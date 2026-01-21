@@ -12,7 +12,7 @@ const POS = () => {
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
 
-    const [displayedLimit, setDisplayedLimit] = useState(200);
+    const [displayedLimit, setDisplayedLimit] = useState(8);
 
     // Check register status on mount
     React.useEffect(() => {
@@ -23,7 +23,7 @@ const POS = () => {
 
     // Reset displayed limit when search or category changes
     React.useEffect(() => {
-        setDisplayedLimit(200);
+        setDisplayedLimit(8);
     }, [searchTerm, selectedCategory]);
 
     const categories = ['Todos', ...new Set(products.map(p => p.category))];
@@ -40,7 +40,7 @@ const POS = () => {
         const { scrollTop, clientHeight, scrollHeight } = e.target;
         if (scrollHeight - scrollTop <= clientHeight + 100) {
             if (displayedLimit < filteredProducts.length) {
-                setDisplayedLimit(prev => prev + 50);
+                setDisplayedLimit(prev => prev + 8);
             }
         }
     };
