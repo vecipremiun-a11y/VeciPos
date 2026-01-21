@@ -124,20 +124,22 @@ const POS = () => {
                             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity">
                                 <span className="text-[var(--color-primary)]">+</span>
                             </div>
-                            <div className="w-full h-48 rounded-lg bg-white/5 mb-3 flex items-center justify-center overflow-hidden relative shrink-0">
+                            <div className="w-full aspect-square rounded-lg bg-white mb-3 flex items-center justify-center overflow-hidden relative shrink-0">
                                 {product.image && product.image !== '[object Object]' && (product.image.startsWith('http') || product.image.startsWith('data:')) ? (
                                     <img
                                         src={product.image}
                                         alt={product.name}
-                                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                                        className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-110"
                                         onError={(e) => {
                                             e.target.style.display = 'none';
-                                            e.target.parentElement.classList.add('flex', 'flex-col', 'gap-2');
-                                            // Create fallback content dynamically if img fails
+                                            e.target.parentElement.classList.add('flex', 'flex-col', 'gap-2', 'bg-white/5');
+                                            e.target.parentElement.classList.remove('bg-white');
+
+                                            // Create fallback content dynamically
                                             const icon = document.createElement('div');
-                                            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image-off text-gray-600 mb-2"><line x1="2" x2="22" y1="2" y2="22"/><path d="M10.41 6.26l2.15 2.15 3.44-3.44 5 5V20a2 2 0 0 1-2 2h-9"/><path d="M4 13.5V4a2 2 0 0 1 2-2h8.5"/><path d="M4 19.5l3-3"/><path d="M14 14l2-2 2.5 2.5"/></svg>';
+                                            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image-off text-gray-400 mb-2"><line x1="2" x2="22" y1="2" y2="22"/><path d="M10.41 6.26l2.15 2.15 3.44-3.44 5 5V20a2 2 0 0 1-2 2h-9"/><path d="M4 13.5V4a2 2 0 0 1 2-2h8.5"/><path d="M4 19.5l3-3"/><path d="M14 14l2-2 2.5 2.5"/></svg>';
                                             const text = document.createElement('span');
-                                            text.className = 'text-xs text-gray-500 font-medium uppercase tracking-wider';
+                                            text.className = 'text-xs text-gray-400 font-medium uppercase tracking-wider';
                                             text.innerText = 'Sin Imagen';
 
                                             e.target.parentElement.appendChild(icon.firstChild);
@@ -145,9 +147,9 @@ const POS = () => {
                                         }}
                                     />
                                 ) : (
-                                    <div className="flex flex-col items-center justify-center gap-2">
-                                        <ImageOff className="text-gray-600" size={48} />
-                                        <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">Sin Imagen</span>
+                                    <div className="flex flex-col items-center justify-center gap-2 bg-white/5 w-full h-full">
+                                        <ImageOff className="text-gray-400" size={48} />
+                                        <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">Sin Imagen</span>
                                     </div>
                                 )}
                             </div>
