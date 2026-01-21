@@ -1,0 +1,104 @@
+import React, { useState } from 'react';
+import { Plus, Trash2, Shield, User } from 'lucide-react';
+import { useStore } from '../store/useStore';
+import { cn } from '../lib/utils';
+
+const Users = () => {
+    const { users, currentUser, addUser, deleteUser } = useStore();
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [formData, setFormData] = useState({ name: '', username: '', role: 'Vendedor' });
+
+    // Simple protection: only Admin allows editing users
+    if (currentUser?.role !== 'Administrador') {
+        return <div className="text-center p-10 text-red-500">Acceso Denegado. Se requieren permisos de Administrador.</div>;
+    }
+
+    const handleAddUser = (e) => {
+        e.preventDefault();
+        addUser(formData);
+        setIsModalOpen(false);
+        setFormData({ name: '', username: '', role: 'Vendedor' });
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className="flex justify-between items-center">
+                <h1 className="text-3xl font-bold text-white neon-text">Gestión de Usuarios</h1>
+                <button onClick={() => setIsModalOpen(true)} className="btn-primary flex items-center gap-2">
+                    <Plus size={20} /> Nuevo Usuario
+                </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {users.map(user => (
+                    <div key={user.id} className="glass-card flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center text-[var(--color-primary)]">
+                            <User size={24} />
+                        </div>
+                        <div className="flex-1">
+                            <h3 className="text-white font-bold">{user.name}</h3>
+                            <p className="text-gray-400 text-sm">@{user.username}</p>
+                            <span className="inline-block mt-1 px-2 py-0.5 rounded-md bg-[var(--color-secondary)]/20 text-[var(--color-secondary)] text-xs border border-[var(--color-secondary)]/30">
+                                {user.role}
+                            </span>
+                        </div>
+                        {user.username !== 'admin' && (
+                            <button
+                                onClick={() => deleteUser(user.id)}
+                                className="p-2 text-gray-500 hover:text-red-400 transition-colors"
+                            >
+                                <Trash2 size={18} />
+                            </button>
+                        )}
+                    </div>
+                ))}
+            </div>
+
+            {isModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="glass-card w-full max-w-md relative animate-[float_0.3s_ease-out]">
+                        <h2 className="text-xl font-bold mb-4 text-white">Nuevo Usuario</h2>
+                        <form onSubmit={handleAddUser} className="space-y-4">
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Nombre Completo</label>
+                                <input
+                                    className="glass-input w-full"
+                                    value={formData.name}
+                                    onChange={e => setFormData({ ...formData, name: e.target.value })}
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Usuario</label>
+                                <input
+                                    className="glass-input w-full"
+                                    value={formData.username}
+                                    onChange={e => setFormData({ ...formData, username: e.target.value })}
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Rol</label>
+                                <select
+                                    className="glass-input w-full bg-gray-900"
+                                    value={formData.role}
+                                    onChange={e => setFormData({ ...formData, role: e.target.value })}
+                                >
+                                    <option value="Vendedor">Vendedor</option>
+                                    <option value="Bodeguero">Bodeguero</option>
+                                    <option value="Administrador">Administrador</option>
+                                </select>
+                            </div>
+                            <div className="flex justify-end gap-2 pt-4">
+                                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-lg text-white hover:bg-white/10">Cancelar</button>
+                                <button type="submit" className="btn-primary">Crear</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default Users;
