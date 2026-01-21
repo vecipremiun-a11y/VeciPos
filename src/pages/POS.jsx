@@ -124,8 +124,8 @@ const POS = () => {
                             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity">
                                 <span className="text-[var(--color-primary)]">+</span>
                             </div>
-                            <div className="w-full aspect-square rounded-lg bg-black/20 mb-3 flex items-center justify-center overflow-hidden relative min-h-[150px]">
-                                {product.image && product.image !== '[object Object]' ? (
+                            <div className="w-full h-48 rounded-lg bg-black/20 mb-3 flex items-center justify-center overflow-hidden relative shrink-0">
+                                {product.image && product.image !== '[object Object]' && (product.image.startsWith('http') || product.image.startsWith('data:')) ? (
                                     <img
                                         src={product.image}
                                         alt={product.name}
@@ -133,6 +133,7 @@ const POS = () => {
                                         onError={(e) => {
                                             e.target.style.display = 'none'; // Hide broken image
                                             e.target.parentNode.classList.add('bg-gray-800'); // Add fallback bg
+                                            e.target.parentElement.innerHTML = '<div class="flex flex-col items-center justify-center text-gray-600 gap-1"><span class="text-4xl font-bold">' + product.name.charAt(0) + '</span><span class="text-[10px] uppercase text-gray-700">Sin Imagen</span></div>';
                                         }}
                                     />
                                 ) : (
