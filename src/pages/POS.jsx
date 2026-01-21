@@ -12,12 +12,19 @@ const POS = () => {
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
 
+    const [displayedLimit, setDisplayedLimit] = useState(200);
+
     // Check register status on mount
     React.useEffect(() => {
         if (currentUser) {
             checkRegisterStatus(currentUser.id);
         }
     }, [currentUser, checkRegisterStatus]);
+
+    // Reset displayed limit when search or category changes
+    React.useEffect(() => {
+        setDisplayedLimit(200);
+    }, [searchTerm, selectedCategory]);
 
     const categories = ['Todos', ...new Set(products.map(p => p.category))];
 
@@ -26,6 +33,17 @@ const POS = () => {
         const matchesCategory = selectedCategory === 'Todos' || product.category === selectedCategory;
         return matchesSearch && matchesCategory;
     });
+
+    const visibleProducts = filteredProducts.slice(0, displayedLimit);
+
+    const handleScroll = (e) => {
+        const { scrollTop, clientHeight, scrollHeight } = e.target;
+        if (scrollHeight - scrollTop <= clientHeight + 100) {
+            if (displayedLimit < filteredProducts.length) {
+                setDisplayedLimit(prev => prev + 50);
+            }
+        }
+    };
 
     const finalTotal = cart.reduce((total, item) => total + (item.price * item.quantity), 0);
     const taxTotal = cart.reduce((total, item) => {
@@ -93,12 +111,15 @@ const POS = () => {
                 </div>
 
                 {/* Grid */}
-                <div className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 content-start">
-                    {filteredProducts.map((product) => (
+                <div
+                    className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 content-start"
+                    onScroll={handleScroll}
+                >
+                    {visibleProducts.map((product) => (
                         <button
                             key={product.id}
                             onClick={() => addToCart(product)}
-                            className="glass-card p-4 flex flex-col items-start text-left group hover:scale-[1.02] transition-transform relative overflow-hidden"
+                            className="glass-card p-4 flex flex-col items-start text-left group hover:scale-[1.02] transition-transform relative overflow-hidden h-auto"
                         >
                             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity">
                                 <span className="text-[var(--color-primary)]">+</span>
