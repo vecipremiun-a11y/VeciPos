@@ -112,19 +112,19 @@ const POS = () => {
 
                 {/* Grid */}
                 <div
-                    className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-16 content-start pb-20"
+                    className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 content-start pb-20"
                     onScroll={handleScroll}
                 >
                     {visibleProducts.map((product) => (
                         <button
                             key={product.id}
                             onClick={() => addToCart(product)}
-                            className="glass-card p-4 flex flex-col items-start text-left group hover:scale-[1.02] transition-transform relative overflow-hidden h-full min-h-[340px]"
+                            className="glass-card p-4 flex flex-col items-start text-left group hover:scale-[1.02] transition-transform relative overflow-hidden h-full min-h-[380px]"
                         >
                             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity">
                                 <span className="text-[var(--color-primary)]">+</span>
                             </div>
-                            <div className="w-full aspect-[4/3] rounded-lg bg-white/5 mb-3 flex items-center justify-center overflow-hidden relative shrink-0 border border-white/5">
+                            <div className="w-full aspect-square rounded-lg bg-white/5 mb-3 flex items-center justify-center overflow-hidden relative shrink-0 border border-white/5">
                                 {product.image && product.image !== '[object Object]' && (product.image.startsWith('http') || product.image.startsWith('data:')) ? (
                                     <img
                                         src={product.image}
