@@ -120,7 +120,7 @@ const POS = () => {
 
                 {/* Grid */}
                 <div
-                    className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 min-[1450px]:grid-cols-3 min-[1801px]:grid-cols-4 min-[2201px]:grid-cols-5 gap-4 content-start pb-20"
+                    className="flex-1 overflow-y-auto pr-2 grid grid-cols-3 min-[1450px]:grid-cols-4 min-[1801px]:grid-cols-5 min-[2201px]:grid-cols-6 gap-4 content-start pb-20"
                     onScroll={handleScroll}
                 >
                     {visibleProducts.map((product) => (
