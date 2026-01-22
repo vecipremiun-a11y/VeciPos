@@ -119,17 +119,17 @@ const POS = () => {
                         <button
                             key={product.id}
                             onClick={() => addToCart(product)}
-                            className="glass-card p-4 flex flex-col items-start text-left group hover:scale-[1.02] transition-transform relative overflow-hidden h-full min-h-[380px]"
+                            className="glass-card p-3 flex flex-col items-start text-left group hover:scale-[1.02] transition-transform relative overflow-hidden h-full min-h-[300px]"
                         >
                             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity">
                                 <span className="text-[var(--color-primary)]">+</span>
                             </div>
-                            <div className="w-full aspect-square rounded-xl bg-white/5 mb-4 flex items-center justify-center overflow-hidden relative shrink-0 border border-white/5">
+                            <div className="w-full aspect-[4/3] rounded-lg bg-white/5 mb-3 flex items-center justify-center overflow-hidden relative shrink-0 border border-white/5">
                                 {product.image && product.image !== '[object Object]' && (product.image.startsWith('http') || product.image.startsWith('data:')) ? (
                                     <img
                                         src={product.image}
                                         alt={product.name}
-                                        className="w-full h-full object-contain p-4 transition-transform duration-500 group-hover:scale-110"
+                                        className="w-full h-full object-contain p-3 transition-transform duration-500 group-hover:scale-110"
                                         onError={(e) => {
                                             e.target.style.display = 'none';
                                             e.target.parentElement.classList.add('flex', 'flex-col', 'gap-2');
@@ -147,24 +147,24 @@ const POS = () => {
                                     />
                                 ) : (
                                     <div className="flex flex-col items-center justify-center gap-2 w-full h-full">
-                                        <ImageOff className="text-gray-500 opacity-50" size={48} />
+                                        <ImageOff className="text-gray-500 opacity-50" size={40} />
                                         <span className="text-xs text-gray-500 font-medium uppercase tracking-wider opacity-50">Sin Imagen</span>
                                     </div>
                                 )}
                             </div>
 
                             <div className="flex flex-col flex-1 w-full">
-                                <h3 className="text-white font-bold text-lg line-clamp-2 leading-tight mb-1 group-hover:text-[var(--color-primary)] transition-colors">
+                                <h3 className="text-white font-bold text-base line-clamp-2 leading-tight mb-1 group-hover:text-[var(--color-primary)] transition-colors">
                                     {product.name}
                                 </h3>
-                                <p className="text-sm text-gray-400 mb-4 font-mono opacity-70">
+                                <p className="text-xs text-gray-400 mb-3 font-mono opacity-70">
                                     {product.sku || 'N/A'}
                                 </p>
 
-                                <div className="mt-auto w-full flex justify-between items-end pt-4 border-t border-white/5">
+                                <div className="mt-auto w-full flex justify-between items-end pt-3 border-t border-white/5">
                                     <div className="flex flex-col">
                                         <span className="text-xs text-gray-400 mb-0.5">Precio</span>
-                                        <span className="text-[var(--color-primary)] font-bold text-xl tracking-tight">
+                                        <span className="text-[var(--color-primary)] font-bold text-lg tracking-tight">
                                             ${product.price.toFixed(2)}
                                         </span>
                                     </div>
