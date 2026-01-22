@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 
@@ -12,6 +12,7 @@ const MainLayout = () => {
     const allNavItems = [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', roles: ['Administrador', 'Vendedor', 'Bodeguero', 'Supervisor'] },
         { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', roles: ['Administrador', 'Vendedor'] },
+        { icon: History, label: 'Historial', path: '/sales-history', roles: ['Administrador', 'Vendedor', 'Supervisor'] },
         { icon: Package, label: 'Inventario', path: '/inventory', roles: ['Administrador', 'Bodeguero'] },
         { icon: FileText, label: 'Reportes', path: '/reports', roles: ['Administrador', 'Supervisor'] },
         { icon: Users, label: 'Usuarios', path: '/users', roles: ['Administrador'] },

@@ -201,7 +201,7 @@ export const useStore = create(persist((set, get) => ({
 
             await turso.batch([
                 {
-                    sql: "INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    sql: "INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')",
                     args: [new Date().toISOString(), sale.total, sale.summary, itemsJson, sale.paymentMethod, detailsJson, currentUser ? currentUser.id : null]
                 },
                 ...sale.items.map(item => ({
@@ -212,7 +212,7 @@ export const useStore = create(persist((set, get) => ({
 
             // Update local state to reflect stock changes
             set((state) => ({
-                sales: [{ ...sale, id: Date.now(), date: new Date().toISOString() }, ...state.sales],
+                sales: [{ ...sale, id: Date.now(), date: new Date().toISOString(), status: 'completed' }, ...state.sales],
                 products: state.products.map(p => {
                     const soldItem = sale.items.find(i => i.id === p.id);
                     if (soldItem) {
@@ -230,6 +230,40 @@ export const useStore = create(persist((set, get) => ({
 
         } catch (e) {
             console.error("Sales transaction error", e);
+        }
+    },
+
+    cancelSale: async (saleId) => {
+        try {
+            const { sales } = get();
+            const saleToCancel = sales.find(s => s.id === saleId);
+            if (!saleToCancel) return false;
+
+            await turso.batch([
+                {
+                    sql: "UPDATE sales SET status = 'cancelled' WHERE id = ?",
+                    args: [saleId]
+                },
+                ...saleToCancel.items.map(item => ({
+                    sql: "UPDATE products SET stock = stock + ? WHERE id = ?",
+                    args: [item.quantity, item.id] // Restore stock
+                }))
+            ]);
+
+            set(state => ({
+                sales: state.sales.map(s => s.id === saleId ? { ...s, status: 'cancelled' } : s),
+                products: state.products.map(p => {
+                    const item = saleToCancel.items.find(i => i.id === p.id);
+                    if (item) {
+                        return { ...p, stock: p.stock + item.quantity };
+                    }
+                    return p;
+                })
+            }));
+            return true;
+        } catch (e) {
+            console.error("Cancel sale error", e);
+            return false;
         }
     },
 

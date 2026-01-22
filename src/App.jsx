@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import POS from './pages/POS';
+import SalesHistory from './pages/SalesHistory';
 import Inventory from './pages/Inventory';
 import Users from './pages/Users';
 import Reports from './pages/Reports';
@@ -54,6 +55,7 @@ function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="pos" element={<POS />} />
+          <Route path="sales-history" element={<SalesHistory />} />
           <Route path="inventory" element={<Inventory />} />
           <Route path="users" element={<Users />} />
           <Route path="reports" element={<Reports />} />
