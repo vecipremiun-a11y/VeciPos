@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { DollarSign, ArrowUpRight, ArrowDownLeft, Clock, ShoppingCart, LogOut, X, TrendingUp, TrendingDown } from 'lucide-react';
@@ -261,8 +262,8 @@ const TransactionModal = ({ isOpen, onClose, type, onConfirm }) => {
         onConfirm(parseFloat(amount), reason || (type === 'IN' ? 'Ingreso Manual' : 'Retiro Manual'));
     };
 
-    return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+    return createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm">
             <div className="glass-card w-full max-w-sm p-6 relative animate-[float_0.3s_ease-out]">
                 <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={20} /></button>
 
@@ -305,7 +306,8 @@ const TransactionModal = ({ isOpen, onClose, type, onConfirm }) => {
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { CheckCircle, X, ExternalLink, MessageCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -60,8 +61,8 @@ const CashCloseSuccessModal = ({ isOpen, onClose, data, onSendWhatsApp }) => {
         window.open(url, '_blank');
     };
 
-    return (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-md">
+    return createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md">
             <div className="glass-card w-full max-w-md relative animate-[float_0.3s_ease-out] p-0 overflow-hidden flex flex-col">
 
                 {/* Header with Check */}
@@ -106,7 +107,8 @@ const CashCloseSuccessModal = ({ isOpen, onClose, data, onSendWhatsApp }) => {
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };
 

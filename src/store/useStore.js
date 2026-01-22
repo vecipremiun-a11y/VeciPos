@@ -68,6 +68,30 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    updateUser: async (id, updatedUser) => {
+        try {
+            await turso.execute({
+                sql: "UPDATE users SET name = ?, username = ?, role = ? WHERE id = ?",
+                args: [updatedUser.name, updatedUser.username, updatedUser.role, id]
+            });
+
+            // If a password is provided (and it's not empty), update it separately or include it.
+            // For simplicity, let's allow password update if provided.
+            if (updatedUser.password) {
+                await turso.execute({
+                    sql: "UPDATE users SET password = ? WHERE id = ?",
+                    args: [updatedUser.password, id]
+                });
+            }
+
+            set((state) => ({
+                users: state.users.map(u => u.id === id ? { ...u, ...updatedUser } : u)
+            }));
+        } catch (e) {
+            console.error("Update user error", e);
+        }
+    },
+
     deleteUser: async (id) => {
         try {
             await turso.execute({
@@ -152,8 +176,14 @@ export const useStore = create(persist((set, get) => ({
                 )
             };
         }
-        return { cart: [...state.cart, { ...product, quantity: 1 }] };
+        return { cart: [...state.cart, { ...product, quantity: 1, discount: 0 }] };
     }),
+
+    updateCartItem: (productId, updates) => set((state) => ({
+        cart: state.cart.map((item) =>
+            item.id === productId ? { ...item, ...updates } : item
+        )
+    })),
 
     removeFromCart: (productId) => set((state) => ({
         cart: state.cart.filter((item) => item.id !== productId)

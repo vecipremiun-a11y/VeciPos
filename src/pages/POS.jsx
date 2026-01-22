@@ -7,7 +7,7 @@ import CashOpeningModal from '../components/CashOpeningModal';
 import CashStatusWidget from '../components/CashStatusWidget';
 
 const POS = () => {
-    const { products, cart, addToCart, removeFromCart, clearCart, addSale, currentUser, cashRegister, checkRegisterStatus } = useStore();
+    const { products, cart, addToCart, removeFromCart, clearCart, updateCartItem, addSale, currentUser, cashRegister, checkRegisterStatus } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -45,10 +45,18 @@ const POS = () => {
         }
     };
 
-    const finalTotal = cart.reduce((total, item) => total + (item.price * item.quantity), 0);
+    const finalTotal = cart.reduce((total, item) => {
+        const itemTotal = item.price * item.quantity;
+        const discountAmount = itemTotal * ((item.discountPercent || 0) / 100);
+        return total + (itemTotal - discountAmount);
+    }, 0);
+
     const taxTotal = cart.reduce((total, item) => {
         const itemTotal = item.price * item.quantity;
-        const itemTax = item.tax_rate ? (itemTotal - (itemTotal / (1 + item.tax_rate / 100))) : 0;
+        const discountAmount = itemTotal * ((item.discountPercent || 0) / 100);
+        const taxableAmount = itemTotal - discountAmount;
+
+        const itemTax = item.tax_rate ? (taxableAmount - (taxableAmount / (1 + item.tax_rate / 100))) : 0;
         return total + itemTax;
     }, 0);
     const subTotal = finalTotal - taxTotal;
@@ -200,7 +208,7 @@ const POS = () => {
             </div>
 
             {/* Right Side: Cart */}
-            <div className="w-full lg:w-[400px] flex flex-col glass-card p-0 overflow-hidden">
+            <div className="w-full lg:w-[560px] flex flex-col glass-card p-0 overflow-hidden">
                 <div className="p-4 border-b border-white/5 bg-white/5">
                     <h2 className="text-xl font-bold text-white flex items-center gap-2">
                         <ShoppingCart size={20} className="text-[var(--color-primary)]" />
@@ -215,30 +223,101 @@ const POS = () => {
                             <p>El carrito está vacío</p>
                         </div>
                     ) : (
-                        cart.map((item) => (
-                            <div key={item.id} className="flex gap-4 p-3 rounded-xl bg-white/5 border border-white/5">
-                                <div className="flex-1">
-                                    <h4 className="text-white font-medium text-sm line-clamp-1">{item.name}</h4>
-                                    <p className="text-[var(--color-primary)] font-bold text-sm">${item.price.toFixed(2)}</p>
-                                    <p className="text-xs text-gray-500">
-                                        {item.tax_rate ? `IVA ${item.tax_rate}%` : 'Exento'}
-                                    </p>
+                        cart.map((item) => {
+                            const unitPrice = item.price;
+                            const totalPrice = (unitPrice * item.quantity);
+                            const discountPercent = item.discountPercent || 0;
+                            const discountAmount = totalPrice * (discountPercent / 100);
+                            const finalPrice = totalPrice - discountAmount;
+
+                            const discountedUnitPrice = unitPrice * (1 - discountPercent / 100);
+
+                            return (
+                                <div key={item.id} className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+                                    {/* Row 1: Name and Remove */}
+                                    <div className="flex justify-between items-start gap-2">
+                                        <h4 className="text-white font-medium text-sm line-clamp-2">{item.name}</h4>
+                                        <button
+                                            className="text-gray-500 hover:text-red-400 transition-colors p-1"
+                                            onClick={() => removeFromCart(item.id)}
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    </div>
+
+                                    {/* Row 2: Prices */}
+                                    <div className="flex justify-between items-center text-xs text-gray-400">
+                                        <div className="flex items-center gap-2">
+                                            <span>Unit:</span>
+                                            {discountPercent > 0 ? (
+                                                <>
+                                                    <span className="text-red-400 line-through text-[10px]">
+                                                        ${unitPrice.toLocaleString('es-CL')}
+                                                    </span>
+                                                    <span className="text-green-400 font-bold">
+                                                        ${discountedUnitPrice.toLocaleString('es-CL')}
+                                                    </span>
+                                                </>
+                                            ) : (
+                                                <span>${unitPrice.toLocaleString('es-CL')}</span>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-col items-end">
+                                            <span className="text-[var(--color-primary)] font-bold text-sm">
+                                                Total: ${finalPrice.toLocaleString('es-CL')}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* Row 3: Controls */}
+                                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
+                                        {/* Discount Input */}
+                                        <div className="flex items-center gap-1 bg-black/20 rounded-lg px-2 py-1.5 border border-white/5 w-24 group focus-within:border-[var(--color-primary)]/50 transition-colors">
+                                            <span className="text-xs text-gray-500 font-bold group-focus-within:text-[var(--color-primary)]">%</span>
+                                            <input
+                                                type="number"
+                                                placeholder="0"
+                                                min="0"
+                                                max="100"
+                                                className="w-full bg-transparent text-sm text-white outline-none text-right font-bold"
+                                                value={item.discountPercent || ''}
+                                                onChange={(e) => {
+                                                    let val = parseFloat(e.target.value);
+                                                    if (isNaN(val)) val = 0;
+                                                    if (val < 0) val = 0;
+                                                    if (val > 100) val = 100;
+
+                                                    updateCartItem(item.id, { discountPercent: val });
+                                                }}
+                                            />
+                                        </div>
+
+                                        {/* Quantity Controls */}
+                                        <div className="flex items-center gap-4 bg-black/20 rounded-lg p-1.5 border border-white/5">
+                                            <button
+                                                className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+                                                onClick={() => {
+                                                    if (item.quantity > 1) {
+                                                        updateCartItem(item.id, { quantity: item.quantity - 1 });
+                                                    } else {
+                                                        removeFromCart(item.id);
+                                                    }
+                                                }}
+                                            >
+                                                <Minus size={18} />
+                                            </button>
+                                            <span className="text-white font-bold text-lg w-8 text-center">{item.quantity}</span>
+                                            <button
+                                                className="w-8 h-8 rounded-lg bg-[var(--color-primary)]/20 flex items-center justify-center text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-black transition-colors"
+                                                onClick={() => updateCartItem(item.id, { quantity: item.quantity + 1 })}
+                                            >
+                                                <Plus size={18} />
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                    <button className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-[var(--color-primary)] hover:text-black transition-colors"
-                                        onClick={() => addToCart(item)}
-                                    >
-                                        <Plus size={14} />
-                                    </button>
-                                    <span className="text-white font-bold w-4 text-center">{item.quantity}</span>
-                                    <button className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white hover:bg-red-500 hover:text-white transition-colors"
-                                        onClick={() => removeFromCart(item.id)}
-                                    >
-                                        <Minus size={14} />
-                                    </button>
-                                </div>
-                            </div>
-                        ))
+                            );
+                        })
                     )}
                 </div>
 

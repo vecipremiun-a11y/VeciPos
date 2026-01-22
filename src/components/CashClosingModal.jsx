@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Calculator, CheckCircle, AlertTriangle, Save, ArrowRight } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
@@ -37,8 +38,8 @@ const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => 
 
     const isMatch = Math.abs(difference) < 1;
 
-    return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+    return createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
             <div className="glass-card w-full max-w-md relative animate-[float_0.3s_ease-out] p-0 overflow-hidden flex flex-col max-h-[90vh]">
 
                 {/* Header */}
@@ -163,7 +164,8 @@ const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => 
                 </div>
 
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };
 
