@@ -1,7 +1,8 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { turso } from '../lib/turso';
 
-export const useStore = create((set, get) => ({
+export const useStore = create(persist((set, get) => ({
     // Initial State
     products: [],
     users: [],
@@ -378,4 +379,7 @@ export const useStore = create((set, get) => ({
             console.error("Refresh stats error", e);
         }
     },
+}), {
+    name: 'pos-storage',
+    partialize: (state) => ({ currentUser: state.currentUser }),
 }));
