@@ -78,7 +78,7 @@ const POS = () => {
             {/* Left Side: Product Grid */}
             <div className="flex-1 flex flex-col gap-4 overflow-hidden min-h-0">
                 {/* Search & Categories */}
-                <div className="glass-card p-4 space-y-4 shrink-0">
+                <div className="glass-card p-4 space-y-4 shrink-0 relative z-50">
                     <div className="flex gap-4">
                         <div className="relative flex-1">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
