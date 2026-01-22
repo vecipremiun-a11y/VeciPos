@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { Search, Calendar, CreditCard, User, Download, Send, Trash2, Printer, AlertTriangle, FileText, X } from 'lucide-react';
 import { formatMoney, generateReceiptPDF, generateWhatsAppLink } from '../utils/receipt';
@@ -12,6 +12,9 @@ const SalesHistory = () => {
     const [paymentFilter, setPaymentFilter] = useState('all');
     const [sellerFilter, setSellerFilter] = useState('all');
 
+    const dateFromRef = useRef(null);
+    const dateToRef = useRef(null);
+
     // WhatsApp Phone State
     const [showPhoneInput, setShowPhoneInput] = useState(false);
     const [phoneNumber, setPhoneNumber] = useState('');
@@ -22,15 +25,21 @@ const SalesHistory = () => {
                 sale.summary?.toLowerCase().includes(searchTerm.toLowerCase());
 
             let matchesDate = true;
-            const saleDate = new Date(sale.date);
+            // Extract YYYY-MM-DD from the sale ISO string (first 10 chars)
+            // Note: If sale.date is full ISO, we might want to check if it's stored in UTC.
+            // Assuming sale.date is "2024-01-22T..." 
+            // Better to use a reliable parsing or simple string check if input is YYYY-MM-DD
+
+            const saleDateObj = new Date(sale.date);
+            // Get local YYYY-MM-DD string from the sale date
+            // This ensures we match what the user sees in "toLocaleDateString"
+            const saleDateStr = saleDateObj.toLocaleDateString('en-CA'); // en-CA gives YYYY-MM-DD format
+
             if (dateFrom) {
-                matchesDate = matchesDate && saleDate >= new Date(dateFrom);
+                matchesDate = matchesDate && saleDateStr >= dateFrom;
             }
             if (dateTo) {
-                // Set to end of day
-                const end = new Date(dateTo);
-                end.setHours(23, 59, 59, 999);
-                matchesDate = matchesDate && saleDate <= end;
+                matchesDate = matchesDate && saleDateStr <= dateTo;
             }
 
             const matchesPayment = paymentFilter === 'all' || sale.paymentMethod === paymentFilter;
@@ -128,50 +137,84 @@ const SalesHistory = () => {
                     />
                 </div>
 
-                <div className="flex items-center gap-2 bg-black/20 border border-white/10 rounded-lg px-3 py-2">
-                    <Calendar size={16} className="text-gray-400" />
-                    <input
-                        type="date"
-                        className="bg-transparent text-sm text-white focus:outline-none min-w-[120px]"
-                        value={dateFrom}
-                        onChange={(e) => setDateFrom(e.target.value)}
-                    />
-                    <span className="text-gray-400">-</span>
-                    <input
-                        type="date"
-                        className="bg-transparent text-sm text-white focus:outline-none min-w-[120px]"
-                        value={dateTo}
-                        onChange={(e) => setDateTo(e.target.value)}
-                    />
+                {/* 3D Date Buttons */}
+                <div className="flex gap-2">
+                    <div
+                        className="relative group active:translate-y-1 transition-all"
+                        onClick={() => dateFromRef.current?.showPicker()}
+                    >
+                        <div className="flex items-center gap-2 bg-[#2a2a40] text-white px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[#32324a] transition-colors min-w-[140px]">
+                            <Calendar size={16} className="text-[var(--color-primary)] mb-0.5" />
+                            <span className="text-sm font-bold truncate">
+                                {dateFrom ? new Date(dateFrom + 'T00:00').toLocaleDateString('es-CL') : 'Desde'}
+                            </span>
+                        </div>
+                        <input
+                            ref={dateFromRef}
+                            type="date"
+                            className="absolute inset-0 opacity-0 w-full h-full cursor-pointer pointer-events-none"
+                            value={dateFrom}
+                            onChange={(e) => setDateFrom(e.target.value)}
+                        />
+                    </div>
+
+                    <div
+                        className="relative group active:translate-y-1 transition-all"
+                        onClick={() => dateToRef.current?.showPicker()}
+                    >
+                        <div className="flex items-center gap-2 bg-[#2a2a40] text-white px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[#32324a] transition-colors min-w-[140px]">
+                            <Calendar size={16} className="text-[var(--color-primary)] mb-0.5" />
+                            <span className="text-sm font-bold truncate">
+                                {dateTo ? new Date(dateTo + 'T00:00').toLocaleDateString('es-CL') : 'Hasta'}
+                            </span>
+                        </div>
+                        <input
+                            ref={dateToRef}
+                            type="date"
+                            className="absolute inset-0 opacity-0 w-full h-full cursor-pointer pointer-events-none"
+                            value={dateTo}
+                            onChange={(e) => setDateTo(e.target.value)}
+                        />
+                    </div>
                 </div>
 
-                <div className="relative">
+                <div className="relative group active:translate-y-1 transition-all">
+                    <div className="flex items-center gap-2 bg-[#2a2a40] text-white px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[#32324a] transition-colors min-w-[180px]">
+                        <CreditCard size={16} className="text-[var(--color-primary)] mb-0.5" />
+                        <span className="text-sm font-bold truncate flex-1">
+                            {paymentFilter === 'all' ? 'Todos los pagos' : paymentFilter}
+                        </span>
+                    </div>
                     <select
-                        className="appearance-none bg-black/20 border border-white/10 rounded-lg pl-9 pr-8 py-2 text-sm text-white focus:outline-none min-w-[150px]"
+                        className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
                         value={paymentFilter}
                         onChange={(e) => setPaymentFilter(e.target.value)}
                     >
-                        <option value="all">Todos los pagos</option>
-                        <option value="Efectivo">Efectivo</option>
-                        <option value="Tarjeta">Tarjeta</option>
-                        <option value="Transferencia">Transferencia</option>
-                        <option value="Mixto">Mixto</option>
+                        <option value="all" className="bg-[#1a1a2e] text-white">Todos los pagos</option>
+                        <option value="Efectivo" className="bg-[#1a1a2e] text-white">Efectivo</option>
+                        <option value="Tarjeta" className="bg-[#1a1a2e] text-white">Tarjeta</option>
+                        <option value="Transferencia" className="bg-[#1a1a2e] text-white">Transferencia</option>
+                        <option value="Mixto" className="bg-[#1a1a2e] text-white">Mixto</option>
                     </select>
-                    <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                 </div>
 
-                <div className="relative">
+                <div className="relative group active:translate-y-1 transition-all">
+                    <div className="flex items-center gap-2 bg-[#2a2a40] text-white px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[#32324a] transition-colors min-w-[180px]">
+                        <User size={16} className="text-[var(--color-primary)] mb-0.5" />
+                        <span className="text-sm font-bold truncate flex-1">
+                            {sellerFilter === 'all' ? 'Todos los vendedores' : users.find(u => String(u.id) === sellerFilter)?.name || 'Desconocido'}
+                        </span>
+                    </div>
                     <select
-                        className="appearance-none bg-black/20 border border-white/10 rounded-lg pl-9 pr-8 py-2 text-sm text-white focus:outline-none min-w-[150px]"
+                        className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
                         value={sellerFilter}
                         onChange={(e) => setSellerFilter(e.target.value)}
                     >
-                        <option value="all">Todos los vendedores</option>
+                        <option value="all" className="bg-[#1a1a2e] text-white">Todos los vendedores</option>
                         {users.map(user => (
-                            <option key={user.id} value={user.id}>{user.name}</option>
+                            <option key={user.id} value={user.id} className="bg-[#1a1a2e] text-white">{user.name}</option>
                         ))}
                     </select>
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                 </div>
             </div>
 

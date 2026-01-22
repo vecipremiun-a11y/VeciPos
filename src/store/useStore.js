@@ -24,7 +24,9 @@ export const useStore = create(persist((set, get) => ({
             const users = usersRes.rows;
             const sales = salesRes.rows.map(sale => ({
                 ...sale,
-                items: JSON.parse(sale.items) // Parse JSON items here for easier consumption
+                items: JSON.parse(sale.items),
+                paymentMethod: sale.payment_method, // Map snake_case to camelCase
+                paymentDetails: sale.payment_details ? JSON.parse(sale.payment_details) : null
             }));
 
             set({ products, users, sales, isLoading: false });
