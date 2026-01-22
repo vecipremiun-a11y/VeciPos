@@ -5,12 +5,15 @@ import { cn } from '../lib/utils';
 import PaymentModal from '../components/PaymentModal';
 import CashOpeningModal from '../components/CashOpeningModal';
 import CashStatusWidget from '../components/CashStatusWidget';
+import SaleSuccessModal from '../components/SaleSuccessModal';
 
 const POS = () => {
     const { products, cart, addToCart, removeFromCart, clearCart, updateCartItem, addSale, currentUser, cashRegister, checkRegisterStatus } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+    const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
+    const [lastSaleDetails, setLastSaleDetails] = useState(null);
 
     const [displayedLimit, setDisplayedLimit] = useState(30);
 
@@ -110,21 +113,38 @@ const POS = () => {
     };
 
     const handlePaymentConfirm = (paymentData) => {
-        addSale({
+        const saleData = {
             items: cart,
             total: finalTotal,
             summary: `${cart.length} productos`,
             paymentMethod: paymentData.method,
             paymentDetails: paymentData
-        });
-        /* alert('¡Venta realizada con éxito!');  User flow suggests seamlessness, maybe a toast later? */
+        };
+
+        addSale(saleData);
+
+        // Prepare data for success modal
+        setLastSaleDetails(saleData);
+        setIsSuccessModalOpen(true);
+        // Do NOT clear cart here, wait for "New Sale" or modal close
+    };
+
+    const handleNewSale = () => {
         clearCart();
-        /* Modal closes automatically via its internal logic calling this handler then closing */
+        setIsSuccessModalOpen(false);
+        setLastSaleDetails(null);
     };
 
     return (
         <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-100px)]">
             <CashOpeningModal isOpen={!cashRegister && !!currentUser} />
+            <SaleSuccessModal
+                isOpen={isSuccessModalOpen}
+                onClose={() => setIsSuccessModalOpen(false)} // Optional: allow closing without clearing? better to enforce new sale flow or just close
+                saleDetails={lastSaleDetails}
+                onNewSale={handleNewSale}
+                seller={currentUser}
+            />
 
             {/* Left Side: Product Grid */}
             <div className="flex-1 flex flex-col gap-4 overflow-hidden min-h-0">
