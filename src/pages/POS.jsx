@@ -26,10 +26,53 @@ const POS = () => {
         setDisplayedLimit(30);
     }, [searchTerm, selectedCategory]);
 
+    // Barcode Scanner Listener
+    React.useEffect(() => {
+        let buffer = '';
+        let lastKeyTime = Date.now();
+
+        const handleKeyDown = (e) => {
+            const currentTime = Date.now();
+
+            // If typing in an input, don't interfere
+            if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
+                return;
+            }
+
+            // Clear buffer if too much time passed (manual typing vs scanner)
+            if (currentTime - lastKeyTime > 100) {
+                buffer = '';
+            }
+            lastKeyTime = currentTime;
+
+            if (e.key === 'Enter') {
+                if (buffer.length > 0) {
+                    const scannedProduct = products.find(p =>
+                        p.sku && p.sku.toLowerCase() === buffer.toLowerCase()
+                    );
+
+                    if (scannedProduct) {
+                        addToCart(scannedProduct);
+                        // Optional: Scan sound or visual feedback could go here
+                    }
+                    buffer = '';
+                }
+            } else if (e.key.length === 1) {
+                // Only add printable characters to buffer
+                buffer += e.key;
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [products, addToCart]);
+
     const categories = ['Todos', ...new Set(products.map(p => p.category))];
 
     const filteredProducts = products.filter(product => {
-        const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase());
+        const term = searchTerm.toLowerCase();
+        const matchesSearch = product.name.toLowerCase().includes(term) ||
+            (product.sku && product.sku.toLowerCase().includes(term));
         const matchesCategory = selectedCategory === 'Todos' || product.category === selectedCategory;
         return matchesSearch && matchesCategory;
     });
@@ -305,10 +348,14 @@ const POS = () => {
                                             <button
                                                 className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
                                                 onClick={() => {
-                                                    if (item.quantity > 1) {
-                                                        updateCartItem(item.id, { quantity: item.quantity - 1 });
-                                                    } else {
-                                                        removeFromCart(item.id);
+                                                    const isKg = item.unit === 'Kg';
+                                                    const minVal = isKg ? 0.001 : 1;
+
+                                                    if (item.quantity > minVal) {
+                                                        const newVal = item.quantity - 1;
+                                                        updateCartItem(item.id, {
+                                                            quantity: newVal < minVal ? minVal : newVal
+                                                        });
                                                     }
                                                 }}
                                             >
