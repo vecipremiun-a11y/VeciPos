@@ -7,6 +7,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
         name: '',
         price: '',
         stock: '',
+        unit: 'Und',
         category: '',
         sku: '',
         image: '',
@@ -17,7 +18,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
 
     useEffect(() => {
         if (productToEdit) {
-            setFormData(productToEdit);
+            setFormData({ ...productToEdit, unit: productToEdit.unit || 'Und' });
             // Calculate initial margin %
             if (productToEdit.price && productToEdit.cost) {
                 const taxRate = parseFloat(productToEdit.tax_rate) || 0;
@@ -29,7 +30,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
                 }
             }
         } else {
-            setFormData({ name: '', price: '', stock: '', category: '', sku: '', image: '', cost: '', tax_rate: 0 });
+            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', tax_rate: 0 });
             setMarginPercentage('');
         }
     }, [productToEdit, isOpen]);
@@ -136,7 +137,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
                         />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-3 gap-4">
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">Precio ($) (Auto)</label>
                             <input
@@ -160,6 +161,21 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
                                 className="glass-input w-full"
                                 required
                             />
+                        </div>
+                        <div>
+                            <label className="block text-sm text-gray-400 mb-1">Unidad Medida</label>
+                            <select
+                                name="unit"
+                                value={formData.unit}
+                                onChange={handleChange}
+                                className="glass-input w-full"
+                            >
+                                <option value="Und" className="bg-gray-900">Und (Unidad)</option>
+                                <option value="Kg" className="bg-gray-900">Kg (Kilogramo)</option>
+                                <option value="Caja" className="bg-gray-900">Caja</option>
+                                <option value="Lt" className="bg-gray-900">Lt (Litro)</option>
+                                <option value="Mt" className="bg-gray-900">Mt (Metro)</option>
+                            </select>
                         </div>
                     </div>
 

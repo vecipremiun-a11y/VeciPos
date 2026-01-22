@@ -82,7 +82,7 @@ export const useStore = create((set, get) => ({
     addProduct: async (product) => {
         try {
             const result = await turso.execute({
-                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     product.name,
                     product.price,
@@ -91,7 +91,8 @@ export const useStore = create((set, get) => ({
                     product.sku,
                     product.image || null,
                     product.cost || 0,
-                    product.tax_rate || 0
+                    product.tax_rate || 0,
+                    product.unit || 'Und'
                 ]
             });
             const newProduct = result.rows[0];
@@ -104,7 +105,7 @@ export const useStore = create((set, get) => ({
     updateProduct: async (id, updatedProduct) => {
         try {
             await turso.execute({
-                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=? WHERE id = ?",
+                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=? WHERE id = ?",
                 args: [
                     updatedProduct.name,
                     updatedProduct.price,
@@ -114,6 +115,7 @@ export const useStore = create((set, get) => ({
                     updatedProduct.image,
                     updatedProduct.cost || 0,
                     updatedProduct.tax_rate || 0,
+                    updatedProduct.unit || 'Und',
                     id
                 ]
             });
