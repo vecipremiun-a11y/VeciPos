@@ -112,14 +112,14 @@ const POS = () => {
 
                 {/* Grid */}
                 <div
-                    className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 content-start pb-20"
+                    className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 content-start pb-20"
                     onScroll={handleScroll}
                 >
                     {visibleProducts.map((product) => (
                         <button
                             key={product.id}
                             onClick={() => addToCart(product)}
-                            className="glass-card p-3 flex flex-col items-start text-left group hover:scale-[1.02] transition-transform relative overflow-hidden h-full min-h-[300px]"
+                            className="glass-card p-4 flex flex-col items-start text-left group hover:scale-[1.02] transition-transform relative overflow-hidden h-full min-h-[340px]"
                         >
                             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity">
                                 <span className="text-[var(--color-primary)]">+</span>
