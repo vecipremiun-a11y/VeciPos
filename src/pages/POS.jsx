@@ -195,7 +195,7 @@ const POS = () => {
                                             ? "bg-red-500/20 text-red-400 border border-red-500/30"
                                             : "bg-green-500/20 text-green-400 border border-green-500/30"
                                     )}>
-                                        {product.stock} un.
+                                        {product.stock} {product.unit === 'Kg' ? 'kg' : 'un.'}
                                     </span>
                                     <span className="text-[10px] text-gray-500 font-medium truncate max-w-[50%] text-right">
                                         {product.category || product.sku || 'General'}
@@ -248,22 +248,30 @@ const POS = () => {
                                     {/* Row 2: Prices */}
                                     <div className="flex justify-between items-center text-xs text-gray-400">
                                         <div className="flex items-center gap-2">
-                                            <span>Unit:</span>
-                                            {discountPercent > 0 ? (
-                                                <>
-                                                    <span className="text-red-400 line-through text-[10px]">
-                                                        ${unitPrice.toLocaleString('es-CL')}
-                                                    </span>
-                                                    <span className="text-green-400 font-bold">
-                                                        ${discountedUnitPrice.toLocaleString('es-CL')}
-                                                    </span>
-                                                </>
-                                            ) : (
-                                                <span>${unitPrice.toLocaleString('es-CL')}</span>
+                                            <span>{item.unit === 'Kg' ? 'Kg:' : 'Und:'}</span>
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-gray-500 text-sm">$</span>
+                                                <input
+                                                    type="number"
+                                                    className="w-20 bg-transparent text-sm font-bold text-white outline-none border-b border-white/10 focus:border-[var(--color-primary)] transition-colors"
+                                                    value={item.price}
+                                                    onChange={(e) => {
+                                                        const val = parseFloat(e.target.value);
+                                                        if (!isNaN(val) && val >= 0) {
+                                                            updateCartItem(item.id, { price: val });
+                                                        }
+                                                    }}
+                                                />
+                                            </div>
+
+                                            {discountPercent > 0 && (
+                                                <span className="text-green-400 font-bold ml-1 text-xs">
+                                                    (${discountedUnitPrice.toLocaleString('es-CL')})
+                                                </span>
                                             )}
                                         </div>
                                         <div className="flex flex-col items-end">
-                                            <span className="text-[var(--color-primary)] font-bold text-sm">
+                                            <span className="text-[var(--color-primary)] font-bold text-base">
                                                 Total: ${finalPrice.toLocaleString('es-CL')}
                                             </span>
                                         </div>
@@ -306,7 +314,22 @@ const POS = () => {
                                             >
                                                 <Minus size={18} />
                                             </button>
-                                            <span className="text-white font-bold text-lg w-8 text-center">{item.quantity}</span>
+                                            {item.unit === 'Kg' ? (
+                                                <input
+                                                    type="number"
+                                                    className="w-14 bg-transparent text-center text-white font-bold text-lg outline-none border-b border-transparent hover:border-white/20 focus:border-[var(--color-primary)] transition-colors appearance-none"
+                                                    value={item.quantity}
+                                                    step="0.001"
+                                                    onChange={(e) => {
+                                                        const val = parseFloat(e.target.value);
+                                                        if (!isNaN(val) && val >= 0) {
+                                                            updateCartItem(item.id, { quantity: val });
+                                                        }
+                                                    }}
+                                                />
+                                            ) : (
+                                                <span className="text-white font-bold text-lg w-8 text-center">{item.quantity}</span>
+                                            )}
                                             <button
                                                 className="w-8 h-8 rounded-lg bg-[var(--color-primary)]/20 flex items-center justify-center text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-black transition-colors"
                                                 onClick={() => updateCartItem(item.id, { quantity: item.quantity + 1 })}
