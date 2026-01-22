@@ -119,27 +119,26 @@ const POS = () => {
                         <button
                             key={product.id}
                             onClick={() => addToCart(product)}
-                            className="glass-card p-4 flex flex-col items-start text-left group hover:scale-[1.02] transition-transform relative overflow-hidden h-auto min-h-[300px]"
+                            className="glass-card p-4 flex flex-col items-start text-left group hover:scale-[1.02] transition-transform relative overflow-hidden h-full min-h-[380px]"
                         >
                             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity">
                                 <span className="text-[var(--color-primary)]">+</span>
                             </div>
-                            <div className="w-full aspect-square rounded-lg bg-white mb-3 flex items-center justify-center overflow-hidden relative shrink-0">
+                            <div className="w-full aspect-square rounded-xl bg-white/5 mb-4 flex items-center justify-center overflow-hidden relative shrink-0 border border-white/5">
                                 {product.image && product.image !== '[object Object]' && (product.image.startsWith('http') || product.image.startsWith('data:')) ? (
                                     <img
                                         src={product.image}
                                         alt={product.name}
-                                        className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-110"
+                                        className="w-full h-full object-contain p-4 transition-transform duration-500 group-hover:scale-110"
                                         onError={(e) => {
                                             e.target.style.display = 'none';
-                                            e.target.parentElement.classList.add('flex', 'flex-col', 'gap-2', 'bg-white/5');
-                                            e.target.parentElement.classList.remove('bg-white');
+                                            e.target.parentElement.classList.add('flex', 'flex-col', 'gap-2');
 
                                             // Create fallback content dynamically
                                             const icon = document.createElement('div');
-                                            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image-off text-gray-400 mb-2"><line x1="2" x2="22" y1="2" y2="22"/><path d="M10.41 6.26l2.15 2.15 3.44-3.44 5 5V20a2 2 0 0 1-2 2h-9"/><path d="M4 13.5V4a2 2 0 0 1 2-2h8.5"/><path d="M4 19.5l3-3"/><path d="M14 14l2-2 2.5 2.5"/></svg>';
+                                            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image-off text-gray-500 mb-2 opacity-50"><line x1="2" x2="22" y1="2" y2="22"/><path d="M10.41 6.26l2.15 2.15 3.44-3.44 5 5V20a2 2 0 0 1-2 2h-9"/><path d="M4 13.5V4a2 2 0 0 1 2-2h8.5"/><path d="M4 19.5l3-3"/><path d="M14 14l2-2 2.5 2.5"/></svg>';
                                             const text = document.createElement('span');
-                                            text.className = 'text-xs text-gray-400 font-medium uppercase tracking-wider';
+                                            text.className = 'text-xs text-gray-500 font-medium uppercase tracking-wider opacity-50';
                                             text.innerText = 'Sin Imagen';
 
                                             e.target.parentElement.appendChild(icon.firstChild);
@@ -147,19 +146,40 @@ const POS = () => {
                                         }}
                                     />
                                 ) : (
-                                    <div className="flex flex-col items-center justify-center gap-2 bg-white/5 w-full h-full">
-                                        <ImageOff className="text-gray-400" size={48} />
-                                        <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">Sin Imagen</span>
+                                    <div className="flex flex-col items-center justify-center gap-2 w-full h-full">
+                                        <ImageOff className="text-gray-500 opacity-50" size={48} />
+                                        <span className="text-xs text-gray-500 font-medium uppercase tracking-wider opacity-50">Sin Imagen</span>
                                     </div>
                                 )}
                             </div>
-                            <h3 className="text-white font-medium line-clamp-2 leading-tight mb-1">{product.name}</h3>
-                            <p className="text-xs text-gray-400 mb-2">{product.sku}</p>
-                            <div className="mt-auto w-full flex justify-between items-end">
-                                <span className="text-[var(--color-primary)] font-bold text-lg">${product.price.toFixed(2)}</span>
-                                <span className={cn("text-xs", product.stock < 10 ? "text-red-400" : "text-gray-500")}>
-                                    Msg: {product.stock}
-                                </span>
+
+                            <div className="flex flex-col flex-1 w-full">
+                                <h3 className="text-white font-bold text-lg line-clamp-2 leading-tight mb-1 group-hover:text-[var(--color-primary)] transition-colors">
+                                    {product.name}
+                                </h3>
+                                <p className="text-sm text-gray-400 mb-4 font-mono opacity-70">
+                                    {product.sku || 'N/A'}
+                                </p>
+
+                                <div className="mt-auto w-full flex justify-between items-end pt-4 border-t border-white/5">
+                                    <div className="flex flex-col">
+                                        <span className="text-xs text-gray-400 mb-0.5">Precio</span>
+                                        <span className="text-[var(--color-primary)] font-bold text-xl tracking-tight">
+                                            ${product.price.toFixed(2)}
+                                        </span>
+                                    </div>
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-xs text-gray-400 mb-0.5">Stock</span>
+                                        <span className={cn(
+                                            "font-medium px-2 py-0.5 rounded text-xs",
+                                            product.stock < 10
+                                                ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                                                : "bg-green-500/20 text-green-400 border border-green-500/30"
+                                        )}>
+                                            {product.stock} un.
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
                         </button>
                     ))}
