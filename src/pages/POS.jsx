@@ -274,7 +274,7 @@ const POS = () => {
             </div>
 
             {/* Right Side: Cart */}
-            <div className="w-full lg:w-[560px] flex flex-col glass-card p-0 overflow-hidden">
+            <div className="w-full lg:w-[448px] flex flex-col glass-card p-0 overflow-hidden">
                 <div className="p-4 border-b border-white/5 bg-white/5">
                     <h2 className="text-xl font-bold text-white flex items-center gap-2">
                         <ShoppingCart size={20} className="text-[var(--color-primary)]" />
