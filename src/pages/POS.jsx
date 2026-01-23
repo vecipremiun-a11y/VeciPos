@@ -8,7 +8,7 @@ import CashStatusWidget from '../components/CashStatusWidget';
 import SaleSuccessModal from '../components/SaleSuccessModal';
 
 const POS = () => {
-    const { products, cart, addToCart, removeFromCart, clearCart, updateCartItem, addSale, currentUser, cashRegister, checkRegisterStatus } = useStore();
+    const { products, categories: storedCategories, cart, addToCart, removeFromCart, clearCart, updateCartItem, addSale, currentUser, cashRegister, checkRegisterStatus } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -70,7 +70,10 @@ const POS = () => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [products, addToCart]);
 
-    const categories = ['Todos', ...new Set(products.map(p => p.category))];
+    // Use stored categories for the filter list. 
+    // We filter for active ones usually, or show all. Let's show all for now or active? 
+    // User probably wants to see available categories.
+    const categoryList = ['Todos', ...storedCategories.filter(c => c.status === 'active').map(c => c.name)];
 
     const filteredProducts = products.filter(product => {
         const term = searchTerm.toLowerCase();
@@ -164,7 +167,7 @@ const POS = () => {
                         <CashStatusWidget />
                     </div>
                     <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
-                        {categories.map(cat => (
+                        {categoryList.map(cat => (
                             <button
                                 key={cat}
                                 onClick={() => setSelectedCategory(cat)}

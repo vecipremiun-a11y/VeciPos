@@ -18,6 +18,8 @@ const SalesHistory = () => {
     // WhatsApp Phone State
     const [showPhoneInput, setShowPhoneInput] = useState(false);
     const [phoneNumber, setPhoneNumber] = useState('');
+    const [showCancelModal, setShowCancelModal] = useState(false);
+    const [cancellationReason, setCancellationReason] = useState('');
 
     const filteredSales = useMemo(() => {
         return sales.filter(sale => {
@@ -78,18 +80,21 @@ const SalesHistory = () => {
         setPhoneNumber('');
     };
 
-    const handleCancelSale = async () => {
-        if (!selectedSale) return;
-        if (selectedSale.status === 'cancelled') return;
+    const handleCancelSale = () => {
+        if (!selectedSale || selectedSale.status === 'cancelled') return;
+        setShowCancelModal(true);
+    };
 
-        if (window.confirm('¿Está seguro de que desea ANULAR esta venta? Esto restaurará el stock de los productos.')) {
-            const success = await cancelSale(selectedSale.id);
-            if (success) {
-                // Update selected sale to show cancelled status immediately
-                setSelectedSale(prev => ({ ...prev, status: 'cancelled' }));
-            } else {
-                alert('Error al anular la venta');
-            }
+    const confirmCancellation = async () => {
+        if (!selectedSale || !cancellationReason.trim()) return;
+
+        const success = await cancelSale(selectedSale.id, cancellationReason);
+        if (success) {
+            setSelectedSale(prev => ({ ...prev, status: 'cancelled', observation: cancellationReason }));
+            setShowCancelModal(false);
+            setCancellationReason('');
+        } else {
+            alert('Error al anular la venta');
         }
     };
 
@@ -371,6 +376,18 @@ const SalesHistory = () => {
                                                 </>
                                             )}
                                         </div>
+
+                                        {selectedSale.status === 'cancelled' && (
+                                            <div className="mt-4 p-4 bg-red-500/10 rounded-lg border border-red-500/20">
+                                                <p className="text-xs text-red-400 uppercase font-bold mb-2 flex items-center gap-2">
+                                                    <AlertTriangle size={12} />
+                                                    Motivo de Anulación
+                                                </p>
+                                                <p className="text-sm text-red-200 italic">
+                                                    "{selectedSale.observation || 'Sin observación'}"
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -407,6 +424,66 @@ const SalesHistory = () => {
                                             <Send size={16} />
                                             Enviar Mensaje
                                         </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Cancellation Modal Overlay */}
+                            {showCancelModal && (
+                                <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-20 flex items-center justify-center p-4">
+                                    <div className="bg-[#0f0f2d] border border-red-500/20 p-6 rounded-2xl w-full max-w-md shadow-2xl animate-[float_0.3s_ease-out]">
+                                        <div className="flex justify-between items-center mb-6">
+                                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                                <AlertTriangle className="text-red-500" size={24} />
+                                                Anular Venta
+                                            </h3>
+                                            <button
+                                                onClick={() => {
+                                                    setShowCancelModal(false);
+                                                    setCancellationReason('');
+                                                }}
+                                                className="text-gray-400 hover:text-white"
+                                            >
+                                                <X size={20} />
+                                            </button>
+                                        </div>
+
+                                        <div className="mb-6">
+                                            <p className="text-gray-300 text-sm mb-4">
+                                                ¿Está seguro de que desea anular esta venta? Esta acción restaurará el stock de los productos.
+                                            </p>
+
+                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-2">
+                                                Motivo de Anulación (Requerido)
+                                            </label>
+                                            <textarea
+                                                className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-white text-sm focus:border-red-500/50 focus:outline-none resize-none h-24"
+                                                placeholder="Especifique la razón de la anulación..."
+                                                value={cancellationReason}
+                                                onChange={(e) => setCancellationReason(e.target.value)}
+                                                autoFocus
+                                            />
+                                        </div>
+
+                                        <div className="flex gap-3">
+                                            <button
+                                                onClick={() => {
+                                                    setShowCancelModal(false);
+                                                    setCancellationReason('');
+                                                }}
+                                                className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-300 rounded-lg text-sm font-bold transition-colors"
+                                            >
+                                                Cancelar
+                                            </button>
+                                            <button
+                                                onClick={confirmCancellation}
+                                                disabled={!cancellationReason.trim()}
+                                                className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                            >
+                                                <Trash2 size={16} />
+                                                Confirmar Anulación
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             )}

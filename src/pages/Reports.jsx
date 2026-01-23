@@ -6,7 +6,8 @@ import { BarChart, FileText } from 'lucide-react';
 const Reports = () => {
     const { sales } = useStore();
 
-    const totalRevenue = sales.reduce((acc, sale) => acc + sale.total, 0);
+    const activeSales = sales.filter(s => s.status !== 'cancelled');
+    const totalRevenue = activeSales.reduce((acc, sale) => acc + sale.total, 0);
 
     return (
         <div className="space-y-6">
@@ -33,14 +34,14 @@ const Reports = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
-                            {sales.length === 0 ? (
+                            {activeSales.length === 0 ? (
                                 <tr>
                                     <td colSpan="4" className="text-center py-10 text-gray-500">
                                         No hay ventas registradas aún.
                                     </td>
                                 </tr>
                             ) : (
-                                sales.map((sale) => (
+                                activeSales.map((sale) => (
                                     <tr key={sale.id} className="hover:bg-white/5 transition-colors">
                                         <td className="px-6 py-4 font-mono text-xs text-gray-400">#{sale.id}</td>
                                         <td className="px-6 py-4 text-white">

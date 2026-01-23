@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useStore } from '../store/useStore';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
+    const { categories, suppliers } = useStore();
     const [formData, setFormData] = useState({
         name: '',
         price: '',
@@ -12,6 +14,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
         sku: '',
         image: '',
         cost: '',
+        supplier: '',
         tax_rate: 0
     });
     const [marginPercentage, setMarginPercentage] = useState('');
@@ -30,7 +33,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
                 }
             }
         } else {
-            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', tax_rate: 0 });
+            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0 });
             setMarginPercentage('');
         }
     }, [productToEdit, isOpen]);
@@ -105,7 +108,9 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
             price: parseFloat(formData.price),
             stock: parseInt(formData.stock),
             cost: parseFloat(formData.cost) || 0,
-            tax_rate: parseFloat(formData.tax_rate) || 0
+            cost: parseFloat(formData.cost) || 0,
+            tax_rate: parseFloat(formData.tax_rate) || 0,
+            supplier: formData.supplier
         });
         onClose();
     };
@@ -155,13 +160,42 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
                                     required
                                 >
                                     <option value="" className="bg-gray-900">Seleccionar...</option>
-                                    <option value="Bebidas" className="bg-gray-900">Bebidas</option>
-                                    <option value="Snacks" className="bg-gray-900">Snacks</option>
-                                    <option value="Limpieza" className="bg-gray-900">Limpieza</option>
-                                    <option value="Alcohol" className="bg-gray-900">Alcohol</option>
-                                    <option value="Varios" className="bg-gray-900">Varios</option>
+                                    {categories && categories.length > 0 ? (
+                                        categories.map(cat => (
+                                            <option key={cat.id} value={cat.name} className="bg-gray-900">
+                                                {cat.name}
+                                            </option>
+                                        ))
+                                    ) : (
+                                        <>
+                                            <option value="Bebidas" className="bg-gray-900">Bebidas</option>
+                                            <option value="Snacks" className="bg-gray-900">Snacks</option>
+                                            <option value="Limpieza" className="bg-gray-900">Limpieza</option>
+                                            <option value="Alcohol" className="bg-gray-900">Alcohol</option>
+                                            <option value="Varios" className="bg-gray-900">Varios</option>
+                                        </>
+                                    )}
                                 </select>
                             </div>
+                            <div>
+                                <label className="block text-sm text-gray-400 mb-1">Proveedor</label>
+                                <select
+                                    name="supplier"
+                                    value={formData.supplier || ''}
+                                    onChange={handleChange}
+                                    className="glass-input w-full"
+                                >
+                                    <option value="" className="bg-gray-900">Seleccionar...</option>
+                                    {suppliers && suppliers.length > 0 && suppliers.map(sup => (
+                                        <option key={sup.id} value={sup.name} className="bg-gray-900">
+                                            {sup.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm text-gray-400 mb-1">SKU / Código</label>
                                 <input
@@ -278,7 +312,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4 items-center">
+                        <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm text-gray-400 mb-1">Impuesto / IVA</label>
                                 <select
@@ -291,11 +325,12 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
                                     <option value="19">IVA (19%)</option>
                                 </select>
                             </div>
-                            <div className="text-right">
-                                <label className="block text-xs text-gray-500 mb-1">Precio Neto Calc.</label>
-                                <div className="text-lg font-mono text-gray-300">
-                                    ${(parseFloat(formData.cost || 0) * (1 + (parseFloat(marginPercentage || 0)) / 100)).toFixed(0)}
-                                </div>
+                        </div>
+
+                        <div className="text-right">
+                            <label className="block text-xs text-gray-500 mb-1">Precio Neto Calc.</label>
+                            <div className="text-lg font-mono text-gray-300">
+                                ${(parseFloat(formData.cost || 0) * (1 + (parseFloat(marginPercentage || 0)) / 100)).toFixed(0)}
                             </div>
                         </div>
 

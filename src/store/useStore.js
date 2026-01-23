@@ -5,7 +5,10 @@ import { turso } from '../lib/turso';
 export const useStore = create(persist((set, get) => ({
     // Initial State
     products: [],
+    categories: [],
+    suppliers: [],
     users: [],
+    purchases: [],
     sales: [],
     cart: [],
     currentUser: null,
@@ -17,19 +20,24 @@ export const useStore = create(persist((set, get) => ({
         set({ isLoading: true });
         try {
             const productsRes = await turso.execute("SELECT * FROM products");
+            const categoriesRes = await turso.execute("SELECT * FROM categories");
+            const suppliersRes = await turso.execute("SELECT * FROM suppliers");
             const usersRes = await turso.execute("SELECT * FROM users");
             const salesRes = await turso.execute("SELECT * FROM sales ORDER BY id DESC");
 
             const products = productsRes.rows;
+            const categories = categoriesRes.rows;
+            const suppliers = suppliersRes.rows;
             const users = usersRes.rows;
             const sales = salesRes.rows.map(sale => ({
                 ...sale,
                 items: JSON.parse(sale.items),
                 paymentMethod: sale.payment_method, // Map snake_case to camelCase
-                paymentDetails: sale.payment_details ? JSON.parse(sale.payment_details) : null
+                paymentDetails: sale.payment_details ? JSON.parse(sale.payment_details) : null,
+                observation: sale.observation || ''
             }));
 
-            set({ products, users, sales, isLoading: false });
+            set({ products, categories, suppliers, users, sales, isLoading: false });
         } catch (error) {
             console.error("Failed to fetch data:", error);
             set({ error: error.message, isLoading: false });
@@ -109,7 +117,7 @@ export const useStore = create(persist((set, get) => ({
     addProduct: async (product) => {
         try {
             const result = await turso.execute({
-                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     product.name,
                     product.price,
@@ -119,7 +127,8 @@ export const useStore = create(persist((set, get) => ({
                     product.image || null,
                     product.cost || 0,
                     product.tax_rate || 0,
-                    product.unit || 'Und'
+                    product.unit || 'Und',
+                    product.supplier || null
                 ]
             });
             const newProduct = result.rows[0];
@@ -132,7 +141,7 @@ export const useStore = create(persist((set, get) => ({
     updateProduct: async (id, updatedProduct) => {
         try {
             await turso.execute({
-                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=? WHERE id = ?",
+                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=? WHERE id = ?",
                 args: [
                     updatedProduct.name,
                     updatedProduct.price,
@@ -143,6 +152,7 @@ export const useStore = create(persist((set, get) => ({
                     updatedProduct.cost || 0,
                     updatedProduct.tax_rate || 0,
                     updatedProduct.unit || 'Und',
+                    updatedProduct.supplier || null,
                     id
                 ]
             });
@@ -165,6 +175,224 @@ export const useStore = create(persist((set, get) => ({
             }));
         } catch (e) {
             console.error("Delete product error", e);
+        }
+    },
+
+    // Categories
+    addCategory: async (category) => {
+        try {
+            const result = await turso.execute({
+                sql: "INSERT INTO categories (name, color, status) VALUES (?, ?, ?) RETURNING *",
+                args: [category.name, category.color, category.status || 'active']
+            });
+            const newCategory = result.rows[0];
+            set((state) => ({ categories: [...state.categories, newCategory] }));
+        } catch (e) {
+            console.error("Add category error", e);
+        }
+    },
+
+    updateCategory: async (id, updatedCategory) => {
+        try {
+            // 1. Find the old category to see if name changed
+            const { categories, products } = get();
+            const oldCategory = categories.find(c => c.id === id);
+
+            if (!oldCategory) return;
+
+            const nameChanged = oldCategory.name !== updatedCategory.name;
+
+            // 2. Transaction: Update Category + (Optional) Update Products
+            const queries = [
+                {
+                    sql: "UPDATE categories SET name = ?, color = ?, status = ? WHERE id = ?",
+                    args: [updatedCategory.name, updatedCategory.color, updatedCategory.status, id]
+                }
+            ];
+
+            if (nameChanged) {
+                queries.push({
+                    sql: "UPDATE products SET category = ? WHERE category = ?",
+                    args: [updatedCategory.name, oldCategory.name]
+                });
+            }
+
+            await turso.batch(queries);
+
+            // 3. Update Local State
+            set((state) => ({
+                categories: state.categories.map((c) => c.id === id ? { ...c, ...updatedCategory } : c),
+                products: nameChanged
+                    ? state.products.map(p => p.category === oldCategory.name ? { ...p, category: updatedCategory.name } : p)
+                    : state.products
+            }));
+        } catch (e) {
+            console.error("Update category error", e);
+        }
+    },
+
+    deleteCategory: async (id) => {
+        try {
+            await turso.execute({
+                sql: "DELETE FROM categories WHERE id = ?",
+                args: [id]
+            });
+            set((state) => ({
+                categories: state.categories.filter((c) => c.id !== id)
+            }));
+        } catch (e) {
+            console.error("Delete category error", e);
+        }
+    },
+
+    // Suppliers
+    addSupplier: async (supplier) => {
+        try {
+            const result = await turso.execute({
+                sql: "INSERT INTO suppliers (name, phone, email, status) VALUES (?, ?, ?, ?) RETURNING *",
+                args: [supplier.name, supplier.phone || '', supplier.email || '', supplier.status || 'active']
+            });
+            const newSupplier = result.rows[0];
+            set((state) => ({ suppliers: [...state.suppliers, newSupplier] }));
+        } catch (e) {
+            console.error("Add supplier error", e);
+        }
+    },
+
+    updateSupplier: async (id, updatedSupplier) => {
+        try {
+            // 1. Find old supplier to check for name change
+            const { suppliers } = get();
+            const oldSupplier = suppliers.find(s => s.id === id);
+
+            if (!oldSupplier) return;
+
+            const nameChanged = oldSupplier.name !== updatedSupplier.name;
+
+            // 2. Transaction
+            const queries = [
+                {
+                    sql: "UPDATE suppliers SET name = ?, phone = ?, email = ?, status = ? WHERE id = ?",
+                    args: [updatedSupplier.name, updatedSupplier.phone, updatedSupplier.email, updatedSupplier.status, id]
+                }
+            ];
+
+            if (nameChanged) {
+                queries.push({
+                    sql: "UPDATE products SET supplier = ? WHERE supplier = ?",
+                    args: [updatedSupplier.name, oldSupplier.name]
+                });
+            }
+
+            await turso.batch(queries);
+
+            set((state) => ({
+                suppliers: state.suppliers.map((s) => s.id === id ? { ...s, ...updatedSupplier } : s),
+                products: nameChanged
+                    ? state.products.map(p => p.supplier === oldSupplier.name ? { ...p, supplier: updatedSupplier.name } : p)
+                    : state.products
+            }));
+        } catch (e) {
+            console.error("Update supplier error", e);
+        }
+    },
+
+    deleteSupplier: async (id) => {
+        try {
+            await turso.execute({
+                sql: "DELETE FROM suppliers WHERE id = ?",
+                args: [id]
+            });
+            set((state) => ({
+                suppliers: state.suppliers.filter((s) => s.id !== id)
+            }));
+        } catch (e) {
+            console.error("Delete supplier error", e);
+        }
+    },
+
+    deleteSupplier: async (id) => {
+        try {
+            await turso.execute({
+                sql: "DELETE FROM suppliers WHERE id = ?",
+                args: [id]
+            });
+            set((state) => ({
+                suppliers: state.suppliers.filter((s) => s.id !== id)
+            }));
+        } catch (e) {
+            console.error("Delete supplier error", e);
+        }
+    },
+
+    // Purchases
+    addPurchase: async (purchase) => {
+        try {
+            const { currentUser } = get();
+            const itemsJson = JSON.stringify(purchase.items);
+
+            // Transaction: Insert Purchase + Update Product Stock/Cost
+            const queries = [
+                {
+                    sql: "INSERT INTO purchases (supplier_id, supplier_name, invoice_number, date, total, items, status, user_id, is_credit, credit_days, expiry_date, deposit, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    args: [
+                        purchase.supplierId,
+                        purchase.supplierName,
+                        purchase.invoiceNumber || '',
+                        purchase.date,
+                        purchase.total,
+                        itemsJson,
+                        'completed',
+                        currentUser ? currentUser.id : null,
+                        purchase.isCredit ? 1 : 0,
+                        purchase.creditDays || null,
+                        purchase.expiryDate || null,
+                        purchase.deposit || 0,
+                        purchase.paymentMethod || 'Efectivo'
+                    ]
+                }
+            ];
+
+            // For each item, update stock and cost in products table
+            purchase.items.forEach(item => {
+                queries.push({
+                    sql: "UPDATE products SET stock = stock + ?, cost = ?, price = ?, sku = ?, tax_rate = ? WHERE id = ?",
+                    args: [item.quantity, item.cost, item.price, item.sku, item.tax || 0, item.id]
+                });
+            });
+
+            await turso.batch(queries);
+
+            // Update Local State
+            const newPurchase = {
+                ...purchase,
+                id: Date.now(), // Temporary ID until reload
+                status: 'completed',
+                created_at: new Date().toISOString()
+            };
+
+            set((state) => ({
+                purchases: [newPurchase, ...state.purchases],
+                products: state.products.map(p => {
+                    const purchasedItem = purchase.items.find(i => i.id === p.id);
+                    if (purchasedItem) {
+                        return {
+                            ...p,
+                            stock: parseFloat(p.stock) + parseFloat(purchasedItem.quantity),
+                            cost: parseFloat(purchasedItem.cost),
+                            price: parseFloat(purchasedItem.price),
+                            sku: purchasedItem.sku,
+                            tax_rate: parseFloat(purchasedItem.tax || 0)
+                        };
+                    }
+                    return p;
+                })
+            }));
+
+            return true;
+        } catch (e) {
+            console.error("Add purchase error", e);
+            return false;
         }
     },
 
@@ -235,7 +463,7 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    cancelSale: async (saleId) => {
+    cancelSale: async (saleId, observation = '') => {
         try {
             const { sales } = get();
             const saleToCancel = sales.find(s => s.id === saleId);
@@ -243,8 +471,8 @@ export const useStore = create(persist((set, get) => ({
 
             await turso.batch([
                 {
-                    sql: "UPDATE sales SET status = 'cancelled' WHERE id = ?",
-                    args: [saleId]
+                    sql: "UPDATE sales SET status = 'cancelled', observation = ? WHERE id = ?",
+                    args: [observation, saleId]
                 },
                 ...saleToCancel.items.map(item => ({
                     sql: "UPDATE products SET stock = stock + ? WHERE id = ?",
@@ -253,7 +481,7 @@ export const useStore = create(persist((set, get) => ({
             ]);
 
             set(state => ({
-                sales: state.sales.map(s => s.id === saleId ? { ...s, status: 'cancelled' } : s),
+                sales: state.sales.map(s => s.id === saleId ? { ...s, status: 'cancelled', observation } : s),
                 products: state.products.map(p => {
                     const item = saleToCancel.items.find(i => i.id === p.id);
                     if (item) {
