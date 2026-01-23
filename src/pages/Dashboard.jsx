@@ -1,11 +1,24 @@
 import React, { useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { AlertTriangle, TrendingDown, Clock } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { format, isToday, isSameMonth, parseISO, subDays, startOfDay, endOfDay } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 const Dashboard = () => {
-    const { products, sales } = useStore();
+    const { products, sales, activeRegisters, fetchActiveRegisters } = useStore();
+
+    React.useEffect(() => {
+        // Initial fetch
+        fetchActiveRegisters();
+
+        // Polling every minute to keep balances fresh
+        const interval = setInterval(() => {
+            fetchActiveRegisters();
+        }, 60000);
+
+        return () => clearInterval(interval);
+    }, [fetchActiveRegisters]);
 
     // Calculate Real-time Stats
     const stats = useMemo(() => {
@@ -110,6 +123,7 @@ const Dashboard = () => {
                 </div>
             </div>
 
+            {/* Charts Section (Moved to Middle) */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="glass-card lg:col-span-2 h-[400px] flex flex-col">
                     <h3 className="text-lg font-semibold mb-4 text-white">Resumen de Ventas (30 Días)</h3>
@@ -172,7 +186,129 @@ const Dashboard = () => {
                     </div>
                 </div>
             </div>
-        </div>
+
+            {/* Widgets Section (Bottom) */}
+            <div className="space-y-3">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2 px-1">
+                    <AlertTriangle size={18} className="text-[var(--color-primary)]" />
+                    Panel de Control en Tiempo Real
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                    {/* 1. Más Vendidos Hoy */}
+                    <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-[var(--color-primary)] p-0 overflow-hidden">
+                        <div className="p-4 border-b border-white/5 bg-white/5">
+                            <h4 className="text-[var(--color-primary)] font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
+                                <TrendingDown size={16} className="rotate-180" /> Más Vendidos (Hoy)
+                            </h4>
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+                            {(() => {
+                                const todaySales = sales.filter(s => isToday(parseISO(s.date)) && s.status !== 'cancelled');
+                                const productStats = {};
+                                todaySales.forEach(sale => {
+                                    sale.items.forEach(item => {
+                                        if (!productStats[item.id]) productStats[item.id] = { ...item, totalSold: 0 };
+                                        productStats[item.id].totalSold += item.quantity;
+                                    });
+                                });
+                                const sorted = Object.values(productStats).sort((a, b) => b.totalSold - a.totalSold).slice(0, 10);
+
+                                if (sorted.length === 0) return <div className="h-full flex items-center justify-center text-gray-500 text-xs">No hay ventas hoy</div>;
+
+                                return sorted.map((p, idx) => (
+                                    <div key={idx} className="flex items-center justify-between p-2 rounded bg-black/20 border border-white/5">
+                                        <div className="flex items-center gap-3 overflow-hidden">
+                                            <span className="text-[var(--color-primary)] font-bold text-sm w-4">{idx + 1}</span>
+                                            <div className="min-w-0">
+                                                <p className="text-white text-xs font-bold truncate">{p.name}</p>
+                                                <p className="text-gray-500 text-[10px]">{p.category || 'General'}</p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                            <span className="block text-white font-bold text-xs">{p.totalSold} {p.unit === 'Kg' ? 'kg' : 'und'}</span>
+                                        </div>
+                                    </div>
+                                ));
+                            })()}
+                        </div>
+                    </div>
+
+                    {/* 2. Sin Stock (Stock 0) */}
+                    <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-red-500 p-0 overflow-hidden">
+                        <div className="p-4 border-b border-white/5 bg-white/5 flex justify-between items-center">
+                            <h4 className="text-red-500 font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
+                                <AlertTriangle size={16} /> Sin Stock
+                            </h4>
+                            <span className="bg-red-500/20 text-red-400 text-[10px] px-2 py-0.5 rounded-full border border-red-500/20 font-bold">
+                                {products.filter(p => p.stock <= 0).length}
+                            </span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+                            {(() => {
+                                const noStock = products.filter(p => p.stock <= 0).slice(0, 10);
+                                if (noStock.length === 0) return <div className="h-full flex items-center justify-center text-gray-500 text-xs">Todos los productos tienen stock</div>;
+
+                                return noStock.map(p => (
+                                    <div key={p.id} className="flex items-center justify-between p-2 rounded bg-red-500/5 border border-red-500/10 hover:bg-red-500/10 transition-colors">
+                                        <div className="min-w-0">
+                                            <p className="text-red-200 text-xs font-medium truncate">{p.name}</p>
+                                            <p className="text-red-500/50 text-[10px]">SKU: {p.sku || 'N/A'}</p>
+                                        </div>
+                                        <span className="text-red-500 text-[10px] font-bold uppercase tracking-wider">Agotado</span>
+                                    </div>
+                                ));
+                            })()}
+                        </div>
+                    </div>
+
+                    {/* 3. Cajas Abiertas */}
+                    <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-orange-400 p-0 overflow-hidden">
+                        <div className="p-4 border-b border-white/5 bg-white/5 flex justify-between items-center">
+                            <h4 className="text-orange-400 font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
+                                <Clock size={16} /> Cajas Abiertas
+                            </h4>
+                            <span className="bg-orange-500/20 text-orange-400 text-[10px] px-2 py-0.5 rounded-full border border-orange-500/20 font-bold">
+                                {activeRegisters?.length || 0}
+                            </span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+                            {(!activeRegisters || activeRegisters.length === 0) ? (
+                                <div className="h-full flex items-center justify-center text-gray-500 text-xs">No hay cajas abiertas</div>
+                            ) : (
+                                activeRegisters.map(reg => (
+                                    <div key={reg.id} className="p-3 rounded bg-orange-500/5 border border-orange-500/10 flex flex-col gap-2">
+                                        <div className="flex justify-between items-start">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center text-orange-400 font-bold text-xs">
+                                                    {reg.user_name ? reg.user_name.substring(0, 2).toUpperCase() : 'US'}
+                                                </div>
+                                                <div>
+                                                    <p className="text-white text-xs font-bold">{reg.user_name || 'Usuario'}</p>
+                                                    <p className="text-gray-500 text-[10px]">
+                                                        Abierta: {format(parseISO(reg.opening_time), 'HH:mm')} hrs
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <span className="bg-green-500/20 text-green-400 text-[10px] px-1.5 py-0.5 rounded border border-green-500/20">
+                                                Online
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-end border-t border-white/5 pt-2">
+                                            <span className="text-gray-400 text-[10px]">Saldo Actual</span>
+                                            <span className="text-orange-400 font-bold text-sm">
+                                                ${(reg.currentBalance || 0).toLocaleString('es-CL')}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div >
     );
 };
 

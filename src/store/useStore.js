@@ -11,6 +11,7 @@ export const useStore = create(persist((set, get) => ({
     purchases: [],
     sales: [],
     cart: [],
+    activeRegisters: [],
     currentUser: null,
     isLoading: false,
     error: null,
@@ -25,8 +26,30 @@ export const useStore = create(persist((set, get) => ({
             const usersRes = await turso.execute("SELECT * FROM users");
             const salesRes = await turso.execute("SELECT * FROM sales ORDER BY id DESC");
 
+            // Migration: Check if 'show_in_pos' exists in categories
+            // Simple check: see if fetched rows have the property or try to query specific column in catch block.
+            // Safer way: try to select the column, if error, add it.
+            // Actually, `SELECT *` returns everything. If we don't see it in first row (if rows exist) we can't be sure if it's just null?
+            // SQLite `PRAGMA table_info(categories)` is robust.
+
+            try {
+                const info = await turso.execute("PRAGMA table_info(categories)");
+                const hasShowInPos = info.rows.some(col => col.name === 'show_in_pos');
+                if (!hasShowInPos) {
+                    await turso.execute("ALTER TABLE categories ADD COLUMN show_in_pos BOOLEAN DEFAULT 1");
+                    // Refetch categories
+                    const refreshedCats = await turso.execute("SELECT * FROM categories");
+                    categoriesRes.rows = refreshedCats.rows;
+                }
+            } catch (err) {
+                console.warn("Migration check error", err);
+            }
+
             const products = productsRes.rows;
-            const categories = categoriesRes.rows;
+            const categories = categoriesRes.rows.map(c => ({
+                ...c,
+                showInPos: c.show_in_pos !== 0 // 1 or null -> true, 0 -> false
+            }));
             const suppliers = suppliersRes.rows;
             const users = usersRes.rows;
             const sales = salesRes.rows.map(sale => ({
@@ -38,6 +61,15 @@ export const useStore = create(persist((set, get) => ({
             }));
 
             set({ products, categories, suppliers, users, sales, isLoading: false });
+
+            // Fetch active registers initially
+            // We call get() to access the action we just defined, but actions are part of the store definition.
+            // Since we are inside the store creator, we can't easily call the action from 'get()' if it's not fully constructed yet?
+            // Actually in Zustand 'get()' gives access to current state/actions.
+            // However, it's safer to just call the logic or call the action after set.
+            // Let's call it via get().fetchActiveRegisters() if possible, or just ignore for now and call it in Dashboard.
+            // Better to rely on Dashboard mounting to fetch this specific data to avoid overhead on every app load if not needed.
+            // actually, let's leave it out of here to avoid circular dependency or issues during init. Dashboard will trigger it.
         } catch (error) {
             console.error("Failed to fetch data:", error);
             set({ error: error.message, isLoading: false });
@@ -182,8 +214,8 @@ export const useStore = create(persist((set, get) => ({
     addCategory: async (category) => {
         try {
             const result = await turso.execute({
-                sql: "INSERT INTO categories (name, color, status) VALUES (?, ?, ?) RETURNING *",
-                args: [category.name, category.color, category.status || 'active']
+                sql: "INSERT INTO categories (name, color, status, show_in_pos) VALUES (?, ?, ?, ?) RETURNING *",
+                args: [category.name, category.color, category.status || 'active', category.showInPos !== false ? 1 : 0]
             });
             const newCategory = result.rows[0];
             set((state) => ({ categories: [...state.categories, newCategory] }));
@@ -205,8 +237,14 @@ export const useStore = create(persist((set, get) => ({
             // 2. Transaction: Update Category + (Optional) Update Products
             const queries = [
                 {
-                    sql: "UPDATE categories SET name = ?, color = ?, status = ? WHERE id = ?",
-                    args: [updatedCategory.name, updatedCategory.color, updatedCategory.status, id]
+                    sql: "UPDATE categories SET name = ?, color = ?, status = ?, show_in_pos = ? WHERE id = ?",
+                    args: [
+                        updatedCategory.name,
+                        updatedCategory.color,
+                        updatedCategory.status,
+                        updatedCategory.showInPos !== false ? 1 : 0,
+                        id
+                    ]
                 }
             ];
 
@@ -499,6 +537,73 @@ export const useStore = create(persist((set, get) => ({
 
     // Cash Register Logic
     cashRegister: null,
+
+    fetchActiveRegisters: async () => {
+        try {
+            // 1. Get all open registers with user details
+            const result = await turso.execute(`
+                SELECT cr.*, u.name as user_name 
+                FROM cash_registers cr 
+                LEFT JOIN users u ON cr.user_id = u.id 
+                WHERE cr.status = 'open'
+            `);
+
+            const registers = result.rows;
+            const activeRegsWithBalance = [];
+
+            // 2. Calculate balance for each active register
+            for (const reg of registers) {
+                // Get sales since opening
+                const salesRes = await turso.execute({
+                    sql: "SELECT * FROM sales WHERE user_id = ? AND date >= ?",
+                    args: [reg.user_id, reg.opening_time]
+                });
+
+                let cashSales = 0;
+                salesRes.rows.forEach(sale => {
+                    const total = parseFloat(sale.total);
+                    // Simplified cash check (same as refreshRegisterStats)
+                    if (sale.payment_method === 'Efectivo') {
+                        cashSales += total;
+                    } else if (sale.payment_method === 'Mixto' && sale.payment_details) {
+                        try {
+                            const details = JSON.parse(sale.payment_details);
+                            const methodsList = details.mixedPayments || details.methods;
+                            if (methodsList) {
+                                methodsList.forEach(m => {
+                                    if (m.method === 'Efectivo') cashSales += parseFloat(m.amount || 0);
+                                });
+                            }
+                        } catch (e) { }
+                    }
+                });
+
+                // Get movements
+                const movRes = await turso.execute({
+                    sql: "SELECT * FROM cash_movements WHERE register_id = ?",
+                    args: [reg.id]
+                });
+
+                let movesIn = 0;
+                let movesOut = 0;
+                movRes.rows.forEach(m => {
+                    if (m.type === 'IN') movesIn += parseFloat(m.amount);
+                    else movesOut += parseFloat(m.amount);
+                });
+
+                const currentBalance = reg.opening_amount + cashSales + movesIn - movesOut;
+
+                activeRegsWithBalance.push({
+                    ...reg,
+                    currentBalance
+                });
+            }
+
+            set({ activeRegisters: activeRegsWithBalance });
+        } catch (e) {
+            console.error("Fetch active registers error", e);
+        }
+    },
 
     checkRegisterStatus: async (userId) => {
         try {

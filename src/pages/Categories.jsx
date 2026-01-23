@@ -54,13 +54,14 @@ const Categories = () => {
                                 <th className="px-6 py-5">Nombre</th>
                                 <th className="px-6 py-5">Color</th>
                                 <th className="px-6 py-5">Estado</th>
+                                <th className="px-6 py-5 text-center">POS</th>
                                 <th className="px-6 py-5 text-right">Acciones</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
                             {categories.length === 0 ? (
                                 <tr>
-                                    <td colSpan="4" className="text-center py-10 text-gray-500">
+                                    <td colSpan="5" className="text-center py-10 text-gray-500">
                                         No hay categorías registradas.
                                     </td>
                                 </tr>
@@ -77,11 +78,14 @@ const Categories = () => {
                                         </td>
                                         <td className="px-6 py-5">
                                             <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${category.status === 'active'
-                                                    ? 'bg-green-500/10 text-green-400 border border-green-500/20'
-                                                    : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                                ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                                                : 'bg-red-500/10 text-red-400 border border-red-500/20'
                                                 }`}>
                                                 {category.status === 'active' ? 'Activa' : 'Inactiva'}
                                             </span>
+                                        </td>
+                                        <td className="px-6 py-5 text-center">
+                                            <div className={`w-3 h-3 rounded-full mx-auto ${category.showInPos !== false ? 'bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.5)]' : 'bg-gray-600'}`} title={category.showInPos !== false ? 'Visible en POS' : 'Oculto en POS'}></div>
                                         </td>
                                         <td className="px-6 py-5 text-right">
                                             <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -121,14 +125,18 @@ const CategoryModal = ({ isOpen, onClose, onSave, categoryToEdit }) => {
     const [formData, setFormData] = useState({
         name: '',
         color: '#3b82f6', // Default blue
-        status: 'active'
+        status: 'active',
+        showInPos: true
     });
 
     React.useEffect(() => {
         if (categoryToEdit) {
-            setFormData(categoryToEdit);
+            setFormData({
+                ...categoryToEdit,
+                showInPos: categoryToEdit.showInPos !== false
+            });
         } else {
-            setFormData({ name: '', color: '#3b82f6', status: 'active' });
+            setFormData({ name: '', color: '#3b82f6', status: 'active', showInPos: true });
         }
     }, [categoryToEdit, isOpen]);
 
@@ -179,16 +187,32 @@ const CategoryModal = ({ isOpen, onClose, onSave, categoryToEdit }) => {
                         </div>
                     </div>
 
-                    <div>
-                        <label className="block text-sm text-gray-400 mb-1">Estado</label>
-                        <select
-                            value={formData.status}
-                            onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                            className="glass-input w-full"
-                        >
-                            <option value="active" className="bg-gray-900">Activa</option>
-                            <option value="inactive" className="bg-gray-900">Inactiva</option>
-                        </select>
+                    <div className="flex gap-4">
+                        <div className="flex-1">
+                            <label className="block text-sm text-gray-400 mb-1">Estado</label>
+                            <select
+                                value={formData.status}
+                                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                                className="glass-input w-full"
+                            >
+                                <option value="active" className="bg-gray-900">Activa</option>
+                                <option value="inactive" className="bg-gray-900">Inactiva</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center pt-6">
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                                <div className="relative">
+                                    <input
+                                        type="checkbox"
+                                        checked={formData.showInPos}
+                                        onChange={(e) => setFormData({ ...formData, showInPos: e.target.checked })}
+                                        className="sr-only peer"
+                                    />
+                                    <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--color-primary)]"></div>
+                                </div>
+                                <span className="text-sm font-medium text-gray-300">Mostrar en POS</span>
+                            </label>
+                        </div>
                     </div>
 
                     <div className="flex gap-3 justify-end pt-4">

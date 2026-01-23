@@ -71,9 +71,10 @@ const POS = () => {
     }, [products, addToCart]);
 
     // Use stored categories for the filter list. 
-    // We filter for active ones usually, or show all. Let's show all for now or active? 
-    // User probably wants to see available categories.
-    const categoryList = ['Todos', ...storedCategories.filter(c => c.status === 'active').map(c => c.name)];
+    // Filter for active ones AND those allowed in POS
+    const categoryList = ['Todos', ...storedCategories
+        .filter(c => c.status === 'active' && c.showInPos !== false)
+        .map(c => c.name)];
 
     const filteredProducts = products.filter(product => {
         const term = searchTerm.toLowerCase();
