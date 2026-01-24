@@ -37,18 +37,48 @@
 }
 
 :root {
-  --primary: #00f0ff;
-  --secondary: #7000ff;
-  --background: #050510;
-  --surface: #0f0f2d;
+  /* Default (Dark / Neon) */
+  --color-primary: #00f0ff;
+  --color-primary-dark: #00a0aa;
+  --color-secondary: #7000ff;
+  --color-accent: #ff0055;
+  --color-background: #050510;
+  --color-surface: #0f0f2d;
+  --color-surface-hover: #1a1a3d;
+  --color-text: #ffffff;
+  --color-text-muted: #9ca3af;
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --sidebar-bg: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="light"] {
+  /* Light Mode */
+  --color-primary: #2563eb;
+  /* Blue */
+  --color-primary-dark: #1d4ed8;
+  --color-secondary: #4f46e5;
+  --color-accent: #ef4444;
+  --color-background: #f3f4f6;
+  /* Gray-100 */
+  --color-surface: #ffffff;
+  --color-surface-hover: #f3f4f6;
+  --color-text: #1f2937;
+  /* Gray-800 */
+  --color-text-muted: #6b7280;
+  /* Gray-500 */
+  --glass-bg: #ffffff;
+  --glass-border: #e5e7eb;
+  /* Gray-200 */
+  --sidebar-bg: #ffffff;
 }
 
 @layer utilities {
   .glass {
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
-    background-color: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background-color: var(--sidebar-bg);
+    border: 1px solid var(--glass-border);
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
   }
 
@@ -65,17 +95,13 @@
     transition: all 300ms;
   }
 
-  .glass-card:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.2);
-    box-shadow: 0 0 20px rgba(0, 240, 255, 0.1);
-  }
+
 
   .glass-input {
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
-    background-color: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background-color: var(--glass-bg);
+    border: 1px solid var(--glass-border);
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
     border-radius: 0.5rem;
     /* rounded-lg */
@@ -83,11 +109,11 @@
     /* px-4 py-3 */
     outline: none;
     transition: all 300ms;
-    color: white;
+    color: var(--color-text);
   }
 
   .glass-input::placeholder {
-    color: #6b7280;
+    color: var(--color-text-muted);
     /* gray-500 */
   }
 
@@ -106,7 +132,7 @@
 
   .btn-primary {
     background-color: var(--color-primary);
-    color: black;
+    color: var(--btn-text-color, black);
     font-weight: 700;
     padding: 0.5rem 1.5rem;
     /* py-2 px-6 */
@@ -156,8 +182,10 @@
 }
 
 body {
-  @apply bg-[var(--color-background)] text-white font-sans overflow-x-hidden min-h-screen selection:bg-[var(--color-primary)] selection:text-black;
+  @apply bg-[var(--color-background)] text-[var(--color-text)] font-sans overflow-x-hidden min-h-screen selection:bg-[var(--color-primary)] selection:text-white;
+  /* Reduced gradient opacity for cleaner look in light mode, or use variables if needed */
   background-image:
-    radial-gradient(circle at 10% 20%, rgba(112, 0, 255, 0.1) 0%, transparent 40%),
-    radial-gradient(circle at 90% 80%, rgba(0, 240, 255, 0.1) 0%, transparent 40%);
+    radial-gradient(circle at 10% 20%, var(--color-secondary) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, var(--color-primary) 0%, transparent 40%);
+  background-size: 100% 100%;
 }

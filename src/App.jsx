@@ -9,6 +9,7 @@ import Suppliers from './pages/Suppliers';
 import Purchases from './pages/Purchases';
 import Users from './pages/Users';
 import Reports from './pages/Reports';
+import ExpiringProductsReport from './pages/ExpiringProductsReport';
 import Settings from './pages/Settings';
 import MainLayout from './layouts/MainLayout';
 
@@ -38,11 +39,18 @@ const ProtectedRoute = ({ children }) => {
 };
 
 function App() {
-  const { fetchInitialData } = useStore();
+  const { fetchInitialData, darkMode } = useStore();
 
   useEffect(() => {
     fetchInitialData();
-  }, [fetchInitialData]);
+    if (darkMode) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'light');
+      document.documentElement.classList.remove('dark');
+    }
+  }, [fetchInitialData, darkMode]);
 
   return (
     <Router>
@@ -65,6 +73,7 @@ function App() {
           <Route path="purchases" element={<Purchases />} />
           <Route path="users" element={<Users />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="reports/expiring" element={<ExpiringProductsReport />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

@@ -88,8 +88,8 @@ const Dashboard = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {/* Ventas Hoy */}
                 <div className="glass-card">
-                    <h3 className="text-gray-400 text-sm mb-1">Ventas Hoy</h3>
-                    <p className="text-2xl font-bold text-white neon-text">
+                    <h3 className="text-[var(--color-text-muted)] text-sm mb-1">Ventas Hoy</h3>
+                    <p className="text-2xl font-bold text-[var(--color-text)] neon-text">
                         ${stats.totalSalesToday.toLocaleString('es-CL')}
                     </p>
                     <div className="mt-2 text-xs text-[var(--color-primary)]">
@@ -99,34 +99,34 @@ const Dashboard = () => {
 
                 {/* Ventas Mes */}
                 <div className="glass-card">
-                    <h3 className="text-gray-400 text-sm mb-1">Ventas del Mes</h3>
-                    <p className="text-2xl font-bold text-white neon-text">
+                    <h3 className="text-[var(--color-text-muted)] text-sm mb-1">Ventas del Mes</h3>
+                    <p className="text-2xl font-bold text-[var(--color-text)] neon-text">
                         ${stats.totalSalesMonth.toLocaleString('es-CL')}
                     </p>
-                    <div className="mt-2 text-xs text-gray-500">Acumulado mensual</div>
+                    <div className="mt-2 text-xs text-[var(--color-text-muted)]">Acumulado mensual</div>
                 </div>
 
                 {/* Utilidad Hoy */}
                 <div className="glass-card">
-                    <h3 className="text-gray-400 text-sm mb-1">Utilidad Hoy (Neta)</h3>
+                    <h3 className="text-[var(--color-text-muted)] text-sm mb-1">Utilidad Hoy (Neta)</h3>
                     <p className="text-2xl font-bold text-green-400 neon-text">
                         ${stats.utilityToday.toLocaleString('es-CL')}
                     </p>
-                    <div className="mt-2 text-xs text-gray-500">Post-impuestos y costo</div>
+                    <div className="mt-2 text-xs text-[var(--color-text-muted)]">Post-impuestos y costo</div>
                 </div>
 
                 {/* Tickets Hoy (4th Card as requested) */}
                 <div className="glass-card">
-                    <h3 className="text-gray-400 text-sm mb-1">Tickets de Hoy</h3>
+                    <h3 className="text-[var(--color-text-muted)] text-sm mb-1">Tickets de Hoy</h3>
                     <p className="text-2xl font-bold text-blue-400 neon-text">{stats.ticketsToday}</p>
-                    <div className="mt-2 text-xs text-gray-500">Transacciones completadas</div>
+                    <div className="mt-2 text-xs text-[var(--color-text-muted)]">Transacciones completadas</div>
                 </div>
             </div>
 
             {/* Charts Section (Moved to Middle) */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="glass-card lg:col-span-2 h-[400px] flex flex-col">
-                    <h3 className="text-lg font-semibold mb-4 text-white">Resumen de Ventas (30 Días)</h3>
+                    <h3 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Resumen de Ventas (30 Días)</h3>
                     <div className="flex-1 w-full min-h-0">
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart
@@ -139,7 +139,7 @@ const Dashboard = () => {
                                         <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0} />
                                     </linearGradient>
                                 </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                                <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
                                 <XAxis dataKey="name" stroke="#888" tick={{ fill: '#888', fontSize: 12 }} />
                                 <YAxis stroke="#888" tick={{ fill: '#888', fontSize: 12 }} />
                                 <Tooltip
@@ -154,29 +154,29 @@ const Dashboard = () => {
                 </div>
 
                 <div className="glass-card h-[400px] overflow-hidden flex flex-col">
-                    <h3 className="text-lg font-semibold mb-4 text-white">Actividad Reciente</h3>
+                    <h3 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Actividad Reciente</h3>
                     <div className="space-y-4 overflow-y-auto flex-1 pr-2 custom-scrollbar">
                         {sales.length === 0 ? (
-                            <p className="text-gray-500 text-center py-10">No hay ventas registradas.</p>
+                            <p className="text-[var(--color-text-muted)] text-center py-10">No hay ventas registradas.</p>
                         ) : (
                             sales.slice(0, 20).map((sale) => (
-                                <div key={sale.id} className="flex items-center gap-3 p-3 hover:bg-white/5 rounded-lg transition-colors border border-transparent hover:border-white/5">
+                                <div key={sale.id} className="flex items-center gap-3 p-3 hover:bg-[var(--glass-bg)] rounded-lg transition-colors border border-transparent hover:border-[var(--glass-border)]">
                                     <div className="w-10 h-10 rounded-full bg-[var(--color-primary)]/20 flex flex-col items-center justify-center text-[var(--color-primary)] text-xs font-bold">
                                         <span>#{String(sale.id).slice(-4)}</span>
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-sm text-white truncate font-medium">
+                                        <p className="text-sm text-[var(--color-text)] truncate font-medium">
                                             {sale.method === 'Mixto' ? 'Pago Mixto' : sale.method || 'Venta'}
                                         </p>
-                                        <p className="text-xs text-gray-500">
+                                        <p className="text-xs text-[var(--color-text-muted)]">
                                             {format(parseISO(sale.date), "d MMM, HH:mm", { locale: es })}
                                         </p>
                                     </div>
                                     <div className="text-right">
-                                        <p className="text-sm font-bold text-white">
+                                        <p className="text-sm font-bold text-[var(--color-text)]">
                                             ${parseFloat(sale.total).toLocaleString('es-CL')}
                                         </p>
-                                        <p className="text-[10px] text-gray-400">
+                                        <p className="text-[10px] text-[var(--color-text-muted)]">
                                             {sale.items.length} prod.
                                         </p>
                                     </div>
@@ -189,7 +189,7 @@ const Dashboard = () => {
 
             {/* Widgets Section (Bottom) */}
             <div className="space-y-3">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2 px-1">
+                <h3 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2 px-1">
                     <AlertTriangle size={18} className="text-[var(--color-primary)]" />
                     Panel de Control en Tiempo Real
                 </h3>
@@ -197,7 +197,7 @@ const Dashboard = () => {
 
                     {/* 1. Más Vendidos Hoy */}
                     <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-[var(--color-primary)] p-0 overflow-hidden">
-                        <div className="p-4 border-b border-white/5 bg-white/5">
+                        <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)]">
                             <h4 className="text-[var(--color-primary)] font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
                                 <TrendingDown size={16} className="rotate-180" /> Más Vendidos (Hoy)
                             </h4>
@@ -214,19 +214,19 @@ const Dashboard = () => {
                                 });
                                 const sorted = Object.values(productStats).sort((a, b) => b.totalSold - a.totalSold).slice(0, 10);
 
-                                if (sorted.length === 0) return <div className="h-full flex items-center justify-center text-gray-500 text-xs">No hay ventas hoy</div>;
+                                if (sorted.length === 0) return <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">No hay ventas hoy</div>;
 
                                 return sorted.map((p, idx) => (
-                                    <div key={idx} className="flex items-center justify-between p-2 rounded bg-black/20 border border-white/5">
+                                    <div key={idx} className="flex items-center justify-between p-2 rounded bg-black/20 border border-[var(--glass-border)]">
                                         <div className="flex items-center gap-3 overflow-hidden">
                                             <span className="text-[var(--color-primary)] font-bold text-sm w-4">{idx + 1}</span>
                                             <div className="min-w-0">
-                                                <p className="text-white text-xs font-bold truncate">{p.name}</p>
-                                                <p className="text-gray-500 text-[10px]">{p.category || 'General'}</p>
+                                                <p className="text-[var(--color-text)] text-xs font-bold truncate">{p.name}</p>
+                                                <p className="text-[var(--color-text-muted)] text-[10px]">{p.category || 'General'}</p>
                                             </div>
                                         </div>
                                         <div className="text-right shrink-0">
-                                            <span className="block text-white font-bold text-xs">{p.totalSold} {p.unit === 'Kg' ? 'kg' : 'und'}</span>
+                                            <span className="block text-[var(--color-text)] font-bold text-xs">{p.totalSold} {p.unit === 'Kg' ? 'kg' : 'und'}</span>
                                         </div>
                                     </div>
                                 ));
@@ -236,7 +236,7 @@ const Dashboard = () => {
 
                     {/* 2. Sin Stock (Stock 0) */}
                     <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-red-500 p-0 overflow-hidden">
-                        <div className="p-4 border-b border-white/5 bg-white/5 flex justify-between items-center">
+                        <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] flex justify-between items-center">
                             <h4 className="text-red-500 font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
                                 <AlertTriangle size={16} /> Sin Stock
                             </h4>
@@ -247,7 +247,7 @@ const Dashboard = () => {
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
                             {(() => {
                                 const noStock = products.filter(p => p.stock <= 0).slice(0, 10);
-                                if (noStock.length === 0) return <div className="h-full flex items-center justify-center text-gray-500 text-xs">Todos los productos tienen stock</div>;
+                                if (noStock.length === 0) return <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">Todos los productos tienen stock</div>;
 
                                 return noStock.map(p => (
                                     <div key={p.id} className="flex items-center justify-between p-2 rounded bg-red-500/5 border border-red-500/10 hover:bg-red-500/10 transition-colors">
@@ -264,7 +264,7 @@ const Dashboard = () => {
 
                     {/* 3. Cajas Abiertas */}
                     <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-orange-400 p-0 overflow-hidden">
-                        <div className="p-4 border-b border-white/5 bg-white/5 flex justify-between items-center">
+                        <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] flex justify-between items-center">
                             <h4 className="text-orange-400 font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
                                 <Clock size={16} /> Cajas Abiertas
                             </h4>
@@ -274,7 +274,7 @@ const Dashboard = () => {
                         </div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
                             {(!activeRegisters || activeRegisters.length === 0) ? (
-                                <div className="h-full flex items-center justify-center text-gray-500 text-xs">No hay cajas abiertas</div>
+                                <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">No hay cajas abiertas</div>
                             ) : (
                                 activeRegisters.map(reg => (
                                     <div key={reg.id} className="p-3 rounded bg-orange-500/5 border border-orange-500/10 flex flex-col gap-2">
@@ -284,8 +284,8 @@ const Dashboard = () => {
                                                     {reg.user_name ? reg.user_name.substring(0, 2).toUpperCase() : 'US'}
                                                 </div>
                                                 <div>
-                                                    <p className="text-white text-xs font-bold">{reg.user_name || 'Usuario'}</p>
-                                                    <p className="text-gray-500 text-[10px]">
+                                                    <p className="text-[var(--color-text)] text-xs font-bold">{reg.user_name || 'Usuario'}</p>
+                                                    <p className="text-[var(--color-text-muted)] text-[10px]">
                                                         Abierta: {format(parseISO(reg.opening_time), 'HH:mm')} hrs
                                                     </p>
                                                 </div>
@@ -294,8 +294,8 @@ const Dashboard = () => {
                                                 Online
                                             </span>
                                         </div>
-                                        <div className="flex justify-between items-end border-t border-white/5 pt-2">
-                                            <span className="text-gray-400 text-[10px]">Saldo Actual</span>
+                                        <div className="flex justify-between items-end border-t border-[var(--glass-border)] pt-2">
+                                            <span className="text-[var(--color-text-muted)] text-[10px]">Saldo Actual</span>
                                             <span className="text-orange-400 font-bold text-sm">
                                                 ${(reg.currentBalance || 0).toLocaleString('es-CL')}
                                             </span>

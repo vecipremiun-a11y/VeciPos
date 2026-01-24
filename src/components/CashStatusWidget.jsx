@@ -78,13 +78,13 @@ const CashStatusWidget = () => {
                             setIsOpen(!isOpen);
                             refreshRegisterStats(cashRegister.id);
                         }}
-                        className="h-10 px-4 rounded-xl bg-[#050505] border border-white/20 flex items-center gap-3 hover:border-[var(--color-primary)] transition-all group"
+                        className="h-10 px-4 rounded-xl bg-[var(--glass-bg)] border-[var(--glass-border)] flex items-center gap-3 hover:border-[var(--color-primary)] transition-all group"
                     >
                         <div className="flex flex-col items-end">
                             <span className="text-[var(--color-primary)] font-bold text-lg leading-none">
                                 ${Math.floor(registerStats.balance).toLocaleString('es-CL')}
                             </span>
-                            <span className="text-[10px] text-gray-400 flex items-center gap-1">
+                            <span className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1">
                                 <Clock size={10} />
                                 Desde {format(new Date(cashRegister.opening_time), 'h:mm a', { locale: es })}
                             </span>
@@ -98,22 +98,22 @@ const CashStatusWidget = () => {
                     {isOpen && (
                         <>
                             <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
-                            <div className="absolute top-16 right-0 w-[400px] glass-card p-0 !bg-[#050505] border border-white/20 shadow-2xl z-50 overflow-hidden animate-[float_0.2s_ease-out]">
+                            <div className="absolute top-16 right-0 w-[400px] glass-card p-0 !bg-[var(--glass-bg)] border-[var(--glass-border)] shadow-2xl z-50 overflow-hidden animate-[float_0.2s_ease-out]">
                                 {/* Header */}
-                                <div className="p-4 border-b border-white/10 flex justify-between items-center bg-white/5">
-                                    <h3 className="font-bold text-white">Estado de Caja</h3>
+                                <div className="p-4 border-b border-[var(--glass-border)] flex justify-between items-center bg-[var(--glass-bg)]">
+                                    <h3 className="font-bold text-[var(--color-text)]">Estado de Caja</h3>
                                     <div className="px-2 py-1 rounded bg-green-500/20 text-green-400 text-xs font-bold border border-green-500/30">
                                         Turno Activo
                                     </div>
                                 </div>
 
                                 {/* Main Balance */}
-                                <div className="p-6 bg-gradient-to-br from-[var(--color-primary)]/10 to-transparent flex flex-col items-center justify-center border-b border-white/5 relative overflow-hidden group">
+                                <div className="p-6 bg-gradient-to-br from-[var(--color-primary)]/10 to-transparent flex flex-col items-center justify-center border-b border-[var(--glass-border)] relative overflow-hidden group">
                                     <div className="absolute inset-0 bg-[var(--color-primary)]/5 opacity-0 group-hover:opacity-100 transition-opacity blur-xl"></div>
                                     <span className="text-4xl font-extrabold text-[var(--color-primary)] mb-1 relative z-10 text-glow">
                                         ${registerStats.balance.toLocaleString('es-CL')}
                                     </span>
-                                    <span className="text-sm text-gray-400 font-medium relative z-10">Saldo Actual en Caja</span>
+                                    <span className="text-sm text-[var(--color-text-muted)] font-medium relative z-10">Saldo Actual en Caja</span>
                                 </div>
 
                                 {/* Quick Stats Grid */}
@@ -148,26 +148,26 @@ const CashStatusWidget = () => {
 
                                 {/* Transaction List (Mini) */}
                                 <div className="px-4 pb-2">
-                                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Últimos Movimientos</h4>
+                                    <h4 className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Últimos Movimientos</h4>
                                     <div className="space-y-2 max-h-[150px] overflow-y-auto pr-1 scrollbar-thin">
-                                        <div className="flex justify-between items-center text-sm p-2 rounded-lg hover:bg-white/5 transition-colors">
+                                        <div className="flex justify-between items-center text-sm p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500 border border-yellow-500/30">
                                                     <Clock size={14} />
                                                 </div>
                                                 <div className="flex flex-col">
-                                                    <span className="font-bold text-white">Apertura</span>
-                                                    <span className="text-[10px] text-gray-400">Apertura de caja</span>
+                                                    <span className="font-bold text-[var(--color-text)]">Apertura</span>
+                                                    <span className="text-[10px] text-[var(--color-text-muted)]">Apertura de caja</span>
                                                 </div>
                                             </div>
                                             <div className="text-right">
                                                 <span className="block font-bold text-green-400">+${registerStats.initial.toLocaleString('es-CL')}</span>
-                                                <span className="text-[10px] text-gray-500">{format(new Date(cashRegister.opening_time), 'h:mm a')}</span>
+                                                <span className="text-[10px] text-[var(--color-text-muted)]">{format(new Date(cashRegister.opening_time), 'h:mm a')}</span>
                                             </div>
                                         </div>
 
                                         {registerStats.transactions.map((tx) => (
-                                            <div key={tx.id} className="flex justify-between items-center text-sm p-2 rounded-lg hover:bg-white/5 transition-colors animate-[fadeIn_0.3s_ease-out]">
+                                            <div key={tx.id} className="flex justify-between items-center text-sm p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors animate-[fadeIn_0.3s_ease-out]">
                                                 <div className="flex items-center gap-3">
                                                     <div className={cn(
                                                         "w-8 h-8 rounded-full flex items-center justify-center border",
@@ -179,12 +179,12 @@ const CashStatusWidget = () => {
                                                             tx.type === 'INGRESO' ? <ArrowUpRight size={14} /> : <ArrowDownLeft size={14} />}
                                                     </div>
                                                     <div className="flex flex-col">
-                                                        <span className="font-bold text-white">
+                                                        <span className="font-bold text-[var(--color-text)]">
                                                             {tx.type === 'VENTA' ? 'Venta (Efectivo)' :
                                                                 tx.type === 'INGRESO' ? (tx.reason || 'Ingreso Manual') :
                                                                     (tx.reason || 'Retiro Manual')}
                                                         </span>
-                                                        <span className="text-[10px] text-gray-400">{tx.type}</span>
+                                                        <span className="text-[10px] text-[var(--color-text-muted)]">{tx.type}</span>
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
@@ -193,7 +193,7 @@ const CashStatusWidget = () => {
                                                     )}>
                                                         {(tx.type === 'VENTA' || tx.type === 'INGRESO') ? '+' : '-'}${tx.amount.toLocaleString('es-CL')}
                                                     </span>
-                                                    <span className="text-[10px] text-gray-500">{format(new Date(tx.date), 'h:mm a')}</span>
+                                                    <span className="text-[10px] text-[var(--color-text-muted)]">{format(new Date(tx.date), 'h:mm a')}</span>
                                                 </div>
                                             </div>
                                         ))}
@@ -201,7 +201,7 @@ const CashStatusWidget = () => {
                                 </div>
 
                                 {/* Footer */}
-                                <div className="p-4 border-t border-white/10 bg-black/40 mt-2">
+                                <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] mt-2">
                                     <button
                                         onClick={handleInitialCloseClick}
                                         className="w-full py-3 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 hover:border-red-500/50 font-bold transition-all flex items-center justify-center gap-2 group"
@@ -263,18 +263,18 @@ const TransactionModal = ({ isOpen, onClose, type, onConfirm }) => {
     };
 
     return createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--color-surface)] dark:bg-black/80 backdrop-blur-sm">
             <div className="glass-card w-full max-w-sm p-6 relative animate-[float_0.3s_ease-out]">
-                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={20} /></button>
+                <button onClick={onClose} className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"><X size={20} /></button>
 
-                <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                <h3 className="text-xl font-bold text-[var(--color-text)] mb-6 flex items-center gap-2">
                     {type === 'IN' ? <ArrowDownLeft className="text-green-400" /> : <ArrowUpRight className="text-orange-400" />}
                     {type === 'IN' ? 'Registrar Ingreso' : 'Registrar Retiro'}
                 </h3>
 
                 <div className="space-y-4">
                     <div>
-                        <label className="text-sm text-gray-400 mb-1 block">Monto</label>
+                        <label className="text-sm text-[var(--color-text-muted)] mb-1 block">Monto</label>
                         <input
                             type="number"
                             placeholder="0"
@@ -285,7 +285,7 @@ const TransactionModal = ({ isOpen, onClose, type, onConfirm }) => {
                         />
                     </div>
                     <div>
-                        <label className="text-sm text-gray-400 mb-1 block">Motivo (Opcional)</label>
+                        <label className="text-sm text-[var(--color-text-muted)] mb-1 block">Motivo (Opcional)</label>
                         <input
                             type="text"
                             placeholder="Ej: Cambio, Pago proveedor..."

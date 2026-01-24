@@ -13,11 +13,11 @@ const Reports = () => {
         <div className="space-y-6">
             <div className="flex justify-between items-center">
                 <div>
-                    <h1 className="text-3xl font-bold text-white neon-text">Reporte de Ventas</h1>
-                    <p className="text-gray-400">Historial de transacciones</p>
+                    <h1 className="text-3xl font-bold text-[var(--color-text)] neon-text">Reporte de Ventas</h1>
+                    <p className="text-[var(--color-text-muted)]">Historial de transacciones</p>
                 </div>
                 <div className="text-right">
-                    <p className="text-sm text-gray-400">Ingresos Totales</p>
+                    <p className="text-sm text-[var(--color-text-muted)]">Ingresos Totales</p>
                     <p className="text-3xl font-bold text-[var(--color-primary)]">${totalRevenue.toFixed(2)}</p>
                 </div>
             </div>
@@ -25,7 +25,7 @@ const Reports = () => {
             <div className="glass-card p-0 overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
-                        <thead className="bg-white/5 text-gray-300 uppercase text-xs font-semibold">
+                        <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] uppercase text-xs font-semibold">
                             <tr>
                                 <th className="px-6 py-4">ID Transacción</th>
                                 <th className="px-6 py-4">Fecha</th>
@@ -33,23 +33,23 @@ const Reports = () => {
                                 <th className="px-6 py-4 text-right">Total</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-white/5">
+                        <tbody className="divide-y divide-[var(--glass-border)]">
                             {activeSales.length === 0 ? (
                                 <tr>
-                                    <td colSpan="4" className="text-center py-10 text-gray-500">
+                                    <td colSpan="4" className="text-center py-10 text-[var(--color-text-muted)]">
                                         No hay ventas registradas aún.
                                     </td>
                                 </tr>
                             ) : (
                                 activeSales.map((sale) => (
-                                    <tr key={sale.id} className="hover:bg-white/5 transition-colors">
-                                        <td className="px-6 py-4 font-mono text-xs text-gray-400">#{sale.id}</td>
-                                        <td className="px-6 py-4 text-white">
+                                    <tr key={sale.id} className="hover:bg-[var(--glass-bg)] transition-colors">
+                                        <td className="px-6 py-4 font-mono text-xs text-[var(--color-text-muted)]">#{sale.id}</td>
+                                        <td className="px-6 py-4 text-[var(--color-text)]">
                                             {sale.date ? format(new Date(sale.date), 'dd/MM/yyyy HH:mm') : 'N/A'}
                                         </td>
-                                        <td className="px-6 py-4 text-white">
+                                        <td className="px-6 py-4 text-[var(--color-text)]">
                                             <span className="flex items-center gap-2">
-                                                <FileText size={14} className="text-gray-400" />
+                                                <FileText size={14} className="text-[var(--color-text-muted)]" />
                                                 {sale.summary}
                                             </span>
                                         </td>

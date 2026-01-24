@@ -113,18 +113,18 @@ const SalesHistory = () => {
             {/* Top Stats / Header */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-white">Historial de Ventas</h1>
-                    <p className="text-gray-400 text-sm">Gestiona y revisa todas las transacciones</p>
+                    <h1 className="text-2xl font-bold text-[var(--color-text)]">Historial de Ventas</h1>
+                    <p className="text-[var(--color-text-muted)] text-sm">Gestiona y revisa todas las transacciones</p>
                 </div>
-                <div className="flex gap-4 bg-white/5 p-3 rounded-xl border border-white/10">
+                <div className="flex gap-4 bg-[var(--glass-bg)] p-3 rounded-xl border border-[var(--glass-border)]">
                     <div className="text-right">
-                        <p className="text-xs text-gray-400">Total Ventas</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">Total Ventas</p>
                         <p className="text-xl font-bold text-[var(--color-primary)]">{formatMoney(totalSales)}</p>
                     </div>
                     <div className="w-px bg-white/10"></div>
                     <div className="text-right">
-                        <p className="text-xs text-gray-400">Transacciones</p>
-                        <p className="text-xl font-bold text-white">{totalCount}</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">Transacciones</p>
+                        <p className="text-xl font-bold text-[var(--color-text)]">{totalCount}</p>
                     </div>
                 </div>
             </div>
@@ -132,11 +132,11 @@ const SalesHistory = () => {
             {/* Filters Bar */}
             <div className="glass p-4 rounded-xl flex flex-wrap gap-4 items-center">
                 <div className="flex-1 min-w-[200px] relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
                     <input
                         type="text"
                         placeholder="Buscar por # Boleta o monto..."
-                        className="w-full bg-black/20 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-[var(--color-primary)]"
+                        className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg pl-10 pr-4 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
@@ -148,7 +148,7 @@ const SalesHistory = () => {
                         className="relative group active:translate-y-1 transition-all"
                         onClick={() => dateFromRef.current?.showPicker()}
                     >
-                        <div className="flex items-center gap-2 bg-[#2a2a40] text-white px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[#32324a] transition-colors min-w-[140px]">
+                        <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors min-w-[140px]">
                             <Calendar size={16} className="text-[var(--color-primary)] mb-0.5" />
                             <span className="text-sm font-bold truncate">
                                 {dateFrom ? new Date(dateFrom + 'T00:00').toLocaleDateString('es-CL') : 'Desde'}
@@ -167,7 +167,7 @@ const SalesHistory = () => {
                         className="relative group active:translate-y-1 transition-all"
                         onClick={() => dateToRef.current?.showPicker()}
                     >
-                        <div className="flex items-center gap-2 bg-[#2a2a40] text-white px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[#32324a] transition-colors min-w-[140px]">
+                        <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors min-w-[140px]">
                             <Calendar size={16} className="text-[var(--color-primary)] mb-0.5" />
                             <span className="text-sm font-bold truncate">
                                 {dateTo ? new Date(dateTo + 'T00:00').toLocaleDateString('es-CL') : 'Hasta'}
@@ -184,7 +184,7 @@ const SalesHistory = () => {
                 </div>
 
                 <div className="relative group active:translate-y-1 transition-all">
-                    <div className="flex items-center gap-2 bg-[#2a2a40] text-white px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[#32324a] transition-colors min-w-[180px]">
+                    <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors min-w-[180px]">
                         <CreditCard size={16} className="text-[var(--color-primary)] mb-0.5" />
                         <span className="text-sm font-bold truncate flex-1">
                             {paymentFilter === 'all' ? 'Todos los pagos' : paymentFilter}
@@ -195,16 +195,16 @@ const SalesHistory = () => {
                         value={paymentFilter}
                         onChange={(e) => setPaymentFilter(e.target.value)}
                     >
-                        <option value="all" className="bg-[#1a1a2e] text-white">Todos los pagos</option>
-                        <option value="Efectivo" className="bg-[#1a1a2e] text-white">Efectivo</option>
-                        <option value="Tarjeta" className="bg-[#1a1a2e] text-white">Tarjeta</option>
-                        <option value="Transferencia" className="bg-[#1a1a2e] text-white">Transferencia</option>
-                        <option value="Mixto" className="bg-[#1a1a2e] text-white">Mixto</option>
+                        <option value="all" className="bg-[#1a1a2e] text-[var(--color-text)]">Todos los pagos</option>
+                        <option value="Efectivo" className="bg-[#1a1a2e] text-[var(--color-text)]">Efectivo</option>
+                        <option value="Tarjeta" className="bg-[#1a1a2e] text-[var(--color-text)]">Tarjeta</option>
+                        <option value="Transferencia" className="bg-[#1a1a2e] text-[var(--color-text)]">Transferencia</option>
+                        <option value="Mixto" className="bg-[#1a1a2e] text-[var(--color-text)]">Mixto</option>
                     </select>
                 </div>
 
                 <div className="relative group active:translate-y-1 transition-all">
-                    <div className="flex items-center gap-2 bg-[#2a2a40] text-white px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[#32324a] transition-colors min-w-[180px]">
+                    <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors min-w-[180px]">
                         <User size={16} className="text-[var(--color-primary)] mb-0.5" />
                         <span className="text-sm font-bold truncate flex-1">
                             {sellerFilter === 'all' ? 'Todos los vendedores' : users.find(u => String(u.id) === sellerFilter)?.name || 'Desconocido'}
@@ -215,9 +215,9 @@ const SalesHistory = () => {
                         value={sellerFilter}
                         onChange={(e) => setSellerFilter(e.target.value)}
                     >
-                        <option value="all" className="bg-[#1a1a2e] text-white">Todos los vendedores</option>
+                        <option value="all" className="bg-[#1a1a2e] text-[var(--color-text)]">Todos los vendedores</option>
                         {users.map(user => (
-                            <option key={user.id} value={user.id} className="bg-[#1a1a2e] text-white">{user.name}</option>
+                            <option key={user.id} value={user.id} className="bg-[#1a1a2e] text-[var(--color-text)]">{user.name}</option>
                         ))}
                     </select>
                 </div>
@@ -226,8 +226,8 @@ const SalesHistory = () => {
             {/* Split View */}
             <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
                 {/* Left: List */}
-                <div className="w-1/3 glass rounded-xl flex flex-col overflow-hidden border border-white/5">
-                    <div className="p-3 border-b border-white/5 bg-white/5 font-semibold text-gray-300">
+                <div className="w-1/3 glass rounded-xl flex flex-col overflow-hidden border border-[var(--glass-border)]">
+                    <div className="p-3 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] font-semibold text-[var(--color-text-muted)]">
                         Resultados ({filteredSales.length})
                     </div>
                     <div className="flex-1 overflow-y-auto">
@@ -235,10 +235,10 @@ const SalesHistory = () => {
                             <div
                                 key={sale.id}
                                 onClick={() => setSelectedSale(sale)}
-                                className={`p-4 border-b border-white/5 cursor-pointer transition-colors hover:bg-white/5 ${selectedSale?.id === sale.id ? 'bg-[var(--color-primary)]/10 border-l-4 border-l-[var(--color-primary)]' : ''}`}
+                                className={`p-4 border-b border-[var(--glass-border)] cursor-pointer transition-colors hover:bg-[var(--glass-bg)] ${selectedSale?.id === sale.id ? 'bg-[var(--color-primary)]/10 border-l-4 border-l-[var(--color-primary)]' : ''}`}
                             >
                                 <div className="flex justify-between items-start mb-1">
-                                    <span className="font-mono text-sm text-gray-400">#{sale.id}</span>
+                                    <span className="font-mono text-sm text-[var(--color-text-muted)]">#{sale.id}</span>
                                     <span className={`text-xs px-2 py-0.5 rounded-full ${sale.status === 'cancelled' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'
                                         }`}>
                                         {sale.status === 'cancelled' ? 'ANULADA' : 'COMPLETADA'}
@@ -246,21 +246,21 @@ const SalesHistory = () => {
                                 </div>
                                 <div className="flex justify-between items-end">
                                     <div>
-                                        <p className="font-bold text-white">{formatMoney(sale.total)}</p>
-                                        <p className="text-xs text-gray-400">{new Date(sale.date).toLocaleDateString()} {new Date(sale.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                                        <div className="flex items-center gap-1 mt-1 text-xs text-gray-500">
+                                        <p className="font-bold text-[var(--color-text)]">{formatMoney(sale.total)}</p>
+                                        <p className="text-xs text-[var(--color-text-muted)]">{new Date(sale.date).toLocaleDateString()} {new Date(sale.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                                        <div className="flex items-center gap-1 mt-1 text-xs text-[var(--color-text-muted)]">
                                             <User size={10} />
                                             {getSellerName(sale.user_id)}
                                         </div>
                                     </div>
-                                    <div className="text-xs px-2 py-1 rounded bg-white/10 text-gray-300">
+                                    <div className="text-xs px-2 py-1 rounded bg-white/10 text-[var(--color-text-muted)]">
                                         {sale.paymentMethod}
                                     </div>
                                 </div>
                             </div>
                         ))}
                         {filteredSales.length === 0 && (
-                            <div className="p-8 text-center text-gray-500">
+                            <div className="p-8 text-center text-[var(--color-text-muted)]">
                                 No se encontraron ventas
                             </div>
                         )}
@@ -268,16 +268,16 @@ const SalesHistory = () => {
                 </div>
 
                 {/* Right: Details */}
-                <div className="w-2/3 glass rounded-xl flex flex-col overflow-hidden border border-white/5 relative">
+                <div className="w-2/3 glass rounded-xl flex flex-col overflow-hidden border border-[var(--glass-border)] relative">
                     {selectedSale ? (
                         <>
                             {/* Header details */}
-                            <div className="p-6 border-b border-white/5 bg-white/5 flex justify-between items-start">
+                            <div className="p-6 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] flex justify-between items-start">
                                 <div>
-                                    <h2 className="text-2xl font-bold text-white mb-1">
+                                    <h2 className="text-2xl font-bold text-[var(--color-text)] mb-1">
                                         Venta #{selectedSale.id}
                                     </h2>
-                                    <div className="text-sm text-gray-400 flex gap-4">
+                                    <div className="text-sm text-[var(--color-text-muted)] flex gap-4">
                                         <span>{new Date(selectedSale.date).toLocaleString()}</span>
                                         <span>•</span>
                                         <span>Vendedor: {getSellerName(selectedSale.user_id)}</span>
@@ -295,8 +295,8 @@ const SalesHistory = () => {
                             </div>
 
                             {/* Actions Toolbar */}
-                            <div className="p-3 border-b border-white/5 flex gap-2">
-                                <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-gray-200 transition-colors">
+                            <div className="p-3 border-b border-[var(--glass-border)] flex gap-2">
+                                <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-2 bg-[var(--glass-bg)] hover:bg-[var(--color-surface-hover)] rounded-lg text-sm text-gray-200 transition-colors">
                                     <Download size={16} />
                                     Descargar PDF
                                 </button>
@@ -317,7 +317,7 @@ const SalesHistory = () => {
                             <div className="flex-1 overflow-y-auto p-6">
                                 <table className="w-full text-left border-collapse">
                                     <thead>
-                                        <tr className="border-b border-white/10 text-gray-500 text-sm">
+                                        <tr className="border-b border-[var(--glass-border)] text-[var(--color-text-muted)] text-sm">
                                             <th className="py-2">Producto</th>
                                             <th className="py-2 text-right">Cantidad</th>
                                             <th className="py-2 text-right">Precio Unit.</th>
@@ -326,16 +326,16 @@ const SalesHistory = () => {
                                     </thead>
                                     <tbody>
                                         {selectedSale.items?.map((item, idx) => (
-                                            <tr key={idx} className="border-b border-white/5 text-gray-300 text-sm">
+                                            <tr key={idx} className="border-b border-[var(--glass-border)] text-[var(--color-text-muted)] text-sm">
                                                 <td className="py-3">
-                                                    <div className="font-medium text-white">{item.name}</div>
-                                                    {item.sku && <div className="text-xs text-gray-500">{item.sku}</div>}
+                                                    <div className="font-medium text-[var(--color-text)]">{item.name}</div>
+                                                    {item.sku && <div className="text-xs text-[var(--color-text-muted)]">{item.sku}</div>}
                                                 </td>
-                                                <td className="py-3 text-right text-white bg-white/5 rounded w-16 text-center mx-auto" style={{ display: 'table-cell' }}>
-                                                    <span className="px-2 py-1 rounded bg-white/5">{item.quantity}</span>
+                                                <td className="py-3 text-right text-[var(--color-text)] bg-[var(--glass-bg)] rounded w-16 text-center mx-auto" style={{ display: 'table-cell' }}>
+                                                    <span className="px-2 py-1 rounded bg-[var(--glass-bg)]">{item.quantity}</span>
                                                 </td>
                                                 <td className="py-3 text-right">{formatMoney(item.price)}</td>
-                                                <td className="py-3 text-right font-bold text-white">{formatMoney(item.price * item.quantity)}</td>
+                                                <td className="py-3 text-right font-bold text-[var(--color-text)]">{formatMoney(item.price * item.quantity)}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -344,32 +344,32 @@ const SalesHistory = () => {
                                 {/* Totals Summary */}
                                 <div className="mt-8 flex justify-end">
                                     <div className="w-64 space-y-2">
-                                        <div className="flex justify-between text-gray-400 text-sm">
+                                        <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
                                             <span>Subtotal</span>
                                             <span>{formatMoney(selectedSale.total)}</span>
                                         </div>
-                                        <div className="flex justify-between text-gray-400 text-sm">
+                                        <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
                                             <span>Impuestos</span>
                                             <span>$0</span>
                                         </div>
-                                        <div className="border-t border-white/10 pt-2 flex justify-between text-white font-bold text-lg">
+                                        <div className="border-t border-[var(--glass-border)] pt-2 flex justify-between text-[var(--color-text)] font-bold text-lg">
                                             <span>Total</span>
                                             <span className="text-[var(--color-primary)]">{formatMoney(selectedSale.total)}</span>
                                         </div>
 
-                                        <div className="mt-6 p-4 bg-white/5 rounded-lg border border-white/10">
-                                            <p className="text-xs text-gray-500 uppercase font-bold mb-2">Información de Pago</p>
-                                            <div className="flex justify-between text-sm text-gray-300 mb-1">
+                                        <div className="mt-6 p-4 bg-[var(--glass-bg)] rounded-lg border border-[var(--glass-border)]">
+                                            <p className="text-xs text-[var(--color-text-muted)] uppercase font-bold mb-2">Información de Pago</p>
+                                            <div className="flex justify-between text-sm text-[var(--color-text-muted)] mb-1">
                                                 <span>Método</span>
                                                 <span className="capitalize">{selectedSale.paymentMethod}</span>
                                             </div>
                                             {selectedSale.paymentMethod === 'Efectivo' && selectedSale.paymentDetails && (
                                                 <>
-                                                    <div className="flex justify-between text-sm text-gray-300 mb-1">
+                                                    <div className="flex justify-between text-sm text-[var(--color-text-muted)] mb-1">
                                                         <span>Pagado</span>
                                                         <span>{formatMoney(selectedSale.paymentDetails.amount || selectedSale.total)}</span>
                                                     </div>
-                                                    <div className="flex justify-between text-sm text-gray-300">
+                                                    <div className="flex justify-between text-sm text-[var(--color-text-muted)]">
                                                         <span>Vuelto</span>
                                                         <span>{formatMoney(selectedSale.paymentDetails.change || 0)}</span>
                                                     </div>
@@ -395,21 +395,21 @@ const SalesHistory = () => {
                             {/* WhatsApp Phone Input Overlay */}
                             {showPhoneInput && (
                                 <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] z-10 flex items-center justify-center">
-                                    <div className="bg-[#0f0f2d] border border-white/20 p-6 rounded-2xl w-80 shadow-2xl animate-[float_0.3s_ease-out]">
+                                    <div className="bg-[var(--color-surface)] dark:bg-[#0f0f2d] border border-white/20 p-6 rounded-2xl w-80 shadow-2xl animate-[float_0.3s_ease-out]">
                                         <div className="flex justify-between items-center mb-4">
-                                            <h3 className="text-white font-bold">Enviar por WhatsApp</h3>
-                                            <button onClick={() => setShowPhoneInput(false)} className="text-gray-400 hover:text-white">
+                                            <h3 className="text-[var(--color-text)] font-bold">Enviar por WhatsApp</h3>
+                                            <button onClick={() => setShowPhoneInput(false)} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
                                                 <X size={18} />
                                             </button>
                                         </div>
-                                        <p className="text-xs text-gray-400 mb-3">Ingrese el número de teléfono del cliente:</p>
+                                        <p className="text-xs text-[var(--color-text-muted)] mb-3">Ingrese el número de teléfono del cliente:</p>
                                         <div className="flex gap-2 mb-4">
-                                            <div className="bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-gray-400 text-sm flex items-center">
+                                            <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-3 py-2 text-[var(--color-text-muted)] text-sm flex items-center">
                                                 +56 9
                                             </div>
                                             <input
                                                 type="tel"
-                                                className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:border-[var(--color-primary)] focus:outline-none"
+                                                className="flex-1 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-3 py-2 text-[var(--color-text)] text-sm focus:border-[var(--color-primary)] focus:outline-none"
                                                 placeholder="12345678"
                                                 value={phoneNumber}
                                                 onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, '').substring(0, 8))}
@@ -419,7 +419,7 @@ const SalesHistory = () => {
                                         <button
                                             onClick={confirmWhatsAppShare}
                                             disabled={phoneNumber.length < 8}
-                                            className="w-full bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold py-2 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                            className="w-full bg-[#25D366] hover:bg-[#20bd5a] text-[var(--color-text)] font-bold py-2 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                         >
                                             <Send size={16} />
                                             Enviar Mensaje
@@ -431,9 +431,9 @@ const SalesHistory = () => {
                             {/* Cancellation Modal Overlay */}
                             {showCancelModal && (
                                 <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-20 flex items-center justify-center p-4">
-                                    <div className="bg-[#0f0f2d] border border-red-500/20 p-6 rounded-2xl w-full max-w-md shadow-2xl animate-[float_0.3s_ease-out]">
+                                    <div className="bg-[var(--color-surface)] dark:bg-[#0f0f2d] border border-red-500/20 p-6 rounded-2xl w-full max-w-md shadow-2xl animate-[float_0.3s_ease-out]">
                                         <div className="flex justify-between items-center mb-6">
-                                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                            <h3 className="text-xl font-bold text-[var(--color-text)] flex items-center gap-2">
                                                 <AlertTriangle className="text-red-500" size={24} />
                                                 Anular Venta
                                             </h3>
@@ -442,22 +442,22 @@ const SalesHistory = () => {
                                                     setShowCancelModal(false);
                                                     setCancellationReason('');
                                                 }}
-                                                className="text-gray-400 hover:text-white"
+                                                className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                                             >
                                                 <X size={20} />
                                             </button>
                                         </div>
 
                                         <div className="mb-6">
-                                            <p className="text-gray-300 text-sm mb-4">
+                                            <p className="text-[var(--color-text-muted)] text-sm mb-4">
                                                 ¿Está seguro de que desea anular esta venta? Esta acción restaurará el stock de los productos.
                                             </p>
 
-                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-2">
+                                            <label className="block text-xs font-bold text-[var(--color-text-muted)] uppercase mb-2">
                                                 Motivo de Anulación (Requerido)
                                             </label>
                                             <textarea
-                                                className="w-full bg-black/40 border border-white/10 rounded-lg p-3 text-white text-sm focus:border-red-500/50 focus:outline-none resize-none h-24"
+                                                className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg p-3 text-[var(--color-text)] text-sm focus:border-red-500/50 focus:outline-none resize-none h-24"
                                                 placeholder="Especifique la razón de la anulación..."
                                                 value={cancellationReason}
                                                 onChange={(e) => setCancellationReason(e.target.value)}
@@ -471,14 +471,14 @@ const SalesHistory = () => {
                                                     setShowCancelModal(false);
                                                     setCancellationReason('');
                                                 }}
-                                                className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-300 rounded-lg text-sm font-bold transition-colors"
+                                                className="flex-1 px-4 py-2 bg-[var(--glass-bg)] hover:bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] rounded-lg text-sm font-bold transition-colors"
                                             >
                                                 Cancelar
                                             </button>
                                             <button
                                                 onClick={confirmCancellation}
                                                 disabled={!cancellationReason.trim()}
-                                                className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                                className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-[var(--color-text)] rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                             >
                                                 <Trash2 size={16} />
                                                 Confirmar Anulación
@@ -490,9 +490,9 @@ const SalesHistory = () => {
 
                         </>
                     ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center text-gray-500 p-8">
+                        <div className="flex-1 flex flex-col items-center justify-center text-[var(--color-text-muted)] p-8">
                             <FileText size={64} className="mb-4 opacity-20" />
-                            <h3 className="text-xl font-bold text-gray-400 mb-2">Seleccione una venta</h3>
+                            <h3 className="text-xl font-bold text-[var(--color-text-muted)] mb-2">Seleccione una venta</h3>
                             <p className="text-sm max-w-xs text-center">Haga clic en una transacción de la izquierda para ver su detalle, reimprimir o anular.</p>
                         </div>
                     )}

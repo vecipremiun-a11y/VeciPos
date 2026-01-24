@@ -116,7 +116,7 @@ const POS = () => {
         setIsPaymentModalOpen(true);
     };
 
-    const handlePaymentConfirm = (paymentData) => {
+    const handlePaymentConfirm = async (paymentData) => {
         const saleData = {
             items: cart,
             total: finalTotal,
@@ -125,12 +125,16 @@ const POS = () => {
             paymentDetails: paymentData
         };
 
-        addSale(saleData);
+        const result = await addSale(saleData);
 
-        // Prepare data for success modal
-        setLastSaleDetails(saleData);
-        setIsSuccessModalOpen(true);
-        // Do NOT clear cart here, wait for "New Sale" or modal close
+        if (result.success) {
+            // Prepare data for success modal
+            setLastSaleDetails(saleData);
+            setIsSuccessModalOpen(true);
+            // Do NOT clear cart here, wait for "New Sale" or modal close
+        } else {
+            alert(result.error || "Error al procesar la venta");
+        }
     };
 
     const handleNewSale = () => {
@@ -156,7 +160,7 @@ const POS = () => {
                 <div className="glass-card p-4 space-y-4 shrink-0 relative z-50">
                     <div className="flex gap-4">
                         <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={20} />
                             <input
                                 type="text"
                                 placeholder="Buscar productos..."
@@ -176,7 +180,7 @@ const POS = () => {
                                     "px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all",
                                     selectedCategory === cat
                                         ? "bg-[var(--color-primary)] text-black shadow-[0_0_10px_rgba(0,240,255,0.4)]"
-                                        : "glass text-gray-300 hover:bg-white/10"
+                                        : "glass text-[var(--color-text-muted)] hover:bg-[var(--glass-bg)] hover:text-[var(--color-text)]"
                                 )}
                             >
                                 {cat}
@@ -202,17 +206,17 @@ const POS = () => {
                                     addToCart(product);
                                 }
                             }}
-                            className="rounded-xl glass-card bg-card p-0 text-white shadow-sm cursor-pointer border border-white/10 hover:border-[var(--color-primary)] transition-all duration-150 flex flex-col h-auto hover:shadow-lg active:scale-95 touch-manipulation relative group"
+                            className="rounded-xl glass-card bg-card p-0 text-[var(--color-text)] shadow-sm cursor-pointer border border-[var(--glass-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-surface-hover)] transition-all duration-150 flex flex-col h-auto hover:shadow-lg active:scale-95 touch-manipulation relative group"
                         >
                             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity z-10">
                                 <span className={cn(
                                     "text-[var(--color-primary)] bg-black/50 rounded-full w-6 h-6 flex items-center justify-center text-sm",
-                                    product.image ? "text-white" : "text-[var(--color-primary)]"
+                                    product.image ? "text-[var(--color-text)]" : "text-[var(--color-primary)]"
                                 )}>+</span>
                             </div>
 
                             {/* Image Container - Full Width */}
-                            <div className="w-full aspect-square bg-white/5 flex items-center justify-center overflow-hidden relative shrink-0 rounded-t-xl">
+                            <div className="w-full aspect-square bg-[var(--glass-bg)] flex items-center justify-center overflow-hidden relative shrink-0 rounded-t-xl">
                                 {product.image && product.image !== '[object Object]' && (product.image.startsWith('http') || product.image.startsWith('data:')) ? (
                                     <img
                                         src={product.image}
@@ -224,9 +228,9 @@ const POS = () => {
 
                                             // Create fallback content dynamically
                                             const icon = document.createElement('div');
-                                            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image-off text-gray-500 mb-1 opacity-50"><line x1="2" x2="22" y1="2" y2="22"/><path d="M10.41 6.26l2.15 2.15 3.44-3.44 5 5V20a2 2 0 0 1-2 2h-9"/><path d="M4 13.5V4a2 2 0 0 1 2-2h8.5"/><path d="M4 19.5l3-3"/><path d="M14 14l2-2 2.5 2.5"/></svg>';
+                                            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image-off text-[var(--color-text-muted)] mb-1 opacity-50"><line x1="2" x2="22" y1="2" y2="22"/><path d="M10.41 6.26l2.15 2.15 3.44-3.44 5 5V20a2 2 0 0 1-2 2h-9"/><path d="M4 13.5V4a2 2 0 0 1 2-2h8.5"/><path d="M4 19.5l3-3"/><path d="M14 14l2-2 2.5 2.5"/></svg>';
                                             const text = document.createElement('span');
-                                            text.className = 'text-[10px] text-gray-500 font-medium uppercase tracking-wider opacity-50';
+                                            text.className = 'text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider opacity-50';
                                             text.innerText = 'Sin Imagen';
 
                                             e.target.parentElement.appendChild(icon.firstChild);
@@ -235,8 +239,8 @@ const POS = () => {
                                     />
                                 ) : (
                                     <div className="flex flex-col items-center justify-center gap-1 w-full h-full">
-                                        <ImageOff className="text-gray-500 opacity-50" size={40} />
-                                        <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wider opacity-50">Sin Imagen</span>
+                                        <ImageOff className="text-[var(--color-text-muted)] opacity-50" size={40} />
+                                        <span className="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider opacity-50">Sin Imagen</span>
                                     </div>
                                 )}
                             </div>
@@ -244,7 +248,7 @@ const POS = () => {
                             {/* Content Wrapper - Padded */}
                             <div className="flex flex-col flex-1 w-full justify-between p-3">
                                 <div>
-                                    <h3 className="text-white font-bold text-sm line-clamp-2 leading-tight mb-1 group-hover:text-[var(--color-primary)] transition-colors">
+                                    <h3 className="text-[var(--color-text)] font-bold text-sm line-clamp-2 leading-tight mb-1 group-hover:text-[var(--color-primary)] transition-colors">
                                         {product.name}
                                     </h3>
 
@@ -255,7 +259,7 @@ const POS = () => {
                                     </div>
                                 </div>
 
-                                <div className="w-full flex justify-between items-center pt-2 border-t border-white/5">
+                                <div className="w-full flex justify-between items-center pt-2 border-t border-[var(--glass-border)]">
                                     <span className={cn(
                                         "font-medium px-2 py-0.5 rounded text-[10px]",
                                         product.stock < 10
@@ -264,7 +268,7 @@ const POS = () => {
                                     )}>
                                         {product.stock} {product.unit === 'Kg' ? 'kg' : 'un.'}
                                     </span>
-                                    <span className="text-[10px] text-gray-500 font-medium truncate max-w-[50%] text-right">
+                                    <span className="text-[10px] text-[var(--color-text-muted)] font-medium truncate max-w-[50%] text-right">
                                         {product.category || product.sku || 'General'}
                                     </span>
                                 </div>
@@ -276,8 +280,8 @@ const POS = () => {
 
             {/* Right Side: Cart */}
             <div className="w-full lg:w-[448px] flex flex-col glass-card p-0 overflow-hidden">
-                <div className="p-4 border-b border-white/5 bg-white/5">
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)]">
+                    <h2 className="text-xl font-bold text-[var(--color-text)] flex items-center gap-2">
                         <ShoppingCart size={20} className="text-[var(--color-primary)]" />
                         Ticket Actual
                     </h2>
@@ -285,7 +289,7 @@ const POS = () => {
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                     {cart.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-2">
+                        <div className="h-full flex flex-col items-center justify-center text-[var(--color-text-muted)] gap-2">
                             <ShoppingCart size={48} className="opacity-20" />
                             <p>El carrito está vacío</p>
                         </div>
@@ -300,12 +304,12 @@ const POS = () => {
                             const discountedUnitPrice = unitPrice * (1 - discountPercent / 100);
 
                             return (
-                                <div key={item.id} className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+                                <div key={item.id} className="p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)] space-y-2">
                                     {/* Row 1: Name and Remove */}
                                     <div className="flex justify-between items-start gap-2">
-                                        <h4 className="text-white font-medium text-sm line-clamp-2">{item.name}</h4>
+                                        <h4 className="text-[var(--color-text)] font-medium text-sm line-clamp-2">{item.name}</h4>
                                         <button
-                                            className="text-gray-500 hover:text-red-400 transition-colors p-1"
+                                            className="text-[var(--color-text-muted)] hover:text-red-400 transition-colors p-1"
                                             onClick={() => removeFromCart(item.id)}
                                         >
                                             <Trash2 size={16} />
@@ -313,14 +317,14 @@ const POS = () => {
                                     </div>
 
                                     {/* Row 2: Prices */}
-                                    <div className="flex justify-between items-center text-xs text-gray-400">
+                                    <div className="flex justify-between items-center text-xs text-[var(--color-text-muted)]">
                                         <div className="flex items-center gap-2">
                                             <span>{item.unit === 'Kg' ? 'Kg:' : 'Und:'}</span>
                                             <div className="flex items-center gap-1">
-                                                <span className="text-gray-500 text-sm">$</span>
+                                                <span className="text-[var(--color-text-muted)] text-sm">$</span>
                                                 <input
                                                     type="number"
-                                                    className="w-20 bg-transparent text-sm font-bold text-white outline-none border-b border-white/10 focus:border-[var(--color-primary)] transition-colors"
+                                                    className="w-20 bg-transparent text-sm font-bold text-[var(--color-text)] outline-none border-b border-[var(--glass-border)] focus:border-[var(--color-primary)] transition-colors"
                                                     value={item.price}
                                                     onChange={(e) => {
                                                         const val = parseFloat(e.target.value);
@@ -345,16 +349,16 @@ const POS = () => {
                                     </div>
 
                                     {/* Row 3: Controls */}
-                                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
+                                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-[var(--glass-border)]">
                                         {/* Discount Input */}
-                                        <div className="flex items-center gap-1 bg-black/20 rounded-lg px-2 py-1.5 border border-white/5 w-24 group focus-within:border-[var(--color-primary)]/50 transition-colors">
-                                            <span className="text-xs text-gray-500 font-bold group-focus-within:text-[var(--color-primary)]">%</span>
+                                        <div className="flex items-center gap-1 bg-[var(--glass-bg)] rounded-lg px-2 py-1.5 border border-[var(--glass-border)] w-24 group focus-within:border-[var(--color-primary)]/50 transition-colors">
+                                            <span className="text-xs text-[var(--color-text-muted)] font-bold group-focus-within:text-[var(--color-primary)]">%</span>
                                             <input
                                                 type="number"
                                                 placeholder="0"
                                                 min="0"
                                                 max="100"
-                                                className="w-full bg-transparent text-sm text-white outline-none text-right font-bold"
+                                                className="w-full bg-transparent text-sm text-[var(--color-text)] outline-none text-right font-bold"
                                                 value={item.discountPercent || ''}
                                                 onChange={(e) => {
                                                     let val = parseFloat(e.target.value);
@@ -368,9 +372,9 @@ const POS = () => {
                                         </div>
 
                                         {/* Quantity Controls */}
-                                        <div className="flex items-center gap-4 bg-black/20 rounded-lg p-1.5 border border-white/5">
+                                        <div className="flex items-center gap-4 bg-[var(--glass-bg)] rounded-lg p-1.5 border border-[var(--glass-border)]">
                                             <button
-                                                className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+                                                className="w-8 h-8 rounded-lg bg-[var(--glass-bg)] flex items-center justify-center text-[var(--color-text)] hover:bg-white/10 transition-colors"
                                                 onClick={() => {
                                                     const isKg = item.unit === 'Kg';
                                                     const minVal = isKg ? 0.001 : 1;
@@ -388,7 +392,7 @@ const POS = () => {
                                             {item.unit === 'Kg' ? (
                                                 <input
                                                     type="number"
-                                                    className="w-14 bg-transparent text-center text-white font-bold text-lg outline-none border-b border-transparent hover:border-white/20 focus:border-[var(--color-primary)] transition-colors appearance-none"
+                                                    className="w-14 bg-transparent text-center text-[var(--color-text)] font-bold text-lg outline-none border-b border-transparent hover:border-[var(--glass-border)] focus:border-[var(--color-primary)] transition-colors appearance-none"
                                                     value={item.quantity}
                                                     step="0.001"
                                                     onChange={(e) => {
@@ -399,7 +403,7 @@ const POS = () => {
                                                     }}
                                                 />
                                             ) : (
-                                                <span className="text-white font-bold text-lg w-8 text-center">{item.quantity}</span>
+                                                <span className="text-[var(--color-text)] font-bold text-lg w-8 text-center">{item.quantity}</span>
                                             )}
                                             <button
                                                 className="w-8 h-8 rounded-lg bg-[var(--color-primary)]/20 flex items-center justify-center text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-black transition-colors"
@@ -415,16 +419,16 @@ const POS = () => {
                     )}
                 </div>
 
-                <div className="p-4 border-t border-white/10 bg-black/20 space-y-4">
-                    <div className="flex justify-between text-gray-400 text-sm">
+                <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] space-y-4">
+                    <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
                         <span>Subtotal (Neto)</span>
                         <span>${subTotal.toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between text-gray-400 text-sm">
+                    <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
                         <span>Impuestos Total</span>
                         <span>${taxTotal.toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between text-white text-2xl font-bold pt-2 border-t border-white/10">
+                    <div className="flex justify-between text-[var(--color-text)] text-2xl font-bold pt-2 border-t border-[var(--glass-border)]">
                         <span>Total</span>
                         <span className="neon-text">${finalTotal.toFixed(2)}</span>
                     </div>

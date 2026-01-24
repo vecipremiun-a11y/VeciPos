@@ -16,7 +16,9 @@ const Purchases = () => {
         quantity: '1',
         margin: '',
         sku: '',
-        tax: 0
+        tax: 0,
+        expiryDate: '',
+        batchNumber: ''
     });
 
     // Right Column: Invoice Details
@@ -59,7 +61,9 @@ const Purchases = () => {
             quantity: '1',
             margin: margin,
             sku: product.sku || '',
-            tax: taxRate
+            tax: taxRate,
+            expiryDate: '',
+            batchNumber: ''
         });
     };
 
@@ -119,7 +123,11 @@ const Purchases = () => {
             cost: parseFloat(entryForm.cost),
             price: parseFloat(entryForm.price),
             tax: parseFloat(entryForm.tax),
-            total: parseFloat(entryForm.quantity) * parseFloat(entryForm.cost)
+            tax: parseFloat(entryForm.tax),
+            total: parseFloat(entryForm.quantity) * parseFloat(entryForm.cost),
+            total: parseFloat(entryForm.quantity) * parseFloat(entryForm.cost),
+            expiryDate: entryForm.expiryDate || null,
+            batchNumber: entryForm.batchNumber || null
         };
 
         setInvoiceItems([...invoiceItems, newItem]);
@@ -127,7 +135,7 @@ const Purchases = () => {
         // Reset Left
         setSelectedProduct(null);
         setSearchTerm('');
-        setEntryForm({ cost: '', price: '', quantity: '1', margin: '', sku: '', tax: 0 });
+        setEntryForm({ cost: '', price: '', quantity: '1', margin: '', sku: '', tax: 0, expiryDate: '', batchNumber: '' });
     };
 
     const handleRemoveItem = (index) => {
@@ -173,7 +181,7 @@ const Purchases = () => {
     const handleCancel = () => {
         setSelectedProduct(null);
         setSearchTerm('');
-        setEntryForm({ cost: '', price: '', quantity: '1', margin: '', sku: '', tax: 0 });
+        setEntryForm({ cost: '', price: '', quantity: '1', margin: '', sku: '', tax: 0, expiryDate: '', batchNumber: '' });
     };
 
     const handleSaveNewProduct = async (productData) => {
@@ -197,12 +205,12 @@ const Purchases = () => {
 
             {/* Left Column: Product Entry (4 cols) */}
             <div className="col-span-12 lg:col-span-4 glass-card h-full flex flex-col">
-                <h2 className="text-xl font-bold text-white mb-4 border-b border-white/10 pb-2">Agregar Producto</h2>
+                <h2 className="text-xl font-bold text-[var(--color-text)] mb-4 border-b border-[var(--glass-border)] pb-2">Agregar Producto</h2>
 
                 {/* Search */}
                 <div className="relative mb-6 flex gap-2">
                     <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
                         <input
                             type="text"
                             placeholder="Buscar producto por nombre o código..."
@@ -211,16 +219,16 @@ const Purchases = () => {
                             className="glass-input w-full pl-10"
                         />
                         {searchTerm && !selectedProduct && filteredProducts.length > 0 && (
-                            <div className="absolute top-full left-0 right-0 mt-1 bg-[#1a1c2e] border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+                            <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--color-surface)] dark:bg-[#1a1c2e] border border-[var(--glass-border)] rounded-lg shadow-xl z-50 overflow-hidden">
                                 {filteredProducts.map(product => (
                                     <button
                                         key={product.id}
                                         onClick={() => handleSelectProduct(product)}
-                                        className="w-full text-left p-3 hover:bg-white/5 flex justify-between items-center transition-colors border-b border-white/5 last:border-0"
+                                        className="w-full text-left p-3 hover:bg-[var(--glass-bg)] flex justify-between items-center transition-colors border-b border-[var(--glass-border)] last:border-0"
                                     >
                                         <div>
-                                            <div className="text-white font-medium">{product.name}</div>
-                                            <div className="text-xs text-gray-400">{product.sku}</div>
+                                            <div className="text-[var(--color-text)] font-medium">{product.name}</div>
+                                            <div className="text-xs text-[var(--color-text-muted)]">{product.sku}</div>
                                         </div>
                                         <div className="text-[var(--color-primary)] font-bold">
                                             Stock: {product.stock}
@@ -232,7 +240,7 @@ const Purchases = () => {
                     </div>
                     <button
                         onClick={() => setIsProductModalOpen(true)}
-                        className="glass p-3 rounded-xl hover:bg-white/10 text-[var(--color-primary)] border border-white/10"
+                        className="glass p-3 rounded-xl hover:bg-[var(--color-surface-hover)] text-[var(--color-primary)] border border-[var(--glass-border)]"
                         title="Crear Nuevo Producto"
                     >
                         <PackagePlus size={24} />
@@ -243,13 +251,13 @@ const Purchases = () => {
                 <form onSubmit={handleAddToInvoice} className="space-y-4 flex-1 overflow-y-auto pr-2 custom-scrollbar">
                     {selectedProduct ? (
                         <>
-                            <div className="bg-white/5 p-3 rounded-lg mb-4 border border-white/5 flex gap-3 items-center">
+                            <div className="bg-[var(--glass-bg)] p-3 rounded-lg mb-4 border border-[var(--glass-border)] flex gap-3 items-center">
                                 {/* Image Display */}
-                                <div className="w-16 h-16 bg-black/20 rounded-md overflow-hidden flex-shrink-0 border border-white/10 flex items-center justify-center">
+                                <div className="w-16 h-16 bg-[var(--glass-bg)] rounded-md overflow-hidden flex-shrink-0 border border-[var(--glass-border)] flex items-center justify-center">
                                     {selectedProduct.image ? (
                                         <img src={selectedProduct.image} alt={selectedProduct.name} className="w-full h-full object-cover" />
                                     ) : (
-                                        <div className="text-xs text-gray-500 text-center p-1 leading-tight">Sin Imagen</div>
+                                        <div className="text-xs text-[var(--color-text-muted)] text-center p-1 leading-tight">Sin Imagen</div>
                                     )}
                                 </div>
 
@@ -261,7 +269,7 @@ const Purchases = () => {
                             </div>
 
                             <div>
-                                <label className="block text-xs text-gray-400 mb-1">SKU / Código</label>
+                                <label className="block text-xs text-[var(--color-text-muted)] mb-1">SKU / Código</label>
                                 <input
                                     type="text"
                                     name="sku"
@@ -274,7 +282,7 @@ const Purchases = () => {
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Costo ($)</label>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Costo ($)</label>
                                     <input
                                         type="number"
                                         name="cost"
@@ -287,7 +295,7 @@ const Purchases = () => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-gray-400 mb-1">IVA (%)</label>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">IVA (%)</label>
                                     <input
                                         type="number"
                                         name="tax"
@@ -301,16 +309,16 @@ const Purchases = () => {
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Utilidad (%)</label>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Utilidad (%)</label>
                                     <input
                                         type="number"
                                         readOnly
                                         value={entryForm.margin}
-                                        className="glass-input w-full bg-white/5 text-gray-400 cursor-not-allowed"
+                                        className="glass-input w-full bg-[var(--glass-bg)] text-[var(--color-text-muted)] cursor-not-allowed"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Precio Venta ($)</label>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Precio Venta ($)</label>
                                     <input
                                         type="number"
                                         name="price"
@@ -325,7 +333,7 @@ const Purchases = () => {
                             </div>
 
                             <div>
-                                <label className="block text-xs text-gray-400 mb-1">Cantidad a ingresar</label>
+                                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Cantidad a ingresar</label>
                                 <input
                                     type="number"
                                     name="quantity"
@@ -338,11 +346,35 @@ const Purchases = () => {
                                 />
                             </div>
 
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1"># Lote</label>
+                                    <input
+                                        type="text"
+                                        name="batchNumber"
+                                        value={entryForm.batchNumber || ''}
+                                        onChange={handleEntryChange}
+                                        className="glass-input w-full"
+                                        placeholder="# de lote"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Fecha de Vencimiento</label>
+                                    <input
+                                        type="date"
+                                        name="expiryDate"
+                                        value={entryForm.expiryDate || ''}
+                                        onChange={handleEntryChange}
+                                        className="glass-input w-full"
+                                    />
+                                </div>
+                            </div>
+
                             <div className="flex gap-2 mt-4">
                                 <button
                                     type="button"
                                     onClick={handleCancel}
-                                    className="px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors flex-1"
+                                    className="px-4 py-3 bg-white/10 hover:bg-white/20 text-[var(--color-text)] rounded-lg transition-colors flex-1"
                                 >
                                     Cancelar
                                 </button>
@@ -355,7 +387,7 @@ const Purchases = () => {
                             </div>
                         </>
                     ) : (
-                        <div className="flex flex-col items-center justify-center h-48 text-gray-500 border border-dashed border-white/10 rounded-xl">
+                        <div className="flex flex-col items-center justify-center h-48 text-[var(--color-text-muted)] border border-dashed border-[var(--glass-border)] rounded-xl">
                             <Search size={32} className="mb-2 opacity-50" />
                             <p>Busca y selecciona un producto</p>
                         </div>
@@ -367,13 +399,13 @@ const Purchases = () => {
             <div className="col-span-12 lg:col-span-8 h-full flex flex-col gap-4">
                 {/* Header Info */}
                 <div className="glass-card p-4">
-                    <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-[var(--color-text)] mb-4 flex items-center gap-2">
                         <ShoppingCart size={20} className="text-[var(--color-primary)]" />
                         Detalles de la Compra
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
-                            <label className="block text-xs text-gray-400 mb-1">Proveedor</label>
+                            <label className="block text-xs text-[var(--color-text-muted)] mb-1">Proveedor</label>
                             <select
                                 value={invoiceData.supplierId}
                                 onChange={(e) => setInvoiceData({ ...invoiceData, supplierId: e.target.value })}
@@ -381,12 +413,12 @@ const Purchases = () => {
                             >
                                 <option value="">Seleccionar Proveedor...</option>
                                 {suppliers.map(s => (
-                                    <option key={s.id} value={s.id} className="bg-gray-900">{s.name}</option>
+                                    <option key={s.id} value={s.id} className="bg-gray-200 text-gray-800 dark:bg-gray-900 dark:text-gray-200">{s.name}</option>
                                 ))}
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs text-gray-400 mb-1">N° Factura</label>
+                            <label className="block text-xs text-[var(--color-text-muted)] mb-1">N° Factura</label>
                             <input
                                 type="text"
                                 value={invoiceData.invoiceNumber}
@@ -396,7 +428,7 @@ const Purchases = () => {
                             />
                         </div>
                         <div>
-                            <label className="block text-xs text-gray-400 mb-1">Fecha</label>
+                            <label className="block text-xs text-[var(--color-text-muted)] mb-1">Fecha</label>
                             <input
                                 type="date"
                                 value={invoiceData.date}
@@ -406,7 +438,7 @@ const Purchases = () => {
                         </div>
                     </div>
                     {/* Payment Details */}
-                    <div className="mt-4 pt-4 border-t border-white/10">
+                    <div className="mt-4 pt-4 border-t border-[var(--glass-border)]">
                         <div className="flex items-center gap-4 mb-4">
                             <label className="flex items-center cursor-pointer gap-2">
                                 <div className="relative">
@@ -419,14 +451,14 @@ const Purchases = () => {
                                     <div className={`w-10 h-6 rounded-full transition-colors ${invoiceData.isCredit ? 'bg-[var(--color-primary)]' : 'bg-gray-600'}`}></div>
                                     <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${invoiceData.isCredit ? 'translate-x-4' : 'translate-x-0'}`}></div>
                                 </div>
-                                <span className="text-white font-medium">¿Compra a Crédito?</span>
+                                <span className="text-[var(--color-text)] font-medium">¿Compra a Crédito?</span>
                             </label>
                         </div>
 
                         {invoiceData.isCredit ? (
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Días de Plazo</label>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Días de Plazo</label>
                                     <input
                                         type="number"
                                         value={invoiceData.creditDays}
@@ -445,7 +477,7 @@ const Purchases = () => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Fecha de Caducidad</label>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Fecha de Caducidad</label>
                                     <input
                                         type="date"
                                         value={invoiceData.expiryDate}
@@ -454,7 +486,7 @@ const Purchases = () => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Abono Inicial ($)</label>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Abono Inicial ($)</label>
                                     <input
                                         type="number"
                                         value={invoiceData.deposit}
@@ -466,7 +498,7 @@ const Purchases = () => {
                             </div>
                         ) : (
                             <div>
-                                <label className="block text-xs text-gray-400 mb-1">Método de Pago</label>
+                                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Método de Pago</label>
                                 <select
                                     value={invoiceData.paymentMethod}
                                     onChange={(e) => setInvoiceData({ ...invoiceData, paymentMethod: e.target.value })}
@@ -485,7 +517,7 @@ const Purchases = () => {
                 <div className="glass-card flex-1 overflow-hidden flex flex-col p-0">
                     <div className="overflow-x-auto flex-1 custom-scrollbar">
                         <table className="w-full text-left">
-                            <thead className="bg-white/5 text-gray-300 text-xs uppercase font-semibold sticky top-0 backdrop-blur-md">
+                            <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] text-xs uppercase font-semibold sticky top-0 backdrop-blur-md">
                                 <tr>
                                     <th className="px-4 py-3">Código</th>
                                     <th className="px-4 py-3">Producto</th>
@@ -495,27 +527,27 @@ const Purchases = () => {
                                     <th className="px-4 py-3 text-center">Acción</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-white/5">
+                            <tbody className="divide-y divide-[var(--glass-border)]">
                                 {invoiceItems.length === 0 ? (
                                     <tr>
-                                        <td colSpan="6" className="text-center py-10 text-gray-500">
+                                        <td colSpan="6" className="text-center py-10 text-[var(--color-text-muted)]">
                                             No hay productos en la factura.
                                         </td>
                                     </tr>
                                 ) : (
                                     invoiceItems.map((item, index) => (
-                                        <tr key={index} className="hover:bg-white/5 transition-colors">
-                                            <td className="px-4 py-3 text-gray-400 text-sm">{item.sku}</td>
-                                            <td className="px-4 py-3 text-white font-medium">{item.name}</td>
-                                            <td className="px-4 py-3 text-right text-gray-300">{item.quantity}</td>
-                                            <td className="px-4 py-3 text-right text-gray-300">${item.cost.toLocaleString()}</td>
+                                        <tr key={index} className="hover:bg-[var(--glass-bg)] transition-colors">
+                                            <td className="px-4 py-3 text-[var(--color-text-muted)] text-sm">{item.sku}</td>
+                                            <td className="px-4 py-3 text-[var(--color-text)] font-medium">{item.name}</td>
+                                            <td className="px-4 py-3 text-right text-[var(--color-text-muted)]">{item.quantity}</td>
+                                            <td className="px-4 py-3 text-right text-[var(--color-text-muted)]">${item.cost.toLocaleString()}</td>
                                             <td className="px-4 py-3 text-right font-bold text-[var(--color-primary)]">
                                                 ${item.total.toLocaleString()}
                                             </td>
                                             <td className="px-4 py-3 text-center">
                                                 <button
                                                     onClick={() => handleRemoveItem(index)}
-                                                    className="p-1 hover:bg-white/10 rounded text-red-400 hover:text-red-300 transition-colors"
+                                                    className="p-1 hover:bg-[var(--color-surface-hover)] rounded text-red-400 hover:text-red-300 transition-colors"
                                                 >
                                                     <Trash2 size={16} />
                                                 </button>
@@ -528,14 +560,14 @@ const Purchases = () => {
                     </div>
 
                     {/* Footer Totals */}
-                    <div className="bg-black/40 p-4 border-t border-white/10 flex justify-between items-center">
+                    <div className="bg-[var(--glass-bg)] p-4 border-t border-[var(--glass-border)] flex justify-between items-center">
                         <div>
-                            <span className="text-gray-400 text-sm">Items: {invoiceItems.length}</span>
+                            <span className="text-[var(--color-text-muted)] text-sm">Items: {invoiceItems.length}</span>
                         </div>
                         <div className="flex items-center gap-6">
                             <div className="text-right">
-                                <div className="text-sm text-gray-400">Total Factura</div>
-                                <div className="text-3xl font-bold text-white neon-text">
+                                <div className="text-sm text-[var(--color-text-muted)]">Total Factura</div>
+                                <div className="text-3xl font-bold text-[var(--color-text)] neon-text">
                                     ${totalAmount.toLocaleString()}
                                 </div>
                             </div>

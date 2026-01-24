@@ -32,20 +32,20 @@ const Login = () => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-[#050505]">
+        <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-[var(--color-surface)] dark:bg-[#050505]">
             {/* Background Elements */}
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10">
                 <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-[var(--color-secondary)] opacity-10 blur-[120px] animate-[float_10s_ease-in-out_infinite]"></div>
                 <div className="absolute bottom-[10%] right-[10%] w-[40%] h-[40%] rounded-full bg-[var(--color-primary)] opacity-10 blur-[120px] animate-[float_12s_ease-in-out_infinite_reverse]"></div>
             </div>
 
-            <div className="glass-card w-full max-w-md p-8 relative z-10 border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+            <div className="glass-card w-full max-w-md p-8 relative z-10 border border-[var(--glass-border)] shadow-[0_0_50px_rgba(0,0,0,0.5)]">
                 <div className="text-center mb-10">
                     <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-tr from-[var(--color-primary)] to-[var(--color-secondary)] rounded-2xl flex items-center justify-center shadow-[0_0_20px_rgba(0,240,255,0.3)]">
                         <Lock className="text-black" size={32} />
                     </div>
-                    <h1 className="text-4xl font-bold text-white tracking-tight mb-2">POSKEM</h1>
-                    <p className="text-gray-400 text-sm tracking-widest uppercase">Acceso al Sistema</p>
+                    <h1 className="text-4xl font-bold text-[var(--color-text)] tracking-tight mb-2">POSKEM</h1>
+                    <p className="text-[var(--color-text-muted)] text-sm tracking-widest uppercase">Acceso al Sistema</p>
                 </div>
 
                 <form onSubmit={handleLogin} className="space-y-6">
@@ -57,9 +57,9 @@ const Login = () => {
                     )}
 
                     <div className="space-y-1">
-                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Usuario</label>
+                        <label className="block text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider ml-1">Usuario</label>
                         <div className="relative group">
-                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-[var(--color-primary)] transition-colors">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] group-focus-within:text-[var(--color-primary)] transition-colors">
                                 <User size={20} />
                             </span>
                             <input
@@ -73,9 +73,9 @@ const Login = () => {
                     </div>
 
                     <div className="space-y-1">
-                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Contraseña</label>
+                        <label className="block text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider ml-1">Contraseña</label>
                         <div className="relative group">
-                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-[var(--color-primary)] transition-colors">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] group-focus-within:text-[var(--color-primary)] transition-colors">
                                 <Lock size={20} />
                             </span>
                             <input
@@ -95,12 +95,12 @@ const Login = () => {
                     >
                         <span className="relative z-10">{isLoading ? 'Verificando...' : 'Iniciar Sesión'}</span>
                         {!isLoading && <ArrowRight size={20} className="relative z-10 group-hover:translate-x-1 transition-transform" />}
-                        <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+                        <div className="absolute inset-0 bg-[var(--glass-bg)] translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
                     </button>
                 </form>
 
                 <div className="mt-8 text-center">
-                    <p className="text-[10px] text-gray-600 uppercase tracking-widest">
+                    <p className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest">
                         Minimarket POS System v1.0
                     </p>
                 </div>

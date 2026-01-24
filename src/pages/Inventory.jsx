@@ -74,8 +74,8 @@ const Inventory = () => {
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-white neon-text">Inventario</h1>
-                    <p className="text-gray-400">Gestión de productos y existencias</p>
+                    <h1 className="text-3xl font-bold text-[var(--color-text)] neon-text">Inventario</h1>
+                    <p className="text-[var(--color-text-muted)]">Gestión de productos y existencias</p>
                 </div>
                 <button onClick={handleNewProduct} className="btn-primary flex items-center gap-2">
                     <Plus size={20} /> Nuevo Producto
@@ -85,7 +85,7 @@ const Inventory = () => {
             {/* Filters & Search */}
             <div className="glass-card p-4 flex flex-col md:flex-row gap-4 items-center">
                 <div className="relative flex-1 w-full">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={20} />
                     <input
                         type="text"
                         placeholder="Buscar por nombre, SKU o categoría..."
@@ -94,8 +94,8 @@ const Inventory = () => {
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
-                <button className="glass px-4 py-3 rounded-lg hover:bg-white/10 transition-colors">
-                    <Filter size={20} className="text-gray-300" />
+                <button className="glass px-4 py-3 rounded-lg hover:bg-[var(--color-surface-hover)] transition-colors">
+                    <Filter size={20} className="text-[var(--color-text-muted)]" />
                 </button>
             </div>
 
@@ -103,7 +103,7 @@ const Inventory = () => {
             <div className="glass-card overflow-hidden p-0">
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
-                        <thead className="bg-white/5 text-gray-300 uppercase text-sm font-semibold">
+                        <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] uppercase text-sm font-semibold">
                             <tr>
                                 <th className="px-6 py-5">Producto</th>
                                 <th className="px-6 py-5">Imagen</th>
@@ -117,17 +117,17 @@ const Inventory = () => {
                                 <th className="px-6 py-5 text-right">Acciones</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-white/5">
+                        <tbody className="divide-y divide-[var(--glass-border)]">
                             {visibleProducts.map((product) => (
-                                <tr key={product.id} className="hover:bg-white/5 transition-colors group">
-                                    <td className="px-6 py-5 font-medium text-white text-lg">{product.name}</td>
+                                <tr key={product.id} className="hover:bg-[var(--glass-bg)] transition-colors group">
+                                    <td className="px-6 py-5 font-medium text-[var(--color-text)] text-lg">{product.name}</td>
                                     <td className="px-6 py-5">
                                         {product.image ? (
-                                            <div className="w-16 h-16 rounded-lg overflow-hidden border border-white/10">
+                                            <div className="w-16 h-16 rounded-lg overflow-hidden border border-[var(--glass-border)]">
                                                 <img src={product.image} alt="" className="w-full h-full object-cover" />
                                             </div>
                                         ) : (
-                                            <div className="w-16 h-16 rounded-lg bg-white/5 flex items-center justify-center text-sm text-gray-500">
+                                            <div className="w-16 h-16 rounded-lg bg-[var(--glass-bg)] flex items-center justify-center text-sm text-[var(--color-text-muted)]">
                                                 Img
                                             </div>
                                         )}
@@ -137,10 +137,10 @@ const Inventory = () => {
                                             {product.category}
                                         </span>
                                     </td>
-                                    <td className="px-6 py-5 text-gray-400 font-mono text-base">{product.sku}</td>
-                                    <td className="px-6 py-5 text-white font-bold text-xl">${product.price.toFixed(2)}</td>
-                                    <td className="px-6 py-5 text-gray-400 text-lg">${(product.cost || 0).toFixed(2)}</td>
-                                    <td className="px-6 py-5 text-gray-400 text-sm">
+                                    <td className="px-6 py-5 text-[var(--color-text-muted)] font-mono text-base">{product.sku}</td>
+                                    <td className="px-6 py-5 text-[var(--color-text)] font-bold text-xl">${product.price.toFixed(2)}</td>
+                                    <td className="px-6 py-5 text-[var(--color-text-muted)] text-lg">${(product.cost || 0).toFixed(2)}</td>
+                                    <td className="px-6 py-5 text-[var(--color-text-muted)] text-sm">
                                         {product.tax_rate > 0 ? `IVA (${product.tax_rate}%)` : 'Exento (0%)'}
                                     </td>
                                     <td className="px-6 py-5">
@@ -149,7 +149,7 @@ const Inventory = () => {
                                             const taxRate = parseFloat(product.tax_rate) || 0;
                                             const netPrice = parseFloat(product.price) / (1 + taxRate / 100);
                                             const cost = parseFloat(product.cost) || 0;
-                                            if (cost <= 0) return <span className="text-gray-500 text-lg">-</span>;
+                                            if (cost <= 0) return <span className="text-[var(--color-text-muted)] text-lg">-</span>;
 
                                             const margin = ((netPrice - cost) / cost) * 100;
                                             const marginValue = netPrice - cost;
@@ -159,7 +159,7 @@ const Inventory = () => {
                                                     <span className={cn("font-bold text-base", margin > 0 ? "text-green-400" : "text-red-400")}>
                                                         {margin.toFixed(1)}%
                                                     </span>
-                                                    <span className="text-sm text-gray-500">
+                                                    <span className="text-sm text-[var(--color-text-muted)]">
                                                         ${marginValue.toFixed(2)}
                                                     </span>
                                                 </div>
@@ -178,13 +178,13 @@ const Inventory = () => {
                                         <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <button
                                                 onClick={() => handleEdit(product)}
-                                                className="p-3 hover:bg-white/10 rounded-lg text-blue-400 transition-colors"
+                                                className="p-3 hover:bg-[var(--color-surface-hover)] rounded-lg text-blue-400 transition-colors"
                                             >
                                                 <Edit size={24} />
                                             </button>
                                             <button
                                                 onClick={() => handleDelete(product.id)}
-                                                className="p-3 hover:bg-white/10 rounded-lg text-red-400 transition-colors"
+                                                className="p-3 hover:bg-[var(--color-surface-hover)] rounded-lg text-red-400 transition-colors"
                                             >
                                                 <Trash2 size={24} />
                                             </button>
@@ -195,7 +195,7 @@ const Inventory = () => {
                         </tbody>
                     </table>
                     {filteredProducts.length === 0 && (
-                        <div className="p-10 text-center text-gray-500">
+                        <div className="p-10 text-center text-[var(--color-text-muted)]">
                             No se encontraron productos
                         </div>
                     )}

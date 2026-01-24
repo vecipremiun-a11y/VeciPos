@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList } from 'lucide-react';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 
@@ -8,6 +8,7 @@ const MainLayout = () => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const { currentUser, logout } = useStore();
     const navigate = useNavigate();
+    const location = useLocation();
 
     const [openSubmenu, setOpenSubmenu] = useState(null);
 
@@ -27,7 +28,16 @@ const MainLayout = () => {
                 { icon: ClipboardList, label: 'Compras', path: '/purchases', roles: ['Administrador', 'Bodeguero'] }
             ]
         },
-        { icon: FileText, label: 'Reportes', path: '/reports', roles: ['Administrador', 'Supervisor'] },
+        {
+            icon: FileText,
+            label: 'Reportes',
+            // path removed
+            roles: ['Administrador', 'Supervisor'],
+            subItems: [
+                { icon: FileText, label: 'Ventas', path: '/reports', roles: ['Administrador', 'Supervisor'] },
+                { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', roles: ['Administrador', 'Supervisor'] }
+            ]
+        },
         { icon: Users, label: 'Usuarios', path: '/users', roles: ['Administrador'] },
         { icon: Settings, label: 'Configuración', path: '/settings', roles: ['Administrador'] },
     ];
@@ -49,21 +59,21 @@ const MainLayout = () => {
     };
 
     return (
-        <div className="flex h-screen overflow-hidden bg-[var(--color-background)]">
+        <div className="flex h-screen overflow-hidden bg-[var(--color-background)] text-[var(--color-text)]">
             {/* Sidebar */}
             <aside
                 className={cn(
-                    "glass border-r border-white/5 transition-all duration-300 flex flex-col z-20",
+                    "glass border-r border-[var(--glass-border)] transition-all duration-300 flex flex-col z-20",
                     isSidebarOpen ? "w-64" : "w-20"
                 )}
             >
-                <div className="h-16 flex items-center justify-center border-b border-white/5 relative">
-                    <h1 className={cn("font-bold text-2xl neon-text transition-opacity duration-300", !isSidebarOpen && "opacity-0 hidden")}>
+                <div className="h-16 flex items-center justify-center border-b border-[var(--glass-border)] relative">
+                    <h1 className={cn("font-bold text-2xl neon-text transition-opacity duration-300 text-[var(--color-text)]", !isSidebarOpen && "opacity-0 hidden")}>
                         POSKEM
                     </h1>
                     <button
                         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                        className="absolute right-[-12px] top-6 bg-[var(--color-surface)] border border-white/10 rounded-full p-1 hover:text-[var(--color-primary)] transition-colors"
+                        className="absolute right-[-12px] top-6 bg-[var(--color-surface)] border border-[var(--glass-border)] rounded-full p-1 hover:text-[var(--color-primary)] transition-colors text-[var(--color-text-muted)]"
                     >
                         <Menu size={16} />
                     </button>
@@ -82,8 +92,8 @@ const MainLayout = () => {
                                         className={cn(
                                             "w-full flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-200 group relative overflow-hidden text-left",
                                             isActiveParent || isExpanded
-                                                ? "text-white bg-white/5"
-                                                : "text-gray-400 hover:text-white hover:bg-white/5"
+                                                ? "text-[var(--color-text)] bg-[var(--glass-bg)]"
+                                                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
                                         )}
                                     >
                                         <div className="flex items-center gap-3">
@@ -113,7 +123,7 @@ const MainLayout = () => {
                                                     "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 pl-11",
                                                     isActive
                                                         ? "text-[var(--color-primary)] font-bold"
-                                                        : "text-gray-500 hover:text-white"
+                                                        : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
                                                 )}
                                             >
                                                 <subItem.icon size={16} />
@@ -132,8 +142,8 @@ const MainLayout = () => {
                                 className={({ isActive }) => cn(
                                     "flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group relative overflow-hidden",
                                     isActive
-                                        ? "bg-[var(--color-primary)] text-black font-bold shadow-[0_0_15px_rgba(0,240,255,0.4)]"
-                                        : "text-gray-400 hover:text-white hover:bg-white/5"
+                                        ? "bg-[var(--color-primary)] text-white font-bold shadow-[0_0_15px_rgba(0,240,255,0.4)]"
+                                        : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
                                 )}
                             >
                                 <item.icon size={20} className={cn("min-w-[20px]", !isSidebarOpen && "mx-auto")} />
@@ -145,7 +155,7 @@ const MainLayout = () => {
                     })}
                 </nav>
 
-                <div className="p-4 border-t border-white/5">
+                <div className="p-4 border-t border-[var(--glass-border)]">
                     <button
                         onClick={handleLogout}
                         className={cn(
@@ -164,15 +174,15 @@ const MainLayout = () => {
             {/* Main Content */}
             <div className="flex-1 flex flex-col h-full overflow-hidden relative">
                 {/* Header */}
-                <header className="h-16 glass border-b border-white/5 flex items-center justify-between px-6 z-10">
-                    <h2 className="text-xl font-semibold text-gray-200">Panel de Control</h2>
+                <header className="h-16 glass border-b border-[var(--glass-border)] flex items-center justify-between px-6 z-10">
+                    <h2 className="text-xl font-semibold text-[var(--color-text)]">Panel de Control</h2>
                     <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[var(--color-primary)] to-[var(--color-secondary)] flex items-center justify-center font-bold text-black border-2 border-white/20">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[var(--color-primary)] to-[var(--color-secondary)] flex items-center justify-center font-bold text-white border-2 border-[var(--glass-border)]">
                             {currentUser?.username?.charAt(0).toUpperCase() || 'G'}
                         </div>
                         <div className="hidden md:block">
-                            <p className="text-sm font-medium text-white">{currentUser?.name || 'Invitado'}</p>
-                            <p className="text-xs text-gray-400">{currentUser?.role || 'Solo lectura'}</p>
+                            <p className="text-sm font-medium text-[var(--color-text)]">{currentUser?.name || 'Invitado'}</p>
+                            <p className="text-xs text-[var(--color-text-muted)]">{currentUser?.role || 'Solo lectura'}</p>
                         </div>
                     </div>
                 </header>
