@@ -8,7 +8,7 @@ import CashStatusWidget from '../components/CashStatusWidget';
 import SaleSuccessModal from '../components/SaleSuccessModal';
 
 const POS = () => {
-    const { products, categories: storedCategories, cart, addToCart, removeFromCart, clearCart, updateCartItem, addSale, currentUser, cashRegister, checkRegisterStatus } = useStore();
+    const { products, categories: storedCategories, cart, addToCart, removeFromCart, clearCart, updateCartItem, addSale, currentUser, cashRegister, checkRegisterStatus, inventoryAdjustmentMode } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -171,6 +171,13 @@ const POS = () => {
                         </div>
                         <CashStatusWidget />
                     </div>
+
+                    {inventoryAdjustmentMode && (
+                        <div className="bg-yellow-500/20 border border-yellow-500/30 text-yellow-500 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center justify-center animate-pulse">
+                            ⚠️ MODO AJUSTE DE INVENTARIO ACTIVO
+                        </div>
+                    )}
+
                     <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
                         {categoryList.map(cat => (
                             <button
@@ -262,11 +269,13 @@ const POS = () => {
                                 <div className="w-full flex justify-between items-center pt-2 border-t border-[var(--glass-border)]">
                                     <span className={cn(
                                         "font-medium px-2 py-0.5 rounded text-[10px]",
-                                        product.stock < 10
-                                            ? "bg-red-500/20 text-red-400 border border-red-500/30"
-                                            : "bg-green-500/20 text-green-400 border border-green-500/30"
+                                        product.pending_adjustment
+                                            ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
+                                            : product.stock < 10
+                                                ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                                                : "bg-green-500/20 text-green-400 border border-green-500/30"
                                     )}>
-                                        {product.stock} {product.unit === 'Kg' ? 'kg' : 'un.'}
+                                        {product.pending_adjustment ? '⚠ Pendiente' : `${product.stock} ${product.unit === 'Kg' ? 'kg' : 'un.'}`}
                                     </span>
                                     <span className="text-[10px] text-[var(--color-text-muted)] font-medium truncate max-w-[50%] text-right">
                                         {product.category || product.sku || 'General'}

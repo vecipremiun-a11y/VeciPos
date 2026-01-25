@@ -20,6 +20,9 @@ export const useStore = create(persist((set, get) => ({
 
     toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
 
+    inventoryAdjustmentMode: false,
+    toggleInventoryAdjustmentMode: () => set((state) => ({ inventoryAdjustmentMode: !state.inventoryAdjustmentMode })),
+
     // Actions
     fetchInitialData: async () => {
         set({ isLoading: true });
@@ -61,6 +64,20 @@ export const useStore = create(persist((set, get) => ({
                     // Refetch categories
                     const refreshedCats = await turso.execute("SELECT * FROM categories");
                     categoriesRes.rows = refreshedCats.rows;
+                }
+
+                // Migration: Check if 'pending_adjustment' exists in products
+                const prodInfo = await turso.execute("PRAGMA table_info(products)");
+                const hasPendingAdjustment = prodInfo.rows.some(col => col.name === 'pending_adjustment');
+                if (!hasPendingAdjustment) {
+                    await turso.execute("ALTER TABLE products ADD COLUMN pending_adjustment BOOLEAN DEFAULT 0");
+                }
+
+                // Migration: Check if 'has_negative_stock' exists in sales
+                const saleInfo = await turso.execute("PRAGMA table_info(sales)");
+                const hasNegativeStock = saleInfo.rows.some(col => col.name === 'has_negative_stock');
+                if (!hasNegativeStock) {
+                    await turso.execute("ALTER TABLE sales ADD COLUMN has_negative_stock BOOLEAN DEFAULT 0");
                 }
             } catch (err) {
                 console.warn("Migration check error", err);
@@ -520,8 +537,6 @@ export const useStore = create(persist((set, get) => ({
                 const totalLotQty = itemLots.reduce((sum, l) => sum + l.quantity, 0);
 
                 // 2. Calculate Legacy Stock (Stock not in any lot)
-                // If product.stock > totalLotQty, the difference is legacy.
-                // If product.stock < totalLotQty, we have a data sync issue, assume 0 legacy.
                 const legacyStock = Math.max(0, product.stock - totalLotQty);
 
                 // 3. Calculate Valid Lot Stock (Not expired)
@@ -531,24 +546,66 @@ export const useStore = create(persist((set, get) => ({
                     .reduce((sum, l) => sum + l.quantity, 0);
 
                 const totalSellable = legacyStock + validLotStock;
+                const { inventoryAdjustmentMode } = get();
 
                 if (item.quantity > totalSellable) {
-                    // Fail the entire sale if one item exceeds valid stock
-                    // Optional: You could allow partial, but standard POS usually blocks or warns.
-                    // Given user requirement "Un lote vencido NO debe venderse", blocking is safer.
-                    console.error(`Attempted to sell ${item.quantity} of ${product.name}, but only ${totalSellable} is valid/legacy. (Expired blocked)`);
-                    return { success: false, error: `Stock insuficiente (Vencido/No disponible) para: ${product.name}` };
+                    if (inventoryAdjustmentMode) {
+                        // In adjustment mode, we allow selling but strictly block expired lots if NO other option?
+                        // Actually requirements say: "Never sell expired lots".
+                        // Logic below handles deduction. Here we just bypass quantity check.
+                        // But we verify we aren't literally forced to pull from an expired lot?
+                        // If totalSellable is 0, it means we have NO valid stock.
+                        // In adjustment mode, we sell "virtual/negative" stock. We do NOT touch expired lots.
+                        // So we proceed.
+                    } else {
+                        // Fail the entire sale if one item exceeds valid stock
+                        console.error(`Attempted to sell ${item.quantity} of ${product.name}, but only ${totalSellable} is valid/legacy. (Expired blocked)`);
+                        return { success: false, error: `Stock insuficiente (Vencido/No disponible) para: ${product.name}` };
+                    }
                 }
             }
 
             // Transaction: Insert Sale + Deduct Stock
             const itemsJson = JSON.stringify(sale.items);
             const detailsJson = JSON.stringify(sale.paymentDetails);
+            const { inventoryAdjustmentMode } = get();
+
+            // Check if this sale triggers negative stock
+            let saleHasNegativeStock = false;
+
+            // Re-check logic to flag products
+            const productsToMarkPending = [];
+
+            for (const item of sale.items) {
+                const product = products.find(p => p.id === item.id);
+                if (!product) continue;
+                const itemLots = productLots.filter(l => l.product_id === item.id && l.quantity > 0);
+                const totalLotQty = itemLots.reduce((sum, l) => sum + l.quantity, 0);
+                const legacyStock = Math.max(0, product.stock - totalLotQty);
+                const today = new Date().toISOString().split('T')[0];
+                const validLotStock = itemLots
+                    .filter(l => !l.expiry_date || l.expiry_date >= today)
+                    .reduce((sum, l) => sum + l.quantity, 0);
+
+                if (item.quantity > (legacyStock + validLotStock)) {
+                    saleHasNegativeStock = true;
+                    productsToMarkPending.push(item.id);
+                }
+            }
 
             const queries = [
                 {
-                    sql: "INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')",
-                    args: [new Date().toISOString(), sale.total, sale.summary, itemsJson, sale.paymentMethod, detailsJson, currentUser ? currentUser.id : null]
+                    sql: "INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id, status, has_negative_stock) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?)",
+                    args: [
+                        new Date().toISOString(),
+                        sale.total,
+                        sale.summary,
+                        itemsJson,
+                        sale.paymentMethod,
+                        detailsJson,
+                        currentUser ? currentUser.id : null,
+                        saleHasNegativeStock ? 1 : 0
+                    ]
                 }
             ];
 
@@ -561,6 +618,13 @@ export const useStore = create(persist((set, get) => ({
                     sql: "UPDATE products SET stock = stock - ? WHERE id = ?",
                     args: [item.quantity, item.id]
                 });
+
+                if (productsToMarkPending.includes(item.id)) {
+                    queries.push({
+                        sql: "UPDATE products SET pending_adjustment = 1 WHERE id = ?",
+                        args: [item.id]
+                    });
+                }
 
                 // 2. Deduct from Lots (FEFO)
                 // Filter valid lots: matching product, has quantity, not expired
@@ -582,7 +646,6 @@ export const useStore = create(persist((set, get) => ({
                     if (remainingQty <= 0) break;
 
                     // Skip if expired? User said "Un lote vencido NO debe venderse".
-                    // However, if we are here, we assume user allowed it or we strictly block.
                     // If strict:
                     if (lot.expiry_date && lot.expiry_date < today) continue;
 
@@ -599,13 +662,8 @@ export const useStore = create(persist((set, get) => ({
                 }
 
                 // If remainingQty > 0 here, it means we sold more than valid lots have.
-                // This creates a discrepancy if we strictly rely on lots.
-                // For now, we fall back to just updating products table stock (which we did above).
-                // But this means lots won't sum up to product stock.
-                // User said "NUNCA se descuente stock de un producto vencido".
-                // If we run out of valid lots, we technically shouldn't sell. 
-                // But to avoid blocking sales in critical moment if data is messy, we proceed with warning/logging?
-                // Given the strict requirement: "Un lote vencido NO debe venderse", we hopefully filtered those in available stock check.
+                // In Adjustment Mode, we allow this. The 'remainingQty' is just 'sold from void' (negative stock).
+                // We do NOT deduct from expired lots.
             }
 
             await turso.batch(queries);
@@ -617,7 +675,12 @@ export const useStore = create(persist((set, get) => ({
                 products: state.products.map(p => {
                     const soldItem = sale.items.find(i => i.id === p.id);
                     if (soldItem) {
-                        return { ...p, stock: p.stock - soldItem.quantity };
+                        const isPending = productsToMarkPending.includes(p.id);
+                        return {
+                            ...p,
+                            stock: p.stock - soldItem.quantity,
+                            pending_adjustment: isPending ? 1 : (p.pending_adjustment || 0)
+                        };
                     }
                     return p;
                 })
@@ -626,7 +689,7 @@ export const useStore = create(persist((set, get) => ({
             // Force refresh of register stats if open
             const { cashRegister, refreshRegisterStats } = get();
             if (cashRegister) {
-                await refreshRegisterStats(cashRegister.id);
+                refreshRegisterStats(cashRegister.id);
             }
 
             return { success: true };
