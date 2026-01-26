@@ -23,8 +23,8 @@ const Dashboard = () => {
     // Calculate Real-time Stats
     const stats = useMemo(() => {
         const today = new Date();
-        const salesToday = sales.filter(s => isToday(parseISO(s.date)));
-        const salesMonth = sales.filter(s => isSameMonth(parseISO(s.date), today));
+        const salesToday = sales.filter(s => isToday(parseISO(s.date)) && !s.summary?.includes('Abono'));
+        const salesMonth = sales.filter(s => isSameMonth(parseISO(s.date), today) && !s.summary?.includes('Abono'));
 
         // 1. Total Sales Today
         const totalSalesToday = salesToday.reduce((acc, s) => acc + (parseFloat(s.total) || 0), 0);
@@ -61,7 +61,7 @@ const Dashboard = () => {
             const d = subDays(today, i);
             const daySales = sales.filter(s => {
                 const saleDate = parseISO(s.date);
-                return format(saleDate, 'yyyy-MM-dd') === format(d, 'yyyy-MM-dd');
+                return format(saleDate, 'yyyy-MM-dd') === format(d, 'yyyy-MM-dd') && !s.summary?.includes('Abono');
             });
             const dayTotal = daySales.reduce((sum, s) => sum + (parseFloat(s.total) || 0), 0);
 

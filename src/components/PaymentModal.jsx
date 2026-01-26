@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { X, Banknote, CreditCard, Landmark, Coins, ArrowLeft, Check, Plus, Trash2 } from 'lucide-react';
+import { X, Banknote, CreditCard, Landmark, Coins, ArrowLeft, Check, Plus, Trash2, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useStore } from '../store/useStore';
 
 const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
+    const { posSelectedClient } = useStore();
     const [step, setStep] = useState('select-method'); // 'select-method' | 'payment-details'
     const [method, setMethod] = useState(null);
     const [amountPaid, setAmountPaid] = useState('');
@@ -239,6 +241,18 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                     color="text-purple-400"
                                     onClick={() => handleMethodSelect('Mixto')}
                                 />
+                                <MethodButton
+                                    icon={<FileText size={40} />}
+                                    label="Crédito"
+                                    color="text-red-400"
+                                    onClick={() => {
+                                        if (!posSelectedClient) {
+                                            alert("Debes seleccionar un cliente para ventas a crédito.");
+                                            return;
+                                        }
+                                        handleMethodSelect('Crédito');
+                                    }}
+                                />
                             </div>
                         </div>
                     )}
@@ -435,8 +449,37 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                         </div>
                     )}
 
+                    {/* CREDIT VIEW */}
+                    {step === 'payment-details' && method === 'Crédito' && (
+                        <div className="flex flex-col gap-6 max-w-lg mx-auto">
+                            <div className="text-center space-y-2">
+                                <p className="text-gray-300">Venta a Crédito para:</p>
+                                <div className="bg-red-500/10 border border-red-500/30 p-6 rounded-xl shadow-[0_0_15px_rgba(239,68,68,0.2)]">
+                                    <p className="text-red-400 font-bold mb-1 uppercase text-xs tracking-wider">Cliente</p>
+                                    <span className="text-3xl font-bold text-white tracking-tight">{posSelectedClient?.name}</span>
+                                    <p className="text-red-400/80 text-sm mt-2 font-medium">Monto a anotar: ${total.toLocaleString('es-CL')}</p>
+                                </div>
+                            </div>
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="text-white font-medium block">Observaciones (Opcional)</label>
+                                    <textarea
+                                        value={observations}
+                                        onChange={(e) => setObservations(e.target.value)}
+                                        className="glass-input w-full h-24 resize-none text-sm p-4"
+                                        placeholder="Detalles sobre el crédito..."
+                                    ></textarea>
+                                </div>
+                                <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-lg flex gap-3 items-start">
+                                    <div className="mt-0.5 text-yellow-500"><Check size={18} className="bg-yellow-500/20 rounded-full p-0.5" /></div>
+                                    <p className="text-sm text-yellow-200/90 leading-relaxed"><span className="font-bold text-yellow-400">Nota:</span> Esta venta quedará registrada como deuda en la cuenta del cliente.</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* BASIC CASH VIEW */}
-                    {step === 'payment-details' && method !== 'Tarjeta' && method !== 'Transferencia' && method !== 'Mixto' && (
+                    {step === 'payment-details' && method !== 'Tarjeta' && method !== 'Transferencia' && method !== 'Mixto' && method !== 'Crédito' && (
                         <div className="flex flex-col gap-6 max-w-md mx-auto">
 
                             <div className="text-center">
@@ -497,19 +540,21 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                         ? !selectedTerminal
                                         : method === 'Transferencia'
                                             ? !observations
-                                            : (parseFloat(amountPaid) || 0) < total
+                                            : method === 'Crédito'
+                                                ? false // Always valid if arrived here (client check done before)
+                                                : (parseFloat(amountPaid) || 0) < total
                             }
                             className={cn(
                                 "flex-1 py-3 rounded-xl flex items-center justify-center gap-2 font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all",
                                 method === 'Tarjeta'
                                     ? "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/30"
-                                    : method === 'Transferencia'
+                                    : method === 'Transferencia' || method === 'Crédito'
                                         ? "bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-500/30"
                                         : "btn-primary text-black"
                             )}
                         >
                             <Check size={20} />
-                            {method === 'Tarjeta' ? 'Confirmar y Pagar' : method === 'Transferencia' ? 'Confirmar Pago Recibido' : 'Pagar'}
+                            {method === 'Tarjeta' ? 'Confirmar y Pagar' : method === 'Transferencia' ? 'Confirmar Pago Recibido' : method === 'Crédito' ? 'Confirmar Crédito' : 'Pagar'}
                         </button>
                     </div>
                 )}

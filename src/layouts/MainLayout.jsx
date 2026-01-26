@@ -15,6 +15,7 @@ const MainLayout = () => {
     const allNavItems = [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', roles: ['Administrador', 'Vendedor', 'Bodeguero', 'Supervisor'] },
         { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', roles: ['Administrador', 'Vendedor'] },
+        { icon: Users, label: 'Clientes', path: '/clients', roles: ['Administrador', 'Vendedor'] },
         { icon: History, label: 'Historial', path: '/sales-history', roles: ['Administrador', 'Vendedor', 'Supervisor'] },
         {
             icon: Package,

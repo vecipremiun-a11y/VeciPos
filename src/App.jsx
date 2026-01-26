@@ -13,6 +13,7 @@ import ExpiringProductsReport from './pages/ExpiringProductsReport';
 import CashClosuresReport from './pages/CashClosuresReport';
 import CashMovementsReport from './pages/CashMovementsReport';
 import Settings from './pages/Settings';
+import Clients from './pages/Clients';
 import MainLayout from './layouts/MainLayout';
 
 
@@ -74,6 +75,7 @@ function App() {
           <Route path="suppliers" element={<Suppliers />} />
           <Route path="purchases" element={<Purchases />} />
           <Route path="users" element={<Users />} />
+          <Route path="clients" element={<Clients />} />
           <Route path="reports" element={<Reports />} />
           <Route path="reports/expiring" element={<ExpiringProductsReport />} />
           <Route path="reports/closures" element={<CashClosuresReport />} />

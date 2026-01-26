@@ -27,6 +27,65 @@ export const useStore = create(persist((set, get) => ({
         return { inventoryAdjustmentMode: newValue };
     }),
 
+    // Clients State & Actions
+    clients: [],
+    posSelectedClient: null,
+    setPosSelectedClient: (client) => set({ posSelectedClient: client }),
+
+    addClient: async (client) => {
+        try {
+            const result = await turso.execute({
+                sql: "INSERT INTO clients (name, rut, phone, email, address, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
+                args: [
+                    client.name,
+                    client.rut || '',
+                    client.phone || '',
+                    client.email || '',
+                    client.address || '',
+                    new Date().toISOString()
+                ]
+            });
+            const newClient = result.rows[0];
+            set((state) => ({ clients: [...state.clients, newClient].sort((a, b) => a.name.localeCompare(b.name)) }));
+            return { success: true, client: newClient };
+        } catch (e) {
+            console.error("Add client error", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updateClient: async (id, updatedClient) => {
+        try {
+            await turso.execute({
+                sql: "UPDATE clients SET name = ?, rut = ?, phone = ?, email = ?, address = ? WHERE id = ?",
+                args: [updatedClient.name, updatedClient.rut, updatedClient.phone, updatedClient.email, updatedClient.address, id]
+            });
+            set((state) => ({
+                clients: state.clients.map((c) => c.id === id ? { ...c, ...updatedClient } : c).sort((a, b) => a.name.localeCompare(b.name))
+            }));
+            return { success: true };
+        } catch (e) {
+            console.error("Update client error", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deleteClient: async (id) => {
+        try {
+            await turso.execute({
+                sql: "DELETE FROM clients WHERE id = ?",
+                args: [id]
+            });
+            set((state) => ({
+                clients: state.clients.filter((c) => c.id !== id)
+            }));
+            return { success: true };
+        } catch (e) {
+            console.error("Delete client error", e);
+            return { success: false, error: e.message };
+        }
+    },
+
     // Actions
     fetchInitialData: async () => {
         set({ isLoading: true });
@@ -83,6 +142,26 @@ export const useStore = create(persist((set, get) => ({
                 if (!hasNegativeStock) {
                     await turso.execute("ALTER TABLE sales ADD COLUMN has_negative_stock BOOLEAN DEFAULT 0");
                 }
+
+                // Migration: Check if 'client_id' exists in sales
+                const hasClientId = saleInfo.rows.some(col => col.name === 'client_id');
+                if (!hasClientId) {
+                    await turso.execute("ALTER TABLE sales ADD COLUMN client_id INTEGER");
+                    await turso.execute("ALTER TABLE sales ADD COLUMN client_name TEXT");
+                }
+
+                // Initialize clients table
+                await turso.execute(`
+                    CREATE TABLE IF NOT EXISTS clients (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        rut TEXT,
+                        phone TEXT,
+                        email TEXT,
+                        address TEXT,
+                        created_at TEXT
+                    )
+                `);
             } catch (err) {
                 console.warn("Migration check error", err);
             }
@@ -95,15 +174,20 @@ export const useStore = create(persist((set, get) => ({
             }));
             const suppliers = suppliersRes.rows;
             const users = usersRes.rows;
+            const clientsRes = await turso.execute("SELECT * FROM clients ORDER BY name ASC");
+            const clients = clientsRes.rows;
+
             const sales = salesRes.rows.map(sale => ({
                 ...sale,
                 items: JSON.parse(sale.items),
                 paymentMethod: sale.payment_method, // Map snake_case to camelCase
                 paymentDetails: sale.payment_details ? JSON.parse(sale.payment_details) : null,
-                observation: sale.observation || ''
+                observation: sale.observation || '',
+                clientId: sale.client_id,
+                clientName: sale.client_name
             }));
 
-            set({ products, productLots, categories, suppliers, users, sales, isLoading: false });
+            set({ products, productLots, categories, suppliers, users, clients, sales, isLoading: false });
 
             // Fetch active registers initially
             // We call get() to access the action we just defined, but actions are part of the store definition.
@@ -116,6 +200,24 @@ export const useStore = create(persist((set, get) => ({
         } catch (error) {
             console.error("Failed to fetch data:", error);
             set({ error: error.message, isLoading: false });
+        }
+    },
+
+    fetchSales: async () => {
+        try {
+            const result = await turso.execute("SELECT * FROM sales ORDER BY id DESC");
+            const sales = result.rows.map(sale => ({
+                ...sale,
+                items: JSON.parse(sale.items),
+                paymentMethod: sale.payment_method,
+                paymentDetails: sale.payment_details ? JSON.parse(sale.payment_details) : null,
+                observation: sale.observation || '',
+                clientId: sale.client_id,
+                clientName: sale.client_name
+            }));
+            set({ sales });
+        } catch (e) {
+            console.error("Fetch sales error", e);
         }
     },
 
@@ -533,6 +635,7 @@ export const useStore = create(persist((set, get) => ({
             return result.rows.map(sale => ({
                 ...sale,
                 items: JSON.parse(sale.items),
+                clientId: sale.client_id,
                 paymentMethod: sale.payment_method,
                 paymentDetails: sale.payment_details ? JSON.parse(sale.payment_details) : null,
                 observation: sale.observation || ''
@@ -615,7 +718,7 @@ export const useStore = create(persist((set, get) => ({
 
             const queries = [
                 {
-                    sql: "INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id, status, has_negative_stock) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?)",
+                    sql: "INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id, status, has_negative_stock, client_id, client_name) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?)",
                     args: [
                         new Date().toISOString(),
                         sale.total,
@@ -624,7 +727,9 @@ export const useStore = create(persist((set, get) => ({
                         sale.paymentMethod,
                         detailsJson,
                         currentUser ? currentUser.id : null,
-                        saleHasNegativeStock ? 1 : 0
+                        saleHasNegativeStock ? 1 : 0,
+                        sale.client ? sale.client.id : null,
+                        sale.client ? sale.client.name : null
                     ]
                 }
             ];
@@ -690,7 +795,14 @@ export const useStore = create(persist((set, get) => ({
 
             // Update local state to reflect stock changes
             set((state) => ({
-                sales: [{ ...sale, id: Date.now(), date: new Date().toISOString(), status: 'completed' }, ...state.sales],
+                sales: [{
+                    ...sale,
+                    id: Date.now(),
+                    date: new Date().toISOString(),
+                    status: 'completed',
+                    clientId: sale.client ? sale.client.id : null,
+                    clientName: sale.client ? sale.client.name : null
+                }, ...state.sales],
                 productLots: updatedLots, // Updated lots
                 products: state.products.map(p => {
                     const soldItem = sale.items.find(i => i.id === p.id);
@@ -705,6 +817,11 @@ export const useStore = create(persist((set, get) => ({
                     return p;
                 })
             }));
+
+
+
+            // Force refresh of sales to get real DB IDs (Critical for payments)
+            get().fetchSales();
 
             // Force refresh of register stats if open
             const { cashRegister, refreshRegisterStats } = get();
@@ -751,6 +868,85 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error("Cancel sale error", e);
             return false;
+        }
+    },
+
+    registerClientPayment: async (client, amount, salesIds, paymentMethod) => {
+        try {
+            const { currentUser, sales, products } = get();
+
+            // 1. Create a "Payment" Sale entry (So it appears in daily cash register)
+            const paymentSale = {
+                date: new Date().toISOString(),
+                total: amount,
+                summary: `Abono de Cliente: ${client.name}`,
+                items: JSON.stringify([{
+                    id: 'payment-adj',
+                    name: `Abono/Pago de Deuda (${salesIds.length} boletas)`,
+                    price: amount,
+                    quantity: 1,
+                    unit: 'Und'
+                }]),
+                payment_method: paymentMethod,
+                payment_details: JSON.stringify({ amount: amount, change: 0, type: 'debt_payment' }),
+                user_id: currentUser ? currentUser.id : null,
+                status: 'completed',
+                has_negative_stock: 0,
+                client_id: client.id,
+                client_name: client.name
+            };
+
+            const queries = [
+                {
+                    sql: "INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id, status, has_negative_stock, client_id, client_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    args: [
+                        paymentSale.date,
+                        paymentSale.total,
+                        paymentSale.summary,
+                        paymentSale.items,
+                        paymentSale.payment_method,
+                        paymentSale.payment_details,
+                        paymentSale.user_id,
+                        paymentSale.status,
+                        paymentSale.has_negative_stock,
+                        paymentSale.client_id,
+                        paymentSale.client_name
+                    ]
+                }
+            ];
+
+            // 2. Update the status of the Paid Sales
+            salesIds.forEach(id => {
+                queries.push({
+                    sql: "UPDATE sales SET status = 'paid' WHERE id = ?",
+                    args: [Number(id)]
+                });
+            });
+
+            await turso.batch(queries);
+
+            // 3. Update Local State
+            set(state => ({
+                sales: [
+                    { ...paymentSale, id: Date.now(), items: JSON.parse(paymentSale.items), paymentDetails: JSON.parse(paymentSale.payment_details) }, // Add the new "payment" sale
+                    ...state.sales.map(s => salesIds.includes(s.id) ? { ...s, status: 'paid' } : s) // Mark old ones as paid
+                ]
+            }));
+
+            // 4. Force Fetch from DB to ensure consistency
+            await get().fetchSales();
+
+            // 5. Refresh Register
+            const { cashRegister, refreshRegisterStats } = get();
+            if (cashRegister) {
+                refreshRegisterStats(cashRegister.id);
+            }
+
+            return { success: true };
+
+        } catch (e) {
+            console.error("Register payment error", e);
+            return { success: false, error: e.message };
         }
     },
 

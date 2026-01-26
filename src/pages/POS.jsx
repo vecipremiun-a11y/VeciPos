@@ -6,9 +6,10 @@ import PaymentModal from '../components/PaymentModal';
 import CashOpeningModal from '../components/CashOpeningModal';
 import CashStatusWidget from '../components/CashStatusWidget';
 import SaleSuccessModal from '../components/SaleSuccessModal';
+import ClientSearchWidget from '../components/ClientSearchWidget';
 
 const POS = () => {
-    const { products, categories: storedCategories, cart, addToCart, removeFromCart, clearCart, updateCartItem, addSale, currentUser, cashRegister, checkRegisterStatus, inventoryAdjustmentMode } = useStore();
+    const { products, categories: storedCategories, cart, addToCart, removeFromCart, clearCart, updateCartItem, addSale, currentUser, cashRegister, checkRegisterStatus, inventoryAdjustmentMode, posSelectedClient, setPosSelectedClient } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -122,7 +123,8 @@ const POS = () => {
             total: finalTotal,
             summary: `${cart.length} productos`,
             paymentMethod: paymentData.method,
-            paymentDetails: paymentData
+            paymentDetails: paymentData,
+            client: posSelectedClient
         };
 
         const result = await addSale(saleData);
@@ -131,6 +133,7 @@ const POS = () => {
             // Prepare data for success modal
             setLastSaleDetails(saleData);
             setIsSuccessModalOpen(true);
+            setPosSelectedClient(null);
             // Do NOT clear cart here, wait for "New Sale" or modal close
         } else {
             alert(result.error || "Error al procesar la venta");
@@ -289,7 +292,10 @@ const POS = () => {
 
             {/* Right Side: Cart */}
             <div className="w-full lg:w-[448px] flex flex-col glass-card p-0 overflow-hidden">
-                <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)]">
+                <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] space-y-3">
+                    <div className="w-full">
+                        <ClientSearchWidget />
+                    </div>
                     <h2 className="text-xl font-bold text-[var(--color-text)] flex items-center gap-2">
                         <ShoppingCart size={20} className="text-[var(--color-primary)]" />
                         Ticket Actual
