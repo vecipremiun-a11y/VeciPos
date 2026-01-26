@@ -14,7 +14,11 @@ const Inventory = () => {
         product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.category.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    ).sort((a, b) => {
+        const aOffer = (a.is_offer === 1 || a.is_offer === true) ? 1 : 0;
+        const bOffer = (b.is_offer === 1 || b.is_offer === true) ? 1 : 0;
+        return bOffer - aOffer;
+    });
 
     // Reset limit when search/filter changes
     React.useEffect(() => {
@@ -119,8 +123,18 @@ const Inventory = () => {
                         </thead>
                         <tbody className="divide-y divide-[var(--glass-border)]">
                             {visibleProducts.map((product) => (
-                                <tr key={product.id} className="hover:bg-[var(--glass-bg)] transition-colors group">
-                                    <td className="px-6 py-5 font-medium text-[var(--color-text)] text-lg">{product.name}</td>
+                                <tr key={product.id} className={cn(
+                                    "hover:bg-[var(--glass-bg)] transition-colors group",
+                                    (product.is_offer === 1 || product.is_offer === true) ? "bg-yellow-500/5 hover:bg-yellow-500/10" : ""
+                                )}>
+                                    <td className="px-6 py-5 font-medium text-[var(--color-text)] text-lg flex items-center gap-2">
+                                        {(product.is_offer === 1 || product.is_offer === true) && (
+                                            <span className="text-[10px] bg-yellow-500 text-black px-2 py-0.5 rounded-full font-bold animate-pulse">
+                                                OFERTA
+                                            </span>
+                                        )}
+                                        {product.name}
+                                    </td>
                                     <td className="px-6 py-5">
                                         {product.image ? (
                                             <div className="w-16 h-16 rounded-lg overflow-hidden border border-[var(--glass-border)]">

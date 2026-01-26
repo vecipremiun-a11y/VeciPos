@@ -136,6 +136,13 @@ export const useStore = create(persist((set, get) => ({
                     await turso.execute("ALTER TABLE products ADD COLUMN pending_adjustment BOOLEAN DEFAULT 0");
                 }
 
+                // Migration: Check if 'is_offer' and 'offer_price' exist in products
+                const hasIsOffer = prodInfo.rows.some(col => col.name === 'is_offer');
+                if (!hasIsOffer) {
+                    await turso.execute("ALTER TABLE products ADD COLUMN is_offer BOOLEAN DEFAULT 0");
+                    await turso.execute("ALTER TABLE products ADD COLUMN offer_price REAL DEFAULT 0");
+                }
+
                 // Migration: Check if 'has_negative_stock' exists in sales
                 const saleInfo = await turso.execute("PRAGMA table_info(sales)");
                 const hasNegativeStock = saleInfo.rows.some(col => col.name === 'has_negative_stock');
@@ -294,7 +301,7 @@ export const useStore = create(persist((set, get) => ({
     addProduct: async (product) => {
         try {
             const result = await turso.execute({
-                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     product.name,
                     product.price,
@@ -305,7 +312,9 @@ export const useStore = create(persist((set, get) => ({
                     product.cost || 0,
                     product.tax_rate || 0,
                     product.unit || 'Und',
-                    product.supplier || null
+                    product.supplier || null,
+                    product.is_offer ? 1 : 0,
+                    product.offer_price || 0
                 ]
             });
             const newProduct = result.rows[0];
@@ -318,7 +327,7 @@ export const useStore = create(persist((set, get) => ({
     updateProduct: async (id, updatedProduct) => {
         try {
             await turso.execute({
-                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=? WHERE id = ?",
+                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=? WHERE id = ?",
                 args: [
                     updatedProduct.name,
                     updatedProduct.price,
@@ -330,6 +339,8 @@ export const useStore = create(persist((set, get) => ({
                     updatedProduct.tax_rate || 0,
                     updatedProduct.unit || 'Und',
                     updatedProduct.supplier || null,
+                    updatedProduct.is_offer ? 1 : 0,
+                    updatedProduct.offer_price || 0,
                     id
                 ]
             });
@@ -614,7 +625,8 @@ export const useStore = create(persist((set, get) => ({
                 )
             };
         }
-        return { cart: [...state.cart, { ...product, quantity: 1, discount: 0 }] };
+        const effectivePrice = (product.is_offer && product.offer_price > 0) ? parseFloat(product.offer_price) : parseFloat(product.price);
+        return { cart: [...state.cart, { ...product, price: effectivePrice, original_price: product.price, quantity: 1, discount: 0 }] };
     }),
 
     updateCartItem: (productId, updates) => set((state) => ({

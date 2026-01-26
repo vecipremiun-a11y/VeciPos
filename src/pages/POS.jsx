@@ -83,6 +83,10 @@ const POS = () => {
             (product.sku && product.sku.toLowerCase().includes(term));
         const matchesCategory = selectedCategory === 'Todos' || product.category === selectedCategory;
         return matchesSearch && matchesCategory;
+    }).sort((a, b) => {
+        const aOffer = (a.is_offer === 1 || a.is_offer === true) ? 1 : 0;
+        const bOffer = (b.is_offer === 1 || b.is_offer === true) ? 1 : 0;
+        return bOffer - aOffer;
     });
 
     const visibleProducts = filteredProducts.slice(0, displayedLimit);
@@ -216,8 +220,18 @@ const POS = () => {
                                     addToCart(product);
                                 }
                             }}
-                            className="rounded-xl glass-card bg-card p-0 text-[var(--color-text)] shadow-sm cursor-pointer border border-[var(--glass-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-surface-hover)] transition-all duration-150 flex flex-col h-auto hover:shadow-lg active:scale-95 touch-manipulation relative group"
+                            className={cn(
+                                "rounded-xl glass-card bg-card p-0 text-[var(--color-text)] shadow-sm cursor-pointer border hover:bg-[var(--color-surface-hover)] transition-all duration-150 flex flex-col h-auto hover:shadow-lg active:scale-95 touch-manipulation relative group",
+                                (product.is_offer === 1 || product.is_offer === true)
+                                    ? "border-yellow-500/50 bg-yellow-500/5 hover:border-yellow-400 hover:shadow-[0_0_20px_rgba(234,179,8,0.2)]"
+                                    : "border-[var(--glass-border)] hover:border-[var(--color-primary)]"
+                            )}
                         >
+                            {(product.is_offer === 1 || product.is_offer === true) && (
+                                <div className="absolute top-2 left-2 z-20 bg-yellow-500 text-black text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse shadow-lg">
+                                    OFERTA
+                                </div>
+                            )}
                             <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity z-10">
                                 <span className={cn(
                                     "text-[var(--color-primary)] bg-black/50 rounded-full w-6 h-6 flex items-center justify-center text-sm",
@@ -263,9 +277,20 @@ const POS = () => {
                                     </h3>
 
                                     <div className="mb-2">
-                                        <span className="text-green-400 font-bold text-lg tracking-tight">
-                                            ${product.price.toFixed(2)}
-                                        </span>
+                                        {(product.is_offer === 1 || product.is_offer === true) && product.offer_price > 0 ? (
+                                            <div className="flex flex-col items-start leading-none gap-0.5">
+                                                <span className="text-xs text-red-400 line-through decoration-red-400 opacity-70 font-semibold">
+                                                    ${product.price ? product.price.toFixed(2) : '0.00'}
+                                                </span>
+                                                <span className="text-yellow-400 font-extrabold text-xl drop-shadow-sm">
+                                                    ${Number(product.offer_price).toFixed(2)}
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <span className="text-green-400 font-bold text-lg tracking-tight">
+                                                ${product.price ? product.price.toFixed(2) : '0.00'}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
 

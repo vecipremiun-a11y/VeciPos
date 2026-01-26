@@ -15,7 +15,9 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
         image: '',
         cost: '',
         supplier: '',
-        tax_rate: 0
+        tax_rate: 0,
+        is_offer: false,
+        offer_price: ''
     });
     const [marginPercentage, setMarginPercentage] = useState('');
 
@@ -32,8 +34,11 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
                     setMarginPercentage(margin.toFixed(2));
                 }
             }
+            if (productToEdit.is_offer !== undefined) {
+                setFormData(prev => ({ ...prev, is_offer: productToEdit.is_offer === 1 || productToEdit.is_offer === true, offer_price: productToEdit.offer_price || '' }));
+            }
         } else {
-            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0 });
+            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0, is_offer: false, offer_price: '' });
             setMarginPercentage('');
         }
     }, [productToEdit, isOpen]);
@@ -110,7 +115,9 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
             cost: parseFloat(formData.cost) || 0,
             cost: parseFloat(formData.cost) || 0,
             tax_rate: parseFloat(formData.tax_rate) || 0,
-            supplier: formData.supplier
+            supplier: formData.supplier,
+            is_offer: formData.is_offer,
+            offer_price: parseFloat(formData.offer_price) || 0
         });
         onClose();
     };
@@ -351,6 +358,44 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit }) => {
                                 />
                             </div>
                             <p className="text-center text-xs text-gray-500 mt-2">IVA Incluido</p>
+                        </div>
+
+                        {/* OFFER SECTION */}
+                        <div className={`p-4 rounded-xl border transition-all duration-300 ${formData.is_offer ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]' : 'bg-white/5 border-white/10'}`}>
+                            <div className="flex justify-between items-center mb-2">
+                                <label className="text-white font-bold flex items-center gap-2">
+                                    En Oferta
+                                    {formData.is_offer && <span className="text-[10px] bg-[var(--color-primary)] text-black px-2 py-0.5 rounded-full font-bold animate-pulse">ACTIVO</span>}
+                                </label>
+                                <button
+                                    type="button"
+                                    onClick={() => setFormData(prev => ({ ...prev, is_offer: !prev.is_offer }))}
+                                    className={`w-12 h-6 rounded-full flex items-center p-1 transition-all duration-300 ${formData.is_offer ? 'bg-[var(--color-primary)]' : 'bg-gray-600'}`}
+                                >
+                                    <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-all duration-300 ${formData.is_offer ? 'translate-x-6' : 'translate-x-0'}`} />
+                                </button>
+                            </div>
+
+                            {formData.is_offer && (
+                                <div className="mt-4 animate-in slide-in-from-top-2 fade-in duration-300">
+                                    <label className="block text-sm text-[var(--color-primary)] font-bold mb-1">Precio Oferta</label>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-primary)] font-bold text-lg">$</span>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            name="offer_price"
+                                            value={formData.offer_price}
+                                            onChange={handleChange}
+                                            className="glass-input w-full pl-8 text-xl font-bold text-[var(--color-primary)] border-[var(--color-primary)]/50 focus:border-[var(--color-primary)]"
+                                            placeholder="0.00"
+                                        />
+                                    </div>
+                                    <div className="text-right mt-2 text-xs text-gray-400">
+                                        Precio Normal: <span className="line-through text-red-400 decoration-red-400">${formData.price}</span>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div className="pt-4 flex gap-3 justify-end mt-8">
