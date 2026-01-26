@@ -40,7 +40,7 @@ const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => 
 
     return createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-            <div className="glass-card w-full max-w-md relative animate-[float_0.3s_ease-out] p-0 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="glass-card w-full max-w-md relative animate-[float_0.3s_ease-out] p-0 overflow-hidden flex flex-col max-h-[90vh] !bg-[#0f0f2d]/95">
 
                 {/* Header */}
                 <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/5">

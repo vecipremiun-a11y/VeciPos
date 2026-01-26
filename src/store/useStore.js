@@ -20,8 +20,12 @@ export const useStore = create(persist((set, get) => ({
 
     toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
 
-    inventoryAdjustmentMode: false,
-    toggleInventoryAdjustmentMode: () => set((state) => ({ inventoryAdjustmentMode: !state.inventoryAdjustmentMode })),
+    inventoryAdjustmentMode: localStorage.getItem('pos_inventory_adjustment') === 'true',
+    toggleInventoryAdjustmentMode: () => set((state) => {
+        const newValue = !state.inventoryAdjustmentMode;
+        localStorage.setItem('pos_inventory_adjustment', newValue);
+        return { inventoryAdjustmentMode: newValue };
+    }),
 
     // Actions
     fetchInitialData: async () => {
@@ -523,6 +527,22 @@ export const useStore = create(persist((set, get) => ({
 
     clearCart: () => set({ cart: [] }),
 
+    fetchSales: async () => {
+        try {
+            const result = await turso.execute("SELECT * FROM sales ORDER BY id DESC");
+            return result.rows.map(sale => ({
+                ...sale,
+                items: JSON.parse(sale.items),
+                paymentMethod: sale.payment_method,
+                paymentDetails: sale.payment_details ? JSON.parse(sale.payment_details) : null,
+                observation: sale.observation || ''
+            }));
+        } catch (e) {
+            console.error("Fetch sales error", e);
+            return [];
+        }
+    },
+
     addSale: async (sale) => {
         try {
             const { productLots, products, currentUser } = get();
@@ -786,8 +806,9 @@ export const useStore = create(persist((set, get) => ({
                 let movesIn = 0;
                 let movesOut = 0;
                 movRes.rows.forEach(m => {
-                    if (m.type === 'IN') movesIn += parseFloat(m.amount);
-                    else movesOut += parseFloat(m.amount);
+                    const amount = parseFloat(m.amount);
+                    if (m.type === 'IN') movesIn += amount;
+                    else movesOut += amount;
                 });
 
                 const currentBalance = reg.opening_amount + cashSales + movesIn - movesOut;
@@ -849,20 +870,6 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    addCashMovement: async (registerId, type, amount, reason) => {
-        try {
-            await turso.execute({
-                sql: "INSERT INTO cash_movements (register_id, type, amount, reason, date) VALUES (?, ?, ?, ?, ?)",
-                args: [registerId, type, amount, reason, new Date().toISOString()]
-            });
-            // Trigger a refresh of stats ideally, or just let the UI trigger it
-            return true;
-        } catch (e) {
-            console.error("Add movement error", e);
-            return false;
-        }
-    },
-
     registerStats: { balance: 0, sales: 0, movements_in: 0, movements_out: 0, initial: 0, transactions: [] },
 
     refreshRegisterStats: async (registerId) => {
@@ -878,12 +885,6 @@ export const useStore = create(persist((set, get) => ({
             const openingTime = register.opening_time;
 
             // 2. Get Cash Sales since opening
-            // Note: This relies on sales date > openingTime. 
-            // Also need to parse items/paymentDetails to be precise about CASH portion if mixed, 
-            // but for MVP we assume 'paymentMethod' = 'Efectivo' or we sum total if method is Effective.
-            // For Mixed, we might need more complex logic, but let's stick to basic 'Efectivo' method check + Mixed check logic later if needed.
-            // Actually, let's just sum all sales where method is 'Efectivo' for now for simplicity, or grab all and filter in JS.
-
             const salesRes = await turso.execute({
                 sql: "SELECT * FROM sales WHERE user_id = ? AND date >= ?",
                 args: [register.user_id, openingTime]
@@ -952,10 +953,10 @@ export const useStore = create(persist((set, get) => ({
                 const amount = parseFloat(mov.amount);
                 if (mov.type === 'IN') {
                     movementsIn += amount;
-                    movementTransactions.push({ type: 'INGRESO', amount, reason: mov.reason, date: mov.date, id: mov.id });
+                    movementTransactions.push({ type: 'INGRESO', amount, reason: mov.reason, date: mov.date || mov.created_at, id: mov.id });
                 } else {
                     movementsOut += amount;
-                    movementTransactions.push({ type: 'RETIRO', amount, reason: mov.reason, date: mov.date, id: mov.id });
+                    movementTransactions.push({ type: 'RETIRO', amount, reason: mov.reason, date: mov.date || mov.created_at, id: mov.id });
                 }
             });
 
@@ -975,6 +976,183 @@ export const useStore = create(persist((set, get) => ({
             });
         } catch (e) {
             console.error("Refresh stats error", e);
+        }
+    },
+
+    // Historical Reports
+    fetchClosedRegisters: async () => {
+        try {
+            const result = await turso.execute(`
+                SELECT cr.*, u.name as user_name 
+                FROM cash_registers cr 
+                LEFT JOIN users u ON cr.user_id = u.id 
+                WHERE cr.status = 'closed' 
+                ORDER BY cr.closing_time DESC
+            `);
+            return result?.rows || [];
+        } catch (e) {
+            console.error("Fetch closed registers error", e);
+            return [];
+        }
+    },
+
+    addCashMovement: async (registerId, type, amount, reason) => {
+        try {
+            await turso.execute({
+                sql: "INSERT INTO cash_movements (register_id, type, amount, reason, date) VALUES (?, ?, ?, ?, ?)",
+                args: [registerId, type, amount, reason, new Date().toISOString()]
+            });
+            return true;
+        } catch (e) {
+            console.error("Add cash movement error", e);
+            return false;
+        }
+    },
+
+    fetchCashMovements: async () => {
+        try {
+            console.log("Fetching cash movements (JS Join Mode)...");
+
+            // 1. Fetch Raw Tables
+            const [movementsRes, registersRes, usersRes] = await Promise.all([
+                turso.execute("SELECT * FROM cash_movements"),
+                turso.execute("SELECT * FROM cash_registers"),
+                turso.execute("SELECT * FROM users")
+            ]);
+
+            const movements = movementsRes?.rows || [];
+            const registers = registersRes?.rows || [];
+            const users = usersRes?.rows || [];
+
+            console.log(`Fetched: ${movements.length} movs, ${registers.length} regs, ${users.length} users`);
+
+            // Helper to find user name
+            const getUserName = (userId) => {
+                const u = users.find(u => u.id === userId);
+                return u ? u.name : 'Desconocido';
+            };
+
+            // 2. Process Initial Openings (from Registers)
+            const openingsNode = registers.map(reg => ({
+                id: `opening-${reg.id}`,
+                register_id: reg.id, // Explicit ID for grouping
+                created_at: reg.opening_time,
+                type: 'in',
+                amount: reg.opening_amount,
+                reason: 'Apertura de Caja',
+                user_name: getUserName(reg.user_id),
+                source: 'opening'
+            }));
+
+            // 3. Process Manual Movements
+            const movementsNode = movements.map(mov => {
+                // Robust ID Check
+                const regId = mov.register_id || mov.cash_register_id;
+                const reg = registers.find(r => r.id === regId);
+                const userId = reg ? reg.user_id : null;
+
+                return {
+                    id: mov.id,
+                    register_id: regId,
+                    created_at: mov.date || mov.created_at, // Robust Date Check
+                    type: String(mov.type).toLowerCase() === 'in' ? 'in' : 'out',
+                    amount: mov.amount,
+                    reason: mov.reason,
+                    user_name: getUserName(userId),
+                    source: 'movement'
+                };
+            });
+
+            // 4. Combine and Sort
+            const combined = [...movementsNode, ...openingsNode].sort((a, b) => {
+                return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+            });
+
+            return combined;
+
+        } catch (e) {
+            console.error("Fetch cash movements error FULL:", e);
+            return [];
+        }
+    },
+
+    getRegisterReport: async (register) => {
+        try {
+            // Reconstruct report data
+            // 1. Sales
+            const salesRes = await turso.execute({
+                sql: "SELECT * FROM sales WHERE user_id = ? AND date >= ? AND date <= ?",
+                args: [register.user_id, register.opening_time, register.closing_time]
+            });
+
+            let cashSalesTotal = 0;
+            const salesBreakdown = { cash: 0, card: 0, transfer: 0, total: 0 };
+
+            salesRes.rows.forEach(sale => {
+                const total = parseFloat(sale.total);
+                salesBreakdown.total += total;
+
+                let cashPart = 0;
+                let cardPart = 0;
+                let transferPart = 0;
+
+                if (sale.payment_method === 'Efectivo') {
+                    cashPart = total;
+                } else if (sale.payment_method === 'Tarjeta') {
+                    cardPart = total;
+                } else if (sale.payment_method === 'Transferencia') {
+                    transferPart = total;
+                } else if (sale.payment_method === 'Mixto' && sale.payment_details) {
+                    try {
+                        const details = JSON.parse(sale.payment_details);
+                        const methodsList = details.mixedPayments || details.methods;
+                        if (methodsList) {
+                            methodsList.forEach(m => {
+                                const amount = parseFloat(m.amount || 0);
+                                if (m.method === 'Efectivo') cashPart += amount;
+                                if (m.method === 'Tarjeta') cardPart += amount;
+                                if (m.method === 'Transferencia') transferPart += amount;
+                            });
+                        }
+                    } catch (e) { }
+                }
+
+                salesBreakdown.cash += cashPart;
+                salesBreakdown.card += cardPart;
+                salesBreakdown.transfer += transferPart;
+
+                if (cashPart > 0) {
+                    cashSalesTotal += cashPart;
+                }
+            });
+
+            // 2. Movements
+            const movementsRes = await turso.execute({
+                sql: "SELECT * FROM cash_movements WHERE register_id = ?",
+                args: [register.id]
+            });
+
+            let movementsIn = 0;
+            let movementsOut = 0;
+
+            movementsRes.rows.forEach(mov => {
+                const amount = parseFloat(mov.amount);
+                if (mov.type === 'IN') movementsIn += amount;
+                else movementsOut += amount;
+            });
+
+            const calculatedExpected = register.opening_amount + cashSalesTotal + movementsIn - movementsOut;
+
+            return {
+                ...register,
+                salesBreakdown,
+                movements: { in: movementsIn, out: movementsOut },
+                calculatedExpected
+            };
+
+        } catch (e) {
+            console.error("Get register report error", e);
+            return null;
         }
     },
 }), {

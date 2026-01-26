@@ -63,7 +63,7 @@ const CashCloseSuccessModal = ({ isOpen, onClose, data, onSendWhatsApp }) => {
 
     return createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md">
-            <div className="glass-card w-full max-w-md relative animate-[float_0.3s_ease-out] p-0 overflow-hidden flex flex-col">
+            <div className="glass-card w-full max-w-md relative animate-[float_0.3s_ease-out] p-0 overflow-hidden flex flex-col !bg-[#0f0f2d]/95">
 
                 {/* Header with Check */}
                 <div className="p-8 pb-4 flex flex-col items-center justify-center text-center">

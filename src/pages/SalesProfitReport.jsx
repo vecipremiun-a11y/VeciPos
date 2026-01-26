@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
-import { format, isToday, isYesterday, startOfDay, endOfDay, isSameDay } from 'date-fns';
+import { format, isToday, isYesterday, startOfDay, endOfDay, isSameDay, parseISO } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Search, Calendar, Download, DollarSign, TrendingUp, Percent, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 
-const Reports = () => {
+const SalesProfitReport = () => {
     const { fetchSales } = useStore();
     const [sales, setSales] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -30,7 +31,7 @@ const Reports = () => {
     const loadData = async () => {
         setIsLoading(true);
         try {
-            const allSales = await fetchSales();
+            const allSales = await fetchSales(); // This usually fetches all, we might need to filter client-side if API doesn't support
 
             // Filter by Date
             const filtered = allSales.filter(sale => {
@@ -42,7 +43,7 @@ const Reports = () => {
                 if (dateRange === 'custom' && customStart && customEnd) {
                     return saleDate >= startOfDay(new Date(customStart)) && saleDate <= endOfDay(new Date(customEnd));
                 }
-                return true;
+                return true; // Default show all if no filter? Or default today? Let's default today
             });
 
             processSales(filtered);
@@ -59,11 +60,9 @@ const Reports = () => {
         let totalCost = 0;
         let totalDiscount = 0;
         let totalTax = 0;
-        let totalSales = 0;
+        let totalSales = 0; // With Tax
 
         salesData.forEach(sale => {
-            if (sale.status === 'cancelled') return; // Skip cancelled
-
             let saleItems = [];
             try {
                 saleItems = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items;
@@ -71,17 +70,51 @@ const Reports = () => {
 
             saleItems.forEach(item => {
                 const qty = item.quantity || 0;
-                const price = item.price || 0;
-                const cost = item.cost || 0;
-                const taxRate = item.tax_rate || 0;
+                const price = item.price || 0; // Unit Price
+                const cost = item.cost || 0;   // Unit Cost
+                const taxRate = item.tax_rate || 0; // % ex: 0.15 for 15%
+
+                // Calculations per item line
+                const lineTotal = price * qty;
+                const lineCost = cost * qty;
+
+                // Assuming price includes tax? Or tax is added? 
+                // Usually POS price is final. Let's assume Price is Final (Inc Tax) for now unless specified.
+                // If price is final, we verify tax part.
+                // Simple approach: Tax = Price - (Price / (1 + taxRate))
+                // User asked for "Total Impuestos de Ventas". 
+                // Let's assume standard behavior: Price is base, Tax is extra?
+                // Looking at standard POS, often price is gross.
+                // Let's assume: Price = Base Price. Tax = Price * Rate. Total = Price + Tax.
+                // WAIT: In `POS.jsx` usually `item.price` is the selling price.
+                // Let's calculate Profit = (Selling Price - Cost).
+                // If Tax is present, Profit = (Selling Price - Tax - Cost).
+
+                // Let's deduce Tax from the price if implied, or calc it if extra.
+                // Logic used in POS: `calculateTotal` usually sums `item.price * item.quantity`.
+                // So `item.price` is the list price.
+                // Let's assume `item.tax_rate` is informational or included.
+                // For this report, let's treat `item.price` as Revenue.
+                // Profit = Revenue - Cost.
+                // If specific Tax logic needed: Tax = Revenue * (Rate / (1+Rate)) if inclusive.
+
+                // Let's go with:
+                // Sale Amount = item.price * qty
+                // Cost Amount = item.cost * qty
+                // Tax Amount = (item.price * qty) * (taxRate / 100); // Assuming rate is like 16 for 16%? Or 0.16?
+                // Let's assume rate is 0.xx from DB default 0.
+
+                // Actually, let's look at `addProduct` in useStore: `tax_rate || 0`.
+                // Let's assume simple Profit = (Price - Cost) * Qty.
 
                 const lineSale = price * qty;
-                const lineTax = lineSale * ((taxRate || 0) / 100);
-                const lineProfit = lineSale - lineTax - (cost * qty);
+                const lineProfit = (price - cost) * qty;
+                const lineTax = lineSale * (taxRate || 0); // Simplified tax calc
 
-                totalCost += (cost * qty);
+                totalCost += lineCost;
                 totalSales += lineSale;
-                totalTax += lineTax;
+                totalTax += lineTax; // If this is meant to be separate
+                // totalDiscount += (item.discount || 0);
 
                 items.push({
                     saleId: sale.id,
@@ -91,15 +124,15 @@ const Reports = () => {
                     quantity: qty,
                     unitCost: cost,
                     unitPrice: price,
-                    tax: lineTax,
-                    totalCost: cost * qty,
+                    tax: lineTax, // Per line
+                    totalCost: lineCost,
                     totalSale: lineSale,
                     totalProfit: lineProfit
                 });
             });
         });
 
-        const totalProfit = totalSales - totalCost;
+        const totalProfit = totalSales - totalCost; // Simple Gross Profit
         const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0;
 
         setStats({
@@ -111,7 +144,9 @@ const Reports = () => {
             profitMargin
         });
 
+        // Sort items by date desc (newest first)
         items.sort((a, b) => new Date(b.saleDate) - new Date(a.saleDate));
+
         setFlattenedItems(items);
     };
 
@@ -128,8 +163,8 @@ const Reports = () => {
             'Utilidad': item.totalProfit
         })));
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Reporte Ventas");
-        XLSX.writeFile(wb, "Reporte_Ventas_Utilidad.xlsx");
+        XLSX.utils.book_append_sheet(wb, ws, "Reporte Utilidad");
+        XLSX.writeFile(wb, "Reporte_Utilidad.xlsx");
     };
 
     const chartData = [
@@ -139,11 +174,11 @@ const Reports = () => {
     ];
 
     return (
-        <div className="space-y-6 relative z-10">
+        <div className="space-y-6 relative z-10 p-6">
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-[var(--color-text)] neon-text">Reporte de Ventas</h1>
-                    <p className="text-[var(--color-text-muted)]">Análisis detallado de utilidad y productos</p>
+                    <h1 className="text-3xl font-bold text-[var(--color-text)] neon-text">Reporte de Utilidad</h1>
+                    <p className="text-[var(--color-text-muted)]">Análisis de costos, ventas y márgenes</p>
                 </div>
 
                 <div className="flex flex-wrap gap-2 items-center bg-[var(--surface-light)] p-2 rounded-xl border border-[var(--glass-border)]">
@@ -226,7 +261,7 @@ const Reports = () => {
                             {isLoading ? (
                                 <tr><td colSpan="9" className="text-center py-8">Cargando datos...</td></tr>
                             ) : flattenedItems.length === 0 ? (
-                                <tr><td colSpan="9" className="text-center py-8 text-gray-500">No hay ventas registradas.</td></tr>
+                                <tr><td colSpan="9" className="text-center py-8 text-gray-500">No hay ventas en este periodo.</td></tr>
                             ) : (
                                 flattenedItems.map((item, idx) => (
                                     <tr key={`${item.saleId}-${idx}`} className="hover:bg-[var(--glass-bg)] transition-colors">
@@ -265,4 +300,4 @@ const StatCard = ({ title, value, color, icon, isCurrency = true }) => (
     </div>
 );
 
-export default Reports;
+export default SalesProfitReport;

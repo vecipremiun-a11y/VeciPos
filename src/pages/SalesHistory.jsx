@@ -108,6 +108,26 @@ const SalesHistory = () => {
     const totalSales = filteredSales.reduce((acc, curr) => acc + (curr.status === 'cancelled' ? 0 : curr.total), 0);
     const totalCount = filteredSales.filter(s => s.status !== 'cancelled').length;
 
+    // Pagination / Infinite Scroll
+    const [visibleCount, setVisibleCount] = useState(30);
+
+    // Reset visible count when filters change
+    React.useEffect(() => {
+        setVisibleCount(30);
+    }, [searchTerm, dateFrom, dateTo, paymentFilter, sellerFilter, sales]);
+
+    const displayedSales = filteredSales.slice(0, visibleCount);
+
+    const handleScroll = (e) => {
+        const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
+        // Load more when user is near bottom (50px threshold)
+        if (scrollHeight - scrollTop <= clientHeight + 50) {
+            if (visibleCount < filteredSales.length) {
+                setVisibleCount(prev => prev + 30);
+            }
+        }
+    };
+
     return (
         <div className="h-full flex flex-col gap-4">
             {/* Top Stats / Header */}
@@ -229,9 +249,13 @@ const SalesHistory = () => {
                 <div className="w-1/3 glass rounded-xl flex flex-col overflow-hidden border border-[var(--glass-border)]">
                     <div className="p-3 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] font-semibold text-[var(--color-text-muted)]">
                         Resultados ({filteredSales.length})
+                        {visibleCount < filteredSales.length && <span className="text-xs ml-2 opacity-50 font-normal">Mostrando {visibleCount}</span>}
                     </div>
-                    <div className="flex-1 overflow-y-auto">
-                        {filteredSales.map(sale => (
+                    <div
+                        className="flex-1 overflow-y-auto"
+                        onScroll={handleScroll}
+                    >
+                        {displayedSales.map(sale => (
                             <div
                                 key={sale.id}
                                 onClick={() => setSelectedSale(sale)}
@@ -259,6 +283,12 @@ const SalesHistory = () => {
                                 </div>
                             </div>
                         ))}
+                        {/* Loading indication or bottom spacer */}
+                        {visibleCount < filteredSales.length && (
+                            <div className="p-4 text-center text-[var(--color-text-muted)] text-xs animate-pulse">
+                                Cargando más ventas...
+                            </div>
+                        )}
                         {filteredSales.length === 0 && (
                             <div className="p-8 text-center text-[var(--color-text-muted)]">
                                 No se encontraron ventas

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 
@@ -35,7 +35,9 @@ const MainLayout = () => {
             roles: ['Administrador', 'Supervisor'],
             subItems: [
                 { icon: FileText, label: 'Ventas', path: '/reports', roles: ['Administrador', 'Supervisor'] },
-                { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', roles: ['Administrador', 'Supervisor'] }
+                { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', roles: ['Administrador', 'Supervisor'] },
+                { icon: DollarSign, label: 'Cierre de Caja', path: '/reports/closures', roles: ['Administrador', 'Supervisor'] },
+                { icon: ArrowLeftRight, label: 'Movimientos de Caja', path: '/reports/movements', roles: ['Administrador', 'Supervisor'] }
             ]
         },
         { icon: Users, label: 'Usuarios', path: '/users', roles: ['Administrador'] },
@@ -119,6 +121,7 @@ const MainLayout = () => {
                                             <NavLink
                                                 key={subItem.path}
                                                 to={subItem.path}
+                                                end
                                                 className={({ isActive }) => cn(
                                                     "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 pl-11",
                                                     isActive

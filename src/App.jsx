@@ -10,6 +10,8 @@ import Purchases from './pages/Purchases';
 import Users from './pages/Users';
 import Reports from './pages/Reports';
 import ExpiringProductsReport from './pages/ExpiringProductsReport';
+import CashClosuresReport from './pages/CashClosuresReport';
+import CashMovementsReport from './pages/CashMovementsReport';
 import Settings from './pages/Settings';
 import MainLayout from './layouts/MainLayout';
 
@@ -74,6 +76,8 @@ function App() {
           <Route path="users" element={<Users />} />
           <Route path="reports" element={<Reports />} />
           <Route path="reports/expiring" element={<ExpiringProductsReport />} />
+          <Route path="reports/closures" element={<CashClosuresReport />} />
+          <Route path="reports/movements" element={<CashMovementsReport />} />
           <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>

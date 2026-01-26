@@ -98,9 +98,9 @@ const CashStatusWidget = () => {
                     {isOpen && (
                         <>
                             <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
-                            <div className="absolute top-16 right-0 w-[400px] glass-card p-0 !bg-[var(--glass-bg)] border-[var(--glass-border)] shadow-2xl z-50 overflow-hidden animate-[float_0.2s_ease-out]">
+                            <div className="absolute top-16 right-0 w-[400px] glass-card p-0 !bg-[#0f0f2d]/90 border-[var(--glass-border)] shadow-2xl z-50 overflow-hidden animate-[float_0.2s_ease-out]">
                                 {/* Header */}
-                                <div className="p-4 border-b border-[var(--glass-border)] flex justify-between items-center bg-[var(--glass-bg)]">
+                                <div className="p-4 border-b border-[var(--glass-border)] flex justify-between items-center">
                                     <h3 className="font-bold text-[var(--color-text)]">Estado de Caja</h3>
                                     <div className="px-2 py-1 rounded bg-green-500/20 text-green-400 text-xs font-bold border border-green-500/30">
                                         Turno Activo
@@ -263,8 +263,8 @@ const TransactionModal = ({ isOpen, onClose, type, onConfirm }) => {
     };
 
     return createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--color-surface)] dark:bg-black/80 backdrop-blur-sm">
-            <div className="glass-card w-full max-w-sm p-6 relative animate-[float_0.3s_ease-out]">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--color-surface)]/50 dark:bg-black/80 backdrop-blur-sm">
+            <div className="glass-card w-full max-w-sm p-6 relative animate-[float_0.3s_ease-out] !bg-[#0f0f2d]/90">
                 <button onClick={onClose} className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"><X size={20} /></button>
 
                 <h3 className="text-xl font-bold text-[var(--color-text)] mb-6 flex items-center gap-2">
