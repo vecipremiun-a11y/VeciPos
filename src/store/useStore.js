@@ -143,6 +143,18 @@ export const useStore = create(persist((set, get) => ({
                     await turso.execute("ALTER TABLE products ADD COLUMN offer_price REAL DEFAULT 0");
                 }
 
+                // Migration: Check if 'price_ranges' exists in products
+                const hasPriceRanges = prodInfo.rows.some(col => col.name === 'price_ranges');
+                if (!hasPriceRanges) {
+                    await turso.execute("ALTER TABLE products ADD COLUMN price_ranges TEXT DEFAULT '[]'");
+                }
+
+                // Migration: Check if 'scale_group_id' exists in products
+                const hasScaleGroupId = prodInfo.rows.some(col => col.name === 'scale_group_id');
+                if (!hasScaleGroupId) {
+                    await turso.execute("ALTER TABLE products ADD COLUMN scale_group_id TEXT");
+                }
+
                 // Migration: Check if 'has_negative_stock' exists in sales
                 const saleInfo = await turso.execute("PRAGMA table_info(sales)");
                 const hasNegativeStock = saleInfo.rows.some(col => col.name === 'has_negative_stock');
@@ -173,7 +185,10 @@ export const useStore = create(persist((set, get) => ({
                 console.warn("Migration check error", err);
             }
 
-            const products = productsRes.rows;
+            const products = productsRes.rows.map(p => ({
+                ...p,
+                price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
+            }));
             const productLots = productLotsRes.rows;
             const categories = categoriesRes.rows.map(c => ({
                 ...c,
@@ -197,13 +212,7 @@ export const useStore = create(persist((set, get) => ({
             set({ products, productLots, categories, suppliers, users, clients, sales, isLoading: false });
 
             // Fetch active registers initially
-            // We call get() to access the action we just defined, but actions are part of the store definition.
-            // Since we are inside the store creator, we can't easily call the action from 'get()' if it's not fully constructed yet?
-            // Actually in Zustand 'get()' gives access to current state/actions.
-            // However, it's safer to just call the logic or call the action after set.
-            // Let's call it via get().fetchActiveRegisters() if possible, or just ignore for now and call it in Dashboard.
-            // Better to rely on Dashboard mounting to fetch this specific data to avoid overhead on every app load if not needed.
-            // actually, let's leave it out of here to avoid circular dependency or issues during init. Dashboard will trigger it.
+            // ...
         } catch (error) {
             console.error("Failed to fetch data:", error);
             set({ error: error.message, isLoading: false });
@@ -301,7 +310,7 @@ export const useStore = create(persist((set, get) => ({
     addProduct: async (product) => {
         try {
             const result = await turso.execute({
-                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     product.name,
                     product.price,
@@ -314,10 +323,12 @@ export const useStore = create(persist((set, get) => ({
                     product.unit || 'Und',
                     product.supplier || null,
                     product.is_offer ? 1 : 0,
-                    product.offer_price || 0
+                    product.offer_price || 0,
+                    JSON.stringify(product.price_ranges || []),
+                    product.scale_group_id || null
                 ]
             });
-            const newProduct = result.rows[0];
+            const newProduct = { ...result.rows[0], price_ranges: product.price_ranges || [] };
             set((state) => ({ products: [...state.products, newProduct] }));
         } catch (e) {
             console.error("Add product error", e);
@@ -327,7 +338,7 @@ export const useStore = create(persist((set, get) => ({
     updateProduct: async (id, updatedProduct) => {
         try {
             await turso.execute({
-                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=? WHERE id = ?",
+                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=? WHERE id = ?",
                 args: [
                     updatedProduct.name,
                     updatedProduct.price,
@@ -341,6 +352,8 @@ export const useStore = create(persist((set, get) => ({
                     updatedProduct.supplier || null,
                     updatedProduct.is_offer ? 1 : 0,
                     updatedProduct.offer_price || 0,
+                    JSON.stringify(updatedProduct.price_ranges || []),
+                    updatedProduct.scale_group_id || null,
                     id
                 ]
             });
@@ -616,28 +629,84 @@ export const useStore = create(persist((set, get) => ({
     },
 
     // Cart (Local Only)
-    addToCart: (product) => set((state) => {
-        const existing = state.cart.find((item) => item.id === product.id);
-        if (existing) {
+    _recalculateCartPrices: (cartItems) => {
+        // 1. Calculate totals per group
+        const groupTotals = {};
+        cartItems.forEach(item => {
+            if (item.scale_group_id) {
+                groupTotals[item.scale_group_id] = (groupTotals[item.scale_group_id] || 0) + item.quantity;
+            }
+        });
+
+        // Helper to calculate price for a single item context
+        const calculateItemPrice = (product, quantityForScale) => {
+            // Priority 1: Wholesale Ranges
+            if (product.price_ranges && Array.isArray(product.price_ranges) && product.price_ranges.length > 0) {
+                const match = product.price_ranges.find(r => {
+                    const min = parseFloat(r.min) || 0;
+                    const max = r.max ? parseFloat(r.max) : Infinity;
+                    return quantityForScale >= min && quantityForScale <= max;
+                });
+                if (match) return parseFloat(match.price);
+            }
+            // Priority 2: Offer Price
+            if (product.is_offer && product.offer_price > 0) {
+                return parseFloat(product.offer_price);
+            }
+            // Priority 3: Base Price
+            return parseFloat(product.original_price || product.price);
+        };
+
+        // 2. Update prices for all items
+        return cartItems.map(item => {
+            let quantityForScale = item.quantity;
+
+            if (item.scale_group_id && groupTotals[item.scale_group_id]) {
+                quantityForScale = groupTotals[item.scale_group_id];
+            }
+
+            const newPrice = calculateItemPrice(item, quantityForScale);
+
             return {
-                cart: state.cart.map((item) =>
-                    item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-                )
+                ...item,
+                price: newPrice
             };
+        });
+    },
+
+    addToCart: (product) => set((state) => {
+        const existingItem = state.cart.find((item) => item.id === product.id);
+        let newCart;
+
+        if (existingItem) {
+            newCart = state.cart.map((item) =>
+                item.id === product.id
+                    ? { ...item, quantity: item.quantity + 1 }
+                    : item
+            );
+        } else {
+            newCart = [...state.cart, {
+                ...product,
+                quantity: 1,
+                original_price: product.price,
+                discount: 0
+            }];
         }
-        const effectivePrice = (product.is_offer && product.offer_price > 0) ? parseFloat(product.offer_price) : parseFloat(product.price);
-        return { cart: [...state.cart, { ...product, price: effectivePrice, original_price: product.price, quantity: 1, discount: 0 }] };
+
+        return { cart: state._recalculateCartPrices(newCart) };
     }),
 
-    updateCartItem: (productId, updates) => set((state) => ({
-        cart: state.cart.map((item) =>
+    updateCartItem: (productId, updates) => set((state) => {
+        let newCart = state.cart.map((item) =>
             item.id === productId ? { ...item, ...updates } : item
-        )
-    })),
+        );
+        return { cart: state._recalculateCartPrices(newCart) };
+    }),
 
-    removeFromCart: (productId) => set((state) => ({
-        cart: state.cart.filter((item) => item.id !== productId)
-    })),
+    removeFromCart: (productId) => set((state) => {
+        const newCart = state.cart.filter((item) => item.id !== productId);
+        return { cart: state._recalculateCartPrices(newCart) };
+    }),
 
     clearCart: () => set({ cart: [] }),
 

@@ -106,6 +106,18 @@ const Purchases = () => {
             } else {
                 setEntryForm(prev => ({ ...prev, [name]: value }));
             }
+        } else if (name === 'margin') {
+            const margin = parseFloat(value) || 0;
+            const cost = parseFloat(entryForm.cost) || 0;
+            const tax = parseFloat(entryForm.tax) || 0;
+
+            if (cost > 0) {
+                const netPrice = cost * (1 + margin / 100);
+                const finalPrice = netPrice * (1 + tax / 100);
+                setEntryForm(prev => ({ ...prev, [name]: value, price: finalPrice.toFixed(0) }));
+            } else {
+                setEntryForm(prev => ({ ...prev, [name]: value }));
+            }
         } else {
             setEntryForm(prev => ({ ...prev, [name]: value }));
         }
@@ -159,7 +171,7 @@ const Purchases = () => {
             supplierName: supplier ? supplier.name : 'Unknown',
             invoiceNumber: invoiceData.invoiceNumber,
             date: invoiceData.date,
-            total: invoiceItems.reduce((sum, item) => sum + item.total, 0),
+            total: invoiceItems.reduce((sum, item) => sum + item.total + (item.total * (item.tax / 100)), 0),
             items: invoiceItems,
             isCredit: invoiceData.isCredit,
             creditDays: invoiceData.creditDays ? parseInt(invoiceData.creditDays) : null,
@@ -193,7 +205,9 @@ const Purchases = () => {
         setIsProductModalOpen(false);
     };
 
-    const totalAmount = invoiceItems.reduce((sum, item) => sum + item.total, 0);
+    const subtotal = invoiceItems.reduce((sum, item) => sum + item.total, 0);
+    const taxAmount = invoiceItems.reduce((sum, item) => sum + (item.total * (item.tax / 100)), 0);
+    const totalAmount = subtotal + taxAmount;
 
     return (
         <div className="h-[calc(100vh-6rem)] grid grid-cols-12 gap-6">
@@ -296,14 +310,16 @@ const Purchases = () => {
                                 </div>
                                 <div>
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">IVA (%)</label>
-                                    <input
-                                        type="number"
+                                    <select
                                         name="tax"
                                         value={entryForm.tax}
                                         onChange={handleEntryChange}
                                         className="glass-input w-full"
-                                        placeholder="0"
-                                    />
+                                    >
+                                        <option value="0">Exento (0%)</option>
+                                        <option value="19">IVA (19%)</option>
+                                    </select>
+
                                 </div>
                             </div>
 
@@ -312,9 +328,10 @@ const Purchases = () => {
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">Utilidad (%)</label>
                                     <input
                                         type="number"
-                                        readOnly
+                                        name="margin"
                                         value={entryForm.margin}
-                                        className="glass-input w-full bg-[var(--glass-bg)] text-[var(--color-text-muted)] cursor-not-allowed"
+                                        onChange={handleEntryChange}
+                                        className="glass-input w-full"
                                     />
                                 </div>
                                 <div>
@@ -523,6 +540,7 @@ const Purchases = () => {
                                     <th className="px-4 py-3">Producto</th>
                                     <th className="px-4 py-3 text-right">Cant.</th>
                                     <th className="px-4 py-3 text-right">Costo U.</th>
+                                    <th className="px-4 py-3 text-center">IVA</th>
                                     <th className="px-4 py-3 text-right">Total</th>
                                     <th className="px-4 py-3 text-center">Acción</th>
                                 </tr>
@@ -541,8 +559,9 @@ const Purchases = () => {
                                             <td className="px-4 py-3 text-[var(--color-text)] font-medium">{item.name}</td>
                                             <td className="px-4 py-3 text-right text-[var(--color-text-muted)]">{item.quantity}</td>
                                             <td className="px-4 py-3 text-right text-[var(--color-text-muted)]">${item.cost.toLocaleString()}</td>
+                                            <td className="px-4 py-3 text-center text-[var(--color-text-muted)]">{item.tax}%</td>
                                             <td className="px-4 py-3 text-right font-bold text-[var(--color-primary)]">
-                                                ${item.total.toLocaleString()}
+                                                ${(item.total * (1 + item.tax / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                             </td>
                                             <td className="px-4 py-3 text-center">
                                                 <button
@@ -560,13 +579,15 @@ const Purchases = () => {
                     </div>
 
                     {/* Footer Totals */}
-                    <div className="bg-[var(--glass-bg)] p-4 border-t border-[var(--glass-border)] flex justify-between items-center">
+                    <div className="bg-[var(--glass-bg)] p-4 border-t border-[var(--glass-border)] flex justify-between items-center gap-4">
                         <div>
                             <span className="text-[var(--color-text-muted)] text-sm">Items: {invoiceItems.length}</span>
                         </div>
                         <div className="flex items-center gap-6">
                             <div className="text-right">
-                                <div className="text-sm text-[var(--color-text-muted)]">Total Factura</div>
+                                <div className="text-xs text-[var(--color-text-muted)]">Subtotal (Neto): ${subtotal.toLocaleString()}</div>
+                                <div className="text-xs text-green-400">Total IVA: ${taxAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                                <div className="text-sm text-[var(--color-text-muted)] mt-1">Total Factura</div>
                                 <div className="text-3xl font-bold text-[var(--color-text)] neon-text">
                                     ${totalAmount.toLocaleString()}
                                 </div>

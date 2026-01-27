@@ -347,7 +347,12 @@ const POS = () => {
                                 <div key={item.id} className="p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)] space-y-2">
                                     {/* Row 1: Name and Remove */}
                                     <div className="flex justify-between items-start gap-2">
-                                        <h4 className="text-[var(--color-text)] font-medium text-sm line-clamp-2">{item.name}</h4>
+                                        <div className="flex flex-col">
+                                            <h4 className="text-[var(--color-text)] font-medium text-sm line-clamp-2">{item.name}</h4>
+                                            {item.scale_group_id && (
+                                                <span className="text-[10px] text-purple-400 font-mono">Grupo: {item.scale_group_id}</span>
+                                            )}
+                                        </div>
                                         <button
                                             className="text-[var(--color-text-muted)] hover:text-red-400 transition-colors p-1"
                                             onClick={() => removeFromCart(item.id)}
@@ -378,6 +383,11 @@ const POS = () => {
                                             {discountPercent > 0 && (
                                                 <span className="text-green-400 font-bold ml-1 text-xs">
                                                     (${discountedUnitPrice.toLocaleString('es-CL')})
+                                                </span>
+                                            )}
+                                            {(!item.is_offer && item.price < (item.original_price || item.price) && item.price_ranges?.length > 0) && (
+                                                <span className="ml-2 text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/30">
+                                                    Mayorista
                                                 </span>
                                             )}
                                         </div>
