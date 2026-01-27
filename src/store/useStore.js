@@ -27,6 +27,157 @@ export const useStore = create(persist((set, get) => ({
         return { inventoryAdjustmentMode: newValue };
     }),
 
+    // SaaS State & Logic
+    activeCompanyId: 'default',
+    availableCompanies: [], // List of companies the user can access
+    // Default to default for migration, but logic should update this. 
+    // Wait, I should probably load this from localStorage? 
+    // For now 'default' is safe as we backfilled everything to 'default'.
+
+    currentUserCompanyRole: null,
+
+    validateCompanyAccess: (userId, companyId) => {
+        const { availableCompanies, currentUser } = get();
+        // 1. Basic User Check
+        if (!currentUser || !userId) return false;
+
+        // 2. Super Admin Bypass (Optional, but safer to stick to explicit membership for data consistency)
+        // However, if super_admin is not "owner" but needs access, this might be needed.
+        // But our createCompany makes them owner. So membership check is robust.
+
+        // 3. Check Membership
+        return availableCompanies.some(c => c.id === companyId);
+    },
+
+    _runMigrations: async () => {
+        console.log("Checking SaaS Migrations...");
+        try {
+            // 0. Ensure System Settings Table Exists
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            `);
+
+            // Check Schema Version
+            const versionRes = await turso.execute("SELECT value FROM system_settings WHERE key = 'schema_version'");
+            // ... (rest of migration logic kept same, but I need to make sure I don't delete it)
+            // Actually, I can leave _runMigrations as is. I only need to change fetchInitialData.
+            // But wait, I am replacing a chunk. Let's look at where I am.
+            // I requested view up to 450.
+            // I will target fetchInitialData specifically.
+
+            const currentVersion = versionRes.rows.length > 0 ? parseInt(versionRes.rows[0].value) : 0;
+            const TARGET_VERSION = 1; // Increment this when changing schema
+
+            if (currentVersion >= TARGET_VERSION) {
+                console.log("Schema is up to date (v" + currentVersion + ")");
+                return;
+            }
+
+            console.log(`Migrating Schema from v${currentVersion} to v${TARGET_VERSION}...`);
+
+            // 1. Create Companies Table
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS companies (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    status TEXT DEFAULT 'active', -- active, suspended, deleted
+                    created_at TEXT
+                )
+            `);
+
+            // 2. Create User-Companies Table
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS user_companies (
+                    user_id INTEGER,
+                    company_id TEXT,
+                    role TEXT,
+                    PRIMARY KEY (user_id, company_id)
+                )
+            `);
+
+            // 3. Create Audit Logs Table
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id TEXT,
+                    user_id INTEGER,
+                    action TEXT,
+                    entity TEXT,
+                    details TEXT,
+                    created_at TEXT
+                )
+            `);
+
+            // 4. Ensure Default Company Exists
+            const defaultCompanyCheck = await turso.execute("SELECT * FROM companies WHERE id = 'default'");
+            if (defaultCompanyCheck.rows.length === 0) {
+                await turso.execute({
+                    sql: "INSERT INTO companies (id, name, status, created_at) VALUES (?, ?, ?, ?)",
+                    args: ['default', 'Empresa Principal', 'active', new Date().toISOString()]
+                });
+                console.log("Created Default Company");
+            }
+
+            // 5. Add company_id to all tables
+            const tablesWithCompany = [
+                'users', 'products', 'product_lots', 'categories', 'suppliers',
+                'sales', 'clients', 'purchases', 'cash_registers', 'cash_movements'
+            ];
+
+            for (const table of tablesWithCompany) {
+                try {
+                    const info = await turso.execute(`PRAGMA table_info(${table})`);
+                    const hasCompanyId = info.rows.some(col => col.name === 'company_id');
+                    if (!hasCompanyId) {
+                        console.log(`Adding company_id to ${table}...`);
+                        await turso.execute(`ALTER TABLE ${table} ADD COLUMN company_id TEXT DEFAULT 'default'`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_${table}_company_id ON ${table}(company_id)`);
+                    }
+                } catch (e) {
+                    console.warn(`Migration error for table ${table}:`, e);
+                }
+            }
+
+            // Composite Indices for Sales and Purchases
+            try {
+                await turso.execute("CREATE INDEX IF NOT EXISTS idx_sales_company_date ON sales(company_id, date)");
+                await turso.execute("CREATE INDEX IF NOT EXISTS idx_purchases_company_date ON purchases(company_id, date)");
+            } catch (e) { console.warn("Index creation error", e); }
+
+
+            // 6. Backfill User Permissions
+            try {
+                const users = await turso.execute("SELECT * FROM users");
+                for (const user of users.rows) {
+                    const permCheck = await turso.execute({
+                        sql: "SELECT * FROM user_companies WHERE user_id = ? AND company_id = 'default'",
+                        args: [user.id]
+                    });
+                    if (permCheck.rows.length === 0) {
+                        await turso.execute({
+                            sql: "INSERT INTO user_companies (user_id, company_id, role) VALUES (?, ?, ?)",
+                            args: [user.id, 'default', user.role || 'admin']
+                        });
+                    }
+                }
+            } catch (e) { console.warn("Backfill users error", e); }
+
+            // UPDATE VERSION
+            await turso.execute({
+                sql: "INSERT INTO system_settings (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = ?",
+                args: [TARGET_VERSION, TARGET_VERSION]
+            });
+
+            console.log("SaaS Migrations Completed.");
+
+        } catch (e) {
+            console.error("Migration Fatal Error:", e);
+        }
+    },
+
     // Clients State & Actions
     clients: [],
     posSelectedClient: null,
@@ -35,17 +186,25 @@ export const useStore = create(persist((set, get) => ({
     addClient: async (client) => {
         try {
             const result = await turso.execute({
-                sql: "INSERT INTO clients (name, rut, phone, email, address, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO clients (name, rut, phone, email, address, created_at, company_id) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     client.name,
                     client.rut || '',
                     client.phone || '',
                     client.email || '',
                     client.address || '',
-                    new Date().toISOString()
+                    new Date().toISOString(),
+                    get().activeCompanyId
                 ]
             });
             const newClient = result.rows[0];
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [get().activeCompanyId, get().currentUser?.id, 'CREATE', 'CLIENT', JSON.stringify({ name: client.name }), new Date().toISOString()]
+            });
+
             set((state) => ({ clients: [...state.clients, newClient].sort((a, b) => a.name.localeCompare(b.name)) }));
             return { success: true, client: newClient };
         } catch (e) {
@@ -56,10 +215,20 @@ export const useStore = create(persist((set, get) => ({
 
     updateClient: async (id, updatedClient) => {
         try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
             await turso.execute({
-                sql: "UPDATE clients SET name = ?, rut = ?, phone = ?, email = ?, address = ? WHERE id = ?",
-                args: [updatedClient.name, updatedClient.rut, updatedClient.phone, updatedClient.email, updatedClient.address, id]
+                sql: "UPDATE clients SET name = ?, rut = ?, phone = ?, email = ?, address = ? WHERE id = ? AND company_id = ?",
+                args: [updatedClient.name, updatedClient.rut, updatedClient.phone, updatedClient.email, updatedClient.address, id, activeCompanyId]
             });
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'UPDATE', 'CLIENT', JSON.stringify({ id, updates: updatedClient }), new Date().toISOString()]
+            });
+
             set((state) => ({
                 clients: state.clients.map((c) => c.id === id ? { ...c, ...updatedClient } : c).sort((a, b) => a.name.localeCompare(b.name))
             }));
@@ -72,10 +241,20 @@ export const useStore = create(persist((set, get) => ({
 
     deleteClient: async (id) => {
         try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
             await turso.execute({
-                sql: "DELETE FROM clients WHERE id = ?",
-                args: [id]
+                sql: "DELETE FROM clients WHERE id = ? AND company_id = ?",
+                args: [id, activeCompanyId]
             });
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'DELETE', 'CLIENT', JSON.stringify({ id }), new Date().toISOString()]
+            });
+
             set((state) => ({
                 clients: state.clients.filter((c) => c.id !== id)
             }));
@@ -87,12 +266,103 @@ export const useStore = create(persist((set, get) => ({
     },
 
     // Actions
-    fetchInitialData: async () => {
-        set({ isLoading: true });
+    fetchUserCompanies: async (userId) => {
         try {
-            const productsRes = await turso.execute("SELECT * FROM products");
+            const res = await turso.execute({
+                sql: `
+                    SELECT c.id, c.name, uc.role 
+                    FROM user_companies uc
+                    JOIN companies c ON uc.company_id = c.id
+                    WHERE uc.user_id = ? AND c.status = 'active'
+                `,
+                args: [userId]
+            });
+            set({ availableCompanies: res.rows });
+            return res.rows;
+        } catch (e) {
+            console.error("Fetch user companies error", e);
+            return [];
+        }
+    },
 
-            // Initialize product_lots table if not exists
+    setActiveCompanyId: async (companyId) => {
+        const { currentUser, availableCompanies, fetchInitialData } = get();
+
+        // Validate
+        const targetCompany = availableCompanies.find(c => c.id === companyId);
+        if (!targetCompany) {
+            console.error("Attempted to switch to invalid company", companyId);
+            return { success: false, error: "Invalid Company" };
+        }
+
+        console.log("Switching to company:", companyId);
+        set({ activeCompanyId: companyId, isLoading: true });
+
+        if (currentUser) {
+            localStorage.setItem(`activeCompanyId:${currentUser.id}`, companyId);
+        }
+
+        // Reload data
+        await fetchInitialData();
+        set({ isLoading: false });
+        return { success: true };
+    },
+
+    fetchInitialData: async () => {
+        set({ isLoading: true, error: null });
+        try {
+            // RUN MIGRATIONS & BACKFILL
+            await get()._runMigrations();
+
+            const { currentUser, fetchUserCompanies } = get();
+            let { activeCompanyId } = get();
+
+            // Resolve Active Company
+            if (currentUser) {
+                const companies = await fetchUserCompanies(currentUser.id);
+
+                // 1. Try to get from persistence
+                const persistedId = localStorage.getItem(`activeCompanyId:${currentUser.id}`);
+
+                // 2. Validate persistence or fallback
+                if (persistedId && companies.some(c => c.id === persistedId)) {
+                    activeCompanyId = persistedId;
+                } else if (companies.length > 0) {
+                    activeCompanyId = companies[0].id;
+                } else {
+                    // Fallback for edge case (no companies assigned?) - Should ideally not happen if we backfilled 'default'
+                    // activeCompanyId remains 'default' (initial state) or whatever it was.
+                    console.warn("User has no active companies assigned.");
+                }
+
+                // Update state and persistence
+                set({ activeCompanyId });
+                localStorage.setItem(`activeCompanyId:${currentUser.id}`, activeCompanyId);
+            }
+
+            console.log("Fetching data for company:", activeCompanyId);
+
+            const productsRes = await turso.execute({
+                sql: "SELECT * FROM products WHERE company_id = ?",
+                args: [activeCompanyId]
+            });
+
+            // Initialize product_lots table if not exists (Handled in _runMigrations now? No, kept getting created here in previous code. 
+            // _runMigrations handled adding columns. Table creation for lots was there. 
+            // Let's keep the CREATE IF NOT EXISTS here for safety or move it? 
+            // The previous code had it here. _runMigrations handles 'tablesWithCompany' adding columns.
+            // product_lots creation logic is technically migration. 
+            // But let's leave legacy safe-check or just proceed to fetch. 
+            // Actually _runMigrations adds `company_id` to `product_lots` if it exists. 
+            // IF table didn't exist, that loop might have skipped or warned.
+            // Let's ensure it exists here to be safe, then fetch.
+
+            // Wait, if I am strict SaaS, I should move ALL DDL to _runMigrations.
+            // But to minimize friction, I will execute the creation here if it's not in _runMigrations yet.
+            // My _runMigrations loop checked `product_lots` to add column. 
+            // IF table didn't exist, that loop might have skipped or warned.
+            // Let's ensure it exists here to be safe, then fetch.
+
             await turso.execute(`
                 CREATE TABLE IF NOT EXISTS product_lots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,15 +373,37 @@ export const useStore = create(persist((set, get) => ({
                     cost REAL,
                     supplier_name TEXT,
                     created_at TEXT,
-                    status TEXT DEFAULT 'active'
+                    status TEXT DEFAULT 'active',
+                    company_id TEXT DEFAULT 'default' -- Ensure new table has it
                 )
             `);
 
-            const productLotsRes = await turso.execute("SELECT * FROM product_lots WHERE quantity > 0 ORDER BY expiry_date ASC");
-            const categoriesRes = await turso.execute("SELECT * FROM categories");
-            const suppliersRes = await turso.execute("SELECT * FROM suppliers");
-            const usersRes = await turso.execute("SELECT * FROM users");
-            const salesRes = await turso.execute("SELECT * FROM sales ORDER BY id DESC");
+            const productLotsRes = await turso.execute({
+                sql: "SELECT * FROM product_lots WHERE quantity > 0 AND (company_id = ? OR company_id IS NULL) ORDER BY expiry_date ASC", // Handle legacy nulls if any from just-creation
+                args: [activeCompanyId]
+            });
+
+            const categoriesRes = await turso.execute({
+                sql: "SELECT * FROM categories WHERE company_id = ?",
+                args: [activeCompanyId]
+            });
+
+            const suppliersRes = await turso.execute({
+                sql: "SELECT * FROM suppliers WHERE company_id = ?",
+                args: [activeCompanyId]
+            });
+
+            // Users are global? No, we filter users visible to this company? 
+            // Usually in POS you want to see list of employees (users) in THIS company.
+            const usersRes = await turso.execute({
+                sql: "SELECT * FROM users WHERE company_id = ?",
+                args: [activeCompanyId]
+            });
+
+            const salesRes = await turso.execute({
+                sql: "SELECT * FROM sales WHERE company_id = ? ORDER BY id DESC",
+                args: [activeCompanyId]
+            });
 
             // Migration: Check if 'show_in_pos' exists in categories
             // Simple check: see if fetched rows have the property or try to query specific column in catch block.
@@ -196,7 +488,10 @@ export const useStore = create(persist((set, get) => ({
             }));
             const suppliers = suppliersRes.rows;
             const users = usersRes.rows;
-            const clientsRes = await turso.execute("SELECT * FROM clients ORDER BY name ASC");
+            const clientsRes = await turso.execute({
+                sql: "SELECT * FROM clients WHERE company_id = ? ORDER BY name ASC",
+                args: [activeCompanyId]
+            });
             const clients = clientsRes.rows;
 
             const sales = salesRes.rows.map(sale => ({
@@ -309,8 +604,11 @@ export const useStore = create(persist((set, get) => ({
 
     addProduct: async (product) => {
         try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
             const result = await turso.execute({
-                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     product.name,
                     product.price,
@@ -325,20 +623,33 @@ export const useStore = create(persist((set, get) => ({
                     product.is_offer ? 1 : 0,
                     product.offer_price || 0,
                     JSON.stringify(product.price_ranges || []),
-                    product.scale_group_id || null
+                    product.scale_group_id || null,
+                    activeCompanyId
                 ]
             });
-            const newProduct = { ...result.rows[0], price_ranges: product.price_ranges || [] };
-            set((state) => ({ products: [...state.products, newProduct] }));
+            const newProduct = { ...result.rows[0], price_ranges: product.price_ranges ? JSON.parse(product.price_ranges) : [] };
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'CREATE', 'PRODUCT', JSON.stringify({ name: product.name, sku: product.sku }), new Date().toISOString()]
+            });
+
+            set((state) => ({ products: [...state.products, newProduct].sort((a, b) => a.name.localeCompare(b.name)) }));
+            return { success: true, product: newProduct };
         } catch (e) {
             console.error("Add product error", e);
+            return { success: false, error: e.message };
         }
     },
 
     updateProduct: async (id, updatedProduct) => {
         try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
             await turso.execute({
-                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=? WHERE id = ?",
+                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=? WHERE id = ? AND company_id = ?",
                 args: [
                     updatedProduct.name,
                     updatedProduct.price,
@@ -354,75 +665,119 @@ export const useStore = create(persist((set, get) => ({
                     updatedProduct.offer_price || 0,
                     JSON.stringify(updatedProduct.price_ranges || []),
                     updatedProduct.scale_group_id || null,
-                    id
+                    id,
+                    activeCompanyId
                 ]
             });
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'UPDATE', 'PRODUCT', JSON.stringify({ id, updates: updatedProduct }), new Date().toISOString()]
+            });
+
             set((state) => ({
                 products: state.products.map((p) => p.id === id ? { ...p, ...updatedProduct } : p)
             }));
+            return { success: true };
         } catch (e) {
             console.error("Update product error", e);
+            return { success: false, error: e.message };
         }
     },
 
     deleteProduct: async (id) => {
         try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
             await turso.execute({
-                sql: "DELETE FROM products WHERE id = ?",
-                args: [id]
+                sql: "DELETE FROM products WHERE id = ? AND company_id = ?",
+                args: [id, activeCompanyId]
             });
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'DELETE', 'PRODUCT', JSON.stringify({ id }), new Date().toISOString()]
+            });
+
             set((state) => ({
                 products: state.products.filter((p) => p.id !== id)
             }));
+            return { success: true };
         } catch (e) {
             console.error("Delete product error", e);
+            return { success: false, error: e.message };
         }
     },
 
     // Categories
     addCategory: async (category) => {
         try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
             const result = await turso.execute({
-                sql: "INSERT INTO categories (name, color, status, show_in_pos) VALUES (?, ?, ?, ?) RETURNING *",
-                args: [category.name, category.color, category.status || 'active', category.showInPos !== false ? 1 : 0]
+                sql: "INSERT INTO categories (name, color, status, show_in_pos, company_id) VALUES (?, ?, ?, ?, ?) RETURNING *",
+                args: [category.name, category.color, category.status || 'active', category.showInPos !== false ? 1 : 0, activeCompanyId]
             });
             const newCategory = result.rows[0];
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'CREATE', 'CATEGORY', JSON.stringify({ name: category.name }), new Date().toISOString()]
+            });
+
             set((state) => ({ categories: [...state.categories, newCategory] }));
+            return { success: true, category: newCategory };
         } catch (e) {
             console.error("Add category error", e);
+            return { success: false, error: e.message };
         }
     },
 
     updateCategory: async (id, updatedCategory) => {
         try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
             // 1. Find the old category to see if name changed
             const { categories, products } = get();
             const oldCategory = categories.find(c => c.id === id);
 
-            if (!oldCategory) return;
+            if (!oldCategory) return { success: false, error: "Category not found" };
 
             const nameChanged = oldCategory.name !== updatedCategory.name;
 
             // 2. Transaction: Update Category + (Optional) Update Products
             const queries = [
                 {
-                    sql: "UPDATE categories SET name = ?, color = ?, status = ?, show_in_pos = ? WHERE id = ?",
+                    sql: "UPDATE categories SET name = ?, color = ?, status = ?, show_in_pos = ? WHERE id = ? AND company_id = ?",
                     args: [
                         updatedCategory.name,
                         updatedCategory.color,
                         updatedCategory.status,
                         updatedCategory.showInPos !== false ? 1 : 0,
-                        id
+                        id,
+                        activeCompanyId
                     ]
                 }
             ];
 
             if (nameChanged) {
                 queries.push({
-                    sql: "UPDATE products SET category = ? WHERE category = ?",
-                    args: [updatedCategory.name, oldCategory.name]
+                    sql: "UPDATE products SET category = ? WHERE category = ? AND company_id = ?",
+                    args: [updatedCategory.name, oldCategory.name, activeCompanyId]
                 });
             }
+
+            // Audit
+            queries.push({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'UPDATE', 'CATEGORY', JSON.stringify({ id, updates: updatedCategory }), new Date().toISOString()]
+            });
 
             await turso.batch(queries);
 
@@ -433,63 +788,98 @@ export const useStore = create(persist((set, get) => ({
                     ? state.products.map(p => p.category === oldCategory.name ? { ...p, category: updatedCategory.name } : p)
                     : state.products
             }));
+            return { success: true };
         } catch (e) {
             console.error("Update category error", e);
+            return { success: false, error: e.message };
         }
     },
 
     deleteCategory: async (id) => {
         try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
             await turso.execute({
-                sql: "DELETE FROM categories WHERE id = ?",
-                args: [id]
+                sql: "DELETE FROM categories WHERE id = ? AND company_id = ?",
+                args: [id, activeCompanyId]
             });
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'DELETE', 'CATEGORY', JSON.stringify({ id }), new Date().toISOString()]
+            });
+
             set((state) => ({
                 categories: state.categories.filter((c) => c.id !== id)
             }));
+            return { success: true };
         } catch (e) {
             console.error("Delete category error", e);
+            return { success: false, error: e.message };
         }
     },
 
     // Suppliers
     addSupplier: async (supplier) => {
         try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
             const result = await turso.execute({
-                sql: "INSERT INTO suppliers (name, phone, email, status) VALUES (?, ?, ?, ?) RETURNING *",
-                args: [supplier.name, supplier.phone || '', supplier.email || '', supplier.status || 'active']
+                sql: "INSERT INTO suppliers (name, phone, email, status, company_id) VALUES (?, ?, ?, ?, ?) RETURNING *",
+                args: [supplier.name, supplier.phone || '', supplier.email || '', supplier.status || 'active', activeCompanyId]
             });
             const newSupplier = result.rows[0];
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'CREATE', 'SUPPLIER', JSON.stringify({ name: supplier.name }), new Date().toISOString()]
+            });
+
             set((state) => ({ suppliers: [...state.suppliers, newSupplier] }));
+            return { success: true, supplier: newSupplier };
         } catch (e) {
             console.error("Add supplier error", e);
+            return { success: false, error: e.message };
         }
     },
 
     updateSupplier: async (id, updatedSupplier) => {
         try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
             // 1. Find old supplier to check for name change
             const { suppliers } = get();
             const oldSupplier = suppliers.find(s => s.id === id);
 
-            if (!oldSupplier) return;
+            if (!oldSupplier) return { success: false, error: "Supplier not found" };
 
             const nameChanged = oldSupplier.name !== updatedSupplier.name;
 
             // 2. Transaction
             const queries = [
                 {
-                    sql: "UPDATE suppliers SET name = ?, phone = ?, email = ?, status = ? WHERE id = ?",
-                    args: [updatedSupplier.name, updatedSupplier.phone, updatedSupplier.email, updatedSupplier.status, id]
+                    sql: "UPDATE suppliers SET name = ?, phone = ?, email = ?, status = ? WHERE id = ? AND company_id = ?",
+                    args: [updatedSupplier.name, updatedSupplier.phone, updatedSupplier.email, updatedSupplier.status, id, activeCompanyId]
                 }
             ];
 
             if (nameChanged) {
                 queries.push({
-                    sql: "UPDATE products SET supplier = ? WHERE supplier = ?",
-                    args: [updatedSupplier.name, oldSupplier.name]
+                    sql: "UPDATE products SET supplier = ? WHERE supplier = ? AND company_id = ?",
+                    args: [updatedSupplier.name, oldSupplier.name, activeCompanyId]
                 });
             }
+
+            // Audit
+            queries.push({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'UPDATE', 'SUPPLIER', JSON.stringify({ id, updates: updatedSupplier }), new Date().toISOString()]
+            });
 
             await turso.batch(queries);
 
@@ -499,49 +889,147 @@ export const useStore = create(persist((set, get) => ({
                     ? state.products.map(p => p.supplier === oldSupplier.name ? { ...p, supplier: updatedSupplier.name } : p)
                     : state.products
             }));
+            return { success: true };
         } catch (e) {
             console.error("Update supplier error", e);
+            return { success: false, error: e.message };
         }
     },
 
     deleteSupplier: async (id) => {
         try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
             await turso.execute({
-                sql: "DELETE FROM suppliers WHERE id = ?",
-                args: [id]
+                sql: "DELETE FROM suppliers WHERE id = ? AND company_id = ?",
+                args: [id, activeCompanyId]
             });
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'DELETE', 'SUPPLIER', JSON.stringify({ id }), new Date().toISOString()]
+            });
+
             set((state) => ({
                 suppliers: state.suppliers.filter((s) => s.id !== id)
             }));
+            return { success: true };
         } catch (e) {
             console.error("Delete supplier error", e);
+            return { success: false, error: e.message };
         }
     },
 
-    deleteSupplier: async (id) => {
+    // =========================================
+    // SUPER ADMIN ACTIONS
+    // =========================================
+
+    fetchAdminStats: async () => {
         try {
-            await turso.execute({
-                sql: "DELETE FROM suppliers WHERE id = ?",
-                args: [id]
-            });
-            set((state) => ({
-                suppliers: state.suppliers.filter((s) => s.id !== id)
-            }));
+            const { currentUser } = get();
+            if (currentUser?.role !== 'super_admin') return null;
+
+            const totalRes = await turso.execute("SELECT COUNT(*) as count FROM companies");
+            const activeRes = await turso.execute("SELECT COUNT(*) as count FROM companies WHERE status = 'active'");
+            const suspendedRes = await turso.execute("SELECT COUNT(*) as count FROM companies WHERE status = 'suspended'");
+
+            return {
+                totalCompanies: totalRes.rows[0].count,
+                activeCompanies: activeRes.rows[0].count,
+                suspendedCompanies: suspendedRes.rows[0].count
+            };
         } catch (e) {
-            console.error("Delete supplier error", e);
+            console.error("Fetch admin stats error", e);
+            return null;
         }
     },
+
+    fetchAllCompanies: async () => {
+        try {
+            const { currentUser } = get();
+            if (currentUser?.role !== 'super_admin') return [];
+
+            const res = await turso.execute("SELECT * FROM companies ORDER BY created_at DESC");
+            return res.rows;
+        } catch (e) {
+            console.error("Fetch all companies error", e);
+            return [];
+        }
+    },
+
+    createCompany: async (companyId, name) => {
+        try {
+            const { currentUser } = get();
+            if (currentUser?.role !== 'super_admin') return { success: false, error: "Access Denied" };
+
+            // 1. Create Company
+            await turso.execute({
+                sql: "INSERT INTO companies (id, name, status, created_at) VALUES (?, ?, 'active', ?)",
+                args: [companyId, name, new Date().toISOString()]
+            });
+
+            // 2. Assign Current Admin as Owner of new company (so they can switch to it if needed, or just management)
+            // Actually, requirements said "Assign the creating admin into user_companies as owner"
+            await turso.execute({
+                sql: "INSERT INTO user_companies (user_id, company_id, role) VALUES (?, ?, 'owner')",
+                args: [currentUser.id, companyId]
+            });
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: ['system', currentUser.id, 'CREATE', 'COMPANY', JSON.stringify({ companyId, name }), new Date().toISOString()]
+            });
+
+            return { success: true };
+        } catch (e) {
+            console.error("Create company error", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    toggleCompanyStatus: async (companyId, newStatus) => {
+        try {
+            const { currentUser } = get();
+            if (currentUser?.role !== 'super_admin') return { success: false, error: "Access Denied" };
+
+            await turso.execute({
+                sql: "UPDATE companies SET status = ? WHERE id = ?",
+                args: [newStatus, companyId]
+            });
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: ['system', currentUser.id, 'UPDATE_STATUS', 'COMPANY', JSON.stringify({ companyId, newStatus }), new Date().toISOString()]
+            });
+
+            return { success: true };
+        } catch (e) {
+            console.error("Toggle company status error", e);
+            return { success: false, error: e.message };
+        }
+    },
+
 
     // Purchases
     addPurchase: async (purchase) => {
         try {
-            const { currentUser } = get();
+            const { currentUser, activeCompanyId, validateCompanyAccess } = get();
+
+            // 0. Security Validation
+            if (!validateCompanyAccess(currentUser ? currentUser.id : null, activeCompanyId)) {
+                return { success: false, error: "Access Denied" };
+            }
+
             const itemsJson = JSON.stringify(purchase.items);
 
             // Transaction: Insert Purchase + Update Product Stock/Cost
             const queries = [
                 {
-                    sql: "INSERT INTO purchases (supplier_id, supplier_name, invoice_number, date, total, items, status, user_id, is_credit, credit_days, expiry_date, deposit, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    sql: "INSERT INTO purchases (supplier_id, supplier_name, invoice_number, date, total, items, status, user_id, is_credit, credit_days, expiry_date, deposit, payment_method, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     args: [
                         purchase.supplierId,
                         purchase.supplierName,
@@ -555,7 +1043,8 @@ export const useStore = create(persist((set, get) => ({
                         purchase.creditDays || null,
                         purchase.expiryDate || null,
                         purchase.deposit || 0,
-                        purchase.paymentMethod || 'Efectivo'
+                        purchase.paymentMethod || 'Efectivo',
+                        activeCompanyId
                     ]
                 }
             ];
@@ -563,33 +1052,39 @@ export const useStore = create(persist((set, get) => ({
             // For each item, update stock and cost in products table
             purchase.items.forEach(item => {
                 queries.push({
-                    sql: "UPDATE products SET stock = stock + ?, cost = ?, price = ?, sku = ?, tax_rate = ? WHERE id = ?",
-                    args: [item.quantity, item.cost, item.price, item.sku, item.tax || 0, item.id]
+                    sql: "UPDATE products SET stock = stock + ?, cost = ?, price = ?, sku = ?, tax_rate = ? WHERE id = ? AND company_id = ?",
+                    args: [item.quantity, item.cost, item.price, item.sku, item.tax || 0, item.id, activeCompanyId]
                 });
 
-                // Create Lot
+                // Create Lot (with company_id from schema update, even if we left it implicit default in code before, we should be explicit now if possible, 
+                // but checking table schema we added it. Let's add it to args.)
+                // Wait, in _runMigrations we added company_id related to tables. 
+                // product_lots was one of them? Yes.
+
                 queries.push({
-                    sql: "INSERT INTO product_lots (product_id, batch_number, expiry_date, quantity, cost, supplier_name, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')",
+                    sql: "INSERT INTO product_lots (product_id, batch_number, expiry_date, quantity, cost, supplier_name, created_at, status, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)",
                     args: [
                         item.id,
-                        item.batchNumber || '', // Ensure batchNumber is passed from UI
-                        item.expiryDate || null, // Ensure expiryDate is passed from UI
+                        item.batchNumber || '',
+                        item.expiryDate || null,
                         item.quantity,
                         item.cost,
                         purchase.supplierName,
-                        new Date().toISOString()
+                        new Date().toISOString(),
+                        activeCompanyId
                     ]
                 });
             });
 
+            // Audit
+            queries.push({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'CREATE', 'PURCHASE', JSON.stringify({ total: purchase.total }), new Date().toISOString()]
+            });
+
             await turso.batch(queries);
 
-            // Refetch lots to get IDs (simpler than predicting)
-            // Or just append optimistically? We need IDs for sales ideally, but for now just append.
-            // Actually, better to refetch active lots or append a fake one. 
-            // Let's refetch logic or just add to store optimistically without ID (risky for updates).
-            // Let's fetch all lots again to be safe given the complexity? No, too heavy.
-            // Let's just create an optimistic lot.
+            // Refetch lots or simulate (Optimistic)
             const newLots = purchase.items.map(item => ({
                 id: `temp-${Date.now()}-${item.id}`, // Temp ID
                 product_id: item.id,
@@ -599,8 +1094,18 @@ export const useStore = create(persist((set, get) => ({
                 cost: parseFloat(item.cost),
                 supplier_name: purchase.supplierName,
                 created_at: new Date().toISOString(),
-                status: 'active'
+                status: 'active',
+                company_id: activeCompanyId
             }));
+
+            // We need newPurchase object primarily for state update
+            const newPurchase = {
+                ...purchase,
+                id: Date.now(),
+                status: 'completed',
+                userId: currentUser ? currentUser.id : null,
+                company_id: activeCompanyId
+            };
 
             set((state) => ({
                 purchases: [newPurchase, ...state.purchases],
@@ -621,10 +1126,10 @@ export const useStore = create(persist((set, get) => ({
                 })
             }));
 
-            return true;
+            return { success: true };
         } catch (e) {
             console.error("Add purchase error", e);
-            return false;
+            return { success: false, error: e.message };
         }
     },
 
@@ -659,6 +1164,11 @@ export const useStore = create(persist((set, get) => ({
 
         // 2. Update prices for all items
         return cartItems.map(item => {
+            // If price was manually set, skip auto-calculation for this item
+            if (item.isManualPrice) {
+                return item;
+            }
+
             let quantityForScale = item.quantity;
 
             if (item.scale_group_id && groupTotals[item.scale_group_id]) {
@@ -689,7 +1199,8 @@ export const useStore = create(persist((set, get) => ({
                 ...product,
                 quantity: 1,
                 original_price: product.price,
-                discount: 0
+                discount: 0,
+                isManualPrice: false
             }];
         }
 
@@ -697,9 +1208,18 @@ export const useStore = create(persist((set, get) => ({
     }),
 
     updateCartItem: (productId, updates) => set((state) => {
-        let newCart = state.cart.map((item) =>
-            item.id === productId ? { ...item, ...updates } : item
-        );
+        let newCart = state.cart.map((item) => {
+            if (item.id === productId) {
+                // If price is being updated, flag it as manual
+                const isPriceUpdate = updates.price !== undefined;
+                return {
+                    ...item,
+                    ...updates,
+                    isManualPrice: isPriceUpdate ? true : item.isManualPrice
+                };
+            }
+            return item;
+        });
         return { cart: state._recalculateCartPrices(newCart) };
     }),
 
@@ -729,11 +1249,21 @@ export const useStore = create(persist((set, get) => ({
 
     addSale: async (sale) => {
         try {
-            const { productLots, products, currentUser } = get();
+            const { productLots, products, currentUser, activeCompanyId, validateCompanyAccess } = get();
+
+            // 0. Security Validation
+            if (!validateCompanyAccess(currentUser ? currentUser.id : null, activeCompanyId)) {
+                console.error("Access Denied: User cannot add sale to this company.");
+                return { success: false, error: "Acceso denegado." };
+            }
 
             // Validation: Check strict stock availability (Legacy + Valid Lots)
             for (const item of sale.items) {
                 const product = products.find(p => p.id === item.id);
+
+                // Extra Security: Ensure product belongs to active company (implicitly checked if products are filtered, but good to be explicit if we fetched all)
+                // Since 'products' in state are already filtered by activeCompanyId in fetchInitialData, this is safe.
+
                 if (!product) continue;
 
                 // 1. Calculate specific lot stats
@@ -799,7 +1329,7 @@ export const useStore = create(persist((set, get) => ({
 
             const queries = [
                 {
-                    sql: "INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id, status, has_negative_stock, client_id, client_name) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?)",
+                    sql: "INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id, status, has_negative_stock, client_id, client_name, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?)",
                     args: [
                         new Date().toISOString(),
                         sale.total,
@@ -810,7 +1340,8 @@ export const useStore = create(persist((set, get) => ({
                         currentUser ? currentUser.id : null,
                         saleHasNegativeStock ? 1 : 0,
                         sale.client ? sale.client.id : null,
-                        sale.client ? sale.client.name : null
+                        sale.client ? sale.client.name : null,
+                        activeCompanyId
                     ]
                 }
             ];
@@ -821,14 +1352,14 @@ export const useStore = create(persist((set, get) => ({
             for (const item of sale.items) {
                 // 1. Deduct from total stock (Legacy compatibility)
                 queries.push({
-                    sql: "UPDATE products SET stock = stock - ? WHERE id = ?",
-                    args: [item.quantity, item.id]
+                    sql: "UPDATE products SET stock = stock - ? WHERE id = ? AND company_id = ?",
+                    args: [item.quantity, item.id, activeCompanyId]
                 });
 
                 if (productsToMarkPending.includes(item.id)) {
                     queries.push({
-                        sql: "UPDATE products SET pending_adjustment = 1 WHERE id = ?",
-                        args: [item.id]
+                        sql: "UPDATE products SET pending_adjustment = 1 WHERE id = ? AND company_id = ?",
+                        args: [item.id, activeCompanyId]
                     });
                 }
 
@@ -858,7 +1389,7 @@ export const useStore = create(persist((set, get) => ({
                     const deduct = Math.min(lot.quantity, remainingQty);
 
                     queries.push({
-                        sql: "UPDATE product_lots SET quantity = quantity - ? WHERE id = ?",
+                        sql: "UPDATE product_lots SET quantity = quantity - ? WHERE id = ?", // Lots are unique IDs, adding company_id check is safer but ID should be unique.
                         args: [deduct, lot.id]
                     });
 
@@ -872,17 +1403,31 @@ export const useStore = create(persist((set, get) => ({
                 // We do NOT deduct from expired lots.
             }
 
+            // Audit Log
+            queries.push({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [
+                    activeCompanyId,
+                    currentUser ? currentUser.id : null,
+                    'CREATE',
+                    'SALE',
+                    JSON.stringify({ total: sale.total, itemsCount: sale.items.length }),
+                    new Date().toISOString()
+                ]
+            });
+
             await turso.batch(queries);
 
             // Update local state to reflect stock changes
             set((state) => ({
                 sales: [{
                     ...sale,
-                    id: Date.now(),
+                    id: Date.now(), // Optimistic ID, will be replaced on refresh
                     date: new Date().toISOString(),
                     status: 'completed',
                     clientId: sale.client ? sale.client.id : null,
-                    clientName: sale.client ? sale.client.name : null
+                    clientName: sale.client ? sale.client.name : null,
+                    company_id: activeCompanyId
                 }, ...state.sales],
                 productLots: updatedLots, // Updated lots
                 products: state.products.map(p => {
@@ -898,8 +1443,6 @@ export const useStore = create(persist((set, get) => ({
                     return p;
                 })
             }));
-
-
 
             // Force refresh of sales to get real DB IDs (Critical for payments)
             get().fetchSales();

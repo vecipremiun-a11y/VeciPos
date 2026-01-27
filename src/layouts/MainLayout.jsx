@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
+import CompanySwitcher from '../components/CompanySwitcher';
 
 const MainLayout = () => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -12,37 +13,38 @@ const MainLayout = () => {
 
     const [openSubmenu, setOpenSubmenu] = useState(null);
 
+    // Static Navigation Items
     const allNavItems = [
-        { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', roles: ['Administrador', 'Vendedor', 'Bodeguero', 'Supervisor'] },
-        { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', roles: ['Administrador', 'Vendedor'] },
-        { icon: Users, label: 'Clientes', path: '/clients', roles: ['Administrador', 'Vendedor'] },
-        { icon: History, label: 'Historial', path: '/sales-history', roles: ['Administrador', 'Vendedor', 'Supervisor'] },
+        { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', roles: ['Administrador', 'Vendedor', 'Bodeguero', 'Supervisor', 'super_admin', 'owner'] },
+        { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', roles: ['Administrador', 'Vendedor', 'super_admin', 'owner'] },
+        { icon: Users, label: 'Clientes', path: '/clients', roles: ['Administrador', 'Vendedor', 'super_admin', 'owner'] },
+        { icon: History, label: 'Historial', path: '/sales-history', roles: ['Administrador', 'Vendedor', 'Supervisor', 'super_admin', 'owner'] },
         {
             icon: Package,
             label: 'Inventario',
             // Removed path to make it a parent
-            roles: ['Administrador', 'Bodeguero'],
+            roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'],
             subItems: [
-                { icon: Box, label: 'Productos', path: '/inventory', roles: ['Administrador', 'Bodeguero'] },
-                { icon: Tag, label: 'Categorías', path: '/categories', roles: ['Administrador', 'Bodeguero'] },
-                { icon: Truck, label: 'Proveedores', path: '/suppliers', roles: ['Administrador', 'Bodeguero'] },
-                { icon: ClipboardList, label: 'Compras', path: '/purchases', roles: ['Administrador', 'Bodeguero'] }
+                { icon: Box, label: 'Productos', path: '/inventory', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
+                { icon: Tag, label: 'Categorías', path: '/categories', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
+                { icon: Truck, label: 'Proveedores', path: '/suppliers', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
+                { icon: ClipboardList, label: 'Compras', path: '/purchases', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] }
             ]
         },
         {
             icon: FileText,
             label: 'Reportes',
             // path removed
-            roles: ['Administrador', 'Supervisor'],
+            roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'],
             subItems: [
-                { icon: FileText, label: 'Ventas', path: '/reports', roles: ['Administrador', 'Supervisor'] },
-                { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', roles: ['Administrador', 'Supervisor'] },
-                { icon: DollarSign, label: 'Cierre de Caja', path: '/reports/closures', roles: ['Administrador', 'Supervisor'] },
-                { icon: ArrowLeftRight, label: 'Movimientos de Caja', path: '/reports/movements', roles: ['Administrador', 'Supervisor'] }
+                { icon: FileText, label: 'Ventas', path: '/reports', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
+                { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
+                { icon: DollarSign, label: 'Cierre de Caja', path: '/reports/closures', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
+                { icon: ArrowLeftRight, label: 'Movimientos de Caja', path: '/reports/movements', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] }
             ]
         },
-        { icon: Users, label: 'Usuarios', path: '/users', roles: ['Administrador'] },
-        { icon: Settings, label: 'Configuración', path: '/settings', roles: ['Administrador'] },
+        { icon: Users, label: 'Usuarios', path: '/users', roles: ['Administrador', 'super_admin', 'owner'] },
+        { icon: Settings, label: 'Configuración', path: '/settings', roles: ['Administrador', 'super_admin', 'owner'] },
     ];
 
     // If no user is logged in, show all (dev mode) or minimal? 
@@ -175,18 +177,35 @@ const MainLayout = () => {
                 </div>
             </aside>
 
-            {/* Main Content */}
-            <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+            {/* Main Content Area */}
+            <main className="flex-1 flex flex-col overflow-hidden bg-[var(--color-background)] relative">
                 {/* Header */}
-                <header className="h-16 glass border-b border-[var(--glass-border)] flex items-center justify-between px-6 z-10">
-                    <h2 className="text-xl font-semibold text-[var(--color-text)]">Panel de Control</h2>
+                <header className="h-16 glass border-b border-[var(--glass-border)] flex justify-between items-center px-6 z-10 shrink-0">
+                    <h2 className="text-xl font-bold text-[var(--color-text)]">
+                        {navItems.find(item => item.path === location.pathname)?.label ||
+                            navItems.find(item => item.subItems?.some(sub => sub.path === location.pathname))?.subItems?.find(sub => sub.path === location.pathname)?.label ||
+                            'Bienvenido'}
+                    </h2>
+
                     <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[var(--color-primary)] to-[var(--color-secondary)] flex items-center justify-center font-bold text-white border-2 border-[var(--glass-border)]">
-                            {currentUser?.username?.charAt(0).toUpperCase() || 'G'}
-                        </div>
-                        <div className="hidden md:block">
-                            <p className="text-sm font-medium text-[var(--color-text)]">{currentUser?.name || 'Invitado'}</p>
-                            <p className="text-xs text-[var(--color-text-muted)]">{currentUser?.role || 'Solo lectura'}</p>
+                        {/* Company Switcher */}
+                        <CompanySwitcher />
+
+                        <div className="flex items-center gap-3 pl-4 border-l border-[var(--glass-border)]">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[var(--color-primary)] to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-[var(--color-primary)]/20">
+                                {currentUser?.name?.[0] || 'U'}
+                            </div>
+                            <div className="hidden md:block">
+                                <p className="text-sm font-medium text-[var(--color-text)]">{currentUser?.name}</p>
+                                <p className="text-xs text-[var(--color-text-muted)] capitalize">{currentUser?.role}</p>
+                            </div>
+                            <button
+                                onClick={handleLogout}
+                                className="p-2 hover:bg-[var(--color-surface-hover)] rounded-full text-[var(--color-text-muted)] hover:text-red-400 transition-colors ml-2"
+                                title="Cerrar Sesión"
+                            >
+                                <LogOut size={18} />
+                            </button>
                         </div>
                     </div>
                 </header>
@@ -196,7 +215,7 @@ const MainLayout = () => {
                     <div className="absolute top-[20%] right-[10%] w-[300px] h-[300px] rounded-full bg-[var(--color-primary)] opacity-5 blur-[80px] pointer-events-none"></div>
                     <Outlet />
                 </main>
-            </div>
+            </main>
         </div>
     );
 };

@@ -15,6 +15,10 @@ import CashMovementsReport from './pages/CashMovementsReport';
 import Settings from './pages/Settings';
 import Clients from './pages/Clients';
 import MainLayout from './layouts/MainLayout';
+import AdminLayout from './layouts/AdminLayout';
+import RequireAdmin from './components/RequireAdmin';
+import AdminDashboard from './pages/admin/AdminDashboard';
+import AdminCompanies from './pages/admin/AdminCompanies';
 
 
 
@@ -60,6 +64,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
 
+
         {/* Protected Routes */}
         <Route path="/" element={
           <ProtectedRoute>
@@ -81,6 +86,16 @@ function App() {
           <Route path="reports/closures" element={<CashClosuresReport />} />
           <Route path="reports/movements" element={<CashMovementsReport />} />
           <Route path="settings" element={<Settings />} />
+        </Route>
+
+        {/* Super Admin Routes */}
+        <Route path="/admin" element={
+          <RequireAdmin>
+            <AdminLayout />
+          </RequireAdmin>
+        }>
+          <Route index element={<AdminDashboard />} />
+          <Route path="companies" element={<AdminCompanies />} />
         </Route>
       </Routes>
     </Router>
