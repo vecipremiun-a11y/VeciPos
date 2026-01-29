@@ -1,20 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
-import { format, isValid } from 'date-fns';
 import { Search, Filter, ArrowUpCircle, ArrowDownCircle, ChevronDown, ChevronRight, User } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { es } from 'date-fns/locale';
+import { formatInCompanyTime } from '../lib/dateHelpers';
 
 // Helper for safe date formatting
-const safeFormat = (dateString, fmt) => {
+// Helper for safe date formatting
+const safeFormat = (dateString, fmt, timezone) => {
     if (!dateString) return '-';
-    const d = new Date(dateString);
-    if (!isValid(d)) return '-';
-    return format(d, fmt, { locale: es });
+    return formatInCompanyTime(dateString, timezone, fmt);
 };
 
 const CashMovementsReport = () => {
-    const { fetchCashMovements } = useStore();
+    const { fetchCashMovements, currentCompanyTimezone } = useStore();
     const [movements, setMovements] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [expandedGroups, setExpandedGroups] = useState({}); // { registerId: boolean }
@@ -157,7 +155,7 @@ const CashMovementsReport = () => {
                                     <div>
                                         <h3 className="font-bold text-white text-lg">{group.user_name || 'Desconocido'}</h3>
                                         <p className="text-sm text-gray-400">
-                                            Turno #{group.register_id} • Iniciado: {safeFormat(group.opening_time, "d/MM/yy HH:mm")}
+                                            Turno #{group.register_id} • Iniciado: {safeFormat(group.opening_time, "dd/MM/yy HH:mm", currentCompanyTimezone)}
                                         </p>
                                     </div>
                                 </div>
@@ -204,7 +202,7 @@ const CashMovementsReport = () => {
                                             {group.items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).map(item => (
                                                 <tr key={item.id} className="hover:bg-white/5 transition-colors">
                                                     <td className="px-6 py-3 text-gray-300 font-mono">
-                                                        {safeFormat(item.created_at, "HH:mm")}
+                                                        {safeFormat(item.created_at, "HH:mm", currentCompanyTimezone)}
                                                     </td>
                                                     <td className="px-6 py-3">
                                                         <span className={cn(

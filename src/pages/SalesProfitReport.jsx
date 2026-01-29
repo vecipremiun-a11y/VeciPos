@@ -6,9 +6,10 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Search, Calendar, Download, DollarSign, TrendingUp, Percent, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
+import { formatInCompanyTime, getNowInCompanyTime } from '../lib/dateHelpers';
 
 const SalesProfitReport = () => {
-    const { fetchSales } = useStore();
+    const { fetchSales, currentCompanyTimezone } = useStore();
     const [sales, setSales] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [dateRange, setDateRange] = useState('today'); // today, yesterday, custom
@@ -34,16 +35,27 @@ const SalesProfitReport = () => {
             const allSales = await fetchSales(); // This usually fetches all, we might need to filter client-side if API doesn't support
 
             // Filter by Date
+            // Filter by Date
             const filtered = allSales.filter(sale => {
                 if (!sale.date) return false;
-                const saleDate = new Date(sale.date);
 
-                if (dateRange === 'today') return isToday(saleDate);
-                if (dateRange === 'yesterday') return isYesterday(saleDate);
+                // Convert sale date AND comparison dates to Company Time
+                const saleDateStr = formatInCompanyTime(sale.date, currentCompanyTimezone, 'yyyy-MM-dd');
+                const nowInCompany = getNowInCompanyTime(currentCompanyTimezone);
+                const todayStr = formatInCompanyTime(nowInCompany.toISOString(), currentCompanyTimezone, 'yyyy-MM-dd');
+
+                // Calculate yesterday string properly in company time
+                const yesterday = new Date(nowInCompany);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayStr = formatInCompanyTime(yesterday.toISOString(), currentCompanyTimezone, 'yyyy-MM-dd');
+
+                if (dateRange === 'today') return saleDateStr === todayStr;
+                if (dateRange === 'yesterday') return saleDateStr === yesterdayStr;
+
                 if (dateRange === 'custom' && customStart && customEnd) {
-                    return saleDate >= startOfDay(new Date(customStart)) && saleDate <= endOfDay(new Date(customEnd));
+                    return saleDateStr >= customStart && saleDateStr <= customEnd;
                 }
-                return true; // Default show all if no filter? Or default today? Let's default today
+                return true;
             });
 
             processSales(filtered);
@@ -153,7 +165,7 @@ const SalesProfitReport = () => {
     const exportToExcel = () => {
         const ws = XLSX.utils.json_to_sheet(flattenedItems.map(item => ({
             'ID Venta': item.saleId,
-            'Fecha': format(new Date(item.saleDate), 'dd/MM/yyyy HH:mm'),
+            'Fecha': formatInCompanyTime(item.saleDate, currentCompanyTimezone, 'dd/MM/yyyy HH:mm'),
             'Producto': item.productName,
             'Codigo': item.barcode,
             'Cantidad': item.quantity,
@@ -266,7 +278,7 @@ const SalesProfitReport = () => {
                                 flattenedItems.map((item, idx) => (
                                     <tr key={`${item.saleId}-${idx}`} className="hover:bg-[var(--glass-bg)] transition-colors">
                                         <td className="px-6 py-3 text-gray-400">#{item.saleId}</td>
-                                        <td className="px-6 py-3 text-gray-400">{format(new Date(item.saleDate), 'dd/MM HH:mm')}</td>
+                                        <td className="px-6 py-3 text-gray-400">{formatInCompanyTime(item.saleDate, currentCompanyTimezone, 'dd/MM HH:mm')}</td>
                                         <td className="px-6 py-3 font-medium text-white">{item.productName}</td>
                                         <td className="px-6 py-3 text-gray-500">{item.barcode}</td>
                                         <td className="px-6 py-3 text-right text-white font-bold">{item.quantity}</td>

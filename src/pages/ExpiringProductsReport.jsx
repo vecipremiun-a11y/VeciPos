@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../store/useStore';
+import { formatInCompanyTime } from '../lib/dateHelpers';
 import {
     AlertTriangle,
     CheckCircle,
@@ -15,21 +16,35 @@ import {
 } from 'lucide-react';
 
 const ExpiringProductsReport = () => {
-    const { products, productLots, categories } = useStore();
+    // Removed reliance on global products/productLots
+    const { fetchProductLotsReport, currentCompanyTimezone } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
+    const [isLoading, setIsLoading] = useState(true);
+    const [reportData, setReportData] = useState([]); // This will hold the fetched lots with product info
+
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [endDate, setEndDate] = useState(() => {
         const d = new Date();
-        d.setMonth(d.getMonth() + 1); // Default 1 month ahead
+        d.setMonth(d.getMonth() + 1);
         return d.toISOString().split('T')[0];
     });
     const [expandedProduct, setExpandedProduct] = useState(null);
 
-    // Filter Lots Logic
+    // Fetch Data on Mount
+    React.useEffect(() => {
+        const load = async () => {
+            setIsLoading(true);
+            const data = await fetchProductLotsReport();
+            setReportData(data);
+            setIsLoading(false);
+        };
+        load();
+    }, [fetchProductLotsReport]);
+
+    // Filter Logic
     const stats = useMemo(() => {
         const today = new Date().toISOString().split('T')[0];
-        const start = new Date(startDate);
-        const end = new Date(endDate);
+        // ... dates ...
 
         let validCount = 0;
         let validLots = 0;
@@ -41,25 +56,34 @@ const ExpiringProductsReport = () => {
         let totalLots = 0;
         let expiryValueLost = 0;
 
-        // Group lots by product
         const productMap = {};
 
-        productLots.forEach(lot => {
-            // Only count lots with quantity > 0
-            if (lot.quantity <= 0) return;
+        // Iterate over the FETCHED report data, not the global store
+        reportData.forEach(row => {
+            // Row contains mixed lot and product info
 
-            if (!productMap[lot.product_id]) {
-                productMap[lot.product_id] = { ...products.find(p => p.id === lot.product_id), lots: [] };
+            if (!productMap[row.product_id]) {
+                // Reconstruct product object from flat row
+                productMap[row.product_id] = {
+                    id: row.product_id,
+                    name: row.product_name,
+                    sku: row.product_sku,
+                    image: row.product_image,
+                    stock: row.product_stock,
+                    unit: row.product_unit,
+                    price: row.product_price,
+                    lots: []
+                };
             }
 
-            const expiry = lot.expiry_date;
+            const expiry = row.expiry_date;
             let status = 'valid';
 
             if (expiry) {
                 if (expiry < today) {
                     status = 'expired';
                     expiredLots++;
-                    expiryValueLost += (lot.cost * lot.quantity);
+                    expiryValueLost += (row.cost * row.quantity);
                 } else if (expiry >= startDate && expiry <= endDate) {
                     status = 'near_expiry';
                     nearExpiryLots++;
@@ -67,10 +91,13 @@ const ExpiringProductsReport = () => {
                     validLots++;
                 }
             } else {
-                validLots++; // No expiry = Valid forever
+                validLots++;
             }
 
-            productMap[lot.product_id].lots.push({ ...lot, status });
+            productMap[row.product_id].lots.push({
+                ...row, // row has all lot fields (batch_number, etc) + product fields (ignored here)
+                status
+            });
             totalLots++;
         });
 
@@ -81,7 +108,10 @@ const ExpiringProductsReport = () => {
 
             if (hasExpired) expiredCount++;
             if (hasNear) nearExpiryCount++;
-            if (!hasExpired && !hasNear) validCount++; // Loose definition
+            // Only count as valid if it has NO expired and NO near-expiry (strict view for this card?)
+            // Or loose definition: distinct products that are valid?
+            // Original logic: if (!hasExpired && !hasNear) validCount++; 
+            if (!hasExpired && !hasNear) validCount++;
 
             totalItems++;
         });
@@ -94,7 +124,7 @@ const ExpiringProductsReport = () => {
             expiryValueLost,
             groupedProducts: Object.values(productMap)
         };
-    }, [productLots, products, startDate, endDate]);
+    }, [reportData, startDate, endDate]);
 
     const filteredProducts = useMemo(() => {
         return stats.groupedProducts.filter(p => {
@@ -269,7 +299,7 @@ const ExpiringProductsReport = () => {
                                                 <tr key={lot.id} className="border-b border-[var(--glass-border)] hover:bg-[var(--color-surface)] dark:bg-[var(--glass-bg)] transition">
                                                     <td className="px-4 py-3">
                                                         <p className="font-bold text-[var(--color-text)]">{lot.batch_number || 'Sin lote'}</p>
-                                                        <p className="text-xs text-[var(--color-text-muted)]">Reg: {new Date(lot.created_at).toLocaleDateString()}</p>
+                                                        <p className="text-xs text-[var(--color-text-muted)]">Reg: {formatInCompanyTime(lot.created_at, currentCompanyTimezone, 'dd/MM/yyyy')}</p>
                                                     </td>
                                                     <td className="px-4 py-3 font-medium">
                                                         {lot.quantity} Unds
@@ -280,7 +310,7 @@ const ExpiringProductsReport = () => {
                                                                 lot.status === 'near_expiry' ? 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-300' :
                                                                     'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-300'
                                                                 }`}>
-                                                                {new Date(lot.expiry_date).toLocaleDateString()}
+                                                                {formatInCompanyTime(lot.expiry_date, currentCompanyTimezone, 'dd/MM/yyyy')}
                                                             </div>
                                                         ) : (
                                                             <span className="text-[var(--color-text-muted)] text-xs">No vence</span>

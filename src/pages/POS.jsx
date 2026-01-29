@@ -9,26 +9,32 @@ import SaleSuccessModal from '../components/SaleSuccessModal';
 import ClientSearchWidget from '../components/ClientSearchWidget';
 
 const POS = () => {
-    const { products, categories: storedCategories, cart, addToCart, removeFromCart, clearCart, updateCartItem, addSale, currentUser, cashRegister, checkRegisterStatus, inventoryAdjustmentMode, posSelectedClient, setPosSelectedClient } = useStore();
+    const {
+        products,
+        categories: storedCategories,
+        cart,
+        addToCart,
+        removeFromCart,
+        clearCart,
+        updateCartItem,
+        addSale,
+        currentUser,
+        cashRegister, // Added back
+        checkRegisterStatus,
+        inventoryAdjustmentMode,
+        posSelectedClient,
+        setPosSelectedClient,
+        searchProducts,
+        loadCategoryProducts,
+        activeCompanyId
+    } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
     const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
     const [lastSaleDetails, setLastSaleDetails] = useState(null);
 
-    const [displayedLimit, setDisplayedLimit] = useState(30);
-
-    // Check register status on mount
-    React.useEffect(() => {
-        if (currentUser) {
-            checkRegisterStatus(currentUser.id);
-        }
-    }, [currentUser, checkRegisterStatus]);
-
-    // Reset displayed limit when search or category changes
-    React.useEffect(() => {
-        setDisplayedLimit(30);
-    }, [searchTerm, selectedCategory]);
+    // Old logic removed - replaced by pagination logic below
 
     // Barcode Scanner Listener
     React.useEffect(() => {
@@ -38,67 +44,42 @@ const POS = () => {
         const handleKeyDown = (e) => {
             const currentTime = Date.now();
 
-            // If typing in an input, don't interfere
-            if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
-                return;
-            }
+            if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
 
-            // Clear buffer if too much time passed (manual typing vs scanner)
-            if (currentTime - lastKeyTime > 100) {
-                buffer = '';
-            }
+            if (currentTime - lastKeyTime > 100) buffer = '';
             lastKeyTime = currentTime;
 
             if (e.key === 'Enter') {
                 if (buffer.length > 0) {
-                    const scannedProduct = products.find(p =>
+                    // Try to find in current view first
+                    let scannedProduct = products.find(p =>
                         p.sku && p.sku.toLowerCase() === buffer.toLowerCase()
                     );
 
                     if (scannedProduct) {
                         addToCart(scannedProduct);
-                        // Optional: Scan sound or visual feedback could go here
+                    } else {
+                        // Fallback: search specifically for this SKU
+                        searchProducts(buffer);
                     }
                     buffer = '';
                 }
             } else if (e.key.length === 1) {
-                // Only add printable characters to buffer
                 buffer += e.key;
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [products, addToCart]);
+    }, [products, addToCart, searchProducts]);
 
     // Use stored categories for the filter list. 
-    // Filter for active ones AND those allowed in POS
     const categoryList = ['Todos', ...storedCategories
         .filter(c => c.status === 'active' && c.showInPos !== false)
         .map(c => c.name)];
 
-    const filteredProducts = products.filter(product => {
-        const term = searchTerm.toLowerCase();
-        const matchesSearch = product.name.toLowerCase().includes(term) ||
-            (product.sku && product.sku.toLowerCase().includes(term));
-        const matchesCategory = selectedCategory === 'Todos' || product.category === selectedCategory;
-        return matchesSearch && matchesCategory;
-    }).sort((a, b) => {
-        const aOffer = (a.is_offer === 1 || a.is_offer === true) ? 1 : 0;
-        const bOffer = (b.is_offer === 1 || b.is_offer === true) ? 1 : 0;
-        return bOffer - aOffer;
-    });
-
-    const visibleProducts = filteredProducts.slice(0, displayedLimit);
-
-    const handleScroll = (e) => {
-        const { scrollTop, clientHeight, scrollHeight } = e.target;
-        if (scrollHeight - scrollTop <= clientHeight + 100) {
-            if (displayedLimit < filteredProducts.length) {
-                setDisplayedLimit(prev => prev + 30);
-            }
-        }
-    };
+    // Products are now served pre-filtered
+    const visibleProducts = products;
 
     const finalTotal = cart.reduce((total, item) => {
         const itemTotal = item.price * item.quantity;
@@ -150,12 +131,75 @@ const POS = () => {
         setLastSaleDetails(null);
     };
 
+    // Check register status on mount
+    React.useEffect(() => {
+        if (currentUser) {
+            checkRegisterStatus(currentUser.id);
+        }
+    }, [currentUser, checkRegisterStatus]);
+
+    // Pagination State
+    const [offset, setOffset] = React.useState(0);
+    const [hasMore, setHasMore] = React.useState(true);
+    const [isLoadingMore, setIsLoadingMore] = React.useState(false);
+
+    // Initial Load & Category Change
+    React.useEffect(() => {
+        const load = async () => {
+            // If searching, we skip category load (or maybe we paginate search too? user asked for general scroll)
+            // For now, let's assume search handles its own limit or we stick to category mainly.
+            if (searchTerm) {
+                // Search is currently handled by separate effect, let's keep it simple.
+                return;
+            }
+
+            setIsLoadingMore(true);
+            setOffset(0);
+            const count = await loadCategoryProducts(selectedCategory, 0);
+            setHasMore(count === 30); // If we got full batch, assume more exists
+            setIsLoadingMore(false);
+        };
+        load();
+    }, [selectedCategory, searchTerm, activeCompanyId]); // Reset on category/search/company change
+
+    // Search Effect (existing logic modified to reset list)
+    React.useEffect(() => {
+        const delayDebounceFn = setTimeout(() => {
+            if (searchTerm) {
+                // If we want infinite scroll on search too, we need to update searchProducts signature.
+                // For now, let's keep search simple (50 items) or user might get confused.
+                // But user asked "bring first 30... then scroll".
+                searchProducts(searchTerm);
+                setHasMore(false); // Disable infinite scroll for search for now unless requested
+            } else {
+                // Should fall back to category load above
+            }
+        }, 300);
+
+        return () => clearTimeout(delayDebounceFn);
+    }, [searchTerm]);
+
+    const handleScroll = async (e) => {
+        const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
+
+        // Check if we are near bottom (within 100px) and have more data
+        if (scrollHeight - scrollTop <= clientHeight + 100 && hasMore && !isLoadingMore && !searchTerm) {
+            setIsLoadingMore(true);
+            const newOffset = offset + 30;
+            const count = await loadCategoryProducts(selectedCategory, newOffset);
+
+            setOffset(newOffset);
+            setHasMore(count === 30);
+            setIsLoadingMore(false);
+        }
+    };
+
     return (
         <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-100px)]">
             <CashOpeningModal isOpen={!cashRegister && !!currentUser} />
             <SaleSuccessModal
                 isOpen={isSuccessModalOpen}
-                onClose={() => setIsSuccessModalOpen(false)} // Optional: allow closing without clearing? better to enforce new sale flow or just close
+                onClose={() => setIsSuccessModalOpen(false)}
                 saleDetails={lastSaleDetails}
                 onNewSale={handleNewSale}
                 seller={currentUser}
@@ -205,7 +249,7 @@ const POS = () => {
 
                 {/* Grid */}
                 <div
-                    className="flex-1 overflow-y-auto pr-2 grid grid-cols-3 min-[1450px]:grid-cols-4 min-[1801px]:grid-cols-5 min-[2201px]:grid-cols-6 gap-4 content-start pb-20"
+                    className="flex-1 overflow-y-auto pr-2 grid grid-cols-3 min-[1450px]:grid-cols-4 min-[1801px]:grid-cols-5 min-[2201px]:grid-cols-6 gap-4 content-start pb-20 custom-scrollbar"
                     onScroll={handleScroll}
                 >
                     {visibleProducts.map((product) => (

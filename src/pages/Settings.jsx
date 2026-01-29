@@ -1,9 +1,42 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
+import { turso } from '../lib/turso';
 import { Moon, Sun } from 'lucide-react';
 
 const Settings = () => {
-    const { darkMode, toggleDarkMode, inventoryAdjustmentMode, toggleInventoryAdjustmentMode } = useStore();
+    const { darkMode, toggleDarkMode, inventoryAdjustmentMode, toggleInventoryAdjustmentMode, activeCompanyId, currentCompanyTimezone, fetchInitialData } = useStore();
+    const [selectedTimezone, setSelectedTimezone] = useState(currentCompanyTimezone);
+
+    useEffect(() => {
+        setSelectedTimezone(currentCompanyTimezone);
+    }, [currentCompanyTimezone]);
+
+    const timezones = [
+        { value: 'America/Santiago', label: 'Chile (Santiago)' },
+        { value: 'America/Argentina/Buenos_Aires', label: 'Argentina (Buenos Aires)' },
+        { value: 'America/Mexico_City', label: 'México (Ciudad de México)' },
+        { value: 'America/Bogota', label: 'Colombia (Bogotá)' },
+        { value: 'America/Lima', label: 'Perú (Lima)' },
+        { value: 'America/Caracas', label: 'Venezuela (Caracas)' },
+        { value: 'America/Sao_Paulo', label: 'Brasil (São Paulo)' },
+        { value: 'Europe/Madrid', label: 'España (Madrid)' },
+        { value: 'America/New_York', label: 'USA (Nueva York)' },
+    ];
+
+    const handleTimezoneChange = async (newTimezone) => {
+        try {
+            await turso.execute({
+                sql: 'UPDATE companies SET timezone = ? WHERE id = ?',
+                args: [newTimezone, activeCompanyId]
+            });
+            setSelectedTimezone(newTimezone);
+            await fetchInitialData(); // Reload to update store
+            alert('Zona horaria actualizada correctamente');
+        } catch (e) {
+            console.error('Error updating timezone:', e);
+            alert('Error al actualizar zona horaria');
+        }
+    };
 
     return (
         <div className="max-w-4xl mx-auto space-y-6">
@@ -39,6 +72,31 @@ const Settings = () => {
                         className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors duration-300 ${darkMode ? 'bg-[var(--color-primary)]' : 'bg-gray-300'}`}
                     >
                         <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${darkMode ? 'right-1' : 'left-1'}`}></div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="glass-card">
+                <h2 className="text-xl font-bold text-[var(--color-text)] mb-4">Zona Horaria de la Empresa</h2>
+                <div className="flex flex-col gap-4">
+                    <p className="text-sm text-[var(--color-text-muted)]">
+                        Configura la zona horaria para el registro correcto de ventas y reportes
+                    </p>
+                    <div className="flex items-center gap-4">
+                        <select
+                            value={selectedTimezone}
+                            onChange={(e) => handleTimezoneChange(e.target.value)}
+                            className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] w-full max-w-md focus:outline-none focus:border-[var(--color-primary)]"
+                        >
+                            {timezones.map(tz => (
+                                <option key={tz.value} value={tz.value} className="bg-[#1a1a2e] text-white">
+                                    {tz.label}
+                                </option>
+                            ))}
+                        </select>
+                        <span className="text-xs text-[var(--color-text-muted)]">
+                            Actual: {currentCompanyTimezone}
+                        </span>
                     </div>
                 </div>
             </div>

@@ -2,9 +2,10 @@ import React, { useState, useMemo, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { Search, Calendar, CreditCard, User, Download, Send, Trash2, Printer, AlertTriangle, FileText, X } from 'lucide-react';
 import { formatMoney, generateReceiptPDF, generateWhatsAppLink } from '../utils/receipt';
+import { formatInCompanyTime } from '../lib/dateHelpers';
 
 const SalesHistory = () => {
-    const { sales, users, cancelSale, currentUser } = useStore();
+    const { sales, users, cancelSale, currentUser, currentCompanyTimezone } = useStore();
     const [selectedSale, setSelectedSale] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [dateFrom, setDateFrom] = useState('');
@@ -32,10 +33,8 @@ const SalesHistory = () => {
             // Assuming sale.date is "2024-01-22T..." 
             // Better to use a reliable parsing or simple string check if input is YYYY-MM-DD
 
-            const saleDateObj = new Date(sale.date);
-            // Get local YYYY-MM-DD string from the sale date
-            // This ensures we match what the user sees in "toLocaleDateString"
-            const saleDateStr = saleDateObj.toLocaleDateString('en-CA'); // en-CA gives YYYY-MM-DD format
+            // Use Company Timezone for filtering
+            const saleDateStr = formatInCompanyTime(sale.date, currentCompanyTimezone, 'yyyy-MM-dd');
 
             if (dateFrom) {
                 matchesDate = matchesDate && saleDateStr >= dateFrom;
@@ -53,7 +52,7 @@ const SalesHistory = () => {
 
             return matchesSearch && matchesDate && matchesPayment && matchesSeller;
         });
-    }, [sales, searchTerm, dateFrom, dateTo, paymentFilter, sellerFilter]);
+    }, [sales, searchTerm, dateFrom, dateTo, paymentFilter, sellerFilter, currentCompanyTimezone]);
 
     const handleDownloadPDF = () => {
         if (!selectedSale) return;
@@ -271,7 +270,9 @@ const SalesHistory = () => {
                                 <div className="flex justify-between items-end">
                                     <div>
                                         <p className="font-bold text-[var(--color-text)]">{formatMoney(sale.total)}</p>
-                                        <p className="text-xs text-[var(--color-text-muted)]">{new Date(sale.date).toLocaleDateString()} {new Date(sale.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                                        <p className="text-xs text-[var(--color-text-muted)]">
+                                            {formatInCompanyTime(sale.date, currentCompanyTimezone, 'dd/MM/yyyy HH:mm')}
+                                        </p>
                                         <div className="flex items-center gap-1 mt-1 text-xs text-[var(--color-text-muted)]">
                                             <User size={10} />
                                             {getSellerName(sale.user_id)}
@@ -308,7 +309,7 @@ const SalesHistory = () => {
                                         Venta #{selectedSale.id}
                                     </h2>
                                     <div className="text-sm text-[var(--color-text-muted)] flex gap-4">
-                                        <span>{new Date(selectedSale.date).toLocaleString()}</span>
+                                        <span>{formatInCompanyTime(selectedSale.date, currentCompanyTimezone, 'dd/MM/yyyy HH:mm')}</span>
                                         <span>•</span>
                                         <span>Vendedor: {getSellerName(selectedSale.user_id)}</span>
                                     </div>

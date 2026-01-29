@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
+import { formatInCompanyTime } from '../../lib/dateHelpers';
 import { Search, Plus, Building2, Calendar, MoreVertical, Power, Ban } from 'lucide-react';
 
 const AdminCompanies = () => {
-    const { fetchAllCompanies, createCompany, toggleCompanyStatus } = useStore();
+    const { fetchAllCompanies, createCompany, toggleCompanyStatus, currentCompanyTimezone } = useStore();
     const [companies, setCompanies] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -101,10 +102,10 @@ const AdminCompanies = () => {
                                     </td>
                                     <td className="p-4">
                                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${company.status === 'active'
-                                                ? 'bg-green-500/10 text-green-500 border-green-500/20'
-                                                : company.status === 'suspended'
-                                                    ? 'bg-red-500/10 text-red-500 border-red-500/20'
-                                                    : 'bg-gray-500/10 text-gray-500 border-gray-500/20'
+                                            ? 'bg-green-500/10 text-green-500 border-green-500/20'
+                                            : company.status === 'suspended'
+                                                ? 'bg-red-500/10 text-red-500 border-red-500/20'
+                                                : 'bg-gray-500/10 text-gray-500 border-gray-500/20'
                                             }`}>
                                             {company.status === 'active' ? 'Activa' : company.status === 'suspended' ? 'Suspendida' : company.status}
                                         </span>
@@ -112,15 +113,15 @@ const AdminCompanies = () => {
                                     <td className="p-4">
                                         <div className="flex items-center gap-2 text-sm text-gray-400">
                                             <Calendar size={14} />
-                                            {new Date(company.created_at).toLocaleDateString()}
+                                            {formatInCompanyTime(company.created_at, currentCompanyTimezone, 'dd/MM/yyyy')}
                                         </div>
                                     </td>
                                     <td className="p-4 text-right">
                                         <button
                                             onClick={() => handleToggleStatus(company.id, company.status)}
                                             className={`p-2 rounded-lg transition-colors ${company.status === 'active'
-                                                    ? 'text-red-400 hover:bg-red-500/10'
-                                                    : 'text-green-400 hover:bg-green-500/10'
+                                                ? 'text-red-400 hover:bg-red-500/10'
+                                                : 'text-green-400 hover:bg-green-500/10'
                                                 }`}
                                             title={company.status === 'active' ? "Suspender" : "Activar"}
                                         >

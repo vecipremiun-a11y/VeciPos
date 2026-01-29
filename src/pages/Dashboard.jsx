@@ -2,72 +2,116 @@ import React, { useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { AlertTriangle, TrendingDown, Clock } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { format, isToday, isSameMonth, parseISO, subDays, startOfDay, endOfDay } from 'date-fns';
+import { format, subDays, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { formatInCompanyTime } from '../lib/dateHelpers';
 
 const Dashboard = () => {
-    const { products, sales, activeRegisters, fetchActiveRegisters } = useStore();
+    const {
+        products,
+        activeRegisters,
+        fetchActiveRegisters,
+        currentCompanyTimezone,
+        fetchTodaySales,
+        fetchMonthlyStats, // New
+        fetchRecentSales, // New
+        fetchLowStockProducts,
+        activeCompanyId // Added
+    } = useStore();
+
+    // Separate state for different data needs
+    const [todaySales, setTodaySales] = React.useState([]);
+    const [monthlyStats, setMonthlyStats] = React.useState([]); // For Chart & Month Total
+    const [recentSales, setRecentSales] = React.useState([]); // For Activity List
+    const [lowStockProducts, setLowStockProducts] = React.useState([]);
 
     React.useEffect(() => {
-        // Initial fetch
         fetchActiveRegisters();
 
-        // Polling every minute to keep balances fresh
+        const loadDashboardData = async () => {
+            // 1. Fetch Today Sales (Detailed for Widgets)
+            const rawSales = await fetchTodaySales();
+            const parsedToday = rawSales.map(s => ({
+                ...s,
+                items: typeof s.items === 'string' ? JSON.parse(s.items) : s.items,
+                paymentDetails: s.payment_details && typeof s.payment_details === 'string' ? JSON.parse(s.payment_details) : (s.paymentDetails || null)
+            }));
+            setTodaySales(parsedToday);
+
+            // 2. Fetch Monthly Stats (Lightweight for Chart)
+            const thirtyDaysAgo = subDays(new Date(), 30);
+            const now = new Date();
+            const stats = await fetchMonthlyStats(thirtyDaysAgo, now);
+            setMonthlyStats(stats);
+
+            // 3. Fetch Recent Sales (Limited for List)
+            const recent = await fetchRecentSales();
+            setRecentSales(recent);
+
+            // 4. Fetch Low Stock
+            const lowStock = await fetchLowStockProducts();
+            setLowStockProducts(lowStock);
+        };
+        loadDashboardData();
+
         const interval = setInterval(() => {
             fetchActiveRegisters();
+            loadDashboardData();
         }, 60000);
 
         return () => clearInterval(interval);
-    }, [fetchActiveRegisters]);
+    }, [fetchActiveRegisters, fetchTodaySales, fetchMonthlyStats, fetchRecentSales, fetchLowStockProducts, activeCompanyId]);
 
     // Calculate Real-time Stats
     const stats = useMemo(() => {
-        const today = new Date();
-        const salesToday = sales.filter(s => isToday(parseISO(s.date)) && !s.summary?.includes('Abono'));
-        const salesMonth = sales.filter(s => isSameMonth(parseISO(s.date), today) && !s.summary?.includes('Abono'));
+        const now = new Date();
+        const currentMonthKey = formatInCompanyTime(now, currentCompanyTimezone, 'yyyy-MM');
 
-        // 1. Total Sales Today
-        const totalSalesToday = salesToday.reduce((acc, s) => acc + (parseFloat(s.total) || 0), 0);
+        // 1. Metrics from Today's Detailed Sales
+        const salesTodayFiltered = todaySales.filter(s => !s.summary?.includes('Abono'));
+        const totalSalesToday = salesTodayFiltered.reduce((acc, s) => acc + (parseFloat(s.total) || 0), 0);
+        const ticketsToday = salesTodayFiltered.length;
 
-        // 2. Total Sales Month
-        const totalSalesMonth = salesMonth.reduce((acc, s) => acc + (parseFloat(s.total) || 0), 0);
-
-        // 3. Tickets Today
-        const ticketsToday = salesToday.length;
-
-        // 4. Utility Today (Net Profit)
-        // Utility = (Price / (1 + TaxRate)) - Cost
-        const utilityToday = salesToday.reduce((acc, sale) => {
+        // Utility needs detailed items (price, cost, tax) - only available in todaySales
+        const utilityToday = salesTodayFiltered.reduce((acc, sale) => {
             const saleUtility = sale.items.reduce((itemAcc, item) => {
                 const price = parseFloat(item.price) || 0;
                 const cost = parseFloat(item.cost) || 0;
                 const taxRate = parseFloat(item.tax_rate) || 0;
                 const qty = item.quantity || 1;
-
-                // Net Price (removing tax)
-                const netPrice = price / (1 + (taxRate / 100)); // Assuming tax_rate is 19 for 19%
-
-                // Profit per unit
+                const netPrice = price / (1 + (taxRate / 100));
                 const profitPerUnit = netPrice - cost;
-
                 return itemAcc + (profitPerUnit * qty);
             }, 0);
             return acc + saleUtility;
         }, 0);
 
-        // Chart Data (Last 30 Days)
+        // 2. Metrics from Monthly Stats (Lightweight)
+        // Filter for this month
+        const totalSalesMonth = monthlyStats
+            .filter(s => {
+                const saleMonthKey = formatInCompanyTime(s.date, currentCompanyTimezone, 'yyyy-MM');
+                return saleMonthKey === currentMonthKey && !s.summary?.includes('Abono');
+            })
+            .reduce((acc, s) => acc + (parseFloat(s.total) || 0), 0);
+
+        // 3. Chart Data (Last 30 Days from Monthly Stats)
         const chartData = [];
+        const salesByDay = monthlyStats.reduce((acc, s) => {
+            if (s.summary?.includes('Abono')) return acc;
+            const dayKey = formatInCompanyTime(s.date, currentCompanyTimezone, 'yyyy-MM-dd');
+            acc[dayKey] = (acc[dayKey] || 0) + (parseFloat(s.total) || 0);
+            return acc;
+        }, {});
+
         for (let i = 29; i >= 0; i--) {
-            const d = subDays(today, i);
-            const daySales = sales.filter(s => {
-                const saleDate = parseISO(s.date);
-                return format(saleDate, 'yyyy-MM-dd') === format(d, 'yyyy-MM-dd') && !s.summary?.includes('Abono');
-            });
-            const dayTotal = daySales.reduce((sum, s) => sum + (parseFloat(s.total) || 0), 0);
+            const d = subDays(now, i);
+            const dayKey = formatInCompanyTime(d, currentCompanyTimezone, 'yyyy-MM-dd');
+            const displayLabel = formatInCompanyTime(d, currentCompanyTimezone, 'dd MMM');
 
             chartData.push({
-                name: format(d, 'dd MMM', { locale: es }), // e.g. "21 Ene"
-                sales: dayTotal
+                name: displayLabel,
+                sales: salesByDay[dayKey] || 0
             });
         }
 
@@ -78,10 +122,7 @@ const Dashboard = () => {
             utilityToday,
             chartData
         };
-    }, [sales, products]); // Products dependency if we needed it, but sales usually has snapshot
-
-    // Helper for stock (kept from before)
-    const lowStockCount = products.filter(p => p.stock < 10).length;
+    }, [todaySales, monthlyStats, currentCompanyTimezone]);
 
     return (
         <div className="space-y-6">
@@ -156,32 +197,31 @@ const Dashboard = () => {
                 <div className="glass-card h-[400px] overflow-hidden flex flex-col">
                     <h3 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Actividad Reciente</h3>
                     <div className="space-y-4 overflow-y-auto flex-1 pr-2 custom-scrollbar">
-                        {sales.length === 0 ? (
-                            <p className="text-[var(--color-text-muted)] text-center py-10">No hay ventas registradas.</p>
-                        ) : (
-                            sales.slice(0, 20).map((sale) => (
-                                <div key={sale.id} className="flex items-center gap-3 p-3 hover:bg-[var(--glass-bg)] rounded-lg transition-colors border border-transparent hover:border-[var(--glass-border)]">
-                                    <div className="w-10 h-10 rounded-full bg-[var(--color-primary)]/20 flex flex-col items-center justify-center text-[var(--color-primary)] text-xs font-bold">
-                                        <span>#{String(sale.id).slice(-4)}</span>
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-sm text-[var(--color-text)] truncate font-medium">
-                                            {sale.method === 'Mixto' ? 'Pago Mixto' : sale.method || 'Venta'}
-                                        </p>
-                                        <p className="text-xs text-[var(--color-text-muted)]">
-                                            {format(parseISO(sale.date), "d MMM, HH:mm", { locale: es })}
-                                        </p>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-sm font-bold text-[var(--color-text)]">
-                                            ${parseFloat(sale.total).toLocaleString('es-CL')}
-                                        </p>
-                                        <p className="text-[10px] text-[var(--color-text-muted)]">
-                                            {sale.items.length} prod.
-                                        </p>
-                                    </div>
+                        {recentSales.map((sale) => ( // Using recentSales instead of broad 'sales'
+                            <div key={sale.id} className="flex items-center gap-3 p-3 hover:bg-[var(--glass-bg)] rounded-lg transition-colors border border-transparent hover:border-[var(--glass-border)]">
+                                <div className="w-10 h-10 rounded-full bg-[var(--color-primary)]/20 flex flex-col items-center justify-center text-[var(--color-primary)] text-xs font-bold">
+                                    <span>#{String(sale.id).slice(-4)}</span>
                                 </div>
-                            ))
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm text-[var(--color-text)] truncate font-medium">
+                                        {sale.method === 'Mixto' ? 'Pago Mixto' : sale.method || 'Venta'}
+                                    </p>
+                                    <p className="text-xs text-[var(--color-text-muted)]">
+                                        {formatInCompanyTime(sale.date, currentCompanyTimezone, "d MMM, HH:mm")}
+                                    </p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-sm font-bold text-[var(--color-text)]">
+                                        ${parseFloat(sale.total).toLocaleString('es-CL')}
+                                    </p>
+                                    <p className="text-[10px] text-[var(--color-text-muted)]">
+                                        {(sale.items && sale.items.length) || 0} prod.
+                                    </p>
+                                </div>
+                            </div>
+                        ))}
+                        {recentSales.length === 0 && (
+                            <p className="text-[var(--color-text-muted)] text-center py-10">No hay ventas recientes.</p>
                         )}
                     </div>
                 </div>
@@ -204,9 +244,9 @@ const Dashboard = () => {
                         </div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
                             {(() => {
-                                const todaySales = sales.filter(s => isToday(parseISO(s.date)) && s.status !== 'cancelled');
+                                const activeTodaySales = todaySales.filter(s => s.status !== 'cancelled');
                                 const productStats = {};
-                                todaySales.forEach(sale => {
+                                activeTodaySales.forEach(sale => {
                                     sale.items.forEach(item => {
                                         if (!productStats[item.id]) productStats[item.id] = { ...item, totalSold: 0 };
                                         productStats[item.id].totalSold += item.quantity;
@@ -241,15 +281,14 @@ const Dashboard = () => {
                                 <AlertTriangle size={16} /> Sin Stock
                             </h4>
                             <span className="bg-red-500/20 text-red-400 text-[10px] px-2 py-0.5 rounded-full border border-red-500/20 font-bold">
-                                {products.filter(p => p.stock <= 0).length}
+                                {lowStockProducts.length}
                             </span>
                         </div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
                             {(() => {
-                                const noStock = products.filter(p => p.stock <= 0).slice(0, 10);
-                                if (noStock.length === 0) return <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">Todos los productos tienen stock</div>;
+                                if (lowStockProducts.length === 0) return <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">Todos los productos tienen stock</div>;
 
-                                return noStock.map(p => (
+                                return lowStockProducts.map(p => (
                                     <div key={p.id} className="flex items-center justify-between p-2 rounded bg-red-500/5 border border-red-500/10 hover:bg-red-500/10 transition-colors">
                                         <div className="min-w-0">
                                             <p className="text-red-200 text-xs font-medium truncate">{p.name}</p>
@@ -286,7 +325,7 @@ const Dashboard = () => {
                                                 <div>
                                                     <p className="text-[var(--color-text)] text-xs font-bold">{reg.user_name || 'Usuario'}</p>
                                                     <p className="text-[var(--color-text-muted)] text-[10px]">
-                                                        Abierta: {format(parseISO(reg.opening_time), 'HH:mm')} hrs
+                                                        Abierta: {formatInCompanyTime(reg.opening_time, currentCompanyTimezone, 'HH:mm')} hrs
                                                     </p>
                                                 </div>
                                             </div>
