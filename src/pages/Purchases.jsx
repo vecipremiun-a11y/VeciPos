@@ -4,7 +4,7 @@ import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus } from 'lucide-re
 import ProductModal from '../components/ProductModal';
 
 const Purchases = () => {
-    const { products, suppliers, addPurchase, addProduct } = useStore();
+    const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown } = useStore();
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
 
     // Left Column: Product Entry
@@ -35,12 +35,22 @@ const Purchases = () => {
     const [invoiceItems, setInvoiceItems] = useState([]);
 
     // Derived
-    const filteredProducts = searchTerm
-        ? products.filter(p =>
-            p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (p.sku && p.sku.toLowerCase().includes(searchTerm.toLowerCase()))
-        ).slice(0, 5) // Limit results
-        : [];
+    // Derived
+    const [filteredProducts, setFilteredProducts] = useState([]);
+
+    useEffect(() => {
+        const search = async () => {
+            if (searchTerm && !selectedProduct) {
+                const results = await searchProductsForDropdown(searchTerm);
+                setFilteredProducts(results);
+            } else {
+                setFilteredProducts([]);
+            }
+        };
+
+        const timeoutId = setTimeout(search, 300);
+        return () => clearTimeout(timeoutId);
+    }, [searchTerm, selectedProduct, searchProductsForDropdown]);
 
     const handleSelectProduct = (product) => {
         setSelectedProduct(product);

@@ -517,6 +517,26 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    searchProductsForDropdown: async (term) => {
+        const { activeCompanyId } = get();
+        if (!term) return [];
+
+        try {
+            const res = await turso.execute({
+                sql: `SELECT * FROM products WHERE company_id = ? AND (name LIKE ? OR sku LIKE ?) LIMIT 20`,
+                args: [activeCompanyId, `%${term}%`, `%${term}%`]
+            });
+
+            return res.rows.map(p => ({
+                ...p,
+                price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
+            }));
+        } catch (e) {
+            console.error("Dropdown search failed", e);
+            return [];
+        }
+    },
+
     loadCategoryProducts: async (categoryName, offset = 0) => {
         const { activeCompanyId, products: currentProducts } = get();
         try {
