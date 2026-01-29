@@ -591,7 +591,7 @@ const Purchases = () => {
                                     <th className="px-4 py-3 text-right">Cant.</th>
                                     <th className="px-4 py-3 text-right">Costo U.</th>
                                     <th className="px-4 py-3 text-center">IVA</th>
-                                    <th className="px-4 py-3 text-right">Total</th>
+                                    <th className="px-4 py-3 text-right">Subtotal</th>
                                     <th className="px-4 py-3 text-center">Acción</th>
                                 </tr>
                             </thead>
@@ -611,7 +611,7 @@ const Purchases = () => {
                                             <td className="px-4 py-3 text-right text-[var(--color-text-muted)]">${item.cost.toLocaleString()}</td>
                                             <td className="px-4 py-3 text-center text-[var(--color-text-muted)]">{item.tax}%</td>
                                             <td className="px-4 py-3 text-right font-bold text-[var(--color-primary)]">
-                                                ${(item.total * (1 + item.tax / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                ${item.total.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                             </td>
                                             <td className="px-4 py-3 text-center flex justify-center gap-2">
                                                 <button
