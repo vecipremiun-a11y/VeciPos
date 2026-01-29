@@ -247,7 +247,10 @@ const Inventory = () => {
 
             {/* Table */}
             <div className="glass-card overflow-hidden p-0">
-                <div className="overflow-x-auto">
+                <div
+                    className="overflow-x-auto overflow-y-auto h-[calc(100vh-280px)] custom-scrollbar"
+                    onScroll={handleScroll}
+                >
                     <table className="w-full text-left">
                         <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] uppercase text-sm font-semibold">
                             <tr>
