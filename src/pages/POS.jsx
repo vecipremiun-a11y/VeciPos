@@ -19,13 +19,14 @@ const POS = () => {
         updateCartItem,
         addSale,
         currentUser,
-        cashRegister, // Added back
+        cashRegister,
         checkRegisterStatus,
         inventoryAdjustmentMode,
         posSelectedClient,
         setPosSelectedClient,
         searchProducts,
         loadCategoryProducts,
+        getProductByBarcode,
         activeCompanyId
     } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
@@ -51,17 +52,14 @@ const POS = () => {
 
             if (e.key === 'Enter') {
                 if (buffer.length > 0) {
-                    // Try to find in current view first
-                    let scannedProduct = products.find(p =>
-                        p.sku && p.sku.toLowerCase() === buffer.toLowerCase()
-                    );
-
-                    if (scannedProduct) {
-                        addToCart(scannedProduct);
-                    } else {
-                        // Fallback: search specifically for this SKU
-                        searchProducts(buffer);
-                    }
+                    // Direct Server-Side Lookup (User Request: "search from server not local")
+                    getProductByBarcode(buffer).then(p => {
+                        if (p) {
+                            addToCart(p);
+                        } else {
+                            searchProducts(buffer);
+                        }
+                    });
                     buffer = '';
                 }
             } else if (e.key.length === 1) {
@@ -218,6 +216,17 @@ const POS = () => {
                                 className="glass-input !pl-12 w-full"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
+                                onKeyDown={async (e) => {
+                                    if (e.key === 'Enter') {
+                                        // Direct Server-Side Lookup (User Request)
+                                        const productToAdd = await getProductByBarcode(searchTerm);
+
+                                        if (productToAdd) {
+                                            addToCart(productToAdd);
+                                            setSearchTerm('');
+                                        }
+                                    }
+                                }}
                             />
                         </div>
                         <CashStatusWidget />

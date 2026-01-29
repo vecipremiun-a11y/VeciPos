@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus } from 'lucide-react';
+import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus, Edit } from 'lucide-react';
 import ProductModal from '../components/ProductModal';
 
 const Purchases = () => {
@@ -148,6 +148,7 @@ const Purchases = () => {
             tax: parseFloat(entryForm.tax),
             total: parseFloat(entryForm.quantity) * parseFloat(entryForm.cost),
             total: parseFloat(entryForm.quantity) * parseFloat(entryForm.cost),
+            image: selectedProduct.image,
             expiryDate: entryForm.expiryDate || null,
             batchNumber: entryForm.batchNumber || null
         };
@@ -162,6 +163,45 @@ const Purchases = () => {
 
     const handleRemoveItem = (index) => {
         setInvoiceItems(invoiceItems.filter((_, i) => i !== index));
+    };
+
+    const handleEditItem = (index) => {
+        const itemToEdit = invoiceItems[index];
+
+        const productForEdit = {
+            id: itemToEdit.id,
+            name: itemToEdit.name,
+            sku: itemToEdit.sku,
+            image: itemToEdit.image,
+            cost: itemToEdit.cost,
+            price: itemToEdit.price,
+            tax_rate: itemToEdit.tax
+        };
+
+        let margin = '';
+        if (itemToEdit.price && itemToEdit.cost > 0) {
+            const netPrice = itemToEdit.price / (1 + itemToEdit.tax / 100);
+            margin = (((netPrice - itemToEdit.cost) / itemToEdit.cost) * 100).toFixed(2);
+        }
+
+        setSelectedProduct(productForEdit);
+        // We set searchTerm to the name so it fills the input, 
+        // but we might want to avoid triggering a new search or just let it be.
+        setSearchTerm(itemToEdit.name);
+
+        setEntryForm({
+            sku: itemToEdit.sku,
+            cost: itemToEdit.cost,
+            price: itemToEdit.price,
+            quantity: itemToEdit.quantity,
+            margin: margin,
+            tax: itemToEdit.tax,
+            expiryDate: itemToEdit.expiryDate || '',
+            batchNumber: itemToEdit.batchNumber || ''
+        });
+
+        // Remove from list so it doesn't duplicate when re-added
+        handleRemoveItem(index);
     };
 
     const handleSavePurchase = async () => {
@@ -243,7 +283,7 @@ const Purchases = () => {
                             className="glass-input w-full pl-10"
                         />
                         {searchTerm && !selectedProduct && filteredProducts.length > 0 && (
-                            <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--color-surface)] dark:bg-[#1a1c2e] border border-[var(--glass-border)] rounded-lg shadow-xl z-50 overflow-hidden">
+                            <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--color-surface)] dark:bg-[#1a1c2e] border border-[var(--glass-border)] rounded-lg shadow-xl z-50 max-h-[400px] overflow-y-auto custom-scrollbar">
                                 {filteredProducts.map(product => (
                                     <button
                                         key={product.id}
@@ -573,10 +613,18 @@ const Purchases = () => {
                                             <td className="px-4 py-3 text-right font-bold text-[var(--color-primary)]">
                                                 ${(item.total * (1 + item.tax / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                             </td>
-                                            <td className="px-4 py-3 text-center">
+                                            <td className="px-4 py-3 text-center flex justify-center gap-2">
+                                                <button
+                                                    onClick={() => handleEditItem(index)}
+                                                    className="p-1 hover:bg-[var(--color-surface-hover)] rounded text-blue-400 hover:text-blue-300 transition-colors"
+                                                    title="Editar"
+                                                >
+                                                    <Edit size={16} />
+                                                </button>
                                                 <button
                                                     onClick={() => handleRemoveItem(index)}
                                                     className="p-1 hover:bg-[var(--color-surface-hover)] rounded text-red-400 hover:text-red-300 transition-colors"
+                                                    title="Eliminar"
                                                 >
                                                     <Trash2 size={16} />
                                                 </button>

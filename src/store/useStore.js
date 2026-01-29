@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { turso } from '../lib/turso';
+import { subDays } from 'date-fns';
 import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd } from '../lib/dateHelpers'; // <-- AGREGAR
 
 export const useStore = create(persist((set, get) => ({
@@ -14,6 +15,7 @@ export const useStore = create(persist((set, get) => ({
     sales: [],
     cart: [],
     activeRegisters: [],
+    cashRegister: null,
     currentUser: null,
     isLoading: false,
     error: null,
@@ -362,19 +364,15 @@ export const useStore = create(persist((set, get) => ({
                 } else if (companies.length > 0) {
                     activeCompanyId = companies[0].id;
                 } else {
-                    // Fallback for edge case (no companies assigned?) - Should ideally not happen if we backfilled 'default'
-                    // activeCompanyId remains 'default' (initial state) or whatever it was.
                     console.warn("User has no active companies assigned.");
                 }
-
-                // Update state and persistence
 
                 // Obtener timezone de la empresa activa
                 const activeCompany = companies.find(c => c.id === activeCompanyId);
                 const timezone = activeCompany?.timezone || 'America/Santiago';
 
                 set({
-                    availableCompanies: companies, // corrected variable name from user snippet 'companiesForUser' to 'companies' which is used in this scope (line 322)
+                    availableCompanies: companies,
                     activeCompanyId,
                     currentCompanyTimezone: timezone
                 });
@@ -385,10 +383,8 @@ export const useStore = create(persist((set, get) => ({
             console.log("Fetching data for company:", activeCompanyId);
 
             // ==========================================
-            // 1. ENSURE SCHEMA (DDL & Column Checks) - SEQUENTIAL
+            // 1. ENSURE SCHEMA (DDL & Column Checks)
             // ==========================================
-
-            // Product Lots Table
             await turso.execute(`
                 CREATE TABLE IF NOT EXISTS product_lots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -404,7 +400,6 @@ export const useStore = create(persist((set, get) => ({
                 )
             `);
 
-            // Clients Table
             await turso.execute(`
                 CREATE TABLE IF NOT EXISTS clients (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -417,49 +412,27 @@ export const useStore = create(persist((set, get) => ({
                 )
             `);
 
-            // Inline Schema Adjustments (Migrations) - REMOVED FOR PERFORMANCE
-            // These PRAGMA checks were slowing down startup (~1-2s).
-            // Schema changes should be handled via proper migration scripts or the _runMigrations function if forced.
-
-
+            // 2. BATCH DATA FETCHING
             // ==========================================
-            // 2. BATCH DATA FETCHING (Single Round Trip)
-            // ==========================================
-            // RADICAL OPTIMIZATION: Load 0 products initially.
-            // Products will be loaded on demand via search or category selection.
-
             console.time('⏱️ BatchFetch');
-            // Using batch to reduce network round-trips from ~7 to 1
             const batchResults = await turso.batch([
-                // Load 0 products initially (Empty Set)
-                { sql: "SELECT * FROM products WHERE company_id = ? LIMIT 0", args: [activeCompanyId] },
-                // Limit Product Lots to 0 initially
-                { sql: "SELECT * FROM product_lots WHERE quantity > 0 AND (company_id = ? OR company_id IS NULL) ORDER BY expiry_date ASC LIMIT 0", args: [activeCompanyId] },
-                { sql: "SELECT * FROM categories WHERE company_id = ?", args: [activeCompanyId] },
-                { sql: "SELECT * FROM suppliers WHERE company_id = ?", args: [activeCompanyId] },
+                // Removed products LIMIT 0
+                { sql: "SELECT * FROM product_lots WHERE quantity > 0 AND (company_id = ? OR company_id IS NULL) ORDER BY expiry_date ASC", args: [activeCompanyId] }, // Fetch ALL active lots
+                { sql: "SELECT * FROM categories WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
+                { sql: "SELECT * FROM suppliers WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
                 { sql: "SELECT * FROM users WHERE company_id = ?", args: [activeCompanyId] },
-                { sql: "SELECT * FROM clients WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
-                // Load 0 sales initially. Dashboard will fetch its own stats.
-                { sql: "SELECT * FROM sales WHERE company_id = ? ORDER BY id DESC LIMIT 0", args: [activeCompanyId] }
+                { sql: "SELECT * FROM clients WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] }
+                // Removed sales LIMIT 0
             ]);
             console.timeEnd('⏱️ BatchFetch');
 
-            const productsRes = batchResults[0];
-            const productLotsRes = batchResults[1];
-            const categoriesRes = batchResults[2];
-            const suppliersRes = batchResults[3];
-            const usersRes = batchResults[4];
-            const clientsRes = batchResults[5];
-            const salesRes = batchResults[6];
+            const productLotsRes = batchResults[0];
+            const categoriesRes = batchResults[1];
+            const suppliersRes = batchResults[2];
+            const usersRes = batchResults[3];
+            const clientsRes = batchResults[4];
 
-            // ==========================================
-            // 3. PROCESS INITIAL RESULTS
-            // ==========================================
-
-            const products = productsRes.rows.map(p => ({
-                ...p,
-                price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
-            }));
+            // Removed products mapping
             const productLots = productLotsRes.rows;
             const categories = categoriesRes.rows.map(c => ({
                 ...c,
@@ -468,28 +441,18 @@ export const useStore = create(persist((set, get) => ({
             const suppliers = suppliersRes.rows;
             const users = usersRes.rows;
             const clients = clientsRes.rows;
-            const sales = salesRes.rows.map(sale => ({
-                ...sale,
-                items: JSON.parse(sale.items),
-                paymentMethod: sale.payment_method,
-                paymentDetails: sale.payment_details ? JSON.parse(sale.payment_details) : null,
-                observation: sale.observation || '',
-                clientId: sale.client_id,
-                clientName: sale.client_name
-            }));
+            // Sales processing not needed for empty set but kept for structure if limit changes
+            // const sales = ...
 
-            // Set initial data to unblock UI
-            // Note: We do NOT set 'products' or 'sales' here because they are lazy-loaded.
-            // Setting them here would overwrite (with empty arrays) any data that POS/Dashboard 
-            // might have already loaded in parallel.
-            set({ productLots, categories, suppliers, users, clients, isLoading: false });
+            set({ productLots, categories, suppliers, users, clients });
 
             console.timeEnd('⏱️ fetchInitialData');
-            console.log(`✅ Initial Load: Metadata only. (0 products, 0 sales)`);
-            // removed background fetch
+            console.log(`✅ Initial Load: Metadata only.`);
         } catch (error) {
             console.error("Failed to fetch data:", error);
-            set({ error: error.message, isLoading: false });
+            set({ error: error.message });
+        } finally {
+            set({ isLoading: false });
         }
     },
 
@@ -517,13 +480,35 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    getProductByBarcode: async (barcode) => {
+        const { activeCompanyId } = get();
+        try {
+            const res = await turso.execute({
+                sql: `SELECT * FROM products WHERE company_id = ? AND (sku = ? OR name = ?) LIMIT 1`,
+                args: [activeCompanyId, barcode, barcode]
+            });
+
+            if (res.rows.length > 0) {
+                const p = res.rows[0];
+                return {
+                    ...p,
+                    price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
+                };
+            }
+            return null;
+        } catch (e) {
+            console.error("Barcode lookup failed", e);
+            return null;
+        }
+    },
+
     searchProductsForDropdown: async (term) => {
         const { activeCompanyId } = get();
         if (!term) return [];
 
         try {
             const res = await turso.execute({
-                sql: `SELECT * FROM products WHERE company_id = ? AND (name LIKE ? OR sku LIKE ?) LIMIT 20`,
+                sql: `SELECT * FROM products WHERE company_id = ? AND (name LIKE ? OR sku LIKE ?) LIMIT 50`,
                 args: [activeCompanyId, `%${term}%`, `%${term}%`]
             });
 
@@ -537,19 +522,22 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+
+
     loadCategoryProducts: async (categoryName, offset = 0) => {
         const { activeCompanyId, products: currentProducts } = get();
         try {
             console.time('⏱️ loadCategory');
             const limit = 30;
-            let sql = "SELECT * FROM products WHERE company_id = ? AND category = ? LIMIT ? OFFSET ?";
+            let sql = "SELECT * FROM products WHERE company_id = ? AND category = ? ORDER BY name ASC LIMIT ? OFFSET ?";
             let args = [activeCompanyId, categoryName, limit, offset];
 
             if (categoryName === 'Todos') {
-                sql = "SELECT * FROM products WHERE company_id = ? LIMIT ? OFFSET ?";
+                sql = "SELECT * FROM products WHERE company_id = ? ORDER BY name ASC LIMIT ? OFFSET ?";
                 args = [activeCompanyId, limit, offset];
             }
 
+            console.log("🔍 loadCategory:", { activeCompanyId, categoryName, limit, offset });
             const res = await turso.execute({ sql, args });
             console.timeEnd('⏱️ loadCategory');
 
@@ -678,7 +666,7 @@ export const useStore = create(persist((set, get) => ({
             }
 
             // Add Pagination
-            sql += " LIMIT ? OFFSET ?";
+            sql += " ORDER BY name ASC LIMIT ? OFFSET ?";
             args.push(limit, offset);
 
             const res = await turso.execute({ sql, args });
@@ -739,6 +727,96 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error("Fetch low stock failed", e);
             return [];
+        }
+    },
+
+    fetchDashboardData: async () => {
+        const { activeCompanyId, currentCompanyTimezone } = get();
+        try {
+            console.time('⏱️ fetchDashboardData');
+
+            // 1. Date Ranges
+            const today = new Date();
+            const startOfToday = getCompanyDayStart(today, currentCompanyTimezone);
+            const endOfToday = getCompanyDayEnd(today, currentCompanyTimezone);
+
+            const thirtyDaysAgo = subDays(today, 30);
+            const startOfMonth = getCompanyDayStart(thirtyDaysAgo, currentCompanyTimezone);
+
+            // 2. Batched Queries
+            const [
+                registersRes,
+                todaySalesRes,
+                monthlyStatsRes,
+                recentSalesRes,
+                lowStockRes
+            ] = await turso.batch([
+                // 1. Active Registers
+                {
+                    sql: `SELECT r.*, u.name as user_name 
+                          FROM cash_registers r 
+                          LEFT JOIN users u ON r.user_id = u.id 
+                          WHERE r.company_id = ? AND r.status = 'open'`,
+                    args: [activeCompanyId]
+                },
+                // 2. Today's Sales (Full details for widgets)
+                {
+                    sql: `SELECT s.*, u.name as user_name 
+                          FROM sales s 
+                          LEFT JOIN users u ON s.user_id = u.id 
+                          WHERE s.company_id = ? AND s.date >= ? AND s.date <= ?
+                          ORDER BY s.date DESC`,
+                    args: [activeCompanyId, startOfToday.toISOString(), endOfToday.toISOString()]
+                },
+                // 3. Monthly Stats (Lightweight for Chart)
+                {
+                    sql: "SELECT id, date, total, company_id, summary FROM sales WHERE company_id = ? AND date >= ? AND date <= ?",
+                    args: [activeCompanyId, startOfMonth.toISOString(), endOfToday.toISOString()]
+                },
+                // 4. Recent Sales (Limit 20)
+                {
+                    sql: "SELECT * FROM sales WHERE company_id = ? ORDER BY id DESC LIMIT 20",
+                    args: [activeCompanyId]
+                },
+                // 5. Low Stock
+                {
+                    sql: "SELECT * FROM products WHERE company_id = ? AND stock <= 0 LIMIT 20",
+                    args: [activeCompanyId]
+                }
+            ]);
+
+            console.timeEnd('⏱️ fetchDashboardData');
+
+            // 3. Process Results
+            const activeRegisters = registersRes.rows;
+            set({ activeRegisters }); // Update store state for this one as it's used globally
+
+            const todaySales = todaySalesRes.rows;
+            const monthlyStats = monthlyStatsRes.rows;
+
+            const recentSales = recentSalesRes.rows.map(sale => ({
+                ...sale,
+                items: JSON.parse(sale.items),
+                paymentMethod: sale.payment_method,
+                paymentDetails: sale.payment_details ? JSON.parse(sale.payment_details) : null,
+                observation: sale.observation || '',
+                clientId: sale.client_id,
+                clientName: sale.client_name
+            }));
+
+            const lowStockProducts = lowStockRes.rows;
+
+            return {
+                activeRegisters,
+                todaySales,
+                monthlyStats,
+                recentSales,
+                lowStockProducts
+            };
+
+        } catch (e) {
+            console.error("Fetch dashboard data failed", e);
+            return null;
         }
     },
 

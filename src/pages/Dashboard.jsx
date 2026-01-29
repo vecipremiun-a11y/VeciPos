@@ -8,15 +8,10 @@ import { formatInCompanyTime } from '../lib/dateHelpers';
 
 const Dashboard = () => {
     const {
-        products,
-        activeRegisters,
-        fetchActiveRegisters,
+        fetchDashboardData,
         currentCompanyTimezone,
-        fetchTodaySales,
-        fetchMonthlyStats, // New
-        fetchRecentSales, // New
-        fetchLowStockProducts,
-        activeCompanyId // Added
+        activeCompanyId,
+        activeRegisters
     } = useStore();
 
     // Separate state for different data needs
@@ -26,41 +21,30 @@ const Dashboard = () => {
     const [lowStockProducts, setLowStockProducts] = React.useState([]);
 
     React.useEffect(() => {
-        fetchActiveRegisters();
-
         const loadDashboardData = async () => {
-            // 1. Fetch Today Sales (Detailed for Widgets)
-            const rawSales = await fetchTodaySales();
-            const parsedToday = rawSales.map(s => ({
-                ...s,
-                items: typeof s.items === 'string' ? JSON.parse(s.items) : s.items,
-                paymentDetails: s.payment_details && typeof s.payment_details === 'string' ? JSON.parse(s.payment_details) : (s.paymentDetails || null)
-            }));
-            setTodaySales(parsedToday);
+            const data = await fetchDashboardData();
+            if (data) {
+                const parsedToday = data.todaySales.map(s => ({
+                    ...s,
+                    items: typeof s.items === 'string' ? JSON.parse(s.items) : s.items,
+                    paymentDetails: s.payment_details && typeof s.payment_details === 'string' ? JSON.parse(s.payment_details) : (s.paymentDetails || null)
+                }));
 
-            // 2. Fetch Monthly Stats (Lightweight for Chart)
-            const thirtyDaysAgo = subDays(new Date(), 30);
-            const now = new Date();
-            const stats = await fetchMonthlyStats(thirtyDaysAgo, now);
-            setMonthlyStats(stats);
-
-            // 3. Fetch Recent Sales (Limited for List)
-            const recent = await fetchRecentSales();
-            setRecentSales(recent);
-
-            // 4. Fetch Low Stock
-            const lowStock = await fetchLowStockProducts();
-            setLowStockProducts(lowStock);
+                setTodaySales(parsedToday);
+                setMonthlyStats(data.monthlyStats);
+                setRecentSales(data.recentSales);
+                setLowStockProducts(data.lowStockProducts);
+            }
         };
+
         loadDashboardData();
 
         const interval = setInterval(() => {
-            fetchActiveRegisters();
             loadDashboardData();
         }, 60000);
 
         return () => clearInterval(interval);
-    }, [fetchActiveRegisters, fetchTodaySales, fetchMonthlyStats, fetchRecentSales, fetchLowStockProducts, activeCompanyId]);
+    }, [fetchDashboardData, activeCompanyId]);
 
     // Calculate Real-time Stats
     const stats = useMemo(() => {
