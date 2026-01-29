@@ -529,11 +529,11 @@ export const useStore = create(persist((set, get) => ({
         try {
             console.time('⏱️ loadCategory');
             const limit = 30;
-            let sql = "SELECT * FROM products WHERE company_id = ? AND category = ? ORDER BY name ASC LIMIT ? OFFSET ?";
+            let sql = "SELECT * FROM products WHERE company_id = ? AND category = ? ORDER BY is_offer DESC, name ASC LIMIT ? OFFSET ?";
             let args = [activeCompanyId, categoryName, limit, offset];
 
             if (categoryName === 'Todos') {
-                sql = "SELECT * FROM products WHERE company_id = ? ORDER BY name ASC LIMIT ? OFFSET ?";
+                sql = "SELECT * FROM products WHERE company_id = ? ORDER BY is_offer DESC, name ASC LIMIT ? OFFSET ?";
                 args = [activeCompanyId, limit, offset];
             }
 
@@ -559,37 +559,90 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    fetchSales: async (fromDate, toDate) => {
+    fetchSales: async (fromDate, toDate, offset = 0, limit = 30) => {
         try {
-            const { activeCompanyId, currentCompanyTimezone } = get();
-            let query = "SELECT * FROM sales WHERE company_id = ?";
+            const { activeCompanyId, currentCompanyTimezone, sales: currentSales } = get();
+
+            // Only select lightweight columns for the list
+            let query = "SELECT id, date, total, status, user_id, payment_method, client_name, client_id FROM sales WHERE company_id = ?";
             const args = [activeCompanyId];
 
-            if (fromDate && toDate) {
-                // Assuming fromDate/toDate are parsable strings (YYYY-MM-DD) or Date objects
-                // We treat them as "days" in the company timezone
-                const start = getCompanyDayStart(new Date(fromDate), currentCompanyTimezone);
-                const end = getCompanyDayEnd(new Date(toDate), currentCompanyTimezone);
+            let start, end;
 
-                query += " AND date >= ? AND date <= ?";
-                args.push(start.toISOString(), end.toISOString());
+            if (fromDate && toDate) {
+                // Explicit filter
+                start = getCompanyDayStart(new Date(fromDate), currentCompanyTimezone);
+                end = getCompanyDayEnd(new Date(toDate), currentCompanyTimezone);
+            } else {
+                // Default: TODAY
+                const today = new Date();
+                start = getCompanyDayStart(today, currentCompanyTimezone);
+                end = getCompanyDayEnd(today, currentCompanyTimezone);
             }
 
-            query += " ORDER BY id DESC";
+            query += " AND date >= ? AND date <= ?";
+            args.push(start.toISOString(), end.toISOString());
+
+            query += " ORDER BY id DESC LIMIT ? OFFSET ?";
+            args.push(limit, offset);
 
             const result = await turso.execute({ sql: query, args });
-            const sales = result.rows.map(sale => ({
+
+            // Map basic details, assume items and heavy details are null initially
+            const newSales = result.rows.map(sale => ({
                 ...sale,
-                items: JSON.parse(sale.items),
-                paymentMethod: sale.payment_method,
-                paymentDetails: sale.payment_details ? JSON.parse(sale.payment_details) : null,
-                observation: sale.observation || '',
-                clientId: sale.client_id,
-                clientName: sale.client_name
+                items: null, // To be loaded on demand
+                paymentDetails: null, // To be loaded on demand
+                observation: sale.observation || '', // Might be needed for status, but observation text can be long? usually short.
+                // clientName is already fetched
             }));
-            set({ sales });
+
+            if (offset === 0) {
+                set({ sales: newSales });
+            } else {
+                set({ sales: [...currentSales, ...newSales] });
+            }
+
+            return newSales.length; // Return count to know if there are more
         } catch (e) {
             console.error("Fetch sales error", e);
+            return 0;
+        }
+    },
+
+    fetchSaleDetails: async (saleId) => {
+        try {
+            const { activeCompanyId, sales } = get();
+
+            // Fetch full details for one sale
+            const result = await turso.execute({
+                sql: "SELECT * FROM sales WHERE id = ? AND company_id = ?",
+                args: [saleId, activeCompanyId]
+            });
+
+            if (result.rows.length > 0) {
+                const fullSale = result.rows[0];
+                const processedSale = {
+                    ...fullSale,
+                    items: JSON.parse(fullSale.items),
+                    paymentMethod: fullSale.payment_method,
+                    paymentDetails: fullSale.payment_details ? JSON.parse(fullSale.payment_details) : null,
+                    observation: fullSale.observation || '',
+                    clientId: fullSale.client_id,
+                    clientName: fullSale.client_name
+                };
+
+                // Update the specific sale in the list with full details
+                set({
+                    sales: sales.map(s => s.id === saleId ? processedSale : s)
+                });
+
+                return processedSale;
+            }
+            return null;
+        } catch (e) {
+            console.error("Fetch sale details error", e);
+            return null;
         }
     },
 
@@ -666,7 +719,7 @@ export const useStore = create(persist((set, get) => ({
             }
 
             // Add Pagination
-            sql += " ORDER BY name ASC LIMIT ? OFFSET ?";
+            sql += " ORDER BY is_offer DESC, name ASC LIMIT ? OFFSET ?";
             args.push(limit, offset);
 
             const res = await turso.execute({ sql, args });
@@ -1556,22 +1609,7 @@ export const useStore = create(persist((set, get) => ({
 
     clearCart: () => set({ cart: [] }),
 
-    fetchSales: async () => {
-        try {
-            const result = await turso.execute("SELECT * FROM sales ORDER BY id DESC");
-            return result.rows.map(sale => ({
-                ...sale,
-                items: JSON.parse(sale.items),
-                clientId: sale.client_id,
-                paymentMethod: sale.payment_method,
-                paymentDetails: sale.payment_details ? JSON.parse(sale.payment_details) : null,
-                observation: sale.observation || ''
-            }));
-        } catch (e) {
-            console.error("Fetch sales error", e);
-            return [];
-        }
-    },
+
 
     addSale: async (sale) => {
         try {
