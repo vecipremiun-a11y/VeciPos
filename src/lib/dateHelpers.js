@@ -35,7 +35,7 @@ export const formatInCompanyTime = (utcDate, companyTimezone, formatString = 'dd
 
 /**
  * Obtiene inicio del día (00:00:00) en UTC para la fecha dada en timezone de empresa
- * @param {Date} date - Fecha de referencia
+ * @param {Date} date - Fecha de referencia (objeto Date)
  * @param {string} companyTimezone - Timezone IANA
  * @returns {Date} Inicio del día en UTC
  */
@@ -47,7 +47,7 @@ export const getCompanyDayStart = (date, companyTimezone) => {
 
 /**
  * Obtiene fin del día (23:59:59.999) en UTC para la fecha dada en timezone de empresa
- * @param {Date} date - Fecha de referencia
+ * @param {Date} date - Fecha de referencia (objeto Date)
  * @param {string} companyTimezone - Timezone IANA
  * @returns {Date} Fin del día en UTC
  */
@@ -64,4 +64,27 @@ export const getCompanyDayEnd = (date, companyTimezone) => {
  */
 export const getNowInCompanyTime = (companyTimezone) => {
     return toCompanyLocalTime(new Date(), companyTimezone);
+};
+
+/**
+ * Interpreta string YYYY-MM-DD como inicio del día en la zona horaria de la empresa
+ * @param {string} dateStr - Fecha 'YYYY-MM-DD'
+ * @param {string} companyTimezone - Timezone IANA
+ * @returns {Date} Fecha UTC correspondiente al 00:00:00 local
+ */
+export const getStartFromDateString = (dateStr, companyTimezone) => {
+    // Agregamos T00:00:00 para asegurar formato
+    const localStr = `${dateStr}T00:00:00`;
+    return fromZonedTime(localStr, companyTimezone);
+};
+
+/**
+ * Interpreta string YYYY-MM-DD como fin del día en la zona horaria de la empresa
+ * @param {string} dateStr - Fecha 'YYYY-MM-DD'
+ * @param {string} companyTimezone - Timezone IANA
+ * @returns {Date} Fecha UTC correspondiente al 23:59:59.999 local
+ */
+export const getEndFromDateString = (dateStr, companyTimezone) => {
+    const localStr = `${dateStr}T23:59:59.999`;
+    return fromZonedTime(localStr, companyTimezone);
 };

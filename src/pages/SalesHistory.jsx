@@ -13,6 +13,9 @@ const SalesHistory = () => {
     const todayStr = new Date().toLocaleDateString('en-CA');
     const [dateFrom, setDateFrom] = useState(todayStr);
     const [dateTo, setDateTo] = useState(todayStr);
+    const [paymentMethodFilter, setPaymentMethodFilter] = useState('');
+    const [sellerFilter, setSellerFilter] = useState('');
+    const [saleIdFilter, setSaleIdFilter] = useState('');
 
     const [offset, setOffset] = useState(0);
     const [hasMore, setHasMore] = useState(true);
@@ -34,11 +37,12 @@ const SalesHistory = () => {
         const loadInitial = async () => {
             setOffset(0);
             setHasMore(true);
-            const count = await fetchSales(dateFrom, dateTo, 0, 30);
+            // Pass all filters: dateFrom, dateTo, offset, limit, paymentMethod, sellerId, saleId
+            const count = await fetchSales(dateFrom, dateTo, 0, 30, paymentMethodFilter, sellerFilter, saleIdFilter);
             if (count < 30) setHasMore(false);
         };
         loadInitial();
-    }, [dateFrom, dateTo]);
+    }, [dateFrom, dateTo, paymentMethodFilter, sellerFilter, saleIdFilter]);
 
     // Infinite Scroll Handler
     const handleScroll = async (e) => {
@@ -46,7 +50,7 @@ const SalesHistory = () => {
         if (scrollHeight - scrollTop <= clientHeight + 50 && hasMore && !isLoadingMore) {
             setIsLoadingMore(true);
             const nextOffset = offset + 30;
-            const count = await fetchSales(dateFrom, dateTo, nextOffset, 30);
+            const count = await fetchSales(dateFrom, dateTo, nextOffset, 30, paymentMethodFilter, sellerFilter, saleIdFilter);
             setOffset(nextOffset);
             if (count < 30) setHasMore(false);
             setIsLoadingMore(false);
@@ -188,10 +192,64 @@ const SalesHistory = () => {
                     </div>
                 </div>
 
+
+
                 {/* NOTE: Client-side filters (Search/Payment/Seller) removed for now as we are doing Server-Side Paging.
                     To reimplement them, they must be passed to fetchSales in useStore. 
                     For now, focusing on Date + Scroll. 
                 */}
+
+                {/* Payment Method Filter */}
+                <div className="relative group">
+                    <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors min-w-[160px]">
+                        <CreditCard size={16} className="text-[var(--color-primary)] mb-0.5" />
+                        <select
+                            className="bg-transparent border-none outline-none text-sm font-bold w-full cursor-pointer appearance-none"
+                            value={paymentMethodFilter}
+                            onChange={(e) => setPaymentMethodFilter(e.target.value)}
+                        >
+                            <option value="" className="bg-[var(--color-surface)] text-[var(--color-text)]">Todos los Medios</option>
+                            <option value="Efectivo" className="bg-[var(--color-surface)] text-[var(--color-text)]">Efectivo</option>
+                            <option value="Tarjeta" className="bg-[var(--color-surface)] text-[var(--color-text)]">Tarjeta</option>
+                            <option value="Transferencia" className="bg-[var(--color-surface)] text-[var(--color-text)]">Transferencia</option>
+                            <option value="Mixto" className="bg-[var(--color-surface)] text-[var(--color-text)]">Mixto</option>
+                            <option value="Crédito" className="bg-[var(--color-surface)] text-[var(--color-text)]">Crédito</option>
+                        </select>
+                    </div>
+                </div>
+
+                {/* Seller Filter */}
+                <div className="relative group">
+                    <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors min-w-[160px]">
+                        <User size={16} className="text-[var(--color-primary)] mb-0.5" />
+                        <select
+                            className="bg-transparent border-none outline-none text-sm font-bold w-full cursor-pointer appearance-none"
+                            value={sellerFilter}
+                            onChange={(e) => setSellerFilter(e.target.value)}
+                        >
+                            <option value="" className="bg-[var(--color-surface)] text-[var(--color-text)]">Todos los Vendedores</option>
+                            {users.map(user => (
+                                <option key={user.id} value={user.id} className="bg-[var(--color-surface)] text-[var(--color-text)]">
+                                    {user.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                {/* Sale ID Filter (Prioritized) */}
+                <div className="relative group">
+                    <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors w-[140px]">
+                        <span className="text-[var(--color-primary)] font-bold text-sm">#</span>
+                        <input
+                            type="number"
+                            placeholder="N° Venta"
+                            className="bg-transparent border-none outline-none text-sm font-bold w-full appearance-none placeholder-[var(--color-text-muted)]"
+                            value={saleIdFilter}
+                            onChange={(e) => setSaleIdFilter(e.target.value)}
+                        />
+                    </div>
+                </div>
             </div>
 
             {/* Split View */}
@@ -488,7 +546,7 @@ const SalesHistory = () => {
                     )}
                 </div>
             </div>
-        </div>
+        </div >
     );
 };
 

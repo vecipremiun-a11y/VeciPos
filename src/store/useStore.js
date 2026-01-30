@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { turso } from '../lib/turso';
 import { subDays } from 'date-fns';
-import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd } from '../lib/dateHelpers'; // <-- AGREGAR
+import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFromDateString, getEndFromDateString } from '../lib/dateHelpers';
 
 export const useStore = create(persist((set, get) => ({
     // Initial State
@@ -559,7 +559,7 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    fetchSales: async (fromDate, toDate, offset = 0, limit = 30) => {
+    fetchSales: async (fromDate, toDate, offset = 0, limit = 30, paymentMethodFilter = '', sellerIdFilter = '', saleIdFilter = '') => {
         try {
             const { activeCompanyId, currentCompanyTimezone, sales: currentSales } = get();
 
@@ -567,21 +567,47 @@ export const useStore = create(persist((set, get) => ({
             let query = "SELECT id, date, total, status, user_id, payment_method, client_name, client_id FROM sales WHERE company_id = ?";
             const args = [activeCompanyId];
 
-            let start, end;
+            // PRIORITY 1: Sale ID Search (Global)
+            if (saleIdFilter) {
+                query += " AND id = ?";
+                args.push(saleIdFilter);
 
-            if (fromDate && toDate) {
-                // Explicit filter
-                start = getCompanyDayStart(new Date(fromDate), currentCompanyTimezone);
-                end = getCompanyDayEnd(new Date(toDate), currentCompanyTimezone);
-            } else {
-                // Default: TODAY
-                const today = new Date();
-                start = getCompanyDayStart(today, currentCompanyTimezone);
-                end = getCompanyDayEnd(today, currentCompanyTimezone);
+                // Note: When searching by ID, we ignore other filters to ensure we find the specific ticket
+                // We still apply LIMIT/OFFSET but usually ID returns 1 result. 
+                // However, standard flow suggests resetting offset when searching.
             }
+            // PRIORITY 2: Standard Filters (Date, Payment, Seller)
+            else {
+                let start, end;
 
-            query += " AND date >= ? AND date <= ?";
-            args.push(start.toISOString(), end.toISOString());
+                if (fromDate && toDate) {
+                    // Explicit filter
+                    // Use string helpers to avoid UTC shifting issues with new Date()
+                    start = getStartFromDateString(fromDate, currentCompanyTimezone);
+                    end = getEndFromDateString(toDate, currentCompanyTimezone);
+                } else {
+                    // Default: TODAY
+                    const today = new Date();
+                    start = getCompanyDayStart(today, currentCompanyTimezone);
+                    end = getCompanyDayEnd(today, currentCompanyTimezone);
+                }
+
+                query += " AND date >= ? AND date <= ?";
+                args.push(start.toISOString(), end.toISOString());
+
+                if (paymentMethodFilter && paymentMethodFilter !== 'Todos') {
+                    query += " AND payment_method = ?";
+                    args.push(paymentMethodFilter);
+                }
+
+                if (sellerIdFilter && sellerIdFilter !== 'Todos') {
+                    // sellerIdFilter comes as string, but user_id is Integer in DB usually?
+                    // Let's check schema/previous usage. Sales.user_id is integer?
+                    // users.id is integer. 
+                    query += " AND user_id = ?";
+                    args.push(sellerIdFilter);
+                }
+            }
 
             query += " ORDER BY id DESC LIMIT ? OFFSET ?";
             args.push(limit, offset);
@@ -593,8 +619,8 @@ export const useStore = create(persist((set, get) => ({
                 ...sale,
                 items: null, // To be loaded on demand
                 paymentDetails: null, // To be loaded on demand
-                observation: sale.observation || '', // Might be needed for status, but observation text can be long? usually short.
-                // clientName is already fetched
+                paymentMethod: sale.payment_method, // Explicit mapping for UI
+                observation: sale.observation || '',
             }));
 
             if (offset === 0) {
@@ -2044,9 +2070,10 @@ export const useStore = create(persist((set, get) => ({
 
     closeRegister: async (registerId, finalAmount, observations, difference) => {
         try {
+            const { activeCompanyId } = get();
             await turso.execute({
-                sql: "UPDATE cash_registers SET status = 'closed', closing_time = ?, final_amount = ?, observations = ?, difference = ? WHERE id = ?",
-                args: [getNowInCompanyTime(get().currentCompanyTimezone).toISOString(), finalAmount, observations, difference, registerId]
+                sql: "UPDATE cash_registers SET status = 'closed', closing_time = ?, final_amount = ?, observations = ?, difference = ? WHERE id = ? AND company_id = ?",
+                args: [getNowInCompanyTime(get().currentCompanyTimezone).toISOString(), finalAmount, observations, difference, registerId, activeCompanyId]
             });
             set({ cashRegister: null });
             return true;
@@ -2071,9 +2098,10 @@ export const useStore = create(persist((set, get) => ({
             const openingTime = register.opening_time;
 
             // 2. Get Cash Sales since opening
+            const { activeCompanyId } = get();
             const salesRes = await turso.execute({
-                sql: "SELECT * FROM sales WHERE user_id = ? AND date >= ?",
-                args: [register.user_id, openingTime]
+                sql: "SELECT * FROM sales WHERE user_id = ? AND date >= ? AND company_id = ?",
+                args: [register.user_id, openingTime, activeCompanyId]
             });
 
             let cashSalesTotal = 0;
@@ -2127,8 +2155,8 @@ export const useStore = create(persist((set, get) => ({
 
             // 3. Get Manual Movements
             const movementsRes = await turso.execute({
-                sql: "SELECT * FROM cash_movements WHERE register_id = ?",
-                args: [registerId]
+                sql: "SELECT * FROM cash_movements WHERE register_id = ? AND company_id = ?",
+                args: [registerId, activeCompanyId]
             });
 
             let movementsIn = 0;
@@ -2168,13 +2196,15 @@ export const useStore = create(persist((set, get) => ({
     // Historical Reports
     fetchClosedRegisters: async () => {
         try {
-            const result = await turso.execute(`
-                SELECT cr.*, u.name as user_name 
-                FROM cash_registers cr 
-                LEFT JOIN users u ON cr.user_id = u.id 
-                WHERE cr.status = 'closed' 
-                ORDER BY cr.closing_time DESC
-                `);
+            const { activeCompanyId } = get();
+            const result = await turso.execute({
+                sql: `SELECT cr.*, u.name as user_name 
+                      FROM cash_registers cr 
+                      LEFT JOIN users u ON cr.user_id = u.id 
+                      WHERE cr.status = 'closed' AND cr.company_id = ?
+                      ORDER BY cr.closing_time DESC`,
+                args: [activeCompanyId]
+            });
             return result?.rows || [];
         } catch (e) {
             console.error("Fetch closed registers error", e);
@@ -2184,9 +2214,10 @@ export const useStore = create(persist((set, get) => ({
 
     addCashMovement: async (registerId, type, amount, reason) => {
         try {
+            const { activeCompanyId } = get();
             await turso.execute({
-                sql: "INSERT INTO cash_movements (register_id, type, amount, reason, date) VALUES (?, ?, ?, ?, ?)",
-                args: [registerId, type, amount, reason, getNowInCompanyTime(get().currentCompanyTimezone).toISOString()]
+                sql: "INSERT INTO cash_movements (register_id, type, amount, reason, date, company_id) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [registerId, type, amount, reason, getNowInCompanyTime(get().currentCompanyTimezone).toISOString(), activeCompanyId]
             });
             return true;
         } catch (e) {
@@ -2197,13 +2228,23 @@ export const useStore = create(persist((set, get) => ({
 
     fetchCashMovements: async () => {
         try {
-            console.log("Fetching cash movements (JS Join Mode)...");
+            const { activeCompanyId } = get();
+            console.log("Fetching cash movements for company:", activeCompanyId);
 
             // 1. Fetch Raw Tables
             const [movementsRes, registersRes, usersRes] = await Promise.all([
-                turso.execute("SELECT * FROM cash_movements"),
-                turso.execute("SELECT * FROM cash_registers"),
-                turso.execute("SELECT * FROM users")
+                turso.execute({
+                    sql: "SELECT * FROM cash_movements WHERE company_id = ?",
+                    args: [activeCompanyId]
+                }),
+                turso.execute({
+                    sql: "SELECT * FROM cash_registers WHERE company_id = ?",
+                    args: [activeCompanyId]
+                }),
+                turso.execute({
+                    sql: "SELECT * FROM users WHERE company_id = ?",
+                    args: [activeCompanyId]
+                })
             ]);
 
             const movements = movementsRes?.rows || [];
@@ -2266,9 +2307,10 @@ export const useStore = create(persist((set, get) => ({
         try {
             // Reconstruct report data
             // 1. Sales
+            const { activeCompanyId } = get();
             const salesRes = await turso.execute({
-                sql: "SELECT * FROM sales WHERE user_id = ? AND date >= ? AND date <= ?",
-                args: [register.user_id, register.opening_time, register.closing_time]
+                sql: "SELECT * FROM sales WHERE user_id = ? AND date >= ? AND date <= ? AND company_id = ?",
+                args: [register.user_id, register.opening_time, register.closing_time, activeCompanyId]
             });
 
             let cashSalesTotal = 0;
@@ -2314,8 +2356,8 @@ export const useStore = create(persist((set, get) => ({
 
             // 2. Movements
             const movementsRes = await turso.execute({
-                sql: "SELECT * FROM cash_movements WHERE register_id = ?",
-                args: [register.id]
+                sql: "SELECT * FROM cash_movements WHERE register_id = ? AND company_id = ?",
+                args: [register.id, activeCompanyId]
             });
 
             let movementsIn = 0;
