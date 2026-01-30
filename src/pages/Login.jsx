@@ -5,26 +5,44 @@ import { Lock, User, AlertCircle, ArrowRight } from 'lucide-react';
 
 const Login = () => {
     const navigate = useNavigate();
-    const { login } = useStore();
+    const { login, fetchInitialData } = useStore();
 
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
+    // ... (state hooks)
+
     const handleLogin = async (e) => {
         e.preventDefault();
         setError('');
         setIsLoading(true);
 
+        console.log('🔐 Attempting login:', username);
+
         try {
-            const success = await login(username, password);
-            if (success) {
+            const result = await login(username, password);
+            if (result.success) { // Note: login returns object {success: true/false} or boolean. Check store implementation.
+                // Store implementation: return { success: true }; or { success: false, error: ... }
+                // Wait, the original code had: const success = await login... if (success)
+                // Checking store lines 1015/1019: returns object.
+                // So original Login.jsx was PROBABLY wrong if it treated object as boolean?
+                // Wait, if it returns {success:true}, if(result) is true.
+                // But let's follow the requested pattern strictly.
+
+                console.log('✅ Login successful, loading data...');
+
+                // CRÍTICO: Cargar datos DESPUÉS de login
+                await fetchInitialData();
+
+                console.log('✅ Data loaded, navigating to dashboard');
                 navigate('/dashboard');
             } else {
-                setError('Credenciales inválidas. Intente nuevamente.');
+                setError(result.error || 'Credenciales inválidas. Intente nuevamente.');
             }
         } catch (err) {
+            console.error("Login error wrapper:", err);
             setError('Error de conexión.');
         } finally {
             setIsLoading(false);

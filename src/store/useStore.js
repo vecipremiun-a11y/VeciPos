@@ -347,6 +347,8 @@ export const useStore = create(persist((set, get) => ({
         console.time('⏱️ fetchInitialData');
         set({ isLoading: true, error: null });
         try {
+            console.log('📊 fetchInitialData START');
+
             // RUN MIGRATIONS & BACKFILL
             console.time('⏱️ _runMigrations');
             await get()._runMigrations();
@@ -385,6 +387,7 @@ export const useStore = create(persist((set, get) => ({
             }
 
             console.log("Fetching data for company:", activeCompanyId);
+            console.log('🏢 Loading data for company:', activeCompanyId);
 
             // ==========================================
             // 1. ENSURE SCHEMA (DDL & Column Checks)
@@ -436,6 +439,8 @@ export const useStore = create(persist((set, get) => ({
             const usersRes = batchResults[3];
             const clientsRes = batchResults[4];
 
+            console.log('👥 Loaded users:', usersRes.rows.length);
+
             // Removed products mapping
             const productLots = productLotsRes.rows;
             const categories = categoriesRes.rows.map(c => ({
@@ -452,6 +457,7 @@ export const useStore = create(persist((set, get) => ({
 
             console.timeEnd('⏱️ fetchInitialData');
             console.log(`✅ Initial Load: Metadata only.`);
+            console.log('✅ fetchInitialData COMPLETE');
         } catch (error) {
             console.error("Failed to fetch data:", error);
             set({ error: error.message });
@@ -1020,7 +1026,40 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    logout: () => set({ currentUser: null }),
+    logout: () => {
+        const { currentUser } = get();
+
+        console.log('🚪 Logging out user:', currentUser?.username);
+
+        // Limpiar localStorage
+        if (currentUser) {
+            localStorage.removeItem(`activeCompanyId:${currentUser.id}`);
+        }
+
+        // LIMPIAR TODO EL ESTADO
+        set({
+            currentUser: null,
+            availableCompanies: [],
+            activeCompanyId: null,
+            currentCompanyTimezone: 'America/Santiago',
+            currentUserCompanyRole: null,
+            products: [],
+            productLots: [],
+            categories: [],
+            suppliers: [],
+            users: [],        // ← CRÍTICO
+            clients: [],
+            sales: [],
+            purchases: [],
+            cart: [],
+            cashRegister: null,
+            posSelectedClient: null,
+            isLoading: false,
+            error: null
+        });
+
+        console.log('✅ Logout complete - All state cleared');
+    },
 
     addUser: async (user) => {
         try {
@@ -1055,17 +1094,17 @@ export const useStore = create(persist((set, get) => ({
 
     updateUser: async (id, updatedUser) => {
         try {
+            const { activeCompanyId } = get();
             await turso.execute({
-                sql: "UPDATE users SET name = ?, username = ?, role = ? WHERE id = ?",
-                args: [updatedUser.name, updatedUser.username, updatedUser.role, id]
+                sql: "UPDATE users SET name = ?, username = ?, role = ? WHERE id = ? AND company_id = ?",
+                args: [updatedUser.name, updatedUser.username, updatedUser.role, id, activeCompanyId]
             });
 
             // If a password is provided (and it's not empty), update it separately or include it.
-            // For simplicity, let's allow password update if provided.
             if (updatedUser.password) {
                 await turso.execute({
-                    sql: "UPDATE users SET password = ? WHERE id = ?",
-                    args: [updatedUser.password, id]
+                    sql: "UPDATE users SET password = ? WHERE id = ? AND company_id = ?",
+                    args: [updatedUser.password, id, activeCompanyId]
                 });
             }
 
@@ -1079,9 +1118,10 @@ export const useStore = create(persist((set, get) => ({
 
     deleteUser: async (id) => {
         try {
+            const { activeCompanyId } = get();
             await turso.execute({
-                sql: "DELETE FROM users WHERE id = ?",
-                args: [id]
+                sql: "DELETE FROM users WHERE id = ? AND company_id = ?",
+                args: [id, activeCompanyId]
             });
             set((state) => ({ users: state.users.filter(u => u.id !== id) }));
         } catch (e) {

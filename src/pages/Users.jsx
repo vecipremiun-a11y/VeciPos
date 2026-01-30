@@ -4,7 +4,14 @@ import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 
 const Users = () => {
-    const { users, currentUser, addUser, deleteUser, updateUser } = useStore();
+    const { users, currentUser, addUser, deleteUser, updateUser, activeCompanyId } = useStore();
+
+    console.log('👥 Users component render:', {
+        activeCompany: activeCompanyId,
+        usersCount: users.length,
+        userCompanies: users.map(u => ({ name: u.name, company: u.company_id }))
+    });
+
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
     const [formData, setFormData] = useState({ name: '', username: '', role: 'Vendedor', password: '' });
