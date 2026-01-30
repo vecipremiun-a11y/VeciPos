@@ -152,19 +152,23 @@ export const useStore = create(persist((set, get) => ({
             } catch (e) { console.warn("Index creation error", e); }
 
 
-            // 6. Backfill User Permissions
+            // 6. Backfill User Permissions (Self-Healing)
             try {
                 const users = await turso.execute("SELECT * FROM users");
                 for (const user of users.rows) {
+                    const targetCompanyId = user.company_id || 'default';
+
                     const permCheck = await turso.execute({
-                        sql: "SELECT * FROM user_companies WHERE user_id = ? AND company_id = 'default'",
-                        args: [user.id]
+                        sql: "SELECT * FROM user_companies WHERE user_id = ? AND company_id = ?",
+                        args: [user.id, targetCompanyId]
                     });
+
                     if (permCheck.rows.length === 0) {
                         await turso.execute({
                             sql: "INSERT INTO user_companies (user_id, company_id, role) VALUES (?, ?, ?)",
-                            args: [user.id, 'default', user.role || 'admin']
+                            args: [user.id, targetCompanyId, user.role || 'admin']
                         });
+                        console.log(`Auto-linked user ${user.username} to ${targetCompanyId}`);
                     }
                 }
             } catch (e) { console.warn("Backfill users error", e); }
@@ -934,21 +938,85 @@ export const useStore = create(persist((set, get) => ({
     },
 
     login: async (username, password) => {
-        // In a real app, hash passwords!
         try {
+            // 1. Autenticar usuario
             const result = await turso.execute({
                 sql: "SELECT * FROM users WHERE username = ? AND password = ?",
                 args: [username, password]
             });
 
-            if (result.rows.length > 0) {
-                set({ currentUser: result.rows[0] });
-                return true;
+            if (result.rows.length === 0) {
+                return { success: false, error: "Usuario o contraseña incorrectos" };
             }
-            return false;
+
+            const user = result.rows[0];
+
+            // 2. Obtener empresas del usuario
+            const companiesRes = await turso.execute({
+                sql: `SELECT c.id, c.name, c.timezone, uc.role 
+                      FROM user_companies uc
+                      JOIN companies c ON uc.company_id = c.id
+                      WHERE uc.user_id = ? AND c.status = 'active'
+                      ORDER BY c.id`,
+                args: [user.id]
+            });
+
+            if (companiesRes.rows.length === 0) {
+                return {
+                    success: false,
+                    error: "Este usuario no tiene empresas asignadas. Contacte al administrador."
+                };
+            }
+
+            const userCompanies = companiesRes.rows;
+
+            // 3. DETERMINAR EMPRESA ACTIVA (PRIORIDAD CORRECTA)
+            let activeCompanyId;
+
+            // Prioridad 1: company_id del usuario (su empresa "home")
+            if (user.company_id && userCompanies.some(c => c.id === user.company_id)) {
+                activeCompanyId = user.company_id;
+                console.log('✅ Using user home company:', user.company_id);
+            }
+            // Prioridad 2: Última empresa guardada en localStorage (si aún tiene permiso)
+            else {
+                const storedCompanyId = localStorage.getItem(`activeCompanyId:${user.id}`);
+                if (storedCompanyId && userCompanies.some(c => c.id === storedCompanyId)) {
+                    activeCompanyId = storedCompanyId;
+                    console.log('✅ Using stored company:', storedCompanyId);
+                } else {
+                    // Prioridad 3: Primera empresa asignada
+                    activeCompanyId = userCompanies[0].id;
+                    console.log('✅ Using first assigned company:', activeCompanyId);
+                }
+            }
+
+            const activeCompany = userCompanies.find(c => c.id === activeCompanyId);
+
+            // 4. Establecer estado
+            set({
+                currentUser: user,
+                availableCompanies: userCompanies,
+                activeCompanyId: activeCompanyId,
+                currentCompanyTimezone: activeCompany.timezone || 'America/Santiago',
+                currentUserCompanyRole: activeCompany.role
+            });
+
+            // 5. Guardar en localStorage
+            localStorage.setItem(`activeCompanyId:${user.id}`, activeCompanyId);
+
+            console.log('🔐 Login successful:', {
+                user: user.username,
+                homeCompany: user.company_id,
+                activeCompany: activeCompanyId,
+                availableCompanies: userCompanies.length
+            });
+
+            return { success: true };
+
         } catch (e) {
             console.error("Login error", e);
-            return false;
+            return { success: false, error: "Error al iniciar sesión" };
         }
     },
 
@@ -956,14 +1024,32 @@ export const useStore = create(persist((set, get) => ({
 
     addUser: async (user) => {
         try {
+            const { activeCompanyId } = get();
+
+            // 1. Create User
             const result = await turso.execute({
-                sql: "INSERT INTO users (name, username, password, role) VALUES (?, ?, ?, ?) RETURNING *",
-                args: [user.name, user.username, user.password || '123456', user.role]
+                sql: "INSERT INTO users (name, username, password, role, company_id) VALUES (?, ?, ?, ?, ?) RETURNING *",
+                args: [user.name, user.username, user.password || '123456', user.role, activeCompanyId]
             });
             const newUser = result.rows[0];
+
+            // 2. Link to Company
+            await turso.execute({
+                sql: "INSERT INTO user_companies (user_id, company_id, role) VALUES (?, ?, ?)",
+                args: [newUser.id, activeCompanyId, user.role]
+            });
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, 'system', 'CREATE', 'USER', JSON.stringify({ username: user.username }), new Date().toISOString()]
+            });
+
             set((state) => ({ users: [...state.users, newUser] }));
+            return { success: true, user: newUser };
         } catch (e) {
             console.error("Add user error", e);
+            return { success: false, error: e.message };
         }
     },
 
