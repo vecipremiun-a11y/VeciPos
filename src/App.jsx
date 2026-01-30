@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import POS from './pages/POS';
 import SalesHistory from './pages/SalesHistory';
 import Inventory from './pages/Inventory';
+import Invoices from './pages/Invoices';
 import Categories from './pages/Categories';
 import Suppliers from './pages/Suppliers';
 import Purchases from './pages/Purchases';
@@ -76,6 +77,7 @@ function App() {
           <Route path="pos" element={<POS />} />
           <Route path="sales-history" element={<SalesHistory />} />
           <Route path="inventory" element={<Inventory />} />
+          <Route path="invoices" element={<Invoices />} />
           <Route path="categories" element={<Categories />} />
           <Route path="suppliers" element={<Suppliers />} />
           <Route path="purchases" element={<Purchases />} />

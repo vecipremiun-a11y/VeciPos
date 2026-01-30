@@ -824,40 +824,31 @@ export const useStore = create(persist((set, get) => ({
 
             // 2. Batched Queries
             const [
-                registersRes,
                 todaySalesRes,
                 monthlyStatsRes,
                 recentSalesRes,
                 lowStockRes
             ] = await turso.batch([
-                // 1. Active Registers
+                // 1. Today's Sales (Full details for widgets)
                 {
-                    sql: `SELECT r.*, u.name as user_name 
-                          FROM cash_registers r 
-                          LEFT JOIN users u ON r.user_id = u.id 
-                          WHERE r.company_id = ? AND r.status = 'open'`,
-                    args: [activeCompanyId]
-                },
-                // 2. Today's Sales (Full details for widgets)
-                {
-                    sql: `SELECT s.*, u.name as user_name 
-                          FROM sales s 
-                          LEFT JOIN users u ON s.user_id = u.id 
+                    sql: `SELECT s.*, u.name as user_name
+                          FROM sales s
+                          LEFT JOIN users u ON s.user_id = u.id
                           WHERE s.company_id = ? AND s.date >= ? AND s.date <= ?
                           ORDER BY s.date DESC`,
                     args: [activeCompanyId, startOfToday.toISOString(), endOfToday.toISOString()]
                 },
-                // 3. Monthly Stats (Lightweight for Chart)
+                // 2. Monthly Stats (Lightweight for Chart)
                 {
                     sql: "SELECT id, date, total, company_id, summary FROM sales WHERE company_id = ? AND date >= ? AND date <= ?",
                     args: [activeCompanyId, startOfMonth.toISOString(), endOfToday.toISOString()]
                 },
-                // 4. Recent Sales (Limit 20)
+                // 3. Recent Sales (Limit 20)
                 {
                     sql: "SELECT * FROM sales WHERE company_id = ? ORDER BY id DESC LIMIT 20",
                     args: [activeCompanyId]
                 },
-                // 5. Low Stock
+                // 4. Low Stock
                 {
                     sql: "SELECT * FROM products WHERE company_id = ? AND stock <= 0 LIMIT 20",
                     args: [activeCompanyId]
@@ -866,9 +857,14 @@ export const useStore = create(persist((set, get) => ({
 
             console.timeEnd('⏱️ fetchDashboardData');
 
+            // Trigger background fetch for registers (Don't await to avoid blocking UI)
+            get().fetchActiveRegisters();
+
             // 3. Process Results
-            const activeRegisters = registersRes.rows;
-            set({ activeRegisters }); // Update store state for this one as it's used globally
+            // activeRegisters will be updated in the store asynchronously by the call above.
+            // We return the current value from store (likely empty or stale initially) to match signature,
+            // but the component listens to the store anyway.
+            const activeRegisters = get().activeRegisters;
 
             const todaySales = todaySalesRes.rows;
             const monthlyStats = monthlyStatsRes.rows;
@@ -1538,6 +1534,69 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    fetchPurchases: async (offset = 0) => {
+        try {
+            const { activeCompanyId } = get();
+            // Optimized query: Not selecting 'items' to keep list lightweight
+            const result = await turso.execute({
+                sql: "SELECT id, supplier_name, invoice_number, date, total, status, is_credit, credit_days, expiry_date, deposit, payment_method, company_id FROM purchases WHERE company_id = ? ORDER BY date DESC LIMIT 50 OFFSET ?",
+                args: [activeCompanyId, offset]
+            });
+            return result.rows || [];
+        } catch (e) {
+            console.error("Fetch purchases error", e);
+            return [];
+        }
+    },
+
+    fetchPurchaseDetails: async (id) => {
+        try {
+            const { activeCompanyId } = get();
+            const result = await turso.execute({
+                sql: "SELECT * FROM purchases WHERE id = ? AND company_id = ?",
+                args: [id, activeCompanyId]
+            });
+
+            if (result.rows.length > 0) {
+                const purchase = result.rows[0];
+                return {
+                    ...purchase,
+                    items: typeof purchase.items === 'string' ? JSON.parse(purchase.items) : purchase.items
+                };
+            }
+            return null;
+        } catch (e) {
+            console.error("Fetch purchase details error", e);
+            return null;
+        }
+    },
+
+    deletePurchase: async (id) => {
+        try {
+            const { activeCompanyId, currentUser, validateCompanyAccess } = get();
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
+            await turso.execute({
+                sql: "DELETE FROM purchases WHERE id = ? AND company_id = ?",
+                args: [id, activeCompanyId]
+            });
+
+            // Audit
+            await turso.execute({
+                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [activeCompanyId, currentUser?.id, 'DELETE', 'PURCHASE', JSON.stringify({ id }), new Date().toISOString()]
+            });
+
+            set((state) => ({
+                purchases: state.purchases.filter(p => p.id !== id)
+            }));
+            return { success: true };
+        } catch (e) {
+            console.error("Delete purchase error", e);
+            return { success: false, error: e.message };
+        }
+    },
+
     // Cart (Local Only)
     _recalculateCartPrices: (cartItems) => {
         // 1. Calculate totals per group
@@ -1969,13 +2028,17 @@ export const useStore = create(persist((set, get) => ({
 
     fetchActiveRegisters: async () => {
         try {
+            const { activeCompanyId } = get();
             // 1. Get all open registers with user details
-            const result = await turso.execute(`
+            const result = await turso.execute({
+                sql: `
                 SELECT cr.*, u.name as user_name 
                 FROM cash_registers cr 
                 LEFT JOIN users u ON cr.user_id = u.id 
-                WHERE cr.status = 'open'
-                `);
+                WHERE cr.status = 'open' AND cr.company_id = ?
+                `,
+                args: [activeCompanyId]
+            });
 
             const registers = result.rows;
             const activeRegsWithBalance = [];

@@ -28,6 +28,7 @@ const MainLayout = () => {
                 { icon: Box, label: 'Productos', path: '/inventory', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
                 { icon: Tag, label: 'Categorías', path: '/categories', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
                 { icon: Truck, label: 'Proveedores', path: '/suppliers', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
+                { icon: FileText, label: 'Facturas', path: '/invoices', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
                 { icon: ClipboardList, label: 'Compras', path: '/purchases', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] }
             ]
         },
@@ -118,7 +119,7 @@ const MainLayout = () => {
                                     {/* Subitems */}
                                     <div className={cn(
                                         "overflow-hidden transition-all duration-300 space-y-1",
-                                        isExpanded && isSidebarOpen ? "max-h-40 opacity-100" : "max-h-0 opacity-0"
+                                        isExpanded && isSidebarOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
                                     )}>
                                         {item.subItems.map(subItem => (
                                             <NavLink
