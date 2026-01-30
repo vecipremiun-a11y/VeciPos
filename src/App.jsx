@@ -50,7 +50,16 @@ function App() {
   const { fetchInitialData, darkMode } = useStore();
 
   useEffect(() => {
+    const currentUser = useStore.getState().currentUser;
+    const activeCompanyId = useStore.getState().activeCompanyId;
+
+    console.log('🚀 App.jsx useEffect triggered', {
+      hasUser: !!currentUser,
+      activeCompanyId
+    });
+
     fetchInitialData();
+
     if (darkMode) {
       document.documentElement.setAttribute('data-theme', 'dark');
       document.documentElement.classList.add('dark');

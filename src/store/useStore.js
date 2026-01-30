@@ -344,7 +344,6 @@ export const useStore = create(persist((set, get) => ({
     },
 
     fetchInitialData: async () => {
-        console.time('⏱️ fetchInitialData');
         set({ isLoading: true, error: null });
         try {
             console.log('📊 fetchInitialData START');
@@ -354,39 +353,66 @@ export const useStore = create(persist((set, get) => ({
             await get()._runMigrations();
             console.timeEnd('⏱️ _runMigrations');
 
-            const { currentUser, fetchUserCompanies } = get();
-            let { activeCompanyId } = get();
+            const { currentUser } = get();
+            let { activeCompanyId, availableCompanies } = get();
 
-            // Resolve Active Company
-            if (currentUser) {
-                const companies = await fetchUserCompanies(currentUser.id);
+            console.log('🔍 Initial state:', {
+                user: currentUser?.username,
+                activeCompanyId,
+                companiesCount: availableCompanies?.length
+            });
 
-                // 1. Try to get from persistence
-                const persistedId = localStorage.getItem(`activeCompanyId:${currentUser.id}`);
+            // CRÍTICO: Si hay usuario pero NO hay empresas cargadas (recarga de página)
+            if (currentUser && (!availableCompanies || availableCompanies.length === 0)) {
+                console.log('🔄 Page reload detected - Loading user companies...');
 
-                // 2. Validate persistence or fallback
-                if (persistedId && companies.some(c => c.id === persistedId)) {
-                    activeCompanyId = persistedId;
-                } else if (companies.length > 0) {
-                    activeCompanyId = companies[0].id;
-                } else {
-                    console.warn("User has no active companies assigned.");
-                }
-
-                // Obtener timezone de la empresa activa
-                const activeCompany = companies.find(c => c.id === activeCompanyId);
-                const timezone = activeCompany?.timezone || 'America/Santiago';
-
-                set({
-                    availableCompanies: companies,
-                    activeCompanyId,
-                    currentCompanyTimezone: timezone
+                // Cargar empresas del usuario
+                const companiesRes = await turso.execute({
+                    sql: `SELECT c.id, c.name, c.timezone, uc.role 
+                          FROM user_companies uc
+                          JOIN companies c ON uc.company_id = c.id
+                          WHERE uc.user_id = ? AND c.status = 'active'`,
+                    args: [currentUser.id]
                 });
 
+                availableCompanies = companiesRes.rows;
+
+                if (availableCompanies.length === 0) {
+                    throw new Error("Usuario sin empresas asignadas");
+                }
+
+                // Determinar activeCompanyId correcto
+                // Prioridad 1: company_id del usuario (su empresa home)
+                if (currentUser.company_id && availableCompanies.some(c => c.id === currentUser.company_id)) {
+                    activeCompanyId = currentUser.company_id;
+                    console.log('✅ Using user home company:', currentUser.company_id);
+                }
+                // Prioridad 2: Última empresa guardada en localStorage
+                else {
+                    const storedCompanyId = localStorage.getItem(`activeCompanyId:${currentUser.id}`);
+                    if (storedCompanyId && availableCompanies.some(c => c.id === storedCompanyId)) {
+                        activeCompanyId = storedCompanyId;
+                        console.log('✅ Using stored company from localStorage:', storedCompanyId);
+                    } else {
+                        activeCompanyId = availableCompanies[0].id;
+                        console.log('✅ Using first available company:', activeCompanyId);
+                    }
+                }
+
+                const activeCompany = availableCompanies.find(c => c.id === activeCompanyId);
+
+                // Actualizar estado
+                set({
+                    availableCompanies,
+                    activeCompanyId,
+                    currentCompanyTimezone: activeCompany.timezone || 'America/Santiago',
+                    currentUserCompanyRole: activeCompany.role
+                });
+
+                // Guardar en localStorage
                 localStorage.setItem(`activeCompanyId:${currentUser.id}`, activeCompanyId);
             }
 
-            console.log("Fetching data for company:", activeCompanyId);
             console.log('🏢 Loading data for company:', activeCompanyId);
 
             // ==========================================
@@ -2574,5 +2600,11 @@ export const useStore = create(persist((set, get) => ({
     },
 }), {
     name: 'pos-storage',
-    partialize: (state) => ({ currentUser: state.currentUser }),
+    partialize: (state) => ({
+        currentUser: state.currentUser,
+        activeCompanyId: state.activeCompanyId,
+        availableCompanies: state.availableCompanies,
+        currentCompanyTimezone: state.currentCompanyTimezone,
+        currentUserCompanyRole: state.currentUserCompanyRole
+    }),
 }));
