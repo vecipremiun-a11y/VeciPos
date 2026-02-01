@@ -345,10 +345,22 @@ export const useStore = create(persist((set, get) => ({
             purchases: [],
             sales: [],
             // Clear Dashboard/POS specific state
+            // Clear Dashboard/POS specific state
             cashRegister: null, // Critical: Reset cash register
             activeRegisters: [],
-            cart: [], // Clear cart? Yes, usually carts are per-store.
-            posSelectedClient: null
+            posSelectedClient: null,
+            // Reset Multi-Cart System
+            carts: [
+                {
+                    id: 1,
+                    name: 'Ticket 1',
+                    items: [],
+                    client: null,
+                    createdAt: Date.now()
+                }
+            ],
+            activeCartId: 1,
+            nextCartId: 2
         });
 
         if (currentUser) {
@@ -1210,7 +1222,18 @@ export const useStore = create(persist((set, get) => ({
             clients: [],
             sales: [],
             purchases: [],
-            cart: [],
+            // Reset Multi-Cart
+            carts: [
+                {
+                    id: 1,
+                    name: 'Ticket 1',
+                    items: [],
+                    client: null,
+                    createdAt: Date.now()
+                }
+            ],
+            activeCartId: 1,
+            nextCartId: 2,
             cashRegister: null,
             posSelectedClient: null,
             isLoading: false,
@@ -2042,89 +2065,82 @@ export const useStore = create(persist((set, get) => ({
     addToCart: (product) => {
         const { carts, activeCartId, inventoryAdjustmentMode } = get();
 
-        // En modo ajuste de inventario, permitir sin validación
-        if (inventoryAdjustmentMode) {
-            set(state => ({
-                carts: state.carts.map(c =>
-                    c.id === state.activeCartId
-                        ? {
-                            ...c,
-                            items: [
-                                ...c.items,
-                                {
-                                    id: product.id,
-                                    name: product.name,
-                                    price: product.price || 0,
-                                    cost: product.cost || 0,
-                                    quantity: 1,
-                                    tax_rate: product.tax_rate || 0,
-                                    image: product.image || null,
-                                    sku: product.sku || '',
-                                    stock: product.stock || 0
-                                }
-                            ]
-                        }
-                        : c
-                )
-            }));
-            return;
-        }
-
-        // VALIDACIÓN DE STOCK COMPARTIDO
-        // Calcular cuántas unidades hay en TODOS los carritos
-        const totalInAllCarts = carts.reduce((total, cart) => {
-            const itemInCart = cart.items.find(i => i.id === product.id);
-            return total + (itemInCart?.quantity || 0);
-        }, 0);
-
-        const availableStock = (product.stock || 0) - totalInAllCarts;
-
-        if (availableStock <= 0) {
-            alert(`Stock insuficiente para "${product.name}". Ya hay ${totalInAllCarts} unidades en carritos.`);
-            return;
-        }
-
-        console.log('📦 Stock check:', {
+        console.log('➕ addToCart called:', {
             product: product.name,
-            totalStock: product.stock,
-            inCarts: totalInAllCarts,
-            available: availableStock
+            activeCartId,
+            inventoryMode: inventoryAdjustmentMode
         });
 
-        // Verificar si el producto ya existe en el carrito activo
+        // PASO 1: Encontrar el carrito activo
         const activeCart = carts.find(c => c.id === activeCartId);
-        const existingItem = activeCart?.items.find(i => i.id === product.id);
+        if (!activeCart) {
+            console.error('❌ No active cart found');
+            return;
+        }
+
+        // PASO 2: Verificar si el producto YA EXISTE en el carrito
+        const existingItem = activeCart.items.find(i => String(i.id) === String(product.id));
 
         if (existingItem) {
-            // Incrementar cantidad si ya existe
-            get().updateCartItem(product.id, existingItem.quantity + 1);
-        } else {
-            // Agregar nuevo item
-            set(state => ({
-                carts: state.carts.map(c =>
-                    c.id === state.activeCartId
-                        ? {
-                            ...c,
-                            items: [
-                                ...c.items,
-                                {
-                                    id: product.id,
-                                    name: product.name,
-                                    price: product.price || 0,
-                                    cost: product.cost || 0,
-                                    quantity: 1,
-                                    tax_rate: product.tax_rate || 0,
-                                    image: product.image || null,
-                                    sku: product.sku || '',
-                                    stock: product.stock || 0
-                                }
-                            ]
-                        }
-                        : c
-                )
-            }));
+            // PRODUCTO YA EXISTE → SUMAR CANTIDAD
+            console.log('✅ Product exists, incrementing quantity');
+            get().updateCartItem(existingItem.id, existingItem.quantity + 1);
+            return;
         }
+
+        // PASO 3: Producto NO existe → Validar stock (solo en modo normal)
+        if (!inventoryAdjustmentMode) {
+            // Calcular stock en TODOS los carritos
+            const totalInAllCarts = carts.reduce((total, cart) => {
+                const itemInCart = cart.items.find(i => i.id === product.id);
+                return total + (itemInCart?.quantity || 0);
+            }, 0);
+
+            const availableStock = (product.stock || 0) - totalInAllCarts;
+
+            if (availableStock <= 0) {
+                alert(`Stock insuficiente para "${product.name}". Ya hay ${totalInAllCarts} unidades en carritos.`);
+                return;
+            }
+
+            console.log('📦 Stock check:', {
+                product: product.name,
+                totalStock: product.stock,
+                inCarts: totalInAllCarts,
+                available: availableStock
+            });
+        }
+
+        // PASO 4: Agregar producto NUEVO al carrito
+        console.log('✅ Adding new product to cart');
+        set(state => ({
+            carts: state.carts.map(c =>
+                c.id === state.activeCartId
+                    ? {
+                        ...c,
+                        items: [
+                            ...c.items,
+                            {
+                                id: product.id,
+                                name: product.name,
+                                price: product.price || 0,
+                                cost: product.cost || 0,
+                                quantity: 1,
+                                tax_rate: product.tax_rate || 0,
+                                image: product.image || null,
+                                sku: product.sku || '',
+                                stock: product.stock || 0,
+                                unit: product.unit || 'Und',
+                                category: product.category || '',
+                                discountPercent: 0
+                            }
+                        ]
+                    }
+                    : c
+            )
+        }));
     },
+
 
     updateCartItem: (productId, updates) => {
         const { carts, activeCartId } = get();
@@ -2153,9 +2169,14 @@ export const useStore = create(persist((set, get) => ({
 
             const availableStock = (product.stock || 0) - totalInOtherCarts;
 
-            if (newQuantity > availableStock) {
-                alert(`Stock insuficiente. Solo hay ${availableStock} disponibles (${totalInOtherCarts} en otros carritos).`);
-                return;
+            // Si estamos en modo de ajuste de inventario, SALTAMOS la validación de stock
+            const { inventoryAdjustmentMode } = get();
+
+            if (!inventoryAdjustmentMode) {
+                if (newQuantity > availableStock) {
+                    alert(`Stock insuficiente. Solo hay ${availableStock} disponibles (${totalInOtherCarts} en otros carritos).`);
+                    return;
+                }
             }
 
             if (newQuantity <= 0) {
@@ -3168,64 +3189,6 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    // Suspender venta actual (guardar y limpiar carrito)
-    suspendSale: async () => {
-        try {
-            const { cart, posSelectedClient, activeCompanyId, currentUser, currentCompanyTimezone } = get();
-
-            if (cart.length === 0) {
-                alert('El carrito está vacío');
-                return false;
-            }
-
-            // Calcular totales
-            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-            const tax = cart.reduce((sum, item) => {
-                const taxRate = parseFloat(item.tax_rate) || 0;
-                return sum + (item.price * item.quantity * taxRate / 100);
-            }, 0);
-            const total = subtotal + tax;
-            const itemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-
-            const now = getNowInCompanyTime(currentCompanyTimezone).toISOString();
-
-            console.log('💾 Suspending sale:', { itemsCount, total });
-
-            await turso.execute({
-                sql: `INSERT INTO suspended_sales 
-                      (company_id, user_id, items, client_data, subtotal, tax, total, items_count, suspended_at, status, created_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'suspended', ?)`,
-                args: [
-                    activeCompanyId,
-                    currentUser.id,
-                    JSON.stringify(cart),
-                    posSelectedClient ? JSON.stringify(posSelectedClient) : null,
-                    subtotal,
-                    tax,
-                    total,
-                    itemsCount,
-                    now,
-                    now
-                ]
-            });
-
-            console.log('✅ Sale suspended successfully');
-
-            // Limpiar carrito y cliente
-            get().clearCart();
-            get().setPosSelectedClient(null);
-
-            // Actualizar contador
-            await get().updateSuspendedCount();
-
-            return true;
-        } catch (e) {
-            console.error('❌ Suspend sale error:', e);
-            alert('Error al suspender la venta');
-            return false;
-        }
-    },
-
     // Traer lista de ventas suspendidas (ligera, sin items completos)
     fetchSuspendedSales: async () => {
         try {
@@ -3391,7 +3354,18 @@ export const useStore = create(persist((set, get) => ({
     // Suspender venta actual (guardar y limpiar carrito)
     suspendSale: async () => {
         try {
-            const { cart, posSelectedClient, activeCompanyId, currentUser, currentCompanyTimezone } = get();
+            const { carts, activeCartId, activeCompanyId, currentUser, currentCompanyTimezone } = get();
+
+            // DERIVAR cart y client manualmente (NO usar getters)
+            const activeCart = carts.find(c => c.id === activeCartId);
+            const cart = activeCart?.items || [];
+            const posSelectedClient = activeCart?.client || null;
+
+            console.log('💾 Attempting to suspend sale:', {
+                activeCartId,
+                cartItems: cart.length,
+                items: cart.map(i => i.name)
+            });
 
             if (cart.length === 0) {
                 alert('El carrito está vacío');
@@ -3431,9 +3405,14 @@ export const useStore = create(persist((set, get) => ({
 
             console.log('✅ Sale suspended successfully');
 
-            // Limpiar carrito y cliente
-            get().clearCart();
-            get().setPosSelectedClient(null);
+            // Limpiar SOLO el carrito activo
+            set(state => ({
+                carts: state.carts.map(c =>
+                    c.id === state.activeCartId
+                        ? { ...c, items: [], client: null }
+                        : c
+                )
+            }));
 
             // Actualizar contador
             await get().updateSuspendedCount();

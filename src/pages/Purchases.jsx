@@ -145,8 +145,6 @@ const Purchases = () => {
             cost: parseFloat(entryForm.cost),
             price: parseFloat(entryForm.price),
             tax: parseFloat(entryForm.tax),
-            tax: parseFloat(entryForm.tax),
-            total: parseFloat(entryForm.quantity) * parseFloat(entryForm.cost),
             total: parseFloat(entryForm.quantity) * parseFloat(entryForm.cost),
             image: selectedProduct.image,
             expiryDate: entryForm.expiryDate || null,

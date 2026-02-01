@@ -40,9 +40,24 @@ const POS = () => {
     } = useStore();
 
     // Derivar cart y client manualmente (fix para computed getters)
-    const cart = React.useMemo(() => {
-        return carts.find(c => c.id === activeCartId)?.items || [];
+    // Key para forzar re-render cuando cambian items
+    const cartKey = React.useMemo(() => {
+        const activeCart = carts.find(c => c.id === activeCartId);
+        // Usamos JSON.stringify para detectar cambios profundos en los items si es necesario, 
+        // o simplemente confiamos en que carts cambia de referencia.
+        // Agregamos timestamp para debug, pero lo importante es que esto se ejecute cuando carts cambie.
+        return `${activeCartId}-${activeCart?.items?.length || 0}`;
     }, [carts, activeCartId]);
+
+    const cart = React.useMemo(() => {
+        const activeCart = carts.find(c => c.id === activeCartId);
+        console.log('🔄 Cart recalculated:', {
+            cartId: activeCartId,
+            itemsCount: activeCart?.items?.length || 0,
+            items: activeCart?.items?.map(i => i.name) || []
+        });
+        return activeCart?.items || [];
+    }, [carts, activeCartId, cartKey]);
 
     const posSelectedClient = React.useMemo(() => {
         return carts.find(c => c.id === activeCartId)?.client || null;
@@ -701,7 +716,7 @@ const POS = () => {
                                 }
                             }}
                             disabled={cart.length === 0 && suspendedSalesCount === 0}
-                            className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all ${cart.length > 0
+                            className={`w-full py-3 col-span-2 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${cart.length > 0
                                 ? 'bg-orange-500 hover:bg-orange-600 text-white'
                                 : suspendedSalesCount > 0
                                     ? 'bg-blue-500 hover:bg-blue-600 text-white'
