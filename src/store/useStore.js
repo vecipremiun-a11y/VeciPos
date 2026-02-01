@@ -1336,7 +1336,24 @@ export const useStore = create(persist((set, get) => ({
                     activeCompanyId
                 ]
             });
-            const newProduct = { ...result.rows[0], price_ranges: product.price_ranges ? JSON.parse(product.price_ranges) : [] };
+            // Safely handle price_ranges for the local state update
+            let parsedPriceRanges = [];
+            try {
+                // Try to use the returned DB value if possible, otherwise fall back to input
+                const dbValue = result.rows[0].price_ranges;
+                if (typeof dbValue === 'string') {
+                    parsedPriceRanges = JSON.parse(dbValue);
+                } else if (Array.isArray(dbValue)) {
+                    parsedPriceRanges = dbValue;
+                } else {
+                    parsedPriceRanges = product.price_ranges || [];
+                }
+            } catch (e) {
+                console.warn("Error parsing price_ranges from DB, using input", e);
+                parsedPriceRanges = product.price_ranges || [];
+            }
+
+            const newProduct = { ...result.rows[0], price_ranges: parsedPriceRanges };
 
             // Audit
             await turso.execute({

@@ -105,14 +105,20 @@ const Inventory = () => {
         }
     };
 
-    const handleSaveProduct = (productData) => {
+    const handleSaveProduct = async (productData) => {
+        let result;
         if (editingProduct) {
-            updateProduct(editingProduct.id, productData);
+            result = await updateProduct(editingProduct.id, productData);
         } else {
-            addProduct(productData);
+            result = await addProduct(productData);
         }
-        setEditingProduct(null);
-        setView('list');
+
+        if (result && result.success) {
+            setEditingProduct(null);
+            setView('list');
+        } else {
+            alert('Error al guardar el producto: ' + (result?.error || 'Error desconocido'));
+        }
     };
 
     const handleNewProduct = () => {
