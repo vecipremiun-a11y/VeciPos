@@ -21,44 +21,117 @@ import RequireAdmin from './components/RequireAdmin';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminCompanies from './pages/admin/AdminCompanies';
 
-
-
 import React, { useEffect } from 'react';
 import { useStore } from './store/useStore';
 
-// Protected Route Component
+// Protected Route Component - ROBUST RESTORE
 const ProtectedRoute = ({ children }) => {
-  const { currentUser, isLoading } = useStore();
+  const currentUser = useStore(state => state.currentUser);
+  const isLoading = useStore(state => state.isLoading);
+  const [triedRestore, setTriedRestore] = React.useState(false);
 
-  // Optional: show loading spinner while checking auth
-  if (isLoading && !currentUser) {
+  // Intentar restaurar sesión desde localStorage si Zustand persist falló
+  React.useEffect(() => {
+    if (!currentUser && !isLoading && !triedRestore) {
+      console.log('🔍 No user in state, checking localStorage...');
+
+      try {
+        const stored = localStorage.getItem('pos-storage');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          const storedUser = parsed?.state?.currentUser;
+
+          if (storedUser) {
+            console.log('🔄 Restoring user from localStorage:', storedUser.username);
+
+            // Restaurar estado manualmente
+            useStore.setState({
+              currentUser: storedUser,
+              activeCompanyId: parsed.state.activeCompanyId,
+              availableCompanies: parsed.state.availableCompanies || [],
+              currentCompanyTimezone: parsed.state.currentCompanyTimezone || 'America/Santiago',
+              currentUserCompanyRole: parsed.state.currentUserCompanyRole,
+              darkMode: parsed.state.darkMode,
+              carts: parsed.state.carts || [{
+                id: 1,
+                name: 'Ticket 1',
+                items: [],
+                client: null,
+                createdAt: Date.now()
+              }],
+              activeCartId: parsed.state.activeCartId || 1,
+              nextCartId: parsed.state.nextCartId || 2
+            });
+
+            console.log('✅ User restored successfully');
+          } else {
+            console.log('❌ No user found in localStorage');
+          }
+        } else {
+          console.log('❌ No pos-storage in localStorage');
+        }
+      } catch (e) {
+        console.error('❌ Failed to restore from localStorage:', e);
+      }
+
+      setTriedRestore(true);
+    }
+  }, [currentUser, isLoading, triedRestore]);
+
+  // Esperar a que intente restaurar
+  if (!triedRestore && !currentUser) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-[#09090b] text-white">
-        Cargando sistema...
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
+          <p className="text-sm">Verificando sesión...</p>
+        </div>
       </div>
     );
   }
 
-  if (!currentUser) {
-    return <Navigate to="/login" replace />;
+  // Si hay usuario, renderizar
+  if (currentUser) {
+    console.log('✅ User authenticated:', currentUser.username);
+    return children;
   }
 
-  return children;
+  // Si está cargando (login manual), mostrar spinner
+  if (isLoading) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[#09090b] text-white">
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
+          <p>Iniciando sesión...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Si no hay usuario, ir a login
+  console.log('❌ No user found, redirecting to login');
+  return <Navigate to="/login" replace />;
 };
 
 function App() {
   const { fetchInitialData, darkMode } = useStore();
 
+  // 1. Cargar datos SOLO una vez al montar, o cuando currentUser aparece (recarga)
   useEffect(() => {
-    const currentUser = useStore.getState().currentUser;
-    const activeCompanyId = useStore.getState().activeCompanyId;
+    const { currentUser, categories } = useStore.getState();
+    const hasCategories = categories.length > 0;
 
-    console.log('🚀 App.jsx useEffect triggered', {
-      hasUser: !!currentUser,
-      activeCompanyId
-    });
+    console.log('🚀 App.jsx effect', { hasUser: !!currentUser, hasCategories });
 
-    fetchInitialData();
+    // Solo cargar si hay usuario Y no se ha cargado antes
+    if (currentUser && !hasCategories) {
+      console.log('📊 Loading initial data...');
+      fetchInitialData();
+    }
+  }, [useStore.getState().currentUser]); // Listen to user appearance
+
+  useEffect(() => {
+    console.log('🎨 Theme changed to:', darkMode ? 'dark' : 'light');
 
     if (darkMode) {
       document.documentElement.setAttribute('data-theme', 'dark');
@@ -67,13 +140,12 @@ function App() {
       document.documentElement.setAttribute('data-theme', 'light');
       document.documentElement.classList.remove('dark');
     }
-  }, [fetchInitialData, darkMode]);
+  }, [darkMode]);
 
   return (
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
-
 
         {/* Protected Routes */}
         <Route path="/" element={

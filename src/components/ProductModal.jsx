@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, ArrowLeft, Trash2, Plus } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
+import { compressImage, validateImage } from '../lib/imageCompression';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
     const { categories, suppliers } = useStore();
@@ -240,14 +241,37 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                     <input
                                         type="file"
                                         accept="image/*"
-                                        onChange={(e) => {
+                                        onChange={async (e) => {
                                             const file = e.target.files[0];
-                                            if (file) {
-                                                const reader = new FileReader();
-                                                reader.onloadend = () => {
-                                                    setFormData(prev => ({ ...prev, image: reader.result }));
-                                                };
-                                                reader.readAsDataURL(file);
+                                            if (!file) return;
+
+                                            // Validar imagen
+                                            const validation = validateImage(file);
+                                            if (!validation.valid) {
+                                                alert(validation.error);
+                                                return;
+                                            }
+
+                                            try {
+                                                console.log('📸 Comprimiendo imagen...');
+                                                console.time('⏱️ Compresión');
+
+                                                // Comprimir imagen (max 200KB, 800x800px)
+                                                const compressedBase64 = await compressImage(file, 200, 800, 800);
+
+                                                console.timeEnd('⏱️ Compresión');
+
+                                                // Guardar en el formulario
+                                                setFormData(prev => ({
+                                                    ...prev,
+                                                    image: compressedBase64
+                                                }));
+
+                                                console.log('✅ Imagen comprimida y lista');
+
+                                            } catch (error) {
+                                                console.error('❌ Error al comprimir imagen:', error);
+                                                alert('Error al procesar la imagen. Intenta con otra.');
                                             }
                                         }}
                                         className="hidden"

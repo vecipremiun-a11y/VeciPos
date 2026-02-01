@@ -3,6 +3,8 @@ import { useStore } from '../store/useStore';
 import { turso } from '../lib/turso';
 import { Moon, Sun } from 'lucide-react';
 
+import { recompressAllImages } from '../scripts/recompressImages';
+
 const Settings = () => {
     const { darkMode, toggleDarkMode, inventoryAdjustmentMode, toggleInventoryAdjustmentMode, activeCompanyId, currentCompanyTimezone, fetchInitialData } = useStore();
     const [selectedTimezone, setSelectedTimezone] = useState(currentCompanyTimezone);
@@ -120,6 +122,32 @@ const Settings = () => {
                     >
                         <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${inventoryAdjustmentMode ? 'right-1' : 'left-1'}`}></div>
                     </div>
+                </div>
+            </div>
+
+            {/* OPTIMIZATION TOOLS */}
+            <div className="glass-card border border-cyan-500/30">
+                <h2 className="text-xl font-bold text-cyan-400 mb-4 flex items-center gap-2">
+                    ⚡ Optimización de Sistema
+                </h2>
+                <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                        <p className="text-[var(--color-text)] font-medium">Recompresión Masiva de Imágenes</p>
+                        <p className="text-sm text-[var(--color-text-muted)] max-w-xl">
+                            Escanea todos los productos y comprime imágenes antiguas que sean muy pesadas (&gt;200KB).
+                            Ejecutar solo una vez si el sistema está lento.
+                        </p>
+                    </div>
+                    <button
+                        onClick={async () => {
+                            if (window.confirm('¿Iniciar optimización de imágenes? Esto puede tardar unos minutos.')) {
+                                await recompressAllImages();
+                            }
+                        }}
+                        className="btn-primary flex items-center gap-2"
+                    >
+                        📸 Optimizar Imágenes
+                    </button>
                 </div>
             </div>
         </div>

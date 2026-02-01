@@ -15,25 +15,30 @@ const Dashboard = () => {
     } = useStore();
 
     // Separate state for different data needs
-    const [todaySales, setTodaySales] = React.useState([]);
+    const [todayUtility, setTodayUtility] = React.useState(0);        // ← NUEVO
+
+    const [todayStats, setTodayStats] = React.useState(null);        // NUEVO
     const [monthlyStats, setMonthlyStats] = React.useState([]); // For Chart & Month Total
     const [recentSales, setRecentSales] = React.useState([]); // For Activity List
     const [lowStockProducts, setLowStockProducts] = React.useState([]);
+    const [topProducts, setTopProducts] = React.useState([]);         // ← NUEVO
 
     React.useEffect(() => {
         const loadDashboardData = async () => {
+            console.log('🔄 Loading dashboard data...');
             const data = await fetchDashboardData();
-            if (data) {
-                const parsedToday = data.todaySales.map(s => ({
-                    ...s,
-                    items: typeof s.items === 'string' ? JSON.parse(s.items) : s.items,
-                    paymentDetails: s.payment_details && typeof s.payment_details === 'string' ? JSON.parse(s.payment_details) : (s.paymentDetails || null)
-                }));
 
-                setTodaySales(parsedToday);
-                setMonthlyStats(data.monthlyStats);
+            if (data) {
+                // Procesar ventas de hoy para cálculo de utilidad
+
+                setTodayUtility(data.todayUtility);      // ← NUEVO
+                setTodayStats(data.todayStats);       // NUEVO - Stats precalculados
+                setMonthlyStats(data.monthlyStats);   // NUEVO - Stats por día
                 setRecentSales(data.recentSales);
                 setLowStockProducts(data.lowStockProducts);
+                setTopProducts(data.topProducts);        // ← NUEVO
+
+                console.log('✅ Dashboard data loaded');
             }
         };
 
@@ -41,7 +46,7 @@ const Dashboard = () => {
 
         const interval = setInterval(() => {
             loadDashboardData();
-        }, 60000);
+        }, 60000); // Cada 60 segundos
 
         return () => clearInterval(interval);
     }, [fetchDashboardData, activeCompanyId]);
@@ -49,64 +54,60 @@ const Dashboard = () => {
     // Calculate Real-time Stats
     const stats = useMemo(() => {
         const now = new Date();
-        const currentMonthKey = formatInCompanyTime(now, currentCompanyTimezone, 'yyyy-MM');
 
-        // 1. Metrics from Today's Detailed Sales
-        const salesTodayFiltered = todaySales.filter(s => !s.summary?.includes('Abono'));
-        const totalSalesToday = salesTodayFiltered.reduce((acc, s) => acc + (parseFloat(s.total) || 0), 0);
-        const ticketsToday = salesTodayFiltered.length;
+        // 1. Stats del día (YA VIENEN CALCULADOS - SUPER RÁPIDO)
+        const totalSalesToday = todayStats?.total_sales || 0;
+        const ticketsToday = todayStats?.total_orders || 0;
 
-        // Utility needs detailed items (price, cost, tax) - only available in todaySales
-        const utilityToday = salesTodayFiltered.reduce((acc, sale) => {
-            const saleUtility = sale.items.reduce((itemAcc, item) => {
-                const price = parseFloat(item.price) || 0;
-                const cost = parseFloat(item.cost) || 0;
-                const taxRate = parseFloat(item.tax_rate) || 0;
-                const qty = item.quantity || 1;
-                const netPrice = price / (1 + (taxRate / 100));
-                const profitPerUnit = netPrice - cost;
-                return itemAcc + (profitPerUnit * qty);
-            }, 0);
-            return acc + saleUtility;
+        console.log('📊 Today stats:', { totalSalesToday, ticketsToday });
+
+        // 2. Utilidad del día (YA VIENE CALCULADA)
+        const utilityToday = todayUtility;
+
+        // 3. Stats del mes (SUMAR monthlyStats - solo ~30 registros)
+        const totalSalesMonth = monthlyStats.reduce((acc, day) => {
+            return acc + (parseFloat(day.total_sales) || 0);
         }, 0);
 
-        // 2. Metrics from Monthly Stats (Lightweight)
-        // Filter for this month
-        const totalSalesMonth = monthlyStats
-            .filter(s => {
-                const saleMonthKey = formatInCompanyTime(s.date, currentCompanyTimezone, 'yyyy-MM');
-                return saleMonthKey === currentMonthKey && !s.summary?.includes('Abono');
-            })
-            .reduce((acc, s) => acc + (parseFloat(s.total) || 0), 0);
+        console.log('📊 Month total:', totalSalesMonth);
 
-        // 3. Chart Data (Last 30 Days from Monthly Stats)
-        const chartData = [];
-        const salesByDay = monthlyStats.reduce((acc, s) => {
-            if (s.summary?.includes('Abono')) return acc;
-            const dayKey = formatInCompanyTime(s.date, currentCompanyTimezone, 'yyyy-MM-dd');
-            acc[dayKey] = (acc[dayKey] || 0) + (parseFloat(s.total) || 0);
-            return acc;
-        }, {});
+        // 4. Chart Data (usar monthlyStats directamente)
+        const salesByDay = {};
+        monthlyStats.forEach(day => {
+            salesByDay[day.day] = parseFloat(day.total_sales) || 0;
+        });
 
-        for (let i = 29; i >= 0; i--) {
-            const d = subDays(now, i);
+        // Generar días del MES ACTUAL para el gráfico
+        const startOfMonthDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        const daysInMonth = [];
+        let currentIterDate = new Date(startOfMonthDate);
+
+        // Iterar desde el 1 del mes hasta hoy
+        while (currentIterDate <= now) {
+            daysInMonth.push(new Date(currentIterDate));
+            currentIterDate.setDate(currentIterDate.getDate() + 1);
+        }
+
+        const chartData = daysInMonth.map(d => {
             const dayKey = formatInCompanyTime(d, currentCompanyTimezone, 'yyyy-MM-dd');
             const displayLabel = formatInCompanyTime(d, currentCompanyTimezone, 'dd MMM');
 
-            chartData.push({
+            return {
                 name: displayLabel,
                 sales: salesByDay[dayKey] || 0
-            });
-        }
+            };
+        });
 
         return {
-            totalSalesToday,
-            totalSalesMonth,
             ticketsToday,
+            totalSalesToday,
             utilityToday,
+            totalSalesMonth,
             chartData
         };
-    }, [todaySales, monthlyStats, currentCompanyTimezone]);
+    }, [todayStats, monthlyStats, currentCompanyTimezone]);
+
+
 
     return (
         <div className="space-y-6">
@@ -151,7 +152,7 @@ const Dashboard = () => {
             {/* Charts Section (Moved to Middle) */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="glass-card lg:col-span-2 h-[400px] flex flex-col">
-                    <h3 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Resumen de Ventas (30 Días)</h3>
+                    <h3 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Resumen de Ventas (Mes Actual)</h3>
                     <div className="flex-1 w-full min-h-0">
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart
@@ -227,20 +228,12 @@ const Dashboard = () => {
                             </h4>
                         </div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-                            {(() => {
-                                const activeTodaySales = todaySales.filter(s => s.status !== 'cancelled');
-                                const productStats = {};
-                                activeTodaySales.forEach(sale => {
-                                    sale.items.forEach(item => {
-                                        if (!productStats[item.id]) productStats[item.id] = { ...item, totalSold: 0 };
-                                        productStats[item.id].totalSold += item.quantity;
-                                    });
-                                });
-                                const sorted = Object.values(productStats).sort((a, b) => b.totalSold - a.totalSold).slice(0, 10);
-
-                                if (sorted.length === 0) return <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">No hay ventas hoy</div>;
-
-                                return sorted.map((p, idx) => (
+                            {topProducts.length === 0 ? (
+                                <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">
+                                    No hay ventas hoy
+                                </div>
+                            ) : (
+                                topProducts.map((p, idx) => (
                                     <div key={idx} className="flex items-center justify-between p-2 rounded bg-black/20 border border-[var(--glass-border)]">
                                         <div className="flex items-center gap-3 overflow-hidden">
                                             <span className="text-[var(--color-primary)] font-bold text-sm w-4">{idx + 1}</span>
@@ -250,11 +243,13 @@ const Dashboard = () => {
                                             </div>
                                         </div>
                                         <div className="text-right shrink-0">
-                                            <span className="block text-[var(--color-text)] font-bold text-xs">{p.totalSold} {p.unit === 'Kg' ? 'kg' : 'und'}</span>
+                                            <span className="block text-[var(--color-text)] font-bold text-xs">
+                                                {p.total_quantity} {p.unit === 'Kg' ? 'kg' : 'und'}
+                                            </span>
                                         </div>
                                     </div>
-                                ));
-                            })()}
+                                ))
+                            )}
                         </div>
                     </div>
 

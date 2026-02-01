@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Search, Plus, Edit, Trash2, Filter, Loader } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import ProductModal from '../components/ProductModal';
+import OptimizedImage from '../components/OptimizedImage';
 
 const Inventory = () => {
     const {
@@ -282,15 +283,17 @@ const Inventory = () => {
                                             {product.name}
                                         </td>
                                         <td className="px-6 py-5">
-                                            {product.image ? (
-                                                <div className="w-16 h-16 rounded-lg overflow-hidden border border-[var(--glass-border)]">
-                                                    <img src={product.image} alt="" className="w-full h-full object-cover" />
-                                                </div>
-                                            ) : (
-                                                <div className="w-16 h-16 rounded-lg bg-[var(--glass-bg)] flex items-center justify-center text-sm text-[var(--color-text-muted)]">
-                                                    Img
-                                                </div>
-                                            )}
+                                            <div className="w-16 h-16 rounded-lg overflow-hidden border border-[var(--glass-border)] bg-[var(--glass-bg)] flex items-center justify-center">
+                                                <OptimizedImage
+                                                    src={product.image}
+                                                    alt={product.name}
+                                                    className="w-full h-full object-cover"
+                                                    priority={false}
+                                                    fallback={
+                                                        <span className="text-xs text-[var(--color-text-muted)] font-medium">Img</span>
+                                                    }
+                                                />
+                                            </div>
                                         </td>
                                         <td className="px-6 py-5">
                                             <span className="px-3 py-1.5 rounded-full text-sm font-semibold bg-[var(--color-primary)]/10 text-[var(--color-primary)] border border-[var(--color-primary)]/20">

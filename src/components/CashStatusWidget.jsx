@@ -16,6 +16,7 @@ const CashStatusWidget = () => {
     const [txModalType, setTxModalType] = useState(null); // 'IN' or 'OUT'
     const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
     const [successModalData, setSuccessModalData] = useState(null);
+    const [isProcessing, setIsProcessing] = useState(false);
 
     // Refresh stats periodically or when opening
     useEffect(() => {
@@ -62,10 +63,19 @@ const CashStatusWidget = () => {
     };
 
     const handleTransactionConfirm = async (amount, reason) => {
-        if (!txModalType) return;
-        await addCashMovement(cashRegister.id, txModalType, amount, reason);
-        await refreshRegisterStats(cashRegister.id);
-        setTxModalType(null);
+        if (!txModalType || isProcessing) return;
+
+        try {
+            setIsProcessing(true);
+            await addCashMovement(cashRegister.id, txModalType, amount, reason);
+            await refreshRegisterStats(cashRegister.id);
+            setTxModalType(null);
+        } catch (error) {
+            console.error("Transaction failed:", error);
+            alert("Error al registrar movimiento");
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
     return (
@@ -222,6 +232,7 @@ const CashStatusWidget = () => {
                 onClose={() => setTxModalType(null)}
                 type={txModalType}
                 onConfirm={handleTransactionConfirm}
+                isProcessing={isProcessing}
             />
 
             {/* Only render closing modal if register exists (it requires register stats) */}
@@ -244,7 +255,7 @@ const CashStatusWidget = () => {
     );
 };
 
-const TransactionModal = ({ isOpen, onClose, type, onConfirm }) => {
+const TransactionModal = ({ isOpen, onClose, type, onConfirm, isProcessing }) => {
     const [amount, setAmount] = useState('');
     const [reason, setReason] = useState('');
 
@@ -297,12 +308,22 @@ const TransactionModal = ({ isOpen, onClose, type, onConfirm }) => {
 
                     <button
                         onClick={handleSubmit}
+                        disabled={isProcessing}
                         className={cn(
-                            "w-full py-3 rounded-xl font-bold text-black shadow-lg transition-all",
-                            type === 'IN' ? "bg-green-400 hover:bg-green-300 shadow-green-400/20" : "bg-orange-400 hover:bg-orange-300 shadow-orange-400/20"
+                            "w-full py-3 rounded-xl font-bold text-black shadow-lg transition-all flex items-center justify-center gap-2",
+                            type === 'IN'
+                                ? (isProcessing ? "bg-green-400/50 cursor-wait" : "bg-green-400 hover:bg-green-300 shadow-green-400/20")
+                                : (isProcessing ? "bg-orange-400/50 cursor-wait" : "bg-orange-400 hover:bg-orange-300 shadow-orange-400/20")
                         )}
                     >
-                        Confirmar {type === 'IN' ? 'Ingreso' : 'Retiro'}
+                        {isProcessing ? (
+                            <>
+                                <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                                Procesando...
+                            </>
+                        ) : (
+                            `Confirmar ${type === 'IN' ? 'Ingreso' : 'Retiro'}`
+                        )}
                     </button>
                 </div>
             </div>

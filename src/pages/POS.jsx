@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import PaymentModal from '../components/PaymentModal';
@@ -7,12 +7,13 @@ import CashOpeningModal from '../components/CashOpeningModal';
 import CashStatusWidget from '../components/CashStatusWidget';
 import SaleSuccessModal from '../components/SaleSuccessModal';
 import ClientSearchWidget from '../components/ClientSearchWidget';
+import OptimizedImage from '../components/OptimizedImage';
+import SuspendedSalesModal from '../components/SuspendedSalesModal';
 
 const POS = () => {
     const {
         products,
         categories: storedCategories,
-        cart,
         addToCart,
         removeFromCart,
         clearCart,
@@ -22,20 +23,55 @@ const POS = () => {
         cashRegister,
         checkRegisterStatus,
         inventoryAdjustmentMode,
-        posSelectedClient,
         setPosSelectedClient,
         searchProducts,
         loadCategoryProducts,
         getProductByBarcode,
-        activeCompanyId
+        activeCompanyId,
+        suspendSale,
+        suspendedSalesCount,
+        updateSuspendedCount,
+        // Multi-Cart
+        carts,
+        activeCartId,
+        addCart,
+        setActiveCart,
+        removeCart
     } = useStore();
+
+    // Derivar cart y client manualmente (fix para computed getters)
+    const cart = React.useMemo(() => {
+        return carts.find(c => c.id === activeCartId)?.items || [];
+    }, [carts, activeCartId]);
+
+    const posSelectedClient = React.useMemo(() => {
+        return carts.find(c => c.id === activeCartId)?.client || null;
+    }, [carts, activeCartId]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
     const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
     const [lastSaleDetails, setLastSaleDetails] = useState(null);
+    const [isLoadingProducts, setIsLoadingProducts] = useState(true);
+    const [showSuspendedModal, setShowSuspendedModal] = useState(false);
 
-    // Old logic removed - replaced by pagination logic below
+    // Cargar contador de ventas suspendidas
+    React.useEffect(() => {
+        updateSuspendedCount();
+    }, [updateSuspendedCount]);
+
+    // NUEVO: Precargar productos al montar el componente
+    React.useEffect(() => {
+        console.log('🚀 POS montado - Precargando productos iniciales...');
+        setIsLoadingProducts(true);
+        console.time('⏱️ Carga inicial productos');
+
+        loadCategoryProducts('Todos', 0).then(() => {
+            console.timeEnd('⏱️ Carga inicial productos');
+            setIsLoadingProducts(false);
+            console.log('✅ Productos precargados');
+        });
+    }, []); // Array vacío = solo una vez al montar
 
     // Barcode Scanner Listener
     React.useEffect(() => {
@@ -129,6 +165,18 @@ const POS = () => {
         setLastSaleDetails(null);
     };
 
+    const handleCategoryChange = async (category) => {
+        console.log('🔄 Changing category to:', category);
+        setSelectedCategory(category);
+        setIsLoadingProducts(true);
+        setOffset(0); // Reset pagination
+
+        const hasMoreResult = await loadCategoryProducts(category, 0);
+        setHasMore(hasMoreResult); // Update hasMore based on result
+
+        setIsLoadingProducts(false);
+    };
+
     // Check register status on mount
     React.useEffect(() => {
         if (currentUser) {
@@ -151,14 +199,20 @@ const POS = () => {
                 return;
             }
 
-            setIsLoadingMore(true);
-            setOffset(0);
-            const count = await loadCategoryProducts(selectedCategory, 0);
-            setHasMore(count === 30); // If we got full batch, assume more exists
-            setIsLoadingMore(false);
+            // Only run this on Mount or Company Change if needed
+            // But we have a specific mount effect now. 
+            // So this is mainly for ActiveCompanyId changes if distinct from mount (?)
+            // Actually, let's just keep it for activeCompanyId, but NOT selectedCategory
+            if (activeCompanyId) {
+                setIsLoadingMore(true);
+                setOffset(0);
+                const hasMoreResult = await loadCategoryProducts(selectedCategory, 0);
+                setHasMore(hasMoreResult);
+                setIsLoadingMore(false);
+            }
         };
         load();
-    }, [selectedCategory, searchTerm, activeCompanyId]); // Reset on category/search/company change
+    }, [searchTerm, activeCompanyId]); // Removed selectedCategory to avoid double-fetch with handler
 
     // Search Effect (existing logic modified to reset list)
     React.useEffect(() => {
@@ -184,13 +238,30 @@ const POS = () => {
         if (scrollHeight - scrollTop <= clientHeight + 100 && hasMore && !isLoadingMore && !searchTerm) {
             setIsLoadingMore(true);
             const newOffset = offset + 30;
-            const count = await loadCategoryProducts(selectedCategory, newOffset);
+            const hasMoreResult = await loadCategoryProducts(selectedCategory, newOffset);
 
             setOffset(newOffset);
-            setHasMore(count === 30);
+            setHasMore(hasMoreResult);
             setIsLoadingMore(false);
         }
     };
+
+    // Shortcuts de teclado para cambiar carritos
+    React.useEffect(() => {
+        const handleKeyPress = (e) => {
+            // Ctrl/Cmd + 1, 2, 3 para cambiar de carrito
+            if ((e.ctrlKey || e.metaKey) && ['1', '2', '3'].includes(e.key)) {
+                e.preventDefault();
+                const cartIndex = parseInt(e.key) - 1;
+                if (carts[cartIndex]) {
+                    setActiveCart(carts[cartIndex].id);
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyPress);
+        return () => window.removeEventListener('keydown', handleKeyPress);
+    }, [carts, setActiveCart]);
 
     return (
         <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-100px)]">
@@ -242,7 +313,7 @@ const POS = () => {
                         {categoryList.map(cat => (
                             <button
                                 key={cat}
-                                onClick={() => setSelectedCategory(cat)}
+                                onClick={() => handleCategoryChange(cat)}
                                 className={cn(
                                     "px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all",
                                     selectedCategory === cat
@@ -261,110 +332,102 @@ const POS = () => {
                     className="flex-1 overflow-y-auto pr-2 grid grid-cols-3 min-[1450px]:grid-cols-4 min-[1801px]:grid-cols-5 min-[2201px]:grid-cols-6 gap-4 content-start pb-20 custom-scrollbar"
                     onScroll={handleScroll}
                 >
-                    {visibleProducts.map((product) => (
-                        <div
-                            key={product.id}
-                            onClick={() => addToCart(product)}
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault();
-                                    addToCart(product);
-                                }
-                            }}
-                            className={cn(
-                                "rounded-xl glass-card bg-card p-0 text-[var(--color-text)] shadow-sm cursor-pointer border hover:bg-[var(--color-surface-hover)] transition-all duration-150 flex flex-col h-auto hover:shadow-lg active:scale-95 touch-manipulation relative group",
-                                (product.is_offer === 1 || product.is_offer === true)
-                                    ? "border-yellow-500/50 bg-yellow-500/5 hover:border-yellow-400 hover:shadow-[0_0_20px_rgba(234,179,8,0.2)]"
-                                    : "border-[var(--glass-border)] hover:border-[var(--color-primary)]"
-                            )}
-                        >
-                            {(product.is_offer === 1 || product.is_offer === true) && (
-                                <div className="absolute top-2 left-2 z-20 bg-yellow-500 text-black text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse shadow-lg">
-                                    OFERTA
-                                </div>
-                            )}
-                            <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity z-10">
-                                <span className={cn(
-                                    "text-[var(--color-primary)] bg-black/50 rounded-full w-6 h-6 flex items-center justify-center text-sm",
-                                    product.image ? "text-[var(--color-text)]" : "text-[var(--color-primary)]"
-                                )}>+</span>
+                    {isLoadingProducts ? (
+                        <div className="col-span-full flex items-center justify-center py-12">
+                            <div className="text-center">
+                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mx-auto mb-4"></div>
+                                <p className="text-gray-400">Cargando productos...</p>
                             </div>
+                        </div>
+                    ) : visibleProducts.length === 0 ? (
+                        <div className="col-span-full text-center py-12 text-gray-400">
+                            No hay productos disponibles
+                        </div>
+                    ) : (
+                        visibleProducts.map((product) => (
+                            <div
+                                key={product.id}
+                                onClick={() => addToCart(product)}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        addToCart(product);
+                                    }
+                                }}
+                                className={cn(
+                                    "rounded-xl glass-card bg-card p-0 text-[var(--color-text)] shadow-sm cursor-pointer border hover:bg-[var(--color-surface-hover)] transition-all duration-150 flex flex-col h-auto hover:shadow-lg active:scale-95 touch-manipulation relative group",
+                                    (product.is_offer === 1 || product.is_offer === true)
+                                        ? "border-yellow-500/50 bg-yellow-500/5 hover:border-yellow-400 hover:shadow-[0_0_20px_rgba(234,179,8,0.2)]"
+                                        : "border-[var(--glass-border)] hover:border-[var(--color-primary)]"
+                                )}
+                            >
+                                {(product.is_offer === 1 || product.is_offer === true) && (
+                                    <div className="absolute top-2 left-2 z-20 bg-yellow-500 text-black text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse shadow-lg">
+                                        OFERTA
+                                    </div>
+                                )}
+                                <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity z-10">
+                                    <span className={cn(
+                                        "text-[var(--color-primary)] bg-black/50 rounded-full w-6 h-6 flex items-center justify-center text-sm",
+                                        product.image ? "text-[var(--color-text)]" : "text-[var(--color-primary)]"
+                                    )}>+</span>
+                                </div>
 
-                            {/* Image Container - Full Width */}
-                            <div className="w-full aspect-square bg-[var(--glass-bg)] flex items-center justify-center overflow-hidden relative shrink-0 rounded-t-xl">
-                                {product.image && product.image !== '[object Object]' && (product.image.startsWith('http') || product.image.startsWith('data:')) ? (
-                                    <img
+                                {/* Image Container - Full Width */}
+                                <div className="w-full aspect-square bg-[var(--glass-bg)] flex items-center justify-center overflow-hidden relative shrink-0 rounded-t-xl">
+                                    <OptimizedImage
                                         src={product.image}
                                         alt={product.name}
                                         className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-110"
-                                        onError={(e) => {
-                                            e.target.style.display = 'none';
-                                            e.target.parentElement.classList.add('flex', 'flex-col', 'gap-2');
-
-                                            // Create fallback content dynamically
-                                            const icon = document.createElement('div');
-                                            icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-image-off text-[var(--color-text-muted)] mb-1 opacity-50"><line x1="2" x2="22" y1="2" y2="22"/><path d="M10.41 6.26l2.15 2.15 3.44-3.44 5 5V20a2 2 0 0 1-2 2h-9"/><path d="M4 13.5V4a2 2 0 0 1 2-2h8.5"/><path d="M4 19.5l3-3"/><path d="M14 14l2-2 2.5 2.5"/></svg>';
-                                            const text = document.createElement('span');
-                                            text.className = 'text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider opacity-50';
-                                            text.innerText = 'Sin Imagen';
-
-                                            e.target.parentElement.appendChild(icon.firstChild);
-                                            e.target.parentElement.appendChild(text);
-                                        }}
+                                        priority={false}
                                     />
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center gap-1 w-full h-full">
-                                        <ImageOff className="text-[var(--color-text-muted)] opacity-50" size={40} />
-                                        <span className="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider opacity-50">Sin Imagen</span>
-                                    </div>
-                                )}
-                            </div>
+                                </div>
 
-                            {/* Content Wrapper - Padded */}
-                            <div className="flex flex-col flex-1 w-full justify-between p-3">
-                                <div>
-                                    <h3 className="text-[var(--color-text)] font-bold text-sm line-clamp-2 leading-tight mb-1 group-hover:text-[var(--color-primary)] transition-colors">
-                                        {product.name}
-                                    </h3>
+                                {/* Content Wrapper - Padded */}
+                                <div className="flex flex-col flex-1 w-full justify-between p-3">
+                                    <div>
+                                        <h3 className="text-[var(--color-text)] font-bold text-sm line-clamp-2 leading-tight mb-1 group-hover:text-[var(--color-primary)] transition-colors">
+                                            {product.name}
+                                        </h3>
 
-                                    <div className="mb-2">
-                                        {(product.is_offer === 1 || product.is_offer === true) && product.offer_price > 0 ? (
-                                            <div className="flex flex-col items-start leading-none gap-0.5">
-                                                <span className="text-xs text-red-400 line-through decoration-red-400 opacity-70 font-semibold">
+                                        <div className="mb-2">
+                                            {(product.is_offer === 1 || product.is_offer === true) && product.offer_price > 0 ? (
+                                                <div className="flex flex-col items-start leading-none gap-0.5">
+                                                    <span className="text-xs text-red-400 line-through decoration-red-400 opacity-70 font-semibold">
+                                                        ${product.price ? product.price.toFixed(2) : '0.00'}
+                                                    </span>
+                                                    <span className="text-yellow-400 font-extrabold text-xl drop-shadow-sm">
+                                                        ${Number(product.offer_price).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            ) : (
+                                                <span className="text-green-400 font-bold text-lg tracking-tight">
                                                     ${product.price ? product.price.toFixed(2) : '0.00'}
                                                 </span>
-                                                <span className="text-yellow-400 font-extrabold text-xl drop-shadow-sm">
-                                                    ${Number(product.offer_price).toFixed(2)}
-                                                </span>
-                                            </div>
-                                        ) : (
-                                            <span className="text-green-400 font-bold text-lg tracking-tight">
-                                                ${product.price ? product.price.toFixed(2) : '0.00'}
-                                            </span>
-                                        )}
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="w-full flex justify-between items-center pt-2 border-t border-[var(--glass-border)]">
+                                        <span className={cn(
+                                            "font-medium px-2 py-0.5 rounded text-[10px]",
+                                            product.pending_adjustment
+                                                ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
+                                                : product.stock < 10
+                                                    ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                                                    : "bg-green-500/20 text-green-400 border border-green-500/30"
+                                        )}>
+                                            {product.pending_adjustment ? '⚠ Pendiente' : `${product.stock} ${product.unit === 'Kg' ? 'kg' : 'un.'}`}
+                                        </span>
+                                        <span className="text-[10px] text-[var(--color-text-muted)] font-medium truncate max-w-[50%] text-right">
+                                            {product.category || product.sku || 'General'}
+                                        </span>
                                     </div>
                                 </div>
-
-                                <div className="w-full flex justify-between items-center pt-2 border-t border-[var(--glass-border)]">
-                                    <span className={cn(
-                                        "font-medium px-2 py-0.5 rounded text-[10px]",
-                                        product.pending_adjustment
-                                            ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
-                                            : product.stock < 10
-                                                ? "bg-red-500/20 text-red-400 border border-red-500/30"
-                                                : "bg-green-500/20 text-green-400 border border-green-500/30"
-                                    )}>
-                                        {product.pending_adjustment ? '⚠ Pendiente' : `${product.stock} ${product.unit === 'Kg' ? 'kg' : 'un.'}`}
-                                    </span>
-                                    <span className="text-[10px] text-[var(--color-text-muted)] font-medium truncate max-w-[50%] text-right">
-                                        {product.category || product.sku || 'General'}
-                                    </span>
-                                </div>
                             </div>
-                        </div>
-                    ))}
+                        )))}
                 </div>
             </div>
 
@@ -374,10 +437,90 @@ const POS = () => {
                     <div className="w-full">
                         <ClientSearchWidget />
                     </div>
-                    <h2 className="text-xl font-bold text-[var(--color-text)] flex items-center gap-2">
-                        <ShoppingCart size={20} className="text-[var(--color-primary)]" />
-                        Ticket Actual
-                    </h2>
+                    {/* Tabs de carritos (Nuevo Diseño) */}
+                    <div className="mb-4">
+                        <div className="flex w-full gap-2">
+                            {carts.map(cart => {
+                                const itemCount = cart.items.reduce((sum, item) => sum + item.quantity, 0);
+                                const isActive = cart.id === activeCartId;
+
+                                return (
+                                    <div
+                                        key={cart.id}
+                                        onClick={() => setActiveCart(cart.id)}
+                                        className={cn(
+                                            "flex-1 relative p-3 rounded-xl border transition-all cursor-pointer group flex flex-col justify-between h-20 select-none overflow-hidden",
+                                            isActive
+                                                ? "bg-[rgba(6,182,212,0.15)] border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.2)]"
+                                                : "bg-[#1a1b26] border-white/5 hover:bg-[#202230] hover:border-white/10 opacity-70 hover:opacity-100"
+                                        )}
+                                    >
+                                        {/* Header: Icon + Title + Close */}
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-1.5">
+                                                <ShoppingCart size={14} className={isActive ? "text-cyan-400" : "text-gray-500"} />
+                                                <span className={cn("text-xs font-bold tracking-wide", isActive ? "text-white" : "text-gray-400")}>
+                                                    {cart.name}
+                                                </span>
+                                            </div>
+
+                                            {/* Botón X - Solo si hay más de 1 */}
+                                            {carts.length > 1 && (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        removeCart(cart.id);
+                                                    }}
+                                                    className={cn(
+                                                        "p-1 rounded-md transition-colors z-10",
+                                                        isActive
+                                                            ? "text-cyan-400 hover:bg-cyan-900/30 hover:text-cyan-200"
+                                                            : "text-gray-600 hover:bg-white/10 hover:text-gray-300"
+                                                    )}
+                                                >
+                                                    <X size={12} strokeWidth={3} />
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        {/* Divider (Visual only, invisible but space) */}
+
+                                        {/* Content: Count & Client */}
+                                        <div className="flex flex-col">
+                                            <div className="flex items-baseline gap-1">
+                                                <span className={cn("text-lg font-black leading-none", isActive ? "text-cyan-400" : "text-gray-500")}>
+                                                    {itemCount}
+                                                </span>
+                                                <span className={cn("text-[10px] font-medium uppercase tracking-wider", isActive ? "text-cyan-400/70" : "text-gray-600")}>
+                                                    {itemCount === 1 ? 'Artículo' : 'Artículos'}
+                                                </span>
+                                            </div>
+
+                                            {cart.client && (
+                                                <div className="text-[10px] text-gray-500 truncate mt-0.5 flex items-center gap-1">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500/50 inline-block"></span>
+                                                    {cart.client.name.split(' ')[0]}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+
+                            {/* Slot para agregar (Si hay menos de 3) */}
+                            {carts.length < 3 && (
+                                <button
+                                    onClick={addCart}
+                                    className="flex-[0.4] min-w-[60px] max-w-[100px] h-20 rounded-xl border border-dashed border-gray-800 hover:border-gray-600 bg-transparent hover:bg-white/5 flex flex-col items-center justify-center gap-1 text-gray-600 hover:text-gray-400 transition-all group"
+                                    title="Agregar Ticket"
+                                >
+                                    <div className="w-8 h-8 rounded-full bg-gray-800 group-hover:bg-gray-700 flex items-center justify-center transition-colors">
+                                        <Plus size={16} />
+                                    </div>
+                                </button>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -541,9 +684,56 @@ const POS = () => {
                             <Banknote size={20} />
                             Cobrar
                         </button>
+
+                        {/* Botón Suspender/Recuperar */}
+                        <button
+                            onClick={async () => {
+                                if (cart.length > 0) {
+                                    // Suspender venta actual
+                                    const success = await suspendSale();
+                                    if (success) {
+                                        // Opcional: mostrar notificación
+                                        console.log('✅ Venta suspendida');
+                                    }
+                                } else {
+                                    // Abrir modal de recuperar
+                                    setShowSuspendedModal(true);
+                                }
+                            }}
+                            disabled={cart.length === 0 && suspendedSalesCount === 0}
+                            className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all ${cart.length > 0
+                                ? 'bg-orange-500 hover:bg-orange-600 text-white'
+                                : suspendedSalesCount > 0
+                                    ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                                    : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                }`}
+                        >
+                            {cart.length > 0 ? (
+                                <>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                    </svg>
+                                    Suspender Venta
+                                </>
+                            ) : (
+                                <>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M3 3l3 9-3 9 19-9z"></path>
+                                    </svg>
+                                    Recuperar {suspendedSalesCount > 0 ? `(${suspendedSalesCount})` : ''}
+                                </>
+                            )}
+                        </button>
                     </div>
                 </div>
             </div>
+
+            {/* Modals */}
+            <SuspendedSalesModal
+                isOpen={showSuspendedModal}
+                onClose={() => setShowSuspendedModal(false)}
+            />
 
             <PaymentModal
                 isOpen={isPaymentModalOpen}

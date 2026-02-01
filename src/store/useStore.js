@@ -2,7 +2,9 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { turso } from '../lib/turso';
 import { subDays } from 'date-fns';
-import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFromDateString, getEndFromDateString } from '../lib/dateHelpers';
+import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFromDateString, getEndFromDateString, formatInCompanyTime } from '../lib/dateHelpers';
+
+let migrationsExecuted = false;
 
 export const useStore = create(persist((set, get) => ({
     // Initial State
@@ -13,12 +15,36 @@ export const useStore = create(persist((set, get) => ({
     users: [],
     purchases: [],
     sales: [],
-    cart: [],
+    // Multi-cart system
+    carts: [
+        {
+            id: 1,
+            name: 'Ticket 1',
+            items: [],
+            client: null,
+            createdAt: Date.now()
+        }
+    ],
+    activeCartId: 1,
+    nextCartId: 2,
+
+    // Computed getters (derivados automáticamente, sin duplicación)
+    get cart() {
+        const { carts, activeCartId } = get();
+        return carts.find(c => c.id === activeCartId)?.items || [];
+    },
+
+    get posSelectedClient() {
+        const { carts, activeCartId } = get();
+        return carts.find(c => c.id === activeCartId)?.client || null;
+    },
     activeRegisters: [],
     cashRegister: null,
     currentUser: null,
     isLoading: false,
     error: null,
+    _hasHydrated: false,
+    setHasHydrated: (state) => set({ _hasHydrated: state }),
     darkMode: true, // Default to dark mode
 
     toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
@@ -344,14 +370,21 @@ export const useStore = create(persist((set, get) => ({
     },
 
     fetchInitialData: async () => {
+        console.time('⏱️ fetchInitialData');
         set({ isLoading: true, error: null });
         try {
             console.log('📊 fetchInitialData START');
 
             // RUN MIGRATIONS & BACKFILL
-            console.time('⏱️ _runMigrations');
-            await get()._runMigrations();
-            console.timeEnd('⏱️ _runMigrations');
+            if (!migrationsExecuted) {
+                console.time('⏱️ _runMigrations');
+                await get()._runMigrations();
+                console.timeEnd('⏱️ _runMigrations');
+                migrationsExecuted = true;
+                console.log('✅ Migrations executed and cached for session');
+            } else {
+                console.log('✅ Migrations already executed, using cache');
+            }
 
             const { currentUser } = get();
             let { activeCompanyId, availableCompanies } = get();
@@ -449,8 +482,15 @@ export const useStore = create(persist((set, get) => ({
             // ==========================================
             console.time('⏱️ BatchFetch');
             const batchResults = await turso.batch([
-                // Removed products LIMIT 0
-                { sql: "SELECT * FROM product_lots WHERE quantity > 0 AND (company_id = ? OR company_id IS NULL) ORDER BY expiry_date ASC", args: [activeCompanyId] }, // Fetch ALL active lots
+                // Optimized product_lots query
+                {
+                    sql: `SELECT id, product_id, batch_number, expiry_date, quantity, cost, supplier_name, created_at, status, company_id 
+                          FROM product_lots 
+                          WHERE company_id = ? AND quantity > 0 
+                          ORDER BY expiry_date ASC 
+                          LIMIT 200`,
+                    args: [activeCompanyId]
+                },
                 { sql: "SELECT * FROM categories WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
                 { sql: "SELECT * FROM suppliers WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
                 { sql: "SELECT * FROM users WHERE company_id = ?", args: [activeCompanyId] },
@@ -560,38 +600,57 @@ export const useStore = create(persist((set, get) => ({
 
 
 
-    loadCategoryProducts: async (categoryName, offset = 0) => {
-        const { activeCompanyId, products: currentProducts } = get();
+    loadCategoryProducts: async (category, offset = 0, limit = 30) => {
+        const { activeCompanyId } = get();
         try {
-            console.time('⏱️ loadCategory');
-            const limit = 30;
-            let sql = "SELECT * FROM products WHERE company_id = ? AND category = ? ORDER BY is_offer DESC, name ASC LIMIT ? OFFSET ?";
-            let args = [activeCompanyId, categoryName, limit, offset];
+            console.log(`📦 Loading products: category=${category}, offset=${offset}`);
+            console.time(`⏱️ loadCategoryProducts-${category}-${offset}`);
 
-            if (categoryName === 'Todos') {
-                sql = "SELECT * FROM products WHERE company_id = ? ORDER BY is_offer DESC, name ASC LIMIT ? OFFSET ?";
-                args = [activeCompanyId, limit, offset];
+            // Query optimizado - solo columnas necesarias
+            let sql = `SELECT 
+                id, name, sku, price, cost, stock, category, unit, image,
+                tax_rate, is_offer, offer_price, company_id
+            FROM products 
+            WHERE company_id = ?`;
+
+            let args = [activeCompanyId];
+
+            // Filtrar por categoría si no es "Todos"
+            if (category && category !== 'Todos') {
+                sql += " AND category = ?";
+                args.push(category);
             }
 
-            console.log("🔍 loadCategory:", { activeCompanyId, categoryName, limit, offset });
-            const res = await turso.execute({ sql, args });
-            console.timeEnd('⏱️ loadCategory');
+            // Ordenar y paginar
+            sql += " ORDER BY is_offer DESC, name ASC LIMIT ? OFFSET ?";
+            args.push(limit, offset);
 
-            const newProducts = res.rows.map(p => ({
+            const result = await turso.execute({ sql, args });
+
+            console.timeEnd(`⏱️ loadCategoryProducts-${category}-${offset}`);
+            console.log(`✅ Loaded ${result.rows.length} products`);
+
+            // Procesar price_ranges si existe
+            const products = result.rows.map(p => ({
                 ...p,
                 price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
             }));
 
+            // Si es primera página (offset=0), reemplazar productos
+            // Si es paginación, agregar a los existentes
             if (offset === 0) {
-                set({ products: newProducts });
+                set({ products });
             } else {
-                set({ products: [...currentProducts, ...newProducts] });
+                const currentProducts = get().products;
+                set({ products: [...currentProducts, ...products] });
             }
 
-            return newProducts.length;
+            // Retornar si hay más productos
+            return result.rows.length === limit; // true si hay más
+
         } catch (e) {
-            console.error("Category load failed", e);
-            return 0;
+            console.error("❌ Load category products failed", e);
+            return false;
         }
     },
 
@@ -850,60 +909,97 @@ export const useStore = create(persist((set, get) => ({
         try {
             console.time('⏱️ fetchDashboardData');
 
-            // 1. Date Ranges
+            // 1. Calcular fechas
             const today = new Date();
             const startOfToday = getCompanyDayStart(today, currentCompanyTimezone);
             const endOfToday = getCompanyDayEnd(today, currentCompanyTimezone);
 
-            const thirtyDaysAgo = subDays(today, 30);
-            const startOfMonth = getCompanyDayStart(thirtyDaysAgo, currentCompanyTimezone);
+            // Para mes: desde día 1 del mes actual
+            const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-            // 2. Batched Queries
+            // Formatear fechas para comparar con columna 'day' (YYYY-MM-DD)
+            const todayStr = formatInCompanyTime(today, currentCompanyTimezone, 'yyyy-MM-dd');
+            const monthStartStr = formatInCompanyTime(startOfMonth, currentCompanyTimezone, 'yyyy-MM-dd');
+
+            console.log('📅 Dashboard dates:', { todayStr, monthStartStr, company: activeCompanyId });
+
+            // 2. QUERIES OPTIMIZADOS usando sales_daily_summary
+            // 2. QUERIES OPTIMIZADOS usando sales_daily_summary
             const [
-                todaySalesRes,
-                monthlyStatsRes,
+                todayStatsRes,
+                monthStatsRes,
+                todayUtilityRes,        // ← NUEVA: Utilidad precalculada
                 recentSalesRes,
-                lowStockRes
+                lowStockRes,
+                topProductsRes          // ← NUEVA: Más vendidos precalculado
             ] = await turso.batch([
-                // 1. Today's Sales (Full details for widgets)
+                // 1. Stats del día desde tabla agregada (SUPER RÁPIDO)
+                {
+                    sql: `SELECT 
+                            COALESCE(SUM(total_sales), 0) as total_sales,
+                            COALESCE(SUM(total_orders), 0) as total_orders
+                          FROM sales_daily_summary
+                          WHERE company_id = ? AND day = ?`,
+                    args: [activeCompanyId, todayStr]
+                },
+                // 2. Stats del mes desde tabla agregada (RÁPIDO - solo ~30 registros)
+                {
+                    sql: `SELECT 
+                            day,
+                            total_sales,
+                            total_orders
+                          FROM sales_daily_summary
+                          WHERE company_id = ? 
+                          AND day >= ? 
+                          AND day <= ?
+                          ORDER BY day ASC`,
+                    args: [activeCompanyId, monthStartStr, todayStr]
+                },
+                // 3. Utilidad de HOY (desde tabla precalculada - SUPER RÁPIDO)
+                {
+                    sql: `SELECT COALESCE(SUM(total_profit), 0) as total_profit
+                          FROM product_daily_profit
+                          WHERE company_id = ? AND day = ?`,
+                    args: [activeCompanyId, todayStr]
+                },
+                // 4. Ventas recientes (para lista de actividad)
                 {
                     sql: `SELECT s.*, u.name as user_name
                           FROM sales s
                           LEFT JOIN users u ON s.user_id = u.id
-                          WHERE s.company_id = ? AND s.date >= ? AND s.date <= ?
-                          ORDER BY s.date DESC`,
-                    args: [activeCompanyId, startOfToday.toISOString(), endOfToday.toISOString()]
-                },
-                // 2. Monthly Stats (Lightweight for Chart)
-                {
-                    sql: "SELECT id, date, total, company_id, summary FROM sales WHERE company_id = ? AND date >= ? AND date <= ?",
-                    args: [activeCompanyId, startOfMonth.toISOString(), endOfToday.toISOString()]
-                },
-                // 3. Recent Sales (Limit 20)
-                {
-                    sql: "SELECT * FROM sales WHERE company_id = ? ORDER BY id DESC LIMIT 20",
+                          WHERE s.company_id = ?
+                          ORDER BY s.date DESC
+                          LIMIT 20`,
                     args: [activeCompanyId]
                 },
-                // 4. Low Stock
+                // 5. Productos con bajo stock
                 {
                     sql: "SELECT * FROM products WHERE company_id = ? AND stock <= 0 LIMIT 20",
                     args: [activeCompanyId]
+                },
+                // 6. Productos más vendidos HOY (desde tabla precalculada)
+                {
+                    sql: `SELECT 
+                            p.id,
+                            p.name,
+                            p.category,
+                            p.unit,
+                            pdp.total_quantity,
+                            pdp.total_revenue
+                          FROM product_daily_profit pdp
+                          JOIN products p ON pdp.product_id = p.id
+                          WHERE pdp.company_id = ? 
+                          AND pdp.day = ?
+                          ORDER BY pdp.total_quantity DESC
+                          LIMIT 10`,
+                    args: [activeCompanyId, todayStr]
                 }
             ]);
 
-            console.timeEnd('⏱️ fetchDashboardData');
-
-            // Trigger background fetch for registers (Don't await to avoid blocking UI)
-            get().fetchActiveRegisters();
-
-            // 3. Process Results
-            // activeRegisters will be updated in the store asynchronously by the call above.
-            // We return the current value from store (likely empty or stale initially) to match signature,
-            // but the component listens to the store anyway.
-            const activeRegisters = get().activeRegisters;
-
-            const todaySales = todaySalesRes.rows;
-            const monthlyStats = monthlyStatsRes.rows;
+            // 3. Procesar resultados
+            const todayStats = todayStatsRes.rows[0] || { total_sales: 0, total_orders: 0 };
+            const monthlyStats = monthStatsRes.rows;
+            const todayUtility = todayUtilityRes.rows[0]?.total_profit || 0;  // ← NUEVO
 
             const recentSales = recentSalesRes.rows.map(sale => ({
                 ...sale,
@@ -916,17 +1012,24 @@ export const useStore = create(persist((set, get) => ({
             }));
 
             const lowStockProducts = lowStockRes.rows;
+            const topProducts = topProductsRes.rows;  // ← NUEVO
+
+            // Trigger background fetch for registers
+            get().fetchActiveRegisters();
+            const activeRegisters = get().activeRegisters;
 
             return {
                 activeRegisters,
-                todaySales,
+                todayUtility,      // ← NUEVO: Utilidad precalculada
+                todayStats,
                 monthlyStats,
                 recentSales,
-                lowStockProducts
+                lowStockProducts,
+                topProducts        // ← NUEVO: Más vendidos precalculado
             };
 
         } catch (e) {
-            console.error("Fetch dashboard data failed", e);
+            console.error("❌ Fetch dashboard data failed", e);
             return null;
         }
     },
@@ -1036,6 +1139,36 @@ export const useStore = create(persist((set, get) => ({
 
             // 5. Guardar en localStorage
             localStorage.setItem(`activeCompanyId:${user.id}`, activeCompanyId);
+
+            // 6. FORZAR GUARDADO MANUAL DE SESIÓN (CRÍTICO)
+            try {
+                const persistedState = {
+                    state: {
+                        currentUser: user,
+                        activeCompanyId: activeCompanyId,
+                        availableCompanies: userCompanies,
+                        currentCompanyTimezone: activeCompany.timezone || 'America/Santiago',
+                        currentUserCompanyRole: activeCompany.role,
+                        darkMode: get().darkMode,
+                        carts: get().carts,
+                        activeCartId: get().activeCartId,
+                        nextCartId: get().nextCartId
+                    },
+                    version: 0
+                };
+
+                localStorage.setItem('pos-storage', JSON.stringify(persistedState));
+                console.log('💾 Session manually saved to localStorage');
+
+                // Verificar que se guardó
+                const saved = localStorage.getItem('pos-storage');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    console.log('✅ Verified saved user:', parsed?.state?.currentUser?.username);
+                }
+            } catch (e) {
+                console.error('❌ Failed to save session manually:', e);
+            }
 
             console.log('🔐 Login successful:', {
                 user: user.username,
@@ -1749,6 +1882,112 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // ============================================
+    // MULTI-CART SYSTEM
+    // ============================================
+
+    // Agregar nuevo carrito (máximo 3)
+    addCart: () => {
+        const { carts, nextCartId } = get();
+
+        if (carts.length >= 3) {
+            alert('Máximo 3 carritos simultáneos');
+            return;
+        }
+
+        const newCart = {
+            id: nextCartId,
+            name: `Ticket ${carts.length + 1}`,
+            items: [],
+            client: null,
+            createdAt: Date.now()
+        };
+
+        console.log('➕ Adding cart:', newCart.name);
+
+        set({
+            carts: [...carts, newCart],
+            activeCartId: nextCartId,
+            nextCartId: nextCartId + 1
+        });
+    },
+
+    // Cambiar carrito activo (instantáneo)
+    setActiveCart: (cartId) => {
+        const { carts } = get();
+        const cartExists = carts.find(c => c.id === cartId);
+
+        if (!cartExists) {
+            console.error('Cart not found:', cartId);
+            return;
+        }
+
+        console.log('🔄 Switching to cart:', cartId);
+        set({ activeCartId: cartId });
+
+        // cart y posSelectedClient se actualizan automáticamente via getters
+    },
+
+    // Remover carrito (mínimo 1)
+    removeCart: (cartId) => {
+        const { carts, activeCartId } = get();
+
+        if (carts.length === 1) {
+            alert('Debe mantener al menos un carrito abierto');
+            return;
+        }
+
+        const cartToRemove = carts.find(c => c.id === cartId);
+        if (cartToRemove && cartToRemove.items.length > 0) {
+            if (!confirm(`¿Cerrar ${cartToRemove.name}? Tiene ${cartToRemove.items.length} productos.`)) {
+                return;
+            }
+        }
+
+        console.log('❌ Removing cart:', cartId);
+
+        // Filtrar el carrito eliminado y RENOMBRAR secuencialmente
+        const newCarts = carts
+            .filter(c => c.id !== cartId)
+            .map((cart, index) => ({
+                ...cart,
+                name: `Ticket ${index + 1}`
+            }));
+
+        console.log('🔄 Carts renumbered:', newCarts.map(c => c.name).join(', '));
+
+        // Si eliminamos el activo, cambiar al primero disponible
+        const newActiveId = cartId === activeCartId
+            ? newCarts[0].id
+            : activeCartId;
+
+        set({
+            carts: newCarts,
+            activeCartId: newActiveId
+        });
+    },
+
+    // Renombrar carrito (opcional)
+    renameCart: (cartId, newName) => {
+        set(state => ({
+            carts: state.carts.map(c =>
+                c.id === cartId
+                    ? { ...c, name: newName }
+                    : c
+            )
+        }));
+    },
+
+    setPosSelectedClient: (client) => {
+        set(state => ({
+            carts: state.carts.map(c =>
+                c.id === state.activeCartId
+                    ? { ...c, client }
+                    : c
+            )
+        }));
+    },
+
     // Cart (Local Only)
     _recalculateCartPrices: (cartItems) => {
         // 1. Calculate totals per group
@@ -1800,51 +2039,177 @@ export const useStore = create(persist((set, get) => ({
         });
     },
 
-    addToCart: (product) => set((state) => {
-        const existingItem = state.cart.find((item) => item.id === product.id);
-        let newCart;
+    addToCart: (product) => {
+        const { carts, activeCartId, inventoryAdjustmentMode } = get();
 
-        if (existingItem) {
-            newCart = state.cart.map((item) =>
-                item.id === product.id
-                    ? { ...item, quantity: item.quantity + 1 }
-                    : item
-            );
-        } else {
-            newCart = [...state.cart, {
-                ...product,
-                quantity: 1,
-                original_price: product.price,
-                discount: 0,
-                isManualPrice: false
-            }];
+        // En modo ajuste de inventario, permitir sin validación
+        if (inventoryAdjustmentMode) {
+            set(state => ({
+                carts: state.carts.map(c =>
+                    c.id === state.activeCartId
+                        ? {
+                            ...c,
+                            items: [
+                                ...c.items,
+                                {
+                                    id: product.id,
+                                    name: product.name,
+                                    price: product.price || 0,
+                                    cost: product.cost || 0,
+                                    quantity: 1,
+                                    tax_rate: product.tax_rate || 0,
+                                    image: product.image || null,
+                                    sku: product.sku || '',
+                                    stock: product.stock || 0
+                                }
+                            ]
+                        }
+                        : c
+                )
+            }));
+            return;
         }
 
-        return { cart: state._recalculateCartPrices(newCart) };
-    }),
+        // VALIDACIÓN DE STOCK COMPARTIDO
+        // Calcular cuántas unidades hay en TODOS los carritos
+        const totalInAllCarts = carts.reduce((total, cart) => {
+            const itemInCart = cart.items.find(i => i.id === product.id);
+            return total + (itemInCart?.quantity || 0);
+        }, 0);
 
-    updateCartItem: (productId, updates) => set((state) => {
-        let newCart = state.cart.map((item) => {
-            if (item.id === productId) {
-                // If price is being updated, flag it as manual
-                const isPriceUpdate = updates.price !== undefined;
-                return {
-                    ...item,
-                    ...updates,
-                    isManualPrice: isPriceUpdate ? true : item.isManualPrice
-                };
-            }
-            return item;
+        const availableStock = (product.stock || 0) - totalInAllCarts;
+
+        if (availableStock <= 0) {
+            alert(`Stock insuficiente para "${product.name}". Ya hay ${totalInAllCarts} unidades en carritos.`);
+            return;
+        }
+
+        console.log('📦 Stock check:', {
+            product: product.name,
+            totalStock: product.stock,
+            inCarts: totalInAllCarts,
+            available: availableStock
         });
-        return { cart: state._recalculateCartPrices(newCart) };
-    }),
 
-    removeFromCart: (productId) => set((state) => {
-        const newCart = state.cart.filter((item) => item.id !== productId);
-        return { cart: state._recalculateCartPrices(newCart) };
-    }),
+        // Verificar si el producto ya existe en el carrito activo
+        const activeCart = carts.find(c => c.id === activeCartId);
+        const existingItem = activeCart?.items.find(i => i.id === product.id);
 
-    clearCart: () => set({ cart: [] }),
+        if (existingItem) {
+            // Incrementar cantidad si ya existe
+            get().updateCartItem(product.id, existingItem.quantity + 1);
+        } else {
+            // Agregar nuevo item
+            set(state => ({
+                carts: state.carts.map(c =>
+                    c.id === state.activeCartId
+                        ? {
+                            ...c,
+                            items: [
+                                ...c.items,
+                                {
+                                    id: product.id,
+                                    name: product.name,
+                                    price: product.price || 0,
+                                    cost: product.cost || 0,
+                                    quantity: 1,
+                                    tax_rate: product.tax_rate || 0,
+                                    image: product.image || null,
+                                    sku: product.sku || '',
+                                    stock: product.stock || 0
+                                }
+                            ]
+                        }
+                        : c
+                )
+            }));
+        }
+    },
+
+    updateCartItem: (productId, updates) => {
+        const { carts, activeCartId } = get();
+
+        // Handle quantity update with stock validation
+        // Hybrid support: 'updates' can be object or quantity (if number)
+        // User request implied simpler signature but we support object for compat
+
+        let newQuantity;
+        if (typeof updates === 'number') {
+            newQuantity = updates;
+        } else if (updates && typeof updates.quantity === 'number') {
+            newQuantity = updates.quantity;
+        }
+
+        // Only validate if quantity is changing
+        if (newQuantity !== undefined) {
+            const product = carts.find(c => c.id === activeCartId)?.items.find(i => i.id === productId);
+            if (!product) return; // Should not happen
+
+            const totalInOtherCarts = carts.reduce((total, cart) => {
+                if (cart.id === activeCartId) return total;
+                const itemInCart = cart.items.find(i => i.id === productId);
+                return total + (itemInCart?.quantity || 0);
+            }, 0);
+
+            const availableStock = (product.stock || 0) - totalInOtherCarts;
+
+            if (newQuantity > availableStock) {
+                alert(`Stock insuficiente. Solo hay ${availableStock} disponibles (${totalInOtherCarts} en otros carritos).`);
+                return;
+            }
+
+            if (newQuantity <= 0) {
+                get().removeFromCart(productId);
+                return;
+            }
+        }
+
+        set(state => ({
+            carts: state.carts.map(c =>
+                c.id === state.activeCartId
+                    ? {
+                        ...c,
+                        items: c.items.map(item => {
+                            if (item.id === productId) {
+                                // Apply updates
+                                const isPriceUpdate = updates.price !== undefined;
+                                const baseUpdate = typeof updates === 'object' ? updates : { quantity: updates };
+                                return {
+                                    ...item,
+                                    ...baseUpdate,
+                                    isManualPrice: isPriceUpdate ? true : item.isManualPrice
+                                };
+                            }
+                            return item;
+                        })
+                    }
+                    : c
+            )
+        }));
+    },
+
+    removeFromCart: (productId) => {
+        set(state => ({
+            carts: state.carts.map(c =>
+                c.id === state.activeCartId
+                    ? {
+                        ...c,
+                        items: c.items.filter(item => item.id !== productId)
+                    }
+                    : c
+            )
+        }));
+    },
+
+    clearCart: () => {
+        set(state => ({
+            carts: state.carts.map(c =>
+                c.id === state.activeCartId
+                    ? { ...c, items: [], client: null }
+                    : c
+            )
+        }));
+    },
 
 
 
@@ -1946,6 +2311,79 @@ export const useStore = create(persist((set, get) => ({
                     ]
                 }
             ];
+
+            // NUEVO: Actualizar sales_daily_summary
+            const todayForSummary = new Date();
+            const todayStr = formatInCompanyTime(todayForSummary, get().currentCompanyTimezone, 'yyyy-MM-dd');
+
+            queries.push({
+                sql: `INSERT INTO sales_daily_summary (company_id, day, total_sales, total_orders, updated_at)
+                      VALUES (?, ?, ?, 1, ?)
+                      ON CONFLICT(company_id, day) 
+                      DO UPDATE SET 
+                        total_sales = total_sales + ?,
+                        total_orders = total_orders + 1,
+                        updated_at = ?`,
+                args: [
+                    activeCompanyId,
+                    todayStr,
+                    sale.total,
+                    new Date().toISOString(),
+                    sale.total,
+                    new Date().toISOString()
+                ]
+            });
+
+            // NUEVO: Actualizar product_daily_profit por cada producto
+            for (const item of sale.items) {
+                const quantity = parseFloat(item.quantity);
+                const price = parseFloat(item.price) || 0;
+                const cost = parseFloat(item.cost) || 0;
+                const taxRate = parseFloat(item.tax_rate) || 0;
+
+                // Calcular valores
+                const totalRevenue = price * quantity;
+                const totalCost = cost * quantity;
+                const netPrice = price / (1 + (taxRate / 100));
+                const profitPerUnit = netPrice - cost;
+                const totalProfit = profitPerUnit * quantity;
+                const totalTax = totalRevenue - (netPrice * quantity);
+
+                queries.push({
+                    sql: `INSERT INTO product_daily_profit 
+                          (company_id, product_id, day, total_quantity, total_revenue, total_cost, total_tax, total_profit, updated_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          ON CONFLICT(company_id, product_id, day) 
+                          DO UPDATE SET 
+                            total_quantity = total_quantity + ?,
+                            total_revenue = total_revenue + ?,
+                            total_cost = total_cost + ?,
+                            total_tax = total_tax + ?,
+                            total_profit = total_profit + ?,
+                            updated_at = ?`,
+                    args: [
+                        // INSERT values
+                        activeCompanyId,
+                        item.id,
+                        todayStr,
+                        quantity,
+                        totalRevenue,
+                        totalCost,
+                        totalTax,
+                        totalProfit,
+                        new Date().toISOString(),
+                        // UPDATE values (agregados)
+                        quantity,
+                        totalRevenue,
+                        totalCost,
+                        totalTax,
+                        totalProfit,
+                        new Date().toISOString()
+                    ]
+                });
+
+                console.log(`📊 Updating product_daily_profit: ${item.name}, qty: ${quantity}, profit: $${totalProfit.toFixed(2)}`);
+            }
 
             const updatedLots = [...productLots]; // Clone for local update
 
@@ -2180,33 +2618,64 @@ export const useStore = create(persist((set, get) => ({
 
     fetchActiveRegisters: async () => {
         try {
+            console.time('⏱️ fetchActiveRegisters');
             const { activeCompanyId } = get();
+
             // 1. Get all open registers with user details
             const result = await turso.execute({
-                sql: `
-                SELECT cr.*, u.name as user_name 
-                FROM cash_registers cr 
-                LEFT JOIN users u ON cr.user_id = u.id 
-                WHERE cr.status = 'open' AND cr.company_id = ?
-                `,
+                sql: `SELECT cr.*, u.name as user_name 
+                      FROM cash_registers cr 
+                      LEFT JOIN users u ON cr.user_id = u.id 
+                      WHERE cr.status = 'open' AND cr.company_id = ?`,
                 args: [activeCompanyId]
             });
 
             const registers = result.rows;
-            const activeRegsWithBalance = [];
 
-            // 2. Calculate balance for each active register
-            for (const reg of registers) {
-                // Get sales since opening
-                const salesRes = await turso.execute({
-                    sql: "SELECT * FROM sales WHERE user_id = ? AND date >= ?",
+            if (registers.length === 0) {
+                set({ activeRegisters: [] });
+                console.timeEnd('⏱️ fetchActiveRegisters');
+                return;
+            }
+
+            // 2. OPTIMIZACIÓN: Queries en PARALELO con batch
+            const queries = [];
+
+            registers.forEach(reg => {
+                // Query para ventas de este registro
+                queries.push({
+                    sql: `SELECT total, payment_method, payment_details 
+                          FROM sales 
+                          WHERE user_id = ? 
+                          AND date >= ?`,
                     args: [reg.user_id, reg.opening_time]
                 });
 
+                // Query para movimientos de este registro
+                queries.push({
+                    sql: "SELECT type, amount FROM cash_movements WHERE register_id = ?",
+                    args: [reg.id]
+                });
+            });
+
+            // Ejecutar TODAS las queries en paralelo
+            const results = await turso.batch(queries);
+
+            // 3. Procesar resultados
+            const activeRegsWithBalance = [];
+
+            registers.forEach((reg, index) => {
+                const salesIndex = index * 2;
+                const movementsIndex = index * 2 + 1;
+
+                const salesRes = results[salesIndex];
+                const movRes = results[movementsIndex];
+
+                // Calcular ventas en efectivo
                 let cashSales = 0;
                 salesRes.rows.forEach(sale => {
                     const total = parseFloat(sale.total);
-                    // Simplified cash check (same as refreshRegisterStats)
+
                     if (sale.payment_method === 'Efectivo') {
                         cashSales += total;
                     } else if (sale.payment_method === 'Mixto' && sale.payment_details) {
@@ -2215,19 +2684,18 @@ export const useStore = create(persist((set, get) => ({
                             const methodsList = details.mixedPayments || details.methods;
                             if (methodsList) {
                                 methodsList.forEach(m => {
-                                    if (m.method === 'Efectivo') cashSales += parseFloat(m.amount || 0);
+                                    if (m.method === 'Efectivo') {
+                                        cashSales += parseFloat(m.amount || 0);
+                                    }
                                 });
                             }
-                        } catch (e) { }
+                        } catch (e) {
+                            console.error('Error parsing payment details:', e);
+                        }
                     }
                 });
 
-                // Get movements
-                const movRes = await turso.execute({
-                    sql: "SELECT * FROM cash_movements WHERE register_id = ?",
-                    args: [reg.id]
-                });
-
+                // Calcular movimientos
                 let movesIn = 0;
                 let movesOut = 0;
                 movRes.rows.forEach(m => {
@@ -2242,11 +2710,16 @@ export const useStore = create(persist((set, get) => ({
                     ...reg,
                     currentBalance
                 });
-            }
+            });
 
             set({ activeRegisters: activeRegsWithBalance });
+
+            console.timeEnd('⏱️ fetchActiveRegisters');
+            console.log('✅ Active registers loaded:', activeRegsWithBalance.length);
+
         } catch (e) {
-            console.error("Fetch active registers error", e);
+            console.error("❌ Fetch active registers error", e);
+            console.timeEnd('⏱️ fetchActiveRegisters');
         }
     },
 
@@ -2299,81 +2772,127 @@ export const useStore = create(persist((set, get) => ({
     },
 
     registerStats: { balance: 0, sales: 0, movements_in: 0, movements_out: 0, initial: 0, transactions: [] },
+    suspendedSalesCount: 0,
 
     refreshRegisterStats: async (registerId) => {
         try {
+            console.time('⏱️ refreshRegisterStats');
+            const { activeCompanyId } = get();
+
             // 1. Get Register Info (for opening time and initial amount)
             const regRes = await turso.execute({
                 sql: "SELECT * FROM cash_registers WHERE id = ?",
                 args: [registerId]
             });
 
-            if (regRes.rows.length === 0) return;
+            if (regRes.rows.length === 0) {
+                console.timeEnd('⏱️ refreshRegisterStats');
+                return;
+            }
+
             const register = regRes.rows[0];
             const openingTime = register.opening_time;
 
-            // 2. Get Cash Sales since opening
-            const { activeCompanyId } = get();
-            const salesRes = await turso.execute({
-                sql: "SELECT * FROM sales WHERE user_id = ? AND date >= ? AND company_id = ?",
+            // 2. OPTIMIZADO: Queries en paralelo usando batch
+            const [salesStatsRes, movementsRes, recentSalesRes] = await turso.batch([
+                // Query agregado para stats de ventas (MUY RÁPIDO)
+                {
+                    sql: `SELECT 
+                            COUNT(*) as total_sales,
+                            SUM(CASE WHEN payment_method = 'Efectivo' THEN total ELSE 0 END) as cash_total,
+                            SUM(CASE WHEN payment_method = 'Tarjeta' THEN total ELSE 0 END) as card_total,
+                            SUM(CASE WHEN payment_method = 'Transferencia' THEN total ELSE 0 END) as transfer_total,
+                            SUM(total) as total_sales_amount
+                          FROM sales 
+                          WHERE user_id = ? 
+                          AND date >= ? 
+                          AND company_id = ?`,
+                    args: [register.user_id, openingTime, activeCompanyId]
+                },
+                // Movimientos
+                {
+                    sql: "SELECT * FROM cash_movements WHERE register_id = ? AND company_id = ?",
+                    args: [registerId, activeCompanyId]
+                },
+                // Últimas 20 ventas en efectivo para transacciones (para el widget)
+                {
+                    sql: `SELECT id, date, total, payment_method 
+                          FROM sales 
+                          WHERE user_id = ? 
+                          AND date >= ? 
+                          AND company_id = ?
+                          AND (payment_method = 'Efectivo' OR payment_method = 'Mixto')
+                          ORDER BY date DESC 
+                          LIMIT 20`,
+                    args: [register.user_id, openingTime, activeCompanyId]
+                }
+            ]);
+
+            // 3. Procesar stats de ventas (ya viene agregado, super rápido)
+            const salesStats = salesStatsRes.rows[0] || {
+                cash_total: 0,
+                card_total: 0,
+                transfer_total: 0,
+                total_sales_amount: 0
+            };
+
+            let cashSalesTotal = parseFloat(salesStats.cash_total) || 0;
+            const salesBreakdown = {
+                cash: cashSalesTotal,
+                card: parseFloat(salesStats.card_total) || 0,
+                transfer: parseFloat(salesStats.transfer_total) || 0,
+                total: parseFloat(salesStats.total_sales_amount) || 0
+            };
+
+            // 4. Para ventas Mixtas, necesitamos procesarlas (solo si hay)
+            const mixedSalesRes = await turso.execute({
+                sql: `SELECT total, payment_details 
+                      FROM sales 
+                      WHERE user_id = ? 
+                      AND date >= ? 
+                      AND company_id = ?
+                      AND payment_method = 'Mixto'`,
                 args: [register.user_id, openingTime, activeCompanyId]
             });
 
-            let cashSalesTotal = 0;
-            const salesBreakdown = { cash: 0, card: 0, transfer: 0, total: 0 };
-            const salesTransactions = [];
+            // Procesar solo ventas mixtas (mucho menos que todas)
+            mixedSalesRes.rows.forEach(sale => {
+                try {
+                    const details = JSON.parse(sale.payment_details);
+                    const methodsList = details.mixedPayments || details.methods;
+                    if (methodsList) {
+                        let cashInMixed = 0;
+                        let cardInMixed = 0;
+                        let transferInMixed = 0;
 
-            salesRes.rows.forEach(sale => {
-                const total = parseFloat(sale.total);
-                salesBreakdown.total += total;
+                        methodsList.forEach(m => {
+                            const amount = parseFloat(m.amount || 0);
+                            if (m.method === 'Efectivo') cashInMixed += amount;
+                            if (m.method === 'Tarjeta') cardInMixed += amount;
+                            if (m.method === 'Transferencia') transferInMixed += amount;
+                        });
 
-                let cashPart = 0;
-                let cardPart = 0;
-                let transferPart = 0;
-
-                if (sale.payment_method === 'Efectivo') {
-                    cashPart = total;
-                } else if (sale.payment_method === 'Tarjeta') {
-                    cardPart = total;
-                } else if (sale.payment_method === 'Transferencia') {
-                    transferPart = total;
-                } else if (sale.payment_method === 'Mixto' && sale.payment_details) {
-                    try {
-                        const details = JSON.parse(sale.payment_details);
-                        const methodsList = details.mixedPayments || details.methods;
-                        if (methodsList) {
-                            methodsList.forEach(m => {
-                                const amount = parseFloat(m.amount || 0);
-                                if (m.method === 'Efectivo') cashPart += amount;
-                                if (m.method === 'Tarjeta') cardPart += amount;
-                                if (m.method === 'Transferencia') transferPart += amount;
-                            });
-                        }
-                    } catch (err) { console.error("Error parsing mixed payment", err); }
-                }
-
-                salesBreakdown.cash += cashPart;
-                salesBreakdown.card += cardPart;
-                salesBreakdown.transfer += transferPart;
-
-                if (cashPart > 0) {
-                    cashSalesTotal += cashPart;
-                    salesTransactions.push({
-                        type: 'VENTA',
-                        amount: cashPart,
-                        total: total,
-                        date: sale.date,
-                        id: sale.id
-                    });
+                        // Ajustar breakdown
+                        cashSalesTotal += cashInMixed;
+                        salesBreakdown.cash += cashInMixed;
+                        salesBreakdown.card += cardInMixed;
+                        salesBreakdown.transfer += transferInMixed;
+                    }
+                } catch (err) {
+                    console.error("Error parsing mixed payment", err);
                 }
             });
 
-            // 3. Get Manual Movements
-            const movementsRes = await turso.execute({
-                sql: "SELECT * FROM cash_movements WHERE register_id = ? AND company_id = ?",
-                args: [registerId, activeCompanyId]
-            });
+            // 5. Procesar transacciones recientes para el widget
+            const salesTransactions = recentSalesRes.rows.map(sale => ({
+                type: 'VENTA',
+                amount: parseFloat(sale.total),
+                total: parseFloat(sale.total),
+                date: sale.date,
+                id: sale.id
+            }));
 
+            // 6. Procesar movimientos
             let movementsIn = 0;
             let movementsOut = 0;
             const movementTransactions = [];
@@ -2382,14 +2901,30 @@ export const useStore = create(persist((set, get) => ({
                 const amount = parseFloat(mov.amount);
                 if (mov.type === 'IN') {
                     movementsIn += amount;
-                    movementTransactions.push({ type: 'INGRESO', amount, reason: mov.reason, date: mov.date || mov.created_at, id: mov.id });
+                    movementTransactions.push({
+                        type: 'INGRESO',
+                        amount,
+                        reason: mov.reason,
+                        date: mov.date || mov.created_at,
+                        id: mov.id
+                    });
                 } else {
                     movementsOut += amount;
-                    movementTransactions.push({ type: 'RETIRO', amount, reason: mov.reason, date: mov.date || mov.created_at, id: mov.id });
+                    movementTransactions.push({
+                        type: 'RETIRO',
+                        amount,
+                        reason: mov.reason,
+                        date: mov.date || mov.created_at,
+                        id: mov.id
+                    });
                 }
             });
 
-            const allTransactions = [...salesTransactions, ...movementTransactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+            // 7. Combinar transacciones y ordenar
+            const allTransactions = [...salesTransactions, ...movementTransactions]
+                .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            // 8. Calcular balance final
             const currentBalance = register.opening_amount + cashSalesTotal + movementsIn - movementsOut;
 
             set({
@@ -2403,8 +2938,18 @@ export const useStore = create(persist((set, get) => ({
                     transactions: allTransactions
                 }
             });
+
+            console.timeEnd('⏱️ refreshRegisterStats');
+            console.log('✅ Stats refreshed:', {
+                balance: currentBalance,
+                sales: cashSalesTotal,
+                movements_in: movementsIn,
+                movements_out: movementsOut
+            });
+
         } catch (e) {
-            console.error("Refresh stats error", e);
+            console.error("❌ Refresh stats error", e);
+            console.timeEnd('⏱️ refreshRegisterStats');
         }
     },
 
@@ -2598,13 +3143,460 @@ export const useStore = create(persist((set, get) => ({
             return null;
         }
     },
+
+    // ============================================
+    // SUSPENDED SALES (Suspender/Recuperar Ventas)
+    // ============================================
+
+    // Actualizar contador de ventas suspendidas (rápido, solo COUNT)
+    updateSuspendedCount: async () => {
+        try {
+            const { activeCompanyId } = get();
+            const result = await turso.execute({
+                sql: `SELECT COUNT(*) as count 
+                      FROM suspended_sales 
+                      WHERE company_id = ? 
+                      AND status = 'suspended'`,
+                args: [activeCompanyId]
+            });
+
+            const count = result.rows[0]?.count || 0;
+            set({ suspendedSalesCount: count });
+            console.log('✅ Suspended sales count:', count);
+        } catch (e) {
+            console.error('❌ Update suspended count error:', e);
+        }
+    },
+
+    // Suspender venta actual (guardar y limpiar carrito)
+    suspendSale: async () => {
+        try {
+            const { cart, posSelectedClient, activeCompanyId, currentUser, currentCompanyTimezone } = get();
+
+            if (cart.length === 0) {
+                alert('El carrito está vacío');
+                return false;
+            }
+
+            // Calcular totales
+            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const tax = cart.reduce((sum, item) => {
+                const taxRate = parseFloat(item.tax_rate) || 0;
+                return sum + (item.price * item.quantity * taxRate / 100);
+            }, 0);
+            const total = subtotal + tax;
+            const itemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+            const now = getNowInCompanyTime(currentCompanyTimezone).toISOString();
+
+            console.log('💾 Suspending sale:', { itemsCount, total });
+
+            await turso.execute({
+                sql: `INSERT INTO suspended_sales 
+                      (company_id, user_id, items, client_data, subtotal, tax, total, items_count, suspended_at, status, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'suspended', ?)`,
+                args: [
+                    activeCompanyId,
+                    currentUser.id,
+                    JSON.stringify(cart),
+                    posSelectedClient ? JSON.stringify(posSelectedClient) : null,
+                    subtotal,
+                    tax,
+                    total,
+                    itemsCount,
+                    now,
+                    now
+                ]
+            });
+
+            console.log('✅ Sale suspended successfully');
+
+            // Limpiar carrito y cliente
+            get().clearCart();
+            get().setPosSelectedClient(null);
+
+            // Actualizar contador
+            await get().updateSuspendedCount();
+
+            return true;
+        } catch (e) {
+            console.error('❌ Suspend sale error:', e);
+            alert('Error al suspender la venta');
+            return false;
+        }
+    },
+
+    // Traer lista de ventas suspendidas (ligera, sin items completos)
+    fetchSuspendedSales: async () => {
+        try {
+            const { activeCompanyId } = get();
+
+            console.time('⏱️ fetchSuspendedSales');
+
+            // Query optimizado: solo campos necesarios para la lista
+            const result = await turso.execute({
+                sql: `SELECT 
+                        s.id,
+                        s.total,
+                        s.items_count,
+                        s.suspended_at,
+                        u.name as user_name
+                      FROM suspended_sales s
+                      LEFT JOIN users u ON s.user_id = u.id
+                      WHERE s.company_id = ? 
+                      AND s.status = 'suspended'
+                      ORDER BY s.suspended_at DESC
+                      LIMIT 50`,
+                args: [activeCompanyId]
+            });
+
+            console.timeEnd('⏱️ fetchSuspendedSales');
+            console.log('✅ Fetched suspended sales:', result.rows.length);
+
+            return result.rows;
+        } catch (e) {
+            console.error('❌ Fetch suspended sales error:', e);
+            return [];
+        }
+    },
+
+    // Recuperar venta (trae items completos y restaura carrito)
+    recoverSale: async (saleId) => {
+        try {
+            const { activeCompanyId, currentUser } = get();
+
+            console.log('🔄 Recovering sale:', saleId);
+            console.time('⏱️ recoverSale');
+
+            // Traer solo items y client_data
+            const result = await turso.execute({
+                sql: `SELECT items, client_data 
+                      FROM suspended_sales 
+                      WHERE id = ? 
+                      AND company_id = ? 
+                      AND status = 'suspended'`,
+                args: [saleId, activeCompanyId]
+            });
+
+            if (result.rows.length === 0) {
+                alert('Esta venta ya fue recuperada o no existe');
+                return false;
+            }
+
+            const sale = result.rows[0];
+            const items = JSON.parse(sale.items);
+            const clientData = sale.client_data ? JSON.parse(sale.client_data) : null;
+
+            console.log('✅ Sale data recovered:', { itemsCount: items.length });
+
+            // Marcar como recuperada (no eliminar, para auditoría)
+            await turso.execute({
+                sql: `UPDATE suspended_sales 
+                      SET status = 'recovered', 
+                      recovered_at = ?, 
+                      recovered_by = ?
+                  WHERE id = ?`,
+                args: [new Date().toISOString(), currentUser.id, saleId]
+            });
+
+            // Limpiar carrito actual
+            get().clearCart();
+
+            // Restaurar items en carrito
+            items.forEach(item => {
+                get().addToCart({
+                    id: item.id,
+                    name: item.name,
+                    price: item.price,
+                    cost: item.cost || 0,
+                    quantity: item.quantity,
+                    tax_rate: item.tax_rate || 0,
+                    image: item.image || null,
+                    sku: item.sku || '',
+                    stock: item.stock || 0
+                });
+            });
+
+            // Restaurar cliente
+            if (clientData) {
+                get().setPosSelectedClient(clientData);
+            }
+
+            // Actualizar contador
+            await get().updateSuspendedCount();
+
+            console.timeEnd('⏱️ recoverSale');
+            console.log('✅ Sale recovered successfully');
+
+            return true;
+        } catch (e) {
+            console.error('❌ Recover sale error:', e);
+            alert('Error al recuperar la venta');
+            return false;
+        }
+    },
+
+    // Eliminar venta suspendida
+    deleteSuspendedSale: async (saleId) => {
+        try {
+            const { activeCompanyId } = get();
+
+            console.log('🗑️ Deleting suspended sale:', saleId);
+
+            // Marcar como eliminada (no borrar, para auditoría)
+            await turso.execute({
+                sql: `UPDATE suspended_sales 
+                      SET status = 'deleted' 
+                      WHERE id = ? 
+                      AND company_id = ?`,
+                args: [saleId, activeCompanyId]
+            });
+
+            console.log('✅ Sale deleted successfully');
+
+            // Actualizar contador
+            await get().updateSuspendedCount();
+
+            return true;
+        } catch (e) {
+            console.error('❌ Delete suspended sale error:', e);
+            return false;
+        }
+    },
+
+    // ============================================
+    // SUSPENDED SALES (Suspender/Recuperar Ventas)
+    // ============================================
+
+    // Actualizar contador de ventas suspendidas (rápido, solo COUNT)
+    updateSuspendedCount: async () => {
+        try {
+            const { activeCompanyId } = get();
+            const result = await turso.execute({
+                sql: `SELECT COUNT(*) as count 
+                      FROM suspended_sales 
+                      WHERE company_id = ? 
+                      AND status = 'suspended'`,
+                args: [activeCompanyId]
+            });
+
+            const count = result.rows[0]?.count || 0;
+            set({ suspendedSalesCount: count });
+            console.log('✅ Suspended sales count:', count);
+        } catch (e) {
+            console.error('❌ Update suspended count error:', e);
+        }
+    },
+
+    // Suspender venta actual (guardar y limpiar carrito)
+    suspendSale: async () => {
+        try {
+            const { cart, posSelectedClient, activeCompanyId, currentUser, currentCompanyTimezone } = get();
+
+            if (cart.length === 0) {
+                alert('El carrito está vacío');
+                return false;
+            }
+
+            // Calcular totales
+            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const tax = cart.reduce((sum, item) => {
+                const taxRate = parseFloat(item.tax_rate) || 0;
+                return sum + (item.price * item.quantity * taxRate / 100);
+            }, 0);
+            const total = subtotal + tax;
+            const itemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+            const now = getNowInCompanyTime(currentCompanyTimezone).toISOString();
+
+            console.log('💾 Suspending sale:', { itemsCount, total });
+
+            await turso.execute({
+                sql: `INSERT INTO suspended_sales 
+                      (company_id, user_id, items, client_data, subtotal, tax, total, items_count, suspended_at, status, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'suspended', ?)`,
+                args: [
+                    activeCompanyId,
+                    currentUser.id,
+                    JSON.stringify(cart),
+                    posSelectedClient ? JSON.stringify(posSelectedClient) : null,
+                    subtotal,
+                    tax,
+                    total,
+                    itemsCount,
+                    now,
+                    now
+                ]
+            });
+
+            console.log('✅ Sale suspended successfully');
+
+            // Limpiar carrito y cliente
+            get().clearCart();
+            get().setPosSelectedClient(null);
+
+            // Actualizar contador
+            await get().updateSuspendedCount();
+
+            return true;
+        } catch (e) {
+            console.error('❌ Suspend sale error:', e);
+            alert('Error al suspender la venta');
+            return false;
+        }
+    },
+
+    // Traer lista de ventas suspendidas (ligera, sin items completos)
+    fetchSuspendedSales: async () => {
+        try {
+            const { activeCompanyId } = get();
+
+            console.time('⏱️ fetchSuspendedSales');
+
+            // Query optimizado: solo campos necesarios para la lista
+            const result = await turso.execute({
+                sql: `SELECT 
+                        s.id,
+                        s.total,
+                        s.items_count,
+                        s.suspended_at,
+                        u.name as user_name
+                      FROM suspended_sales s
+                      LEFT JOIN users u ON s.user_id = u.id
+                      WHERE s.company_id = ? 
+                      AND s.status = 'suspended'
+                      ORDER BY s.suspended_at DESC
+                      LIMIT 50`,
+                args: [activeCompanyId]
+            });
+
+            console.timeEnd('⏱️ fetchSuspendedSales');
+            console.log('✅ Fetched suspended sales:', result.rows.length);
+
+            return result.rows;
+        } catch (e) {
+            console.error('❌ Fetch suspended sales error:', e);
+            return [];
+        }
+    },
+
+    // Recuperar venta (trae items completos y restaura carrito)
+    recoverSale: async (saleId) => {
+        try {
+            const { activeCompanyId, currentUser } = get();
+
+            console.log('🔄 Recovering sale:', saleId);
+            console.time('⏱️ recoverSale');
+
+            // Traer solo items y client_data
+            const result = await turso.execute({
+                sql: `SELECT items, client_data 
+                      FROM suspended_sales 
+                      WHERE id = ? 
+                      AND company_id = ? 
+                      AND status = 'suspended'`,
+                args: [saleId, activeCompanyId]
+            });
+
+            if (result.rows.length === 0) {
+                alert('Esta venta ya fue recuperada o no existe');
+                return false;
+            }
+
+            const sale = result.rows[0];
+            const items = JSON.parse(sale.items);
+            const clientData = sale.client_data ? JSON.parse(sale.client_data) : null;
+
+            console.log('✅ Sale data recovered:', { itemsCount: items.length });
+
+            // Marcar como recuperada (no eliminar, para auditoría)
+            await turso.execute({
+                sql: `UPDATE suspended_sales 
+                      SET status = 'recovered', 
+                      recovered_at = ?, 
+                      recovered_by = ?
+                  WHERE id = ?`,
+                args: [new Date().toISOString(), currentUser.id, saleId]
+            });
+
+            // Limpiar carrito actual
+            get().clearCart();
+
+            // Restaurar items en carrito
+            items.forEach(item => {
+                get().addToCart({
+                    id: item.id,
+                    name: item.name,
+                    price: item.price,
+                    cost: item.cost || 0,
+                    quantity: item.quantity,
+                    tax_rate: item.tax_rate || 0,
+                    image: item.image || null,
+                    sku: item.sku || '',
+                    stock: item.stock || 0
+                });
+            });
+
+            // Restaurar cliente
+            if (clientData) {
+                get().setPosSelectedClient(clientData);
+            }
+
+            // Actualizar contador
+            await get().updateSuspendedCount();
+
+            console.timeEnd('⏱️ recoverSale');
+            console.log('✅ Sale recovered successfully');
+
+            return true;
+        } catch (e) {
+            console.error('❌ Recover sale error:', e);
+            alert('Error al recuperar la venta');
+            return false;
+        }
+    },
+
+    // Eliminar venta suspendida
+    deleteSuspendedSale: async (saleId) => {
+        try {
+            const { activeCompanyId } = get();
+
+            console.log('🗑️ Deleting suspended sale:', saleId);
+
+            // Marcar como eliminada (no borrar, para auditoría)
+            await turso.execute({
+                sql: `UPDATE suspended_sales 
+                      SET status = 'deleted' 
+                      WHERE id = ? 
+                      AND company_id = ?`,
+                args: [saleId, activeCompanyId]
+            });
+
+            console.log('✅ Sale deleted successfully');
+
+            // Actualizar contador
+            await get().updateSuspendedCount();
+
+            return true;
+        } catch (e) {
+            console.error('❌ Delete suspended sale error:', e);
+            return false;
+        }
+    }
 }), {
     name: 'pos-storage',
     partialize: (state) => ({
+        carts: state.carts,
+        activeCartId: state.activeCartId,
+        nextCartId: state.nextCartId,
         currentUser: state.currentUser,
         activeCompanyId: state.activeCompanyId,
         availableCompanies: state.availableCompanies,
         currentCompanyTimezone: state.currentCompanyTimezone,
-        currentUserCompanyRole: state.currentUserCompanyRole
+        currentUserCompanyRole: state.currentUserCompanyRole,
+        darkMode: state.darkMode
     }),
+    onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+    }
 }));
