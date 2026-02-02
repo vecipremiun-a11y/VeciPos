@@ -34,20 +34,83 @@ const Suppliers = () => {
 
     return (
         <div className="space-y-6">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+            {/* Header - Compact on Mobile */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-[var(--color-text)] neon-text">Proveedores</h1>
-                    <p className="text-[var(--color-text-muted)]">Gestiona tus proveedores y contactos</p>
+                    <h1 className="text-xl lg:text-3xl font-bold text-[var(--color-text)] neon-text">Proveedores</h1>
+                    <p className="text-xs lg:text-base text-[var(--color-text-muted)]">Gestiona tus proveedores y contactos</p>
                 </div>
-                <button onClick={handleNewSupplier} className="btn-primary flex items-center gap-2">
-                    <Plus size={20} /> Nuevo Proveedor
+                <button onClick={handleNewSupplier} className="btn-primary flex items-center gap-2 text-sm lg:text-base px-3 lg:px-4 py-2">
+                    <Plus size={18} /> Nuevo Proveedor
                 </button>
             </div>
 
-            {/* Table */}
+            {/* Suppliers List - Compact rows on Mobile, Table on Desktop */}
             <div className="glass-card overflow-hidden p-0">
-                <div className="overflow-x-auto">
+                {/* Mobile View - Compact Rows */}
+                <div className="lg:hidden">
+                    {/* Mobile Header */}
+                    <div className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] uppercase text-[10px] font-bold px-3 py-3">
+                        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center">
+                            <div>NOMBRE</div>
+                            <div className="w-16 text-center">TELÉFONO</div>
+                            <div className="w-16 text-center">ESTADO</div>
+                            <div className="w-12 text-center">ACCIONES</div>
+                        </div>
+                    </div>
+
+                    {/* Mobile Rows */}
+                    <div className="divide-y divide-[var(--glass-border)] pb-20">
+                        {suppliers.length === 0 ? (
+                            <div className="text-center py-10 text-[var(--color-text-muted)] text-sm">
+                                No hay proveedores registrados.
+                            </div>
+                        ) : (
+                            suppliers.map((supplier) => (
+                                <div key={supplier.id} className="px-3 py-3 hover:bg-[var(--glass-bg)] transition-colors">
+                                    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center">
+                                        {/* Name */}
+                                        <div className="font-bold text-[var(--color-text)] text-sm truncate">
+                                            {supplier.name}
+                                        </div>
+
+                                        {/* Phone */}
+                                        <div className="w-16 text-center text-[var(--color-text-muted)] text-xs truncate">
+                                            {supplier.phone || '-'}
+                                        </div>
+
+                                        {/* Status */}
+                                        <div className="w-16 flex justify-center">
+                                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${supplier.status === 'active'
+                                                ? 'bg-green-500/20 text-green-400'
+                                                : 'bg-red-500/20 text-red-400'
+                                                }`}>
+                                                {supplier.status === 'active' ? 'ACTIVA' : 'INACTIVA'}
+                                            </span>
+                                        </div>
+
+                                        {/* Actions */}
+                                        <div className="w-12 flex justify-center">
+                                            <button
+                                                onClick={() => handleEdit(supplier)}
+                                                className="p-1.5 hover:bg-[var(--color-surface-hover)] rounded text-[var(--color-text-muted)] transition-colors"
+                                            >
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                    <circle cx="12" cy="12" r="1" />
+                                                    <circle cx="12" cy="5" r="1" />
+                                                    <circle cx="12" cy="19" r="1" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+
+                {/* Desktop View - Original Table */}
+                <div className="hidden lg:block overflow-x-auto">
                     <table className="w-full text-left">
                         <thead className="bg-[var(--glass-bg)] text-gray-300 uppercase text-sm font-semibold">
                             <tr>

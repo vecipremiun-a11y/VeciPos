@@ -216,4 +216,69 @@ body {
     radial-gradient(circle at 10% 20%, var(--color-secondary) 0%, transparent 40%),
     radial-gradient(circle at 90% 80%, var(--color-primary) 0%, transparent 40%);
   background-size: 100% 100%;
+  font-size: 14px;
+  /* Base size for mobile */
+}
+
+/* Desktop typography - slightly larger for readability */
+@media (min-width: 1024px) {
+  body {
+    font-size: 21px;
+  }
+
+  .glass-card {
+    font-size: 21px;
+  }
+
+  .glass-input {
+    font-size: 20px;
+  }
+
+  /* Tables get slightly larger text on desktop */
+  table {
+    font-size: 20px;
+  }
+
+  th,
+  td {
+    font-size: inherit;
+  }
+
+  /* Headings remain prominent */
+  h1 {
+    font-size: 1.875rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+  }
+
+  h3 {
+    font-size: 1.25rem;
+  }
+
+  h4 {
+    font-size: 1.125rem;
+  }
+
+  /* Override Tailwind text size utilities for desktop */
+  .text-xs {
+    font-size: 20px !important;
+  }
+
+  .text-sm {
+    font-size: 22px !important;
+  }
+
+  .text-\[10px\] {
+    font-size: 19px !important;
+  }
+
+  .text-\[11px\] {
+    font-size: 20px !important;
+  }
+
+  .text-\[9px\] {
+    font-size: 18px !important;
+  }
 }

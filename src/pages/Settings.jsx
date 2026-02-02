@@ -117,7 +117,12 @@ const Settings = () => {
                         </p>
                     </div>
                     <div
-                        onClick={toggleInventoryAdjustmentMode}
+                        onClick={async () => {
+                            const result = await toggleInventoryAdjustmentMode();
+                            if (!result.success) {
+                                alert('Error al actualizar la configuración: ' + result.error);
+                            }
+                        }}
                         className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors duration-300 ${inventoryAdjustmentMode ? 'bg-yellow-500' : 'bg-gray-700'}`}
                     >
                         <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow-md transition-all duration-300 ${inventoryAdjustmentMode ? 'right-1' : 'left-1'}`}></div>

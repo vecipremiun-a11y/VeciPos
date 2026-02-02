@@ -104,124 +104,132 @@ const CashStatusWidget = () => {
                         </div>
                     </button>
 
-                    {/* Dropdown / Modal */}
-                    {isOpen && (
-                        <>
-                            <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
-                            <div className="absolute top-16 right-0 w-[400px] glass-card p-0 !bg-[#0f0f2d]/90 border-[var(--glass-border)] shadow-2xl z-50 overflow-hidden animate-[float_0.2s_ease-out]">
+                    {/* Dropdown / Modal - Responsive - Using Portal */}
+                    {isOpen && createPortal(
+                        <div className="fixed inset-0 z-[9999]">
+                            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)}></div>
+                            <div className="absolute inset-4 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 w-auto sm:w-[360px] glass-card p-0 !bg-[#0f0f2d]/98 border-[var(--glass-border)] shadow-2xl overflow-hidden animate-[float_0.2s_ease-out] max-h-[90vh] flex flex-col rounded-2xl">
                                 {/* Header */}
-                                <div className="p-4 border-b border-[var(--glass-border)] flex justify-between items-center">
-                                    <h3 className="font-bold text-[var(--color-text)]">Estado de Caja</h3>
-                                    <div className="px-2 py-1 rounded bg-green-500/20 text-green-400 text-xs font-bold border border-green-500/30">
-                                        Turno Activo
-                                    </div>
-                                </div>
-
-                                {/* Main Balance */}
-                                <div className="p-6 bg-gradient-to-br from-[var(--color-primary)]/10 to-transparent flex flex-col items-center justify-center border-b border-[var(--glass-border)] relative overflow-hidden group">
-                                    <div className="absolute inset-0 bg-[var(--color-primary)]/5 opacity-0 group-hover:opacity-100 transition-opacity blur-xl"></div>
-                                    <span className="text-4xl font-extrabold text-[var(--color-primary)] mb-1 relative z-10 text-glow">
-                                        ${registerStats.balance.toLocaleString('es-CL')}
-                                    </span>
-                                    <span className="text-sm text-[var(--color-text-muted)] font-medium relative z-10">Saldo Actual en Caja</span>
-                                </div>
-
-                                {/* Quick Stats Grid */}
-                                <div className="grid grid-cols-2 gap-3 p-4">
-                                    <div className="p-3 bg-blue-500/5 rounded-xl border border-blue-500/20 flex flex-col items-center">
-                                        <TrendingUp size={16} className="text-blue-400 mb-1" />
-                                        <span className="text-2xl font-bold text-blue-400">${registerStats.sales.toLocaleString('es-CL')}</span>
-                                        <span className="text-xs text-blue-300/60">Ventas Efectivo</span>
-                                    </div>
-                                    <div className="p-3 bg-orange-500/5 rounded-xl border border-orange-500/20 flex flex-col items-center">
-                                        <TrendingDown size={16} className="text-orange-400 mb-1" />
-                                        <span className="text-2xl font-bold text-orange-400">${registerStats.movements_out.toLocaleString('es-CL')}</span>
-                                        <span className="text-xs text-orange-300/60">Retiros</span>
-                                    </div>
-                                </div>
-
-                                {/* Action Buttons */}
-                                <div className="grid grid-cols-2 gap-3 px-4 pb-4">
-                                    <button
-                                        onClick={() => setTxModalType('IN')}
-                                        className="p-3 rounded-xl border border-green-500/30 text-green-400 hover:bg-green-500/10 font-bold text-sm flex items-center justify-center gap-2 transition-all"
-                                    >
-                                        <ArrowDownLeft size={16} /> Ingreso
-                                    </button>
-                                    <button
-                                        onClick={() => setTxModalType('OUT')}
-                                        className="p-3 rounded-xl border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 font-bold text-sm flex items-center justify-center gap-2 transition-all"
-                                    >
-                                        <ArrowUpRight size={16} /> Retiro
-                                    </button>
-                                </div>
-
-                                {/* Transaction List (Mini) */}
-                                <div className="px-4 pb-2">
-                                    <h4 className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Últimos Movimientos</h4>
-                                    <div className="space-y-2 max-h-[150px] overflow-y-auto pr-1 scrollbar-thin">
-                                        <div className="flex justify-between items-center text-sm p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500 border border-yellow-500/30">
-                                                    <Clock size={14} />
-                                                </div>
-                                                <div className="flex flex-col">
-                                                    <span className="font-bold text-[var(--color-text)]">Apertura</span>
-                                                    <span className="text-[10px] text-[var(--color-text-muted)]">Apertura de caja</span>
-                                                </div>
-                                            </div>
-                                            <div className="text-right">
-                                                <span className="block font-bold text-green-400">+${registerStats.initial.toLocaleString('es-CL')}</span>
-                                                <span className="text-[10px] text-[var(--color-text-muted)]">{format(new Date(cashRegister.opening_time), 'h:mm a')}</span>
-                                            </div>
+                                <div className="p-3 border-b border-[var(--glass-border)] flex justify-between items-center shrink-0">
+                                    <h3 className="font-bold text-[var(--color-text)] text-sm lg:text-base">Estado de Caja</h3>
+                                    <div className="flex items-center gap-2">
+                                        <div className="px-2 py-0.5 rounded bg-green-500/20 text-green-400 text-[10px] lg:text-xs font-bold border border-green-500/30">
+                                            Turno Activo
                                         </div>
+                                        <button onClick={() => setIsOpen(false)} className="p-1 text-gray-400 hover:text-white">
+                                            <X size={18} />
+                                        </button>
+                                    </div>
+                                </div>
 
-                                        {registerStats.transactions.map((tx) => (
-                                            <div key={tx.id} className="flex justify-between items-center text-sm p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors animate-[fadeIn_0.3s_ease-out]">
-                                                <div className="flex items-center gap-3">
-                                                    <div className={cn(
-                                                        "w-8 h-8 rounded-full flex items-center justify-center border",
-                                                        tx.type === 'VENTA' ? "bg-blue-500/20 text-blue-400 border-blue-500/30" :
-                                                            tx.type === 'INGRESO' ? "bg-green-500/20 text-green-400 border-green-500/30" :
-                                                                "bg-orange-500/20 text-orange-400 border-orange-500/30"
-                                                    )}>
-                                                        {tx.type === 'VENTA' ? <ShoppingCart size={14} /> :
-                                                            tx.type === 'INGRESO' ? <ArrowUpRight size={14} /> : <ArrowDownLeft size={14} />}
+                                {/* Scrollable Content */}
+                                <div className="flex-1 overflow-y-auto">
+                                    {/* Main Balance */}
+                                    <div className="p-4 bg-gradient-to-br from-[var(--color-primary)]/10 to-transparent flex flex-col items-center justify-center border-b border-[var(--glass-border)]">
+                                        <span className="text-3xl lg:text-4xl font-extrabold text-[var(--color-primary)] mb-0.5 text-glow">
+                                            ${registerStats.balance.toLocaleString('es-CL')}
+                                        </span>
+                                        <span className="text-xs lg:text-sm text-[var(--color-text-muted)] font-medium">Saldo Actual en Caja</span>
+                                    </div>
+
+                                    {/* Quick Stats Grid */}
+                                    <div className="grid grid-cols-2 gap-2 p-3">
+                                        <div className="p-2 lg:p-3 bg-blue-500/5 rounded-xl border border-blue-500/20 flex flex-col items-center">
+                                            <TrendingUp size={14} className="text-blue-400 mb-0.5" />
+                                            <span className="text-lg lg:text-xl font-bold text-blue-400">${registerStats.sales.toLocaleString('es-CL')}</span>
+                                            <span className="text-[10px] lg:text-xs text-blue-300/60">Ventas Efectivo</span>
+                                        </div>
+                                        <div className="p-2 lg:p-3 bg-orange-500/5 rounded-xl border border-orange-500/20 flex flex-col items-center">
+                                            <TrendingDown size={14} className="text-orange-400 mb-0.5" />
+                                            <span className="text-lg lg:text-xl font-bold text-orange-400">${registerStats.movements_out.toLocaleString('es-CL')}</span>
+                                            <span className="text-[10px] lg:text-xs text-orange-300/60">Retiros</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="grid grid-cols-2 gap-2 px-3 pb-3">
+                                        <button
+                                            onClick={() => setTxModalType('IN')}
+                                            className="p-2.5 rounded-xl border border-green-500/30 text-green-400 hover:bg-green-500/10 font-bold text-xs lg:text-sm flex items-center justify-center gap-1.5 transition-all"
+                                        >
+                                            <ArrowDownLeft size={14} /> Ingreso
+                                        </button>
+                                        <button
+                                            onClick={() => setTxModalType('OUT')}
+                                            className="p-2.5 rounded-xl border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 font-bold text-xs lg:text-sm flex items-center justify-center gap-1.5 transition-all"
+                                        >
+                                            <ArrowUpRight size={14} /> Retiro
+                                        </button>
+                                    </div>
+
+                                    {/* Transaction List (Mini) */}
+                                    <div className="px-3 pb-2">
+                                        <h4 className="text-[10px] lg:text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Últimos Movimientos</h4>
+                                        <div className="space-y-1.5 max-h-[120px] lg:max-h-[150px] overflow-y-auto pr-1 scrollbar-thin">
+                                            <div className="flex justify-between items-center text-xs lg:text-sm p-1.5 lg:p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-6 h-6 lg:w-8 lg:h-8 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500 border border-yellow-500/30">
+                                                        <Clock size={12} />
                                                     </div>
                                                     <div className="flex flex-col">
-                                                        <span className="font-bold text-[var(--color-text)]">
-                                                            {tx.type === 'VENTA' ? 'Venta (Efectivo)' :
-                                                                tx.type === 'INGRESO' ? (tx.reason || 'Ingreso Manual') :
-                                                                    (tx.reason || 'Retiro Manual')}
-                                                        </span>
-                                                        <span className="text-[10px] text-[var(--color-text-muted)]">{tx.type}</span>
+                                                        <span className="font-bold text-[var(--color-text)] text-xs lg:text-sm">Apertura</span>
+                                                        <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">Apertura de caja</span>
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <span className={cn("block font-bold",
-                                                        (tx.type === 'VENTA' || tx.type === 'INGRESO') ? "text-green-400" : "text-orange-400"
-                                                    )}>
-                                                        {(tx.type === 'VENTA' || tx.type === 'INGRESO') ? '+' : '-'}${tx.amount.toLocaleString('es-CL')}
-                                                    </span>
-                                                    <span className="text-[10px] text-[var(--color-text-muted)]">{format(new Date(tx.date), 'h:mm a')}</span>
+                                                    <span className="block font-bold text-green-400 text-xs lg:text-sm">+${registerStats.initial.toLocaleString('es-CL')}</span>
+                                                    <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{format(new Date(cashRegister.opening_time), 'h:mm a')}</span>
                                                 </div>
                                             </div>
-                                        ))}
+
+                                            {registerStats.transactions.map((tx) => (
+                                                <div key={tx.id} className="flex justify-between items-center text-xs lg:text-sm p-1.5 lg:p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={cn(
+                                                            "w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center border",
+                                                            tx.type === 'VENTA' ? "bg-blue-500/20 text-blue-400 border-blue-500/30" :
+                                                                tx.type === 'INGRESO' ? "bg-green-500/20 text-green-400 border-green-500/30" :
+                                                                    "bg-orange-500/20 text-orange-400 border-orange-500/30"
+                                                        )}>
+                                                            {tx.type === 'VENTA' ? <ShoppingCart size={12} /> :
+                                                                tx.type === 'INGRESO' ? <ArrowUpRight size={12} /> : <ArrowDownLeft size={12} />}
+                                                        </div>
+                                                        <div className="flex flex-col">
+                                                            <span className="font-bold text-[var(--color-text)] text-xs lg:text-sm truncate max-w-[100px] lg:max-w-[140px]">
+                                                                {tx.type === 'VENTA' ? 'Venta (Efectivo)' :
+                                                                    tx.type === 'INGRESO' ? (tx.reason || 'Ingreso') :
+                                                                        (tx.reason || 'Retiro')}
+                                                            </span>
+                                                            <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{tx.type}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <span className={cn("block font-bold text-xs lg:text-sm",
+                                                            (tx.type === 'VENTA' || tx.type === 'INGRESO') ? "text-green-400" : "text-orange-400"
+                                                        )}>
+                                                            {(tx.type === 'VENTA' || tx.type === 'INGRESO') ? '+' : '-'}${tx.amount.toLocaleString('es-CL')}
+                                                        </span>
+                                                        <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{format(new Date(tx.date), 'h:mm a')}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
 
                                 {/* Footer */}
-                                <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] mt-2">
+                                <div className="p-3 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] shrink-0">
                                     <button
                                         onClick={handleInitialCloseClick}
-                                        className="w-full py-3 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 hover:border-red-500/50 font-bold transition-all flex items-center justify-center gap-2 group"
+                                        className="w-full py-2.5 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 hover:border-red-500/50 font-bold text-sm transition-all flex items-center justify-center gap-2"
                                     >
-                                        <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
+                                        <LogOut size={16} />
                                         Cerrar Caja
                                     </button>
                                 </div>
                             </div>
-                        </>
+                        </div>,
+                        document.body
                     )}
                 </div>
             )}

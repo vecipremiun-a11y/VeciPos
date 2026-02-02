@@ -74,61 +74,112 @@ const Invoices = () => {
                                 <Loader className="animate-spin text-[var(--color-primary)]" size={32} />
                             </div>
                         ) : (
-                            <table className="w-full text-left">
-                                <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] uppercase text-sm font-semibold sticky top-0 backdrop-blur-md z-10">
-                                    <tr>
-                                        <th className="px-6 py-4">N° Factura</th>
-                                        <th className="px-6 py-4">Proveedor</th>
-                                        <th className="px-6 py-4">Fecha</th>
-                                        <th className="px-6 py-4">Estado</th>
-                                        <th className="px-6 py-4 text-right">Total</th>
-                                        <th className="px-6 py-4 text-right">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-[var(--glass-border)]">
+                            <>
+                                {/* Mobile List View */}
+                                <div className="lg:hidden divide-y divide-[var(--glass-border)]">
                                     {invoices.map((inv) => (
-                                        <tr
+                                        <div
                                             key={inv.id}
                                             onClick={() => handleInvoiceClick(inv.id)}
-                                            className="hover:bg-[var(--glass-bg)] transition-colors cursor-pointer group"
+                                            className="p-4 hover:bg-[var(--glass-bg)] transition-colors cursor-pointer"
                                         >
-                                            <td className="px-6 py-4 text-[var(--color-text)] font-medium">
+                                            <div className="flex justify-between items-start mb-2">
                                                 <div className="flex items-center gap-2">
                                                     <FileText size={16} className="text-[var(--color-primary)]" />
-                                                    {inv.invoice_number || 'S/N'}
+                                                    <span className="font-bold text-[var(--color-text)]">
+                                                        #{inv.invoice_number || 'S/N'}
+                                                    </span>
                                                 </div>
-                                            </td>
-                                            <td className="px-6 py-4 text-[var(--color-text-muted)]">{inv.supplier_name || 'Desconocido'}</td>
-                                            <td className="px-6 py-4 text-[var(--color-text-muted)]">
-                                                {inv.date ? format(new Date(inv.date), 'dd/MM/yyyy') : '-'}
-                                            </td>
-                                            <td className="px-6 py-4">
+                                                <span className="font-bold text-[var(--color-primary)]">
+                                                    ${inv.total?.toLocaleString()}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between items-center text-sm">
+                                                <span className="text-[var(--color-text-muted)]">
+                                                    {inv.supplier_name || 'Desconocido'}
+                                                </span>
+                                                <span className="text-[var(--color-text-muted)]">
+                                                    {inv.date ? format(new Date(inv.date), 'dd/MM/yyyy') : '-'}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between items-center mt-2">
                                                 {inv.is_credit ? (
-                                                    <span className="px-2 py-1 rounded text-xs font-bold bg-orange-500/20 text-orange-400 border border-orange-500/20">
+                                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-400 border border-orange-500/20">
                                                         CRÉDITO
                                                     </span>
                                                 ) : (
-                                                    <span className="px-2 py-1 rounded text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/20">
+                                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-green-500/20 text-green-400 border border-green-500/20">
                                                         PAGADO
                                                     </span>
                                                 )}
-                                            </td>
-                                            <td className="px-6 py-4 text-right text-[var(--color-text)] font-bold">
-                                                ${inv.total?.toLocaleString()}
-                                            </td>
-                                            <td className="px-6 py-4 text-right">
                                                 <button
                                                     onClick={(e) => handleDeleteInvoice(e, inv.id)}
-                                                    className="p-2 hover:bg-[var(--color-surface-hover)] rounded text-red-400 hover:text-red-300 transition-colors opacity-0 group-hover:opacity-100"
-                                                    title="Eliminar Factura"
+                                                    className="p-1.5 text-red-400"
                                                 >
-                                                    <Trash2 size={20} />
+                                                    <Trash2 size={16} />
                                                 </button>
-                                            </td>
-                                        </tr>
+                                            </div>
+                                        </div>
                                     ))}
-                                </tbody>
-                            </table>
+                                </div>
+
+                                {/* Desktop Table View */}
+                                <table className="hidden lg:table w-full text-left">
+                                    <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] uppercase text-sm font-semibold sticky top-0 backdrop-blur-md z-10">
+                                        <tr>
+                                            <th className="px-6 py-4">N° Factura</th>
+                                            <th className="px-6 py-4">Proveedor</th>
+                                            <th className="px-6 py-4">Fecha</th>
+                                            <th className="px-6 py-4">Estado</th>
+                                            <th className="px-6 py-4 text-right">Total</th>
+                                            <th className="px-6 py-4 text-right">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-[var(--glass-border)]">
+                                        {invoices.map((inv) => (
+                                            <tr
+                                                key={inv.id}
+                                                onClick={() => handleInvoiceClick(inv.id)}
+                                                className="hover:bg-[var(--glass-bg)] transition-colors cursor-pointer group"
+                                            >
+                                                <td className="px-6 py-4 text-[var(--color-text)] font-medium">
+                                                    <div className="flex items-center gap-2">
+                                                        <FileText size={16} className="text-[var(--color-primary)]" />
+                                                        {inv.invoice_number || 'S/N'}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 text-[var(--color-text-muted)]">{inv.supplier_name || 'Desconocido'}</td>
+                                                <td className="px-6 py-4 text-[var(--color-text-muted)]">
+                                                    {inv.date ? format(new Date(inv.date), 'dd/MM/yyyy') : '-'}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    {inv.is_credit ? (
+                                                        <span className="px-2 py-1 rounded text-xs font-bold bg-orange-500/20 text-orange-400 border border-orange-500/20">
+                                                            CRÉDITO
+                                                        </span>
+                                                    ) : (
+                                                        <span className="px-2 py-1 rounded text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/20">
+                                                            PAGADO
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4 text-right text-[var(--color-text)] font-bold">
+                                                    ${inv.total?.toLocaleString()}
+                                                </td>
+                                                <td className="px-6 py-4 text-right">
+                                                    <button
+                                                        onClick={(e) => handleDeleteInvoice(e, inv.id)}
+                                                        className="p-2 hover:bg-[var(--color-surface-hover)] rounded text-red-400 hover:text-red-300 transition-colors opacity-0 group-hover:opacity-100"
+                                                        title="Eliminar Factura"
+                                                    >
+                                                        <Trash2 size={20} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </>
                         )}
                         {invoices.length === 0 && !isLoadingInvoices && (
                             <div className="p-10 text-center text-[var(--color-text-muted)]">
@@ -147,8 +198,106 @@ const Invoices = () => {
                             </div>
                         ) : selectedInvoice ? (
                             <>
-                                {/* Detail Header */}
-                                <div className="p-4 border-b border-[var(--glass-border)] flex items-center gap-4 bg-[var(--glass-bg)]">
+                                {/* Mobile Header */}
+                                <div className="lg:hidden sticky top-0 bg-[var(--color-surface)] border-b border-[var(--glass-border)] p-4 flex items-center gap-3 z-10">
+                                    <button onClick={handleBackToInvoices} className="text-[var(--color-primary)]">
+                                        <ArrowLeft size={24} />
+                                    </button>
+                                    <h2 className="text-lg font-bold text-[var(--color-text)]">Facturas</h2>
+                                </div>
+
+                                {/* Mobile Content */}
+                                <div className="lg:hidden flex-1 overflow-auto p-4 space-y-4">
+                                    {/* Invoice Header Card */}
+                                    <div className="glass-card p-4">
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <h3 className="text-xl font-bold text-[var(--color-text)]">
+                                                    Factura #{selectedInvoice.invoice_number || 'S/N'}
+                                                </h3>
+                                                <p className="text-sm text-[var(--color-text-muted)]">
+                                                    Proveedor: {selectedInvoice.supplier_name} | Fecha:{selectedInvoice.date}
+                                                </p>
+                                            </div>
+                                            <div className="text-right flex items-center gap-3">
+                                                <div>
+                                                    <p className="text-xs text-[var(--color-text-muted)]">Total Factura</p>
+                                                    <p className="text-xl font-bold text-[var(--color-primary)]">
+                                                        ${selectedInvoice.total?.toLocaleString()}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={(e) => handleDeleteInvoice(e, selectedInvoice.id)}
+                                                    className="p-2 text-red-400"
+                                                >
+                                                    <Trash2 size={20} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Products Section */}
+                                    <div>
+                                        <h3 className="text-base font-bold text-[var(--color-text)] mb-3">Productos Ingresados</h3>
+                                        <div className="glass-card p-0 overflow-hidden">
+                                            {/* Mobile Table Header */}
+                                            <div className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] text-[10px] uppercase font-bold px-3 py-2">
+                                                <div className="grid grid-cols-[80px_1fr_40px_60px_70px] gap-1 items-center">
+                                                    <div>CÓDIGO</div>
+                                                    <div>PRODUCTO</div>
+                                                    <div className="text-center">CANT.</div>
+                                                    <div className="text-right">COSTO U.</div>
+                                                    <div className="text-right">TOTAL LÍNEA</div>
+                                                </div>
+                                            </div>
+                                            {/* Mobile Table Body */}
+                                            <div className="divide-y divide-[var(--glass-border)]">
+                                                {selectedInvoice.items && selectedInvoice.items.map((item, idx) => (
+                                                    <div key={idx} className="px-3 py-2.5">
+                                                        <div className="grid grid-cols-[80px_1fr_40px_60px_70px] gap-1 items-center text-xs">
+                                                            <div className="text-[var(--color-text-muted)] font-mono truncate">{item.sku}</div>
+                                                            <div className="text-[var(--color-text)] font-medium truncate">{item.name}</div>
+                                                            <div className="text-center text-[var(--color-text)]">{item.quantity}</div>
+                                                            <div className="text-right text-[var(--color-text-muted)]">${parseFloat(item.cost).toLocaleString()}</div>
+                                                            <div className="text-right text-[var(--color-text)] font-bold">${(item.quantity * item.cost).toLocaleString()}</div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Mobile Footer Cards */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="glass-card p-3">
+                                            <h4 className="text-xs font-bold text-[var(--color-text-muted)] uppercase mb-2">PAGO</h4>
+                                            <p className="text-sm text-[var(--color-text)]">Método: {selectedInvoice.payment_method}</p>
+                                            <p className="text-sm text-[var(--color-text)]">Tipo: {selectedInvoice.is_credit ? 'Crédito' : 'Contado'}</p>
+                                        </div>
+                                        <div className="glass-card p-3">
+                                            <h4 className="text-xs font-bold text-[var(--color-text-muted)] uppercase mb-2">REGISTRO</h4>
+                                            <p className="text-sm text-[var(--color-text-muted)]">ID Interno: {selectedInvoice.id}</p>
+                                            <p className="text-sm text-[var(--color-text-muted)]">Estado: {selectedInvoice.status}</p>
+                                            <p className="text-xl font-bold text-[var(--color-primary)] mt-2">
+                                                ${selectedInvoice.total?.toLocaleString()}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {selectedInvoice.is_credit && (
+                                        <div className="glass-card p-3">
+                                            <h4 className="text-xs font-bold text-[var(--color-text-muted)] uppercase mb-2">CRÉDITO</h4>
+                                            <div className="grid grid-cols-3 gap-2 text-sm">
+                                                <p className="text-[var(--color-text)]">Días: {selectedInvoice.credit_days}</p>
+                                                <p className="text-[var(--color-text)]">Vence: {selectedInvoice.expiry_date}</p>
+                                                <p className="text-[var(--color-text)]">Abono: ${selectedInvoice.deposit?.toLocaleString()}</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Desktop Detail Header */}
+                                <div className="hidden lg:flex p-4 border-b border-[var(--glass-border)] items-center gap-4 bg-[var(--glass-bg)]">
                                     <button
                                         onClick={handleBackToInvoices}
                                         className="p-2 hover:bg-[var(--color-surface-hover)] rounded text-[var(--color-text)]"
@@ -179,28 +328,28 @@ const Invoices = () => {
                                     </div>
                                 </div>
 
-                                {/* Products List in Detail */}
-                                <div className="flex-1 overflow-auto custom-scrollbar p-6">
+                                {/* Desktop Products List */}
+                                <div className="hidden lg:block flex-1 overflow-auto custom-scrollbar p-6">
                                     <h3 className="text-lg font-bold text-[var(--color-text)] mb-4">Productos Ingresados</h3>
                                     <div className="glass-card overflow-hidden">
                                         <table className="w-full text-left">
-                                            <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] text-sm uppercase">
+                                            <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] text-[13px] uppercase font-semibold">
                                                 <tr>
-                                                    <th className="px-6 py-3">Código</th>
-                                                    <th className="px-6 py-3">Producto</th>
-                                                    <th className="px-6 py-3 text-right">Cant.</th>
-                                                    <th className="px-6 py-3 text-right">Costo U.</th>
-                                                    <th className="px-6 py-3 text-right">Total Línea</th>
+                                                    <th className="px-6 py-3.5">Código</th>
+                                                    <th className="px-6 py-3.5">Producto</th>
+                                                    <th className="px-6 py-3.5 text-right">Cant.</th>
+                                                    <th className="px-6 py-3.5 text-right">Costo U.</th>
+                                                    <th className="px-6 py-3.5 text-right">Total Línea</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-[var(--glass-border)]">
                                                 {selectedInvoice.items && selectedInvoice.items.map((item, idx) => (
                                                     <tr key={idx} className="hover:bg-[var(--glass-bg)]">
-                                                        <td className="px-6 py-3 text-[var(--color-text-muted)] font-mono text-sm">{item.sku}</td>
-                                                        <td className="px-6 py-3 text-[var(--color-text)] font-medium">{item.name}</td>
-                                                        <td className="px-6 py-3 text-right text-[var(--color-text)]">{item.quantity}</td>
-                                                        <td className="px-6 py-3 text-right text-[var(--color-text-muted)]">${parseFloat(item.cost).toLocaleString()}</td>
-                                                        <td className="px-6 py-3 text-right text-[var(--color-text)] font-bold">
+                                                        <td className="px-6 py-3.5 text-[var(--color-text-muted)] font-mono text-[13px]">{item.sku}</td>
+                                                        <td className="px-6 py-3.5 text-[var(--color-text)] font-medium text-[14px]">{item.name}</td>
+                                                        <td className="px-6 py-3.5 text-right text-[var(--color-text)] text-[14px]">{item.quantity}</td>
+                                                        <td className="px-6 py-3.5 text-right text-[var(--color-text-muted)] text-[14px]">${parseFloat(item.cost).toLocaleString()}</td>
+                                                        <td className="px-6 py-3.5 text-right text-[var(--color-text)] font-bold text-[14px]">
                                                             ${(item.quantity * item.cost).toLocaleString()}
                                                         </td>
                                                     </tr>
@@ -209,25 +358,25 @@ const Invoices = () => {
                                         </table>
                                     </div>
 
-                                    {/* Invoice Metadata Footer */}
+                                    {/* Desktop Invoice Metadata Footer */}
                                     <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
                                         <div className="glass-card p-4">
-                                            <h4 className="text-sm font-bold text-[var(--color-text-muted)] uppercase mb-2">Pago</h4>
-                                            <p className="text-[var(--color-text)]">Método: {selectedInvoice.payment_method}</p>
-                                            <p className="text-[var(--color-text)]">Tipo: {selectedInvoice.is_credit ? 'Crédito' : 'Contado'}</p>
+                                            <h4 className="text-[13px] font-bold text-[var(--color-text-muted)] uppercase mb-2">Pago</h4>
+                                            <p className="text-[var(--color-text)] text-[14px]">Método: {selectedInvoice.payment_method}</p>
+                                            <p className="text-[var(--color-text)] text-[14px]">Tipo: {selectedInvoice.is_credit ? 'Crédito' : 'Contado'}</p>
                                         </div>
                                         {selectedInvoice.is_credit && (
                                             <div className="glass-card p-4">
-                                                <h4 className="text-sm font-bold text-[var(--color-text-muted)] uppercase mb-2">Crédito</h4>
-                                                <p className="text-[var(--color-text)]">Días Plazo: {selectedInvoice.credit_days}</p>
-                                                <p className="text-[var(--color-text)]">Vencimiento: {selectedInvoice.expiry_date}</p>
-                                                <p className="text-[var(--color-text)]">Abono Inicial: ${selectedInvoice.deposit?.toLocaleString()}</p>
+                                                <h4 className="text-[13px] font-bold text-[var(--color-text-muted)] uppercase mb-2">Crédito</h4>
+                                                <p className="text-[var(--color-text)] text-[14px]">Días Plazo: {selectedInvoice.credit_days}</p>
+                                                <p className="text-[var(--color-text)] text-[14px]">Vencimiento: {selectedInvoice.expiry_date}</p>
+                                                <p className="text-[var(--color-text)] text-[14px]">Abono Inicial: ${selectedInvoice.deposit?.toLocaleString()}</p>
                                             </div>
                                         )}
                                         <div className="glass-card p-4">
-                                            <h4 className="text-sm font-bold text-[var(--color-text-muted)] uppercase mb-2">Registro</h4>
-                                            <p className="text-[var(--color-text-muted)] text-sm">ID Interno: {selectedInvoice.id}</p>
-                                            <p className="text-[var(--color-text-muted)] text-sm">Estado: {selectedInvoice.status}</p>
+                                            <h4 className="text-[13px] font-bold text-[var(--color-text-muted)] uppercase mb-2">Registro</h4>
+                                            <p className="text-[var(--color-text-muted)] text-[14px]">ID Interno: {selectedInvoice.id}</p>
+                                            <p className="text-[var(--color-text-muted)] text-[14px]">Estado: {selectedInvoice.status}</p>
                                         </div>
                                     </div>
                                 </div>

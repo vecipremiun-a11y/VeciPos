@@ -111,41 +111,41 @@ const Dashboard = () => {
 
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
                 {/* Ventas Hoy */}
-                <div className="glass-card">
-                    <h3 className="text-[var(--color-text-muted)] text-sm mb-1">Ventas Hoy</h3>
-                    <p className="text-2xl font-bold text-[var(--color-text)] neon-text">
+                <div className="glass-card p-4">
+                    <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Ventas Hoy</h3>
+                    <p className="text-lg sm:text-2xl font-bold text-[var(--color-text)] neon-text truncate">
                         ${stats.totalSalesToday.toLocaleString('es-CL')}
                     </p>
-                    <div className="mt-2 text-xs text-[var(--color-primary)]">
+                    <div className="mt-2 text-[10px] md:text-xs text-[var(--color-primary)]">
                         {stats.ticketsToday} tickets procesados
                     </div>
                 </div>
 
                 {/* Ventas Mes */}
-                <div className="glass-card">
-                    <h3 className="text-[var(--color-text-muted)] text-sm mb-1">Ventas del Mes</h3>
-                    <p className="text-2xl font-bold text-[var(--color-text)] neon-text">
+                <div className="glass-card p-4">
+                    <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Ventas del Mes</h3>
+                    <p className="text-lg sm:text-2xl font-bold text-[var(--color-text)] neon-text truncate">
                         ${stats.totalSalesMonth.toLocaleString('es-CL')}
                     </p>
-                    <div className="mt-2 text-xs text-[var(--color-text-muted)]">Acumulado mensual</div>
+                    <div className="mt-2 text-[10px] md:text-xs text-[var(--color-text-muted)]">Acumulado mensual</div>
                 </div>
 
                 {/* Utilidad Hoy */}
-                <div className="glass-card">
-                    <h3 className="text-[var(--color-text-muted)] text-sm mb-1">Utilidad Hoy (Neta)</h3>
-                    <p className="text-2xl font-bold text-green-400 neon-text">
+                <div className="glass-card p-4">
+                    <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Utilidad Hoy (Neta)</h3>
+                    <p className="text-lg sm:text-2xl font-bold text-green-400 neon-text truncate">
                         ${stats.utilityToday.toLocaleString('es-CL')}
                     </p>
-                    <div className="mt-2 text-xs text-[var(--color-text-muted)]">Post-impuestos y costo</div>
+                    <div className="mt-2 text-[10px] md:text-xs text-[var(--color-text-muted)]">Post-impuestos y costo</div>
                 </div>
 
                 {/* Tickets Hoy (4th Card as requested) */}
-                <div className="glass-card">
-                    <h3 className="text-[var(--color-text-muted)] text-sm mb-1">Tickets de Hoy</h3>
-                    <p className="text-2xl font-bold text-blue-400 neon-text">{stats.ticketsToday}</p>
-                    <div className="mt-2 text-xs text-[var(--color-text-muted)]">Transacciones completadas</div>
+                <div className="glass-card p-4">
+                    <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Tickets de Hoy</h3>
+                    <p className="text-lg sm:text-2xl font-bold text-blue-400 neon-text truncate">{stats.ticketsToday}</p>
+                    <div className="mt-2 text-[10px] md:text-xs text-[var(--color-text-muted)]">Transacciones completadas</div>
                 </div>
             </div>
 

@@ -49,12 +49,28 @@ export const useStore = create(persist((set, get) => ({
 
     toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
 
-    inventoryAdjustmentMode: localStorage.getItem('pos_inventory_adjustment') === 'true',
-    toggleInventoryAdjustmentMode: () => set((state) => {
-        const newValue = !state.inventoryAdjustmentMode;
-        localStorage.setItem('pos_inventory_adjustment', newValue);
-        return { inventoryAdjustmentMode: newValue };
-    }),
+    inventoryAdjustmentMode: false, // Will be loaded from DB per company
+
+    toggleInventoryAdjustmentMode: async () => {
+        const { activeCompanyId, inventoryAdjustmentMode } = get();
+        const newValue = !inventoryAdjustmentMode;
+
+        try {
+            // Update database
+            await turso.execute({
+                sql: 'UPDATE companies SET inventory_adjustment_mode = ? WHERE id = ?',
+                args: [newValue ? 1 : 0, activeCompanyId]
+            });
+
+            // Update local state
+            set({ inventoryAdjustmentMode: newValue });
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating inventory adjustment mode:', e);
+            return { success: false, error: e.message };
+        }
+    },
 
     // SaaS State & Logic
     activeCompanyId: 'default',
@@ -99,7 +115,7 @@ export const useStore = create(persist((set, get) => ({
             // I will target fetchInitialData specifically.
 
             const currentVersion = versionRes.rows.length > 0 ? parseInt(versionRes.rows[0].value) : 0;
-            const TARGET_VERSION = 1; // Increment this when changing schema
+            const TARGET_VERSION = 2; // Incremented to force re-execution for inventory_adjustment_mode column
 
             if (currentVersion >= TARGET_VERSION) {
                 console.log("Schema is up to date (v" + currentVersion + ")");
@@ -114,7 +130,8 @@ export const useStore = create(persist((set, get) => ({
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     status TEXT DEFAULT 'active', -- active, suspended, deleted
-                    created_at TEXT
+                    created_at TEXT,
+                    inventory_adjustment_mode INTEGER DEFAULT 0
                 )
             `);
 
@@ -176,6 +193,18 @@ export const useStore = create(persist((set, get) => ({
                 await turso.execute("CREATE INDEX IF NOT EXISTS idx_sales_company_date ON sales(company_id, date)");
                 await turso.execute("CREATE INDEX IF NOT EXISTS idx_purchases_company_date ON purchases(company_id, date)");
             } catch (e) { console.warn("Index creation error", e); }
+
+            // 6. Add inventory_adjustment_mode to companies table (for existing databases)
+            try {
+                const companyInfo = await turso.execute(`PRAGMA table_info(companies)`);
+                const hasInventoryMode = companyInfo.rows.some(col => col.name === 'inventory_adjustment_mode');
+                if (!hasInventoryMode) {
+                    console.log('Adding inventory_adjustment_mode to companies...');
+                    await turso.execute(`ALTER TABLE companies ADD COLUMN inventory_adjustment_mode INTEGER DEFAULT 0`);
+                }
+            } catch (e) {
+                console.warn("Migration error for companies.inventory_adjustment_mode:", e);
+            }
 
 
             // 6. Backfill User Permissions (Self-Healing)
@@ -304,7 +333,7 @@ export const useStore = create(persist((set, get) => ({
         try {
             const res = await turso.execute({
                 sql: `
-                    SELECT c.id, c.name, uc.role 
+                    SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, uc.role 
                     FROM user_companies uc
                     JOIN companies c ON uc.company_id = c.id
                     WHERE uc.user_id = ? AND c.status = 'active'
@@ -335,6 +364,8 @@ export const useStore = create(persist((set, get) => ({
         set({
             isLoading: true,
             activeCompanyId: companyId,
+            // Load inventory mode from target company
+            inventoryAdjustmentMode: targetCompany.inventory_adjustment_mode === 1,
             // Clear all data lists
             products: [],
             productLots: [],
@@ -413,7 +444,7 @@ export const useStore = create(persist((set, get) => ({
 
                 // Cargar empresas del usuario
                 const companiesRes = await turso.execute({
-                    sql: `SELECT c.id, c.name, c.timezone, uc.role 
+                    sql: `SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, uc.role 
                           FROM user_companies uc
                           JOIN companies c ON uc.company_id = c.id
                           WHERE uc.user_id = ? AND c.status = 'active'`,
@@ -451,11 +482,31 @@ export const useStore = create(persist((set, get) => ({
                     availableCompanies,
                     activeCompanyId,
                     currentCompanyTimezone: activeCompany.timezone || 'America/Santiago',
-                    currentUserCompanyRole: activeCompany.role
+                    currentUserCompanyRole: activeCompany.role,
+                    inventoryAdjustmentMode: activeCompany.inventory_adjustment_mode === 1
                 });
+
 
                 // Guardar en localStorage
                 localStorage.setItem(`activeCompanyId:${currentUser.id}`, activeCompanyId);
+            }
+
+            // SIEMPRE cargar inventory_adjustment_mode fresco desde la DB
+            // (en caso de que availableCompanies venga de localStorage con valor desactualizado)
+            if (currentUser && activeCompanyId) {
+                try {
+                    const companyRes = await turso.execute({
+                        sql: 'SELECT inventory_adjustment_mode FROM companies WHERE id = ?',
+                        args: [activeCompanyId]
+                    });
+                    if (companyRes.rows.length > 0) {
+                        const freshMode = companyRes.rows[0].inventory_adjustment_mode === 1;
+                        set({ inventoryAdjustmentMode: freshMode });
+                        console.log('🔧 Inventory adjustment mode loaded from DB:', freshMode);
+                    }
+                } catch (e) {
+                    console.warn('Could not load inventory_adjustment_mode:', e);
+                }
             }
 
             console.log('🏢 Loading data for company:', activeCompanyId);
@@ -1100,7 +1151,7 @@ export const useStore = create(persist((set, get) => ({
 
             // 2. Obtener empresas del usuario
             const companiesRes = await turso.execute({
-                sql: `SELECT c.id, c.name, c.timezone, uc.role 
+                sql: `SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, uc.role 
                       FROM user_companies uc
                       JOIN companies c ON uc.company_id = c.id
                       WHERE uc.user_id = ? AND c.status = 'active'
@@ -1146,7 +1197,8 @@ export const useStore = create(persist((set, get) => ({
                 availableCompanies: userCompanies,
                 activeCompanyId: activeCompanyId,
                 currentCompanyTimezone: activeCompany.timezone || 'America/Santiago',
-                currentUserCompanyRole: activeCompany.role
+                currentUserCompanyRole: activeCompany.role,
+                inventoryAdjustmentMode: activeCompany.inventory_adjustment_mode === 1
             });
 
             // 5. Guardar en localStorage
@@ -1161,6 +1213,7 @@ export const useStore = create(persist((set, get) => ({
                         availableCompanies: userCompanies,
                         currentCompanyTimezone: activeCompany.timezone || 'America/Santiago',
                         currentUserCompanyRole: activeCompany.role,
+                        inventoryAdjustmentMode: activeCompany.inventory_adjustment_mode === 1,
                         darkMode: get().darkMode,
                         carts: get().carts,
                         activeCartId: get().activeCartId,
@@ -2196,7 +2249,7 @@ export const useStore = create(persist((set, get) => ({
                 }
             }
 
-            if (newQuantity <= 0) {
+            if (newQuantity <= 0 && !updates._skipRemoval) {
                 get().removeFromCart(productId);
                 return;
             }

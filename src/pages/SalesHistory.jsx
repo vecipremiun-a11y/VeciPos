@@ -128,38 +128,24 @@ const SalesHistory = () => {
     };
 
     return (
-        <div className="h-full flex flex-col gap-4">
-            {/* Top Stats / Header */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-[var(--color-text)]">Historial de Ventas</h1>
-                    <p className="text-[var(--color-text-muted)] text-sm">Gestiona y revisa todas las transacciones</p>
-                </div>
-                <div className="flex gap-4 bg-[var(--glass-bg)] p-3 rounded-xl border border-[var(--glass-border)]">
-                    <div className="text-right">
-                        <p className="text-xs text-[var(--color-text-muted)]">Ventas Cargadas</p>
-                        <p className="text-xl font-bold text-[var(--color-primary)]">{formatMoney(totalSales)}</p>
-                    </div>
-                    <div className="w-px bg-white/10"></div>
-                    <div className="text-right">
-                        <p className="text-xs text-[var(--color-text-muted)]">Transacciones</p>
-                        <p className="text-xl font-bold text-[var(--color-text)]">{totalCount}</p>
-                    </div>
-                </div>
+        <div className="h-full flex flex-col gap-3 lg:gap-4 p-4 lg:p-0">
+            {/* Top Stats / Header - Compact on Mobile */}
+            <div className="shrink-0">
+                <h1 className="text-xl lg:text-2xl font-bold text-[var(--color-text)]">Historial de Ventas</h1>
+                <p className="text-[var(--color-text-muted)] text-xs lg:text-sm">Gestiona y revisa todas tus transacciones.</p>
             </div>
 
-            {/* Filters Bar */}
-            <div className="glass p-4 rounded-xl flex flex-wrap gap-4 items-center">
-
-                {/* 3D Date Buttons */}
-                <div className="flex gap-2">
+            {/* Filters Bar - Horizontal Scroll on Mobile */}
+            <div className="glass p-3 lg:p-4 rounded-xl overflow-x-auto shrink-0">
+                <div className="flex gap-2 lg:gap-4 items-center min-w-max">
+                    {/* Date From */}
                     <div
-                        className="relative group active:translate-y-1 transition-all"
+                        className="relative group active:translate-y-0.5 transition-all"
                         onClick={() => dateFromRef.current?.showPicker()}
                     >
-                        <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors min-w-[140px]">
-                            <Calendar size={16} className="text-[var(--color-primary)] mb-0.5" />
-                            <span className="text-sm font-bold truncate">
+                        <div className="flex items-center gap-1.5 bg-[var(--glass-bg)] text-[var(--color-text)] px-3 py-1.5 lg:px-4 lg:py-2 rounded-xl border-b-2 lg:border-b-4 border-black/50 cursor-pointer shadow-lg text-xs lg:text-sm font-bold">
+                            <Calendar size={14} className="text-[var(--color-primary)]" />
+                            <span className="truncate">
                                 {dateFrom ? new Date(dateFrom + 'T00:00').toLocaleDateString('es-CL') : 'Desde'}
                             </span>
                         </div>
@@ -172,13 +158,16 @@ const SalesHistory = () => {
                         />
                     </div>
 
+                    <span className="text-[var(--color-text-muted)] text-xs">-</span>
+
+                    {/* Date To */}
                     <div
-                        className="relative group active:translate-y-1 transition-all"
+                        className="relative group active:translate-y-0.5 transition-all"
                         onClick={() => dateToRef.current?.showPicker()}
                     >
-                        <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors min-w-[140px]">
-                            <Calendar size={16} className="text-[var(--color-primary)] mb-0.5" />
-                            <span className="text-sm font-bold truncate">
+                        <div className="flex items-center gap-1.5 bg-[var(--glass-bg)] text-[var(--color-text)] px-3 py-1.5 lg:px-4 lg:py-2 rounded-xl border-b-2 lg:border-b-4 border-black/50 cursor-pointer shadow-lg text-xs lg:text-sm font-bold">
+                            <Calendar size={14} className="text-[var(--color-primary)]" />
+                            <span className="truncate">
                                 {dateTo ? new Date(dateTo + 'T00:00').toLocaleDateString('es-CL') : 'Hasta'}
                             </span>
                         </div>
@@ -190,77 +179,51 @@ const SalesHistory = () => {
                             onChange={(e) => setDateTo(e.target.value)}
                         />
                     </div>
-                </div>
 
-
-
-                {/* NOTE: Client-side filters (Search/Payment/Seller) removed for now as we are doing Server-Side Paging.
-                    To reimplement them, they must be passed to fetchSales in useStore. 
-                    For now, focusing on Date + Scroll. 
-                */}
-
-                {/* Payment Method Filter */}
-                <div className="relative group">
-                    <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors min-w-[160px]">
-                        <CreditCard size={16} className="text-[var(--color-primary)] mb-0.5" />
+                    {/* Seller Filter */}
+                    <div className="flex items-center gap-1.5 bg-[var(--glass-bg)] text-[var(--color-text)] px-3 py-1.5 lg:px-4 lg:py-2 rounded-xl border-b-2 lg:border-b-4 border-black/50 cursor-pointer shadow-lg text-xs lg:text-sm font-bold">
+                        <User size={14} className="text-[var(--color-primary)]" />
                         <select
-                            className="bg-transparent border-none outline-none text-sm font-bold w-full cursor-pointer appearance-none"
-                            value={paymentMethodFilter}
-                            onChange={(e) => setPaymentMethodFilter(e.target.value)}
-                        >
-                            <option value="" className="bg-[var(--color-surface)] text-[var(--color-text)]">Todos los Medios</option>
-                            <option value="Efectivo" className="bg-[var(--color-surface)] text-[var(--color-text)]">Efectivo</option>
-                            <option value="Tarjeta" className="bg-[var(--color-surface)] text-[var(--color-text)]">Tarjeta</option>
-                            <option value="Transferencia" className="bg-[var(--color-surface)] text-[var(--color-text)]">Transferencia</option>
-                            <option value="Mixto" className="bg-[var(--color-surface)] text-[var(--color-text)]">Mixto</option>
-                            <option value="Crédito" className="bg-[var(--color-surface)] text-[var(--color-text)]">Crédito</option>
-                        </select>
-                    </div>
-                </div>
-
-                {/* Seller Filter */}
-                <div className="relative group">
-                    <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 cursor-pointer shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors min-w-[160px]">
-                        <User size={16} className="text-[var(--color-primary)] mb-0.5" />
-                        <select
-                            className="bg-transparent border-none outline-none text-sm font-bold w-full cursor-pointer appearance-none"
+                            className="bg-transparent border-none outline-none cursor-pointer appearance-none text-xs lg:text-sm font-bold"
                             value={sellerFilter}
                             onChange={(e) => setSellerFilter(e.target.value)}
                         >
-                            <option value="" className="bg-[var(--color-surface)] text-[var(--color-text)]">Todos los Vendedores</option>
+                            <option value="" className="bg-[var(--color-surface)]">Todos los Vendedores</option>
                             {users.map(user => (
-                                <option key={user.id} value={user.id} className="bg-[var(--color-surface)] text-[var(--color-text)]">
+                                <option key={user.id} value={user.id} className="bg-[var(--color-surface)]">
                                     {user.name}
                                 </option>
                             ))}
                         </select>
                     </div>
-                </div>
 
-                {/* Sale ID Filter (Prioritized) */}
-                <div className="relative group">
-                    <div className="flex items-center gap-2 bg-[var(--glass-bg)] text-[var(--color-text)] px-4 py-2 rounded-xl border-b-4 border-black/50 group-active:border-b-0 shadow-lg hover:bg-[var(--color-surface-hover)] transition-colors w-[140px]">
-                        <span className="text-[var(--color-primary)] font-bold text-sm">#</span>
-                        <input
-                            type="number"
-                            placeholder="N° Venta"
-                            className="bg-transparent border-none outline-none text-sm font-bold w-full appearance-none placeholder-[var(--color-text-muted)]"
-                            value={saleIdFilter}
-                            onChange={(e) => setSaleIdFilter(e.target.value)}
-                        />
+                    {/* Payment Method Filter */}
+                    <div className="flex items-center gap-1.5 bg-[var(--glass-bg)] text-[var(--color-text)] px-3 py-1.5 lg:px-4 lg:py-2 rounded-xl border-b-2 lg:border-b-4 border-black/50 cursor-pointer shadow-lg text-xs lg:text-sm font-bold">
+                        <CreditCard size={14} className="text-[var(--color-primary)]" />
+                        <select
+                            className="bg-transparent border-none outline-none cursor-pointer appearance-none text-xs lg:text-sm font-bold"
+                            value={paymentMethodFilter}
+                            onChange={(e) => setPaymentMethodFilter(e.target.value)}
+                        >
+                            <option value="" className="bg-[var(--color-surface)]">Venta</option>
+                            <option value="Efectivo" className="bg-[var(--color-surface)]">Efectivo</option>
+                            <option value="Tarjeta" className="bg-[var(--color-surface)]">Tarjeta</option>
+                            <option value="Transferencia" className="bg-[var(--color-surface)]">Transferencia</option>
+                            <option value="Crédito" className="bg-[var(--color-surface)]">Crédito</option>
+                        </select>
                     </div>
                 </div>
             </div>
 
-            {/* Split View */}
+            {/* Sales List - Full width on Mobile, Split on Desktop */}
             <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
-                {/* Left: List */}
-                <div className="w-1/3 glass rounded-xl flex flex-col overflow-hidden border border-[var(--glass-border)]">
-                    <div className="p-3 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] font-semibold text-[var(--color-text-muted)]">
+                {/* Sales List */}
+                <div className="w-full lg:w-1/3 glass rounded-xl flex flex-col overflow-hidden border border-[var(--glass-border)]">
+                    <div className="p-2 lg:p-3 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] font-semibold text-[var(--color-text-muted)] text-xs lg:text-sm">
                         Resultados ({sales.length})
                     </div>
                     <div
-                        className="flex-1 overflow-y-auto"
+                        className="flex-1 overflow-y-auto pb-20 lg:pb-0"
                         onScroll={handleScroll}
                         ref={listContainerRef}
                     >
@@ -268,28 +231,21 @@ const SalesHistory = () => {
                             <div
                                 key={sale.id}
                                 onClick={() => handleSelectSale(sale)}
-                                className={`p-4 border-b border-[var(--glass-border)] cursor-pointer transition-colors hover:bg-[var(--glass-bg)] ${selectedSale?.id === sale.id ? 'bg-[var(--color-primary)]/10 border-l-4 border-l-[var(--color-primary)]' : ''}`}
+                                className={`p-3 lg:p-4 border-b border-[var(--glass-border)] cursor-pointer transition-colors hover:bg-[var(--glass-bg)] ${selectedSale?.id === sale.id ? 'bg-[var(--color-primary)]/10 border-l-4 border-l-[var(--color-primary)]' : ''}`}
                             >
                                 <div className="flex justify-between items-start mb-1">
-                                    <span className="font-mono text-sm text-[var(--color-text-muted)]">#{sale.id}</span>
-                                    <span className={`text-xs px-2 py-0.5 rounded-full ${sale.status === 'cancelled' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'
+                                    <span className="font-mono text-sm text-[var(--color-text)]">#{sale.id}</span>
+                                    <span className={`text-[10px] lg:text-xs px-2 py-0.5 rounded-full ${sale.status === 'cancelled' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'
                                         }`}>
                                         {sale.status === 'cancelled' ? 'ANULADA' : 'COMPLETADA'}
                                     </span>
                                 </div>
                                 <div className="flex justify-between items-end">
                                     <div>
-                                        <p className="font-bold text-[var(--color-text)]">{formatMoney(sale.total)}</p>
-                                        <p className="text-xs text-[var(--color-text-muted)]">
-                                            {formatInCompanyTime(sale.date, currentCompanyTimezone, 'dd/MM/yyyy HH:mm')}
+                                        <p className="font-bold text-green-400 text-base lg:text-lg">{formatMoney(sale.total)}</p>
+                                        <p className="text-[10px] lg:text-xs text-[var(--color-text-muted)]">
+                                            {formatInCompanyTime(sale.date, currentCompanyTimezone, 'dd-MM-yyyy HH:mm')}
                                         </p>
-                                        <div className="flex items-center gap-1 mt-1 text-xs text-[var(--color-text-muted)]">
-                                            <User size={10} />
-                                            {getSellerName(sale.user_id)}
-                                        </div>
-                                    </div>
-                                    <div className="text-xs px-2 py-1 rounded bg-white/10 text-[var(--color-text-muted)]">
-                                        {sale.paymentMethod}
                                     </div>
                                 </div>
                             </div>
@@ -309,8 +265,8 @@ const SalesHistory = () => {
                     </div>
                 </div>
 
-                {/* Right: Details */}
-                <div className="w-2/3 glass rounded-xl flex flex-col overflow-hidden border border-[var(--glass-border)] relative">
+                {/* Right: Details - Hidden on Mobile, becomes Modal */}
+                <div className="hidden lg:flex w-2/3 glass rounded-xl flex-col overflow-hidden border border-[var(--glass-border)] relative">
                     {selectedSale ? (
                         isLoadingDetails && !selectedSale.items ? (
                             <div className="flex-1 flex flex-col items-center justify-center text-[var(--color-text-muted)]">
@@ -546,6 +502,147 @@ const SalesHistory = () => {
                     )}
                 </div>
             </div>
+
+            {/* Mobile Sale Detail Modal - Only shown on mobile when sale is selected */}
+            {selectedSale && (
+                <div className="lg:hidden fixed inset-0 z-[9999] bg-[var(--color-background)] flex flex-col">
+                    {/* Mobile Modal Header */}
+                    <div className="p-4 bg-[var(--glass-bg)] border-b border-[var(--glass-border)]">
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <h2 className="text-xl font-bold text-[var(--color-text)]">
+                                    Venta #{selectedSale.id}
+                                </h2>
+                                <p className="text-xs text-[var(--color-text-muted)]">
+                                    {formatInCompanyTime(selectedSale.date, currentCompanyTimezone, 'dd/MM/yyyy HH:mm')} • Vendedor: {getSellerName(selectedSale.user_id)}
+                                </p>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-2xl font-bold text-[var(--color-primary)]">
+                                    {formatMoney(selectedSale.total)}
+                                </div>
+                                <div className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold mt-1 ${selectedSale.status === 'cancelled' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>
+                                    {selectedSale.status === 'cancelled' ? 'ANULADA' : 'PAGADO'}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Mobile Action Buttons */}
+                    <div className="p-3 border-b border-[var(--glass-border)] flex gap-2 overflow-x-auto">
+                        <button onClick={handleDownloadPDF} className="flex items-center gap-1.5 px-3 py-2 bg-[var(--glass-bg)] rounded-lg text-xs text-[var(--color-text)] border border-[var(--glass-border)] whitespace-nowrap">
+                            <Download size={14} />
+                            Descargar PDF
+                        </button>
+                        <button onClick={handleWhatsAppClick} className="flex items-center gap-1.5 px-3 py-2 bg-[#25D366]/20 text-[#25D366] rounded-lg text-xs whitespace-nowrap">
+                            <Send size={14} />
+                            Compartir WhatsApp
+                        </button>
+                        {selectedSale.status !== 'cancelled' && (
+                            <button onClick={handleCancelSale} className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 text-red-400 rounded-lg text-xs border border-red-500/20 whitespace-nowrap">
+                                <Trash2 size={14} />
+                                Anular Venta
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Mobile Products List */}
+                    <div className="flex-1 overflow-y-auto p-4">
+                        {isLoadingDetails && !selectedSale.items ? (
+                            <div className="flex items-center justify-center py-12">
+                                <span className="text-[var(--color-text-muted)]">Cargando...</span>
+                            </div>
+                        ) : (
+                            <>
+                                {/* Products Table */}
+                                <table className="w-full text-left">
+                                    <thead>
+                                        <tr className="border-b border-[var(--glass-border)] text-[var(--color-text-muted)] text-xs">
+                                            <th className="py-2">Producto</th>
+                                            <th className="py-2 text-center">Cantidad</th>
+                                            <th className="py-2 text-right">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {selectedSale.items?.map((item, idx) => (
+                                            <tr key={idx} className="border-b border-[var(--glass-border)]">
+                                                <td className="py-3">
+                                                    <div className="font-medium text-[var(--color-text)] text-sm">{item.name}</div>
+                                                    {item.sku && <div className="text-[10px] text-[var(--color-text-muted)]">{item.sku}</div>}
+                                                </td>
+                                                <td className="py-3 text-center">
+                                                    <span className="px-2 py-1 bg-[var(--glass-bg)] rounded text-[var(--color-text)] text-sm">{item.quantity}</span>
+                                                </td>
+                                                <td className="py-3 text-right font-bold text-[var(--color-text)] text-sm">{formatMoney(item.price * item.quantity)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+
+                                {/* Totals */}
+                                <div className="mt-6 space-y-2">
+                                    <div className="flex justify-between text-sm text-[var(--color-text-muted)]">
+                                        <span>Subtotal</span>
+                                        <span>{formatMoney(selectedSale.total)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm text-[var(--color-text-muted)]">
+                                        <span>Impuestos</span>
+                                        <span>$0</span>
+                                    </div>
+                                    <div className="border-t border-[var(--glass-border)] pt-2 flex justify-between font-bold text-[var(--color-text)]">
+                                        <span>Total</span>
+                                        <span className="text-[var(--color-primary)] text-lg">{formatMoney(selectedSale.total)}</span>
+                                    </div>
+                                </div>
+
+                                {/* Payment Info */}
+                                <div className="mt-6 p-4 bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
+                                    <p className="text-xs text-[var(--color-text-muted)] uppercase font-bold mb-2">INFORMACIÓN DE PAGO</p>
+                                    <div className="flex justify-between text-sm text-[var(--color-text-muted)] mb-1">
+                                        <span>Metodo</span>
+                                        <span>{selectedSale.paymentMethod}</span>
+                                    </div>
+                                    {selectedSale.paymentMethod === 'Efectivo' && selectedSale.paymentDetails && (
+                                        <>
+                                            <div className="flex justify-between text-sm text-[var(--color-text-muted)] mb-1">
+                                                <span>Pagado</span>
+                                                <span>{formatMoney(selectedSale.paymentDetails.amount || selectedSale.total)}</span>
+                                            </div>
+                                            <div className="flex justify-between text-sm text-[var(--color-text-muted)]">
+                                                <span>Vuelto</span>
+                                                <span>{formatMoney(selectedSale.paymentDetails.change || 0)}</span>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+
+                                {/* Cancellation reason if cancelled */}
+                                {selectedSale.status === 'cancelled' && (
+                                    <div className="mt-4 p-4 bg-red-500/10 rounded-xl border border-red-500/20">
+                                        <p className="text-xs text-red-400 uppercase font-bold mb-1 flex items-center gap-1">
+                                            <AlertTriangle size={12} />
+                                            Motivo de Anulación
+                                        </p>
+                                        <p className="text-sm text-red-200 italic">
+                                            "{selectedSale.observation || 'Sin observación'}"
+                                        </p>
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+
+                    {/* Mobile Close Button */}
+                    <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)]">
+                        <button
+                            onClick={() => setSelectedSale(null)}
+                            className="w-full py-3 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl text-[var(--color-text)] font-bold"
+                        >
+                            Cerrar
+                        </button>
+                    </div>
+                </div>
+            )}
         </div >
     );
 };

@@ -147,38 +147,38 @@ const Inventory = () => {
 
     return (
         <div className="space-y-6 h-[calc(100vh-6rem)] flex flex-col">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between items-center gap-4 shrink-0">
+            {/* Header - Compact on Mobile */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4 shrink-0">
                 <div>
-                    <h1 className="text-3xl font-bold text-[var(--color-text)] neon-text">Inventario</h1>
-                    <p className="text-[var(--color-text-muted)]">Gestión de productos y existencias</p>
+                    <h1 className="text-xl lg:text-3xl font-bold text-[var(--color-text)] neon-text">Inventario</h1>
+                    <p className="text-xs lg:text-base text-[var(--color-text-muted)]">Gestión de productos y existencias</p>
                 </div>
 
-                <button onClick={handleNewProduct} className="btn-primary flex items-center gap-2">
-                    <Plus size={20} /> Nuevo Producto
+                <button onClick={handleNewProduct} className="btn-primary flex items-center gap-2 text-sm lg:text-base px-3 lg:px-4 py-2">
+                    <Plus size={18} /> Nuevo Producto
                 </button>
             </div>
 
             {/* Content Area */}
             <div className="flex-1 min-h-0 flex flex-col">
-                {/* Filters & Search */}
-                <div className="glass-card p-4 flex flex-col md:flex-row gap-4 items-center mb-4 shrink-0">
+                {/* Filters & Search - Compact on Mobile */}
+                <div className="glass-card p-3 lg:p-4 flex flex-col md:flex-row gap-3 lg:gap-4 items-center mb-3 lg:mb-4 shrink-0">
                     <div className="relative flex-1 w-full">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={20} />
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
                         <input
                             type="text"
                             placeholder="Buscar por nombre, SKU o categoría..."
-                            className="glass-input pl-10 w-full"
+                            className="glass-input pl-10 w-full text-sm lg:text-base"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
                     <button
                         onClick={() => setShowFilters(!showFilters)}
-                        className={`glass px-4 py-3 rounded-lg transition-colors flex items-center gap-2 ${showFilters ? 'bg-[var(--color-primary)] text-black' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                        className={`glass px-3 lg:px-4 py-2 lg:py-3 rounded-lg transition-colors flex items-center gap-2 text-sm ${showFilters ? 'bg-[var(--color-primary)] text-black' : 'hover:bg-[var(--color-surface-hover)]'}`}
                     >
-                        <Filter size={20} className={showFilters ? "text-black" : "text-[var(--color-text-muted)]"} />
-                        {showFilters && <span className="font-bold text-sm">Filtros</span>}
+                        <Filter size={18} className={showFilters ? "text-black" : "text-[var(--color-text-muted)]"} />
+                        {showFilters && <span className="font-bold">Filtros</span>}
                     </button>
                 </div>
 
@@ -253,10 +253,73 @@ const Inventory = () => {
                     </div>
                 )}
 
-                {/* Table */}
+                {/* Product List - Cards on Mobile, Table on Desktop */}
                 <div className="glass-card overflow-hidden p-0 flex-1 flex flex-col">
+                    {/* Mobile Card View */}
+                    <div className="lg:hidden flex-1 overflow-y-auto pb-20" onScroll={handleScroll}>
+                        {visibleProducts.map((product) => (
+                            <div
+                                key={product.id}
+                                className={cn(
+                                    "p-3 border-b border-[var(--glass-border)] flex items-center gap-3",
+                                    (product.is_offer === 1 || product.is_offer === true) ? "bg-yellow-500/5" : ""
+                                )}
+                            >
+                                {/* Image */}
+                                <div className="w-16 h-16 shrink-0 rounded-lg overflow-hidden border border-[var(--glass-border)] bg-[var(--glass-bg)] flex items-center justify-center">
+                                    <OptimizedImage
+                                        src={product.image}
+                                        alt={product.name}
+                                        className="w-full h-full object-cover"
+                                        priority={false}
+                                        fallback={
+                                            <span className="text-xs text-[var(--color-text-muted)] font-medium">Img</span>
+                                        }
+                                    />
+                                </div>
+
+                                {/* Info */}
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-start gap-2 mb-0.5">
+                                        {(product.is_offer === 1 || product.is_offer === true) && (
+                                            <span className="text-[8px] bg-yellow-500 text-black px-1.5 py-0.5 rounded-full font-bold">OFERTA</span>
+                                        )}
+                                        <h3 className="text-sm font-bold text-[var(--color-text)] line-clamp-1">{product.name}</h3>
+                                    </div>
+                                    <p className="text-xs text-[var(--color-text-muted)] font-mono mb-1">{product.sku}</p>
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-base font-bold text-green-400">${product.price.toFixed(2)}</span>
+                                        <span className="text-xs text-[var(--color-text-muted)]">Costo: ${(product.cost || 0).toFixed(2)}</span>
+                                    </div>
+                                </div>
+
+                                {/* Actions */}
+                                <div className="flex gap-1 shrink-0">
+                                    <button
+                                        onClick={() => handleEdit(product)}
+                                        className="p-2 hover:bg-[var(--color-surface-hover)] rounded-lg text-blue-400 transition-colors"
+                                    >
+                                        <Edit size={18} />
+                                    </button>
+                                    <button
+                                        onClick={() => handleDelete(product.id)}
+                                        className="p-2 hover:bg-[var(--color-surface-hover)] rounded-lg text-red-400 transition-colors"
+                                    >
+                                        <Trash2 size={18} />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                        {visibleProducts.length === 0 && (
+                            <div className="p-10 text-center text-[var(--color-text-muted)]">
+                                No se encontraron productos
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Desktop Table View */}
                     <div
-                        className="overflow-x-auto overflow-y-auto flex-1 custom-scrollbar"
+                        className="hidden lg:block overflow-x-auto overflow-y-auto flex-1 custom-scrollbar"
                         onScroll={handleScroll}
                     >
                         <table className="w-full text-left">

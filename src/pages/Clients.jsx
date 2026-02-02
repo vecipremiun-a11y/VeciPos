@@ -207,124 +207,197 @@ const Clients = () => {
     }
 
     return (
-        <div className="h-full flex flex-col gap-6 p-6 overflow-hidden">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0">
-                <div>
-                    <h1 className="text-3xl font-bold text-[var(--color-text)] neon-text mb-2">Gestión de Clientes</h1>
-                    <p className="text-[var(--color-text-muted)]">Administra tu base de datos de clientes.</p>
-                </div>
-
-                <div className="flex gap-4 w-full md:w-auto">
-                    <div className="relative flex-1 md:w-64">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={20} />
-                        <input
-                            type="text"
-                            placeholder="Buscar por nombre o RUT..."
-                            className="glass-input !pl-10 w-full"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                    </div>
-                    <button
-                        onClick={() => {
-                            setEditingClient(null);
-                            setIsModalOpen(true);
-                        }}
-                        className="btn-primary flex items-center gap-2 px-4 py-2 rounded-xl whitespace-nowrap"
-                    >
-                        <Plus size={20} />
-                        Nuevo Cliente
-                    </button>
-                </div>
+        <div className="h-full flex flex-col gap-4 lg:gap-6 p-4 lg:p-6 overflow-hidden">
+            {/* Header - Compact on Mobile */}
+            <div className="shrink-0">
+                <h1 className="text-xl lg:text-3xl font-bold text-[var(--color-text)] mb-1">Gestión de Clientes</h1>
+                <p className="text-sm lg:text-base text-[var(--color-text-muted)]">Administra tu base de datos de clientes.</p>
             </div>
 
-            <div className="flex-1 glass-card p-0 overflow-hidden flex flex-col">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-black/20 border-b border-[var(--glass-border)]">
-                            <tr>
-                                <th className="text-left p-4 text-[var(--color-text-muted)] font-medium">Cliente</th>
-                                <th className="text-left p-4 text-[var(--color-text-muted)] font-medium">Contacto</th>
-                                <th className="text-left p-4 text-[var(--color-text-muted)] font-medium">Ubicación</th>
-                                <th className="text-right p-4 text-[var(--color-text-muted)] font-medium">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[var(--glass-border)]">
-                            {filteredClients.map((client) => (
-                                <tr key={client.id} className="hover:bg-white/5 transition-colors group">
-                                    <td className="p-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-full bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)] font-bold">
-                                                {client.name.charAt(0).toUpperCase()}
-                                            </div>
-                                            <div>
-                                                <div className="font-medium text-[var(--color-text)]">{client.name}</div>
-                                                <div className="text-xs text-[var(--color-text-muted)]">{client.rut || 'Sin RUT'}</div>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td className="p-4">
-                                        <div className="space-y-1">
-                                            {client.phone && (
-                                                <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
-                                                    <Phone size={14} />
-                                                    {client.phone}
-                                                </div>
-                                            )}
-                                            {client.email && (
-                                                <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
-                                                    <Mail size={14} />
-                                                    {client.email}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="p-4">
-                                        {client.address && (
-                                            <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] max-w-[200px] truncate">
-                                                <MapPin size={14} className="shrink-0" />
-                                                <span className="truncate">{client.address}</span>
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="p-4 text-right">
-                                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button
-                                                onClick={() => handleViewAccount(client)}
-                                                className="p-2 hover:bg-yellow-500/20 text-[var(--color-text-muted)] hover:text-yellow-400 rounded-lg transition-colors flex items-center gap-2"
-                                                title="Ver Cuenta"
-                                            >
-                                                <FileText size={18} />
-                                                <span className="text-xs font-bold hidden md:inline">Cuenta</span>
-                                            </button>
-                                            <button
-                                                onClick={() => handleEdit(client)}
-                                                className="p-2 hover:bg-[var(--color-primary)]/20 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] rounded-lg transition-colors"
-                                                title="Editar"
-                                            >
-                                                <Edit size={18} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleDelete(client.id)}
-                                                className="p-2 hover:bg-red-500/20 text-[var(--color-text-muted)] hover:text-red-400 rounded-lg transition-colors"
-                                                title="Eliminar"
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                            {filteredClients.length === 0 && (
+            {/* Search & Add Button - Side by Side */}
+            <div className="flex gap-2 lg:gap-4 shrink-0">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
+                    <input
+                        type="text"
+                        placeholder="Buscar por nombre o RUT..."
+                        className="glass-input !pl-10 w-full text-sm"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </div>
+                <button
+                    onClick={() => {
+                        setEditingClient(null);
+                        setIsModalOpen(true);
+                    }}
+                    className="btn-primary flex items-center gap-2 px-3 lg:px-4 py-2 rounded-xl whitespace-nowrap text-sm lg:text-base"
+                >
+                    <Plus size={18} />
+                    <span className="hidden sm:inline">Nuevo Cliente</span>
+                </button>
+            </div>
+
+            {/* Client List - Cards on Mobile, Table on Desktop */}
+            <div className="flex-1 overflow-hidden">
+                {/* Mobile Cards View */}
+                <div className="lg:hidden h-full overflow-y-auto space-y-3 pb-20">
+                    {filteredClients.map((client) => (
+                        <div
+                            key={client.id}
+                            className="glass-card p-4 space-y-3"
+                            onClick={() => handleViewAccount(client)}
+                        >
+                            {/* Header: Avatar + Name/RUT */}
+                            <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-full bg-[var(--color-primary)]/20 flex items-center justify-center text-[var(--color-primary)] font-bold text-lg">
+                                    {client.name.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="flex-1">
+                                    <div className="font-bold text-[var(--color-text)] text-base">{client.name}</div>
+                                    <div className="text-sm text-[var(--color-text-muted)]">{client.rut || 'Sin RUT'}</div>
+                                </div>
+                                {/* Quick Actions */}
+                                <div className="flex gap-1">
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleEdit(client);
+                                        }}
+                                        className="p-2 hover:bg-[var(--color-primary)]/20 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] rounded-lg transition-colors"
+                                    >
+                                        <Edit size={16} />
+                                    </button>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDelete(client.id);
+                                        }}
+                                        className="p-2 hover:bg-red-500/20 text-[var(--color-text-muted)] hover:text-red-400 rounded-lg transition-colors"
+                                    >
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Contact Details */}
+                            <div className="space-y-1.5 pl-1">
+                                {client.phone && (
+                                    <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                                        <Phone size={14} className="text-[var(--color-primary)]" />
+                                        {client.phone}
+                                    </div>
+                                )}
+                                {client.email && (
+                                    <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                                        <Mail size={14} className="text-[var(--color-primary)]" />
+                                        {client.email}
+                                    </div>
+                                )}
+                                {client.address && (
+                                    <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                                        <MapPin size={14} className="text-[var(--color-primary)]" />
+                                        <span className="truncate">{client.address}</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                    {filteredClients.length === 0 && (
+                        <div className="text-center py-12 text-[var(--color-text-muted)]">
+                            No se encontraron clientes.
+                        </div>
+                    )}
+                </div>
+
+                {/* Desktop Table View */}
+                <div className="hidden lg:block h-full glass-card p-0 overflow-hidden">
+                    <div className="overflow-x-auto h-full">
+                        <table className="w-full">
+                            <thead className="bg-black/20 border-b border-[var(--glass-border)] sticky top-0">
                                 <tr>
-                                    <td colSpan="4" className="p-8 text-center text-[var(--color-text-muted)]">
-                                        No se encontraron clientes.
-                                    </td>
+                                    <th className="text-left p-4 text-[var(--color-text-muted)] font-medium">Cliente</th>
+                                    <th className="text-left p-4 text-[var(--color-text-muted)] font-medium">Contacto</th>
+                                    <th className="text-left p-4 text-[var(--color-text-muted)] font-medium">Ubicación</th>
+                                    <th className="text-right p-4 text-[var(--color-text-muted)] font-medium">Acciones</th>
                                 </tr>
-                            )}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="divide-y divide-[var(--glass-border)]">
+                                {filteredClients.map((client) => (
+                                    <tr key={client.id} className="hover:bg-white/5 transition-colors group">
+                                        <td className="p-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)] font-bold">
+                                                    {client.name.charAt(0).toUpperCase()}
+                                                </div>
+                                                <div>
+                                                    <div className="font-medium text-[var(--color-text)]">{client.name}</div>
+                                                    <div className="text-xs text-[var(--color-text-muted)]">{client.rut || 'Sin RUT'}</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="p-4">
+                                            <div className="space-y-1">
+                                                {client.phone && (
+                                                    <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                                                        <Phone size={14} />
+                                                        {client.phone}
+                                                    </div>
+                                                )}
+                                                {client.email && (
+                                                    <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                                                        <Mail size={14} />
+                                                        {client.email}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="p-4">
+                                            {client.address && (
+                                                <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] max-w-[200px] truncate">
+                                                    <MapPin size={14} className="shrink-0" />
+                                                    <span className="truncate">{client.address}</span>
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="p-4 text-right">
+                                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={() => handleViewAccount(client)}
+                                                    className="p-2 hover:bg-yellow-500/20 text-[var(--color-text-muted)] hover:text-yellow-400 rounded-lg transition-colors flex items-center gap-2"
+                                                    title="Ver Cuenta"
+                                                >
+                                                    <FileText size={18} />
+                                                    <span className="text-xs font-bold">Cuenta</span>
+                                                </button>
+                                                <button
+                                                    onClick={() => handleEdit(client)}
+                                                    className="p-2 hover:bg-[var(--color-primary)]/20 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] rounded-lg transition-colors"
+                                                    title="Editar"
+                                                >
+                                                    <Edit size={18} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDelete(client.id)}
+                                                    className="p-2 hover:bg-red-500/20 text-[var(--color-text-muted)] hover:text-red-400 rounded-lg transition-colors"
+                                                    title="Eliminar"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                                {filteredClients.length === 0 && (
+                                    <tr>
+                                        <td colSpan="4" className="p-8 text-center text-[var(--color-text-muted)]">
+                                            No se encontraron clientes.
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 

@@ -6,12 +6,28 @@ import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
 
 const MainLayout = () => {
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    // Helper to check window width strictly for initial state (avoid hydration mismatch if SSR, but this is SPA)
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile); // Closed by default on mobile, open on desktop
     const { currentUser, logout } = useStore();
     const navigate = useNavigate();
     const location = useLocation();
 
     const [openSubmenu, setOpenSubmenu] = useState(null);
+
+    // Handle Resize
+    React.useEffect(() => {
+        const handleResize = () => {
+            const mobile = window.innerWidth < 768;
+            setIsMobile(mobile);
+            // Optional: Auto-close/open on breakpoint switch? 
+            // Let's keep user state preference or default logic:
+            if (!mobile && !isSidebarOpen) setIsSidebarOpen(true);
+            if (mobile && isSidebarOpen) setIsSidebarOpen(false);
+        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     // Static Navigation Items
     const allNavItems = [
@@ -66,22 +82,34 @@ const MainLayout = () => {
 
     return (
         <div className="flex h-screen overflow-hidden bg-[var(--color-background)] text-[var(--color-text)]">
+            {/* Mobile Backdrop */}
+            {isMobile && isSidebarOpen && (
+                <div
+                    className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm transition-opacity"
+                    onClick={() => setIsSidebarOpen(false)}
+                />
+            )}
+
             {/* Sidebar */}
             <aside
                 className={cn(
-                    "glass border-r border-[var(--glass-border)] transition-all duration-300 flex flex-col z-20",
-                    isSidebarOpen ? "w-64" : "w-20"
+                    "glass border-r border-[var(--glass-border)] transition-all duration-300 flex flex-col z-50",
+                    isMobile ? "fixed inset-y-0 left-0 h-full shadow-2xl" : "relative",
+                    isSidebarOpen ? "w-[333px] translate-x-0" : (isMobile ? "-translate-x-full w-[333px]" : "w-20")
                 )}
             >
                 <div className="h-16 flex items-center justify-center border-b border-[var(--glass-border)] relative">
-                    <h1 className={cn("font-bold text-2xl neon-text transition-opacity duration-300 text-[var(--color-text)]", !isSidebarOpen && "opacity-0 hidden")}>
+                    <h1 className={cn("font-bold text-2xl neon-text transition-opacity duration-300 text-[var(--color-text)]", !isSidebarOpen && !isMobile && "opacity-0 hidden")}>
                         POSKEM
                     </h1>
                     <button
                         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                        className="absolute right-[-12px] top-6 bg-[var(--color-surface)] border border-[var(--glass-border)] rounded-full p-1 hover:text-[var(--color-primary)] transition-colors text-[var(--color-text-muted)]"
+                        className={cn(
+                            "absolute bg-[var(--color-surface)] border border-[var(--glass-border)] rounded-full p-1 hover:text-[var(--color-primary)] transition-colors text-[var(--color-text-muted)]",
+                            isMobile ? "right-4 top-4" : "right-[-12px] top-6"
+                        )}
                     >
-                        <Menu size={16} />
+                        {isMobile ? <Menu size={20} /> : <Menu size={16} />}
                     </button>
                 </div>
 
@@ -180,13 +208,36 @@ const MainLayout = () => {
 
             {/* Main Content Area */}
             <main className="flex-1 flex flex-col overflow-hidden bg-[var(--color-background)] relative">
-                {/* Header */}
-                <header className="h-16 glass border-b border-[var(--glass-border)] flex justify-between items-center px-6 z-10 shrink-0">
-                    <h2 className="text-xl font-bold text-[var(--color-text)]">
-                        {navItems.find(item => item.path === location.pathname)?.label ||
-                            navItems.find(item => item.subItems?.some(sub => sub.path === location.pathname))?.subItems?.find(sub => sub.path === location.pathname)?.label ||
-                            'Bienvenido'}
-                    </h2>
+                <header className="h-16 glass border-b border-[var(--glass-border)] flex justify-between items-center px-4 md:px-6 z-10 shrink-0">
+                    <div className="flex items-center gap-4">
+                        {isMobile && (
+                            <button
+                                onClick={() => setIsSidebarOpen(true)}
+                                className="p-2 -ml-2 text-[var(--color-text-muted)] hover:text-[var(--color-primary)]"
+                            >
+                                <Menu size={24} />
+                            </button>
+                        )}
+
+                        {(() => {
+                            const activeItem = navItems.find(item => item.path === location.pathname) ||
+                                navItems.flatMap(item => item.subItems || []).find(sub => sub.path === location.pathname);
+
+                            return (
+                                <div className="flex items-center gap-2">
+                                    {isMobile && activeItem?.icon && (
+                                        <activeItem.icon size={20} className="text-[var(--color-primary)]" />
+                                    )}
+                                    <h2 className={cn(
+                                        "font-bold text-[var(--color-text)]",
+                                        isMobile ? "text-base hidden sm:block" : "text-xl"
+                                    )}>
+                                        {activeItem?.label || 'Bienvenido'}
+                                    </h2>
+                                </div>
+                            );
+                        })()}
+                    </div>
 
                     <div className="flex items-center gap-4">
                         {/* Company Switcher */}
