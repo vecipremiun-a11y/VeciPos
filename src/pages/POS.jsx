@@ -499,7 +499,7 @@ const POS = () => {
             </div>
 
             {/* Right Side: Cart (Desktop Only) */}
-            <div className="hidden lg:flex w-full lg:w-[583px] flex-col glass-card p-0 overflow-hidden">
+            <div className="hidden lg:flex w-full lg:w-[449px] flex-col glass-card p-0 overflow-hidden">
                 <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] space-y-3">
                     <div className="w-full">
                         <ClientSearchWidget />

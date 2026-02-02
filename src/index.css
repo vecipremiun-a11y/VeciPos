@@ -223,20 +223,20 @@ body {
 /* Desktop typography - slightly larger for readability */
 @media (min-width: 1024px) {
   body {
-    font-size: 21px;
+    font-size: 13px;
   }
 
   .glass-card {
-    font-size: 21px;
+    font-size: 13px;
   }
 
   .glass-input {
-    font-size: 20px;
+    font-size: 12px;
   }
 
   /* Tables get slightly larger text on desktop */
   table {
-    font-size: 20px;
+    font-size: 12px;
   }
 
   th,
@@ -263,22 +263,22 @@ body {
 
   /* Override Tailwind text size utilities for desktop */
   .text-xs {
-    font-size: 20px !important;
+    font-size: 13px !important;
   }
 
   .text-sm {
-    font-size: 22px !important;
+    font-size: 15px !important;
   }
 
   .text-\[10px\] {
-    font-size: 19px !important;
+    font-size: 12px !important;
   }
 
   .text-\[11px\] {
-    font-size: 20px !important;
+    font-size: 13px !important;
   }
 
   .text-\[9px\] {
-    font-size: 18px !important;
+    font-size: 11px !important;
   }
 }
