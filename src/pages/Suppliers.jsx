@@ -23,13 +23,23 @@ const Suppliers = () => {
         setIsModalOpen(true);
     };
 
-    const handleSave = (supplierData) => {
+    const handleSave = async (supplierData) => {
+        let result;
         if (editingSupplier) {
-            updateSupplier(editingSupplier.id, supplierData);
+            console.log("Updating supplier:", editingSupplier.id, supplierData);
+            result = await updateSupplier(editingSupplier.id, supplierData);
         } else {
-            addSupplier(supplierData);
+            console.log("Adding supplier:", supplierData);
+            result = await addSupplier(supplierData);
         }
-        setIsModalOpen(false);
+
+        console.log("Save result:", result);
+
+        if (result.success) {
+            setIsModalOpen(false);
+        } else {
+            alert("Error al guardar: " + result.error);
+        }
     };
 
     return (
@@ -250,6 +260,40 @@ const SupplierModal = ({ isOpen, onClose, onSave, supplierToEdit }) => {
                                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                                 className="glass-input w-full pl-10"
                                 placeholder="contacto@proveedor.com"
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm text-[var(--color-text-muted)] mb-1">Nombre del Vendedor</label>
+                        <input
+                            type="text"
+                            value={formData.seller_name || ''}
+                            onChange={(e) => setFormData({ ...formData, seller_name: e.target.value })}
+                            className="glass-input w-full"
+                            placeholder="Ej. Juan Pérez"
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">Días de Pedido</label>
+                            <input
+                                type="text"
+                                value={formData.order_days || ''}
+                                onChange={(e) => setFormData({ ...formData, order_days: e.target.value })}
+                                className="glass-input w-full"
+                                placeholder="Ej. Lunes, Jueves"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">Días de Entrega</label>
+                            <input
+                                type="text"
+                                value={formData.delivery_days || ''}
+                                onChange={(e) => setFormData({ ...formData, delivery_days: e.target.value })}
+                                className="glass-input w-full"
+                                placeholder="Ej. Martes, Viernes"
                             />
                         </div>
                     </div>

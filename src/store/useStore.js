@@ -115,7 +115,7 @@ export const useStore = create(persist((set, get) => ({
             // I will target fetchInitialData specifically.
 
             const currentVersion = versionRes.rows.length > 0 ? parseInt(versionRes.rows[0].value) : 0;
-            const TARGET_VERSION = 2; // Incremented to force re-execution for inventory_adjustment_mode column
+            const TARGET_VERSION = 3; // Incremented to trigger wholesale columns migration
 
             if (currentVersion >= TARGET_VERSION) {
                 console.log("Schema is up to date (v" + currentVersion + ")");
@@ -206,6 +206,43 @@ export const useStore = create(persist((set, get) => ({
                 console.warn("Migration error for companies.inventory_adjustment_mode:", e);
             }
 
+
+            // 7. Add new columns to suppliers table (seller_name, order_days, delivery_days)
+            try {
+                const supplierInfo = await turso.execute(`PRAGMA table_info(suppliers)`);
+                const hasSellerName = supplierInfo.rows.some(col => col.name === 'seller_name');
+                if (!hasSellerName) {
+                    console.log('Adding extra columns to suppliers...');
+                    await turso.execute(`ALTER TABLE suppliers ADD COLUMN seller_name TEXT`);
+                    await turso.execute(`ALTER TABLE suppliers ADD COLUMN order_days TEXT`);
+                    await turso.execute(`ALTER TABLE suppliers ADD COLUMN delivery_days TEXT`);
+                }
+            } catch (e) {
+                console.warn("Migration error for suppliers extra columns:", e);
+            }
+
+            // 8. Add Wholesale/Scale Pricing Columns to Products
+            try {
+                const productInfo = await turso.execute(`PRAGMA table_info(products)`);
+                const hasPriceRanges = productInfo.rows.some(col => col.name === 'price_ranges');
+                const hasScaleGroupId = productInfo.rows.some(col => col.name === 'scale_group_id');
+                const hasOriginalPrice = productInfo.rows.some(col => col.name === 'original_price');
+
+                if (!hasPriceRanges) {
+                    console.log('Adding price_ranges to products...');
+                    await turso.execute(`ALTER TABLE products ADD COLUMN price_ranges TEXT`); // JSON string
+                }
+                if (!hasScaleGroupId) {
+                    console.log('Adding scale_group_id to products...');
+                    await turso.execute(`ALTER TABLE products ADD COLUMN scale_group_id TEXT`);
+                }
+                if (!hasOriginalPrice) {
+                    console.log('Adding original_price to products...');
+                    await turso.execute(`ALTER TABLE products ADD COLUMN original_price REAL`);
+                }
+            } catch (e) {
+                console.warn("Migration error for products wholesale columns:", e);
+            }
 
             // 6. Backfill User Permissions (Self-Healing)
             try {
@@ -327,6 +364,8 @@ export const useStore = create(persist((set, get) => ({
             return { success: false, error: e.message };
         }
     },
+
+
 
     // Actions
     fetchUserCompanies: async (userId) => {
@@ -541,6 +580,38 @@ export const useStore = create(persist((set, get) => ({
                 )
             `);
 
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS supplier_orders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id TEXT,
+                    user_id TEXT,
+                    supplier_id INTEGER,
+                    supplier_name TEXT,
+                    seller_name TEXT,
+                    total_amount REAL,
+                    items TEXT,
+                    status TEXT DEFAULT 'pending',
+                    created_at TEXT,
+                    expected_delivery_date TEXT,
+                    FOREIGN KEY(company_id) REFERENCES companies(id)
+                )
+            `);
+
+            // Migration: Add new columns to suppliers if they don't exist
+            const newColumns = [
+                'ALTER TABLE suppliers ADD COLUMN seller_name TEXT',
+                'ALTER TABLE suppliers ADD COLUMN order_days TEXT',
+                'ALTER TABLE suppliers ADD COLUMN delivery_days TEXT'
+            ];
+
+            for (const query of newColumns) {
+                try {
+                    await turso.execute(query);
+                } catch (e) {
+                    // Ignore error if column already exists
+                }
+            }
+
             // 2. BATCH DATA FETCHING
             // ==========================================
             console.time('⏱️ BatchFetch');
@@ -672,7 +743,8 @@ export const useStore = create(persist((set, get) => ({
             // Query optimizado - solo columnas necesarias
             let sql = `SELECT 
                 id, name, sku, price, cost, stock, category, unit, image,
-                tax_rate, is_offer, offer_price, company_id
+                tax_rate, is_offer, offer_price, company_id,
+                price_ranges, scale_group_id, original_price
             FROM products 
             WHERE company_id = ?`;
 
@@ -1607,8 +1679,18 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             const result = await turso.execute({
-                sql: "INSERT INTO suppliers (name, phone, email, status, company_id) VALUES (?, ?, ?, ?, ?) RETURNING *",
-                args: [supplier.name, supplier.phone || '', supplier.email || '', supplier.status || 'active', activeCompanyId]
+                sql: "INSERT INTO suppliers (name, phone, email, seller_name, order_days, delivery_days, status, company_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                args: [
+                    supplier.name,
+                    supplier.phone || '',
+                    supplier.email || '',
+                    supplier.seller_name || '',
+                    supplier.order_days || '',
+                    supplier.delivery_days || '',
+                    supplier.status || 'active',
+                    activeCompanyId,
+                    new Date().toISOString()
+                ]
             });
             const newSupplier = result.rows[0];
 
@@ -1642,8 +1724,18 @@ export const useStore = create(persist((set, get) => ({
             // 2. Transaction
             const queries = [
                 {
-                    sql: "UPDATE suppliers SET name = ?, phone = ?, email = ?, status = ? WHERE id = ? AND company_id = ?",
-                    args: [updatedSupplier.name, updatedSupplier.phone, updatedSupplier.email, updatedSupplier.status, id, activeCompanyId]
+                    sql: "UPDATE suppliers SET name = ?, phone = ?, email = ?, seller_name = ?, order_days = ?, delivery_days = ?, status = ? WHERE id = ? AND company_id = ?",
+                    args: [
+                        updatedSupplier.name,
+                        updatedSupplier.phone || '',
+                        updatedSupplier.email || '',
+                        updatedSupplier.seller_name || '',
+                        updatedSupplier.order_days || '',
+                        updatedSupplier.delivery_days || '',
+                        updatedSupplier.status || 'active',
+                        id,
+                        activeCompanyId
+                    ]
                 }
             ];
 
@@ -1701,6 +1793,65 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    fetchSupplierOrders: async (filters = {}) => {
+        try {
+            const { activeCompanyId } = get();
+            let sql = "SELECT * FROM supplier_orders WHERE company_id = ?";
+            const args = [activeCompanyId];
+
+            if (filters.supplier_id) {
+                sql += " AND supplier_id = ?";
+                args.push(filters.supplier_id);
+            }
+            if (filters.status) {
+                sql += " AND status = ?";
+                args.push(filters.status);
+            }
+
+            sql += " ORDER BY created_at DESC";
+
+            const result = await turso.execute({ sql, args });
+            return result.rows.map(row => ({
+                ...row,
+                items: row.items ? JSON.parse(row.items) : []
+            }));
+        } catch (e) {
+            console.error("Fetch supplier orders error", e);
+            return [];
+        }
+    },
+
+    createSupplierOrder: async (orderData) => {
+        try {
+            const { activeCompanyId, currentUser } = get();
+
+            const result = await turso.execute({
+                sql: `INSERT INTO supplier_orders (
+                    company_id, user_id, supplier_id, supplier_name, seller_name, 
+                    total_amount, items, status, created_at, expected_delivery_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+                args: [
+                    activeCompanyId,
+                    currentUser?.id || null,
+                    orderData.supplier_id,
+                    orderData.supplier_name,
+                    orderData.seller_name || null,
+                    orderData.total_amount,
+                    JSON.stringify(orderData.items),
+                    'pending',
+                    new Date().toISOString(),
+                    orderData.expected_delivery_date || null
+                ]
+            });
+
+            const newOrder = result.rows[0];
+            return { success: true, order: newOrder };
+        } catch (e) {
+            console.error("Create supplier order error", e);
+            return { success: false, error: e.message };
+        }
+    },
+
     // =========================================
     // SUPER ADMIN ACTIONS
     // =========================================
@@ -1738,29 +1889,73 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    createCompany: async (companyId, name) => {
+    createCompany: async (companyData) => {
         try {
+            const { id, name, country, plan, newUser } = companyData;
             const { currentUser } = get();
+
             if (currentUser?.role !== 'super_admin') return { success: false, error: "Access Denied" };
 
             // 1. Create Company
             await turso.execute({
-                sql: "INSERT INTO companies (id, name, status, created_at) VALUES (?, ?, 'active', ?)",
-                args: [companyId, name, new Date().toISOString()]
+                sql: "INSERT INTO companies (id, name, status, created_at, country_code, plan) VALUES (?, ?, 'active', ?, ?, ?)",
+                args: [id, name, new Date().toISOString(), country || 'CL', plan || 'basic']
             });
 
-            // 2. Assign Current Admin as Owner of new company (so they can switch to it if needed, or just management)
-            // Actually, requirements said "Assign the creating admin into user_companies as owner"
+            // 2. Assign Current Admin as Owner (so they can manage it)
             await turso.execute({
                 sql: "INSERT INTO user_companies (user_id, company_id, role) VALUES (?, ?, 'owner')",
-                args: [currentUser.id, companyId]
+                args: [currentUser.id, id]
             });
+
+            // 3. Create New User (if provided)
+            if (newUser && newUser.username && newUser.password) {
+                // Check if username exists
+                const userCheck = await turso.execute({
+                    sql: "SELECT id FROM users WHERE username = ?",
+                    args: [newUser.username]
+                });
+
+                if (userCheck.rows.length > 0) {
+                    console.warn(`Username ${newUser.username} already exists. Skipping user creation.`);
+                    // We don't fail the whole process, just warn? Or maybe we should allow linking existing user?
+                    // For now, let's assume unique usernames required for new creation.
+                } else {
+                    const userRes = await turso.execute({
+                        sql: "INSERT INTO users (username, password, name, role, company_id) VALUES (?, ?, ?, 'Administrador', ?) RETURNING id",
+                        args: [newUser.username, newUser.password, newUser.name || newUser.username, id]
+                    });
+
+                    const newUserId = userRes.rows[0]?.id; // If RETURNING is supported, else query? 
+
+                    // Turso/LibSQL usually supports RETURNING. If not, we'd need to select by username.
+                    // Assuming it works or we fallback:
+                    let finalUserId = newUserId;
+                    if (!finalUserId) {
+                        const fetchUser = await turso.execute({
+                            sql: "SELECT id FROM users WHERE username = ?",
+                            args: [newUser.username]
+                        });
+                        finalUserId = fetchUser.rows[0]?.id;
+                    }
+
+                    if (finalUserId) {
+                        await turso.execute({
+                            sql: "INSERT INTO user_companies (user_id, company_id, role) VALUES (?, ?, 'owner')",
+                            args: [finalUserId, id]
+                        });
+                    }
+                }
+            }
 
             // Audit
             await turso.execute({
                 sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                args: ['system', currentUser.id, 'CREATE', 'COMPANY', JSON.stringify({ companyId, name }), new Date().toISOString()]
+                args: ['system', currentUser.id, 'CREATE', 'COMPANY', JSON.stringify({ id, name, plan }), new Date().toISOString()]
             });
+
+            // Refresh available companies
+            await get().fetchUserCompanies(currentUser.id);
 
             return { success: true };
         } catch (e) {
@@ -2183,32 +2378,47 @@ export const useStore = create(persist((set, get) => ({
 
         // PASO 4: Agregar producto NUEVO al carrito
         console.log('✅ Adding new product to cart');
-        set(state => ({
-            carts: state.carts.map(c =>
-                c.id === state.activeCartId
-                    ? {
-                        ...c,
-                        items: [
-                            ...c.items,
-                            {
-                                id: product.id,
-                                name: product.name,
-                                price: product.price || 0,
-                                cost: product.cost || 0,
-                                quantity: 1,
-                                tax_rate: product.tax_rate || 0,
-                                image: product.image || null,
-                                sku: product.sku || '',
-                                stock: product.stock || 0,
-                                unit: product.unit || 'Und',
-                                category: product.category || '',
-                                discountPercent: 0
-                            }
-                        ]
-                    }
-                    : c
-            )
-        }));
+
+        let newItemsContext = [];
+
+        set(state => {
+            const currentCart = state.carts.find(c => c.id === state.activeCartId);
+            const rawNewItem = {
+                id: product.id,
+                name: product.name,
+                price: product.price || 0,
+                cost: product.cost || 0,
+                quantity: 1,
+                tax_rate: product.tax_rate || 0,
+                image: product.image || null,
+                sku: product.sku || '',
+                stock: product.stock || 0,
+                unit: product.unit || 'Und',
+                category: product.category || '',
+                discountPercent: 0,
+                // Wholesale & Offer Support
+                price_ranges: product.price_ranges || [],
+                scale_group_id: product.scale_group_id || null,
+                original_price: product.original_price || product.price,
+                is_offer: product.is_offer,
+                offer_price: product.offer_price
+            };
+
+            const updatedItems = [...currentCart.items, rawNewItem];
+            // Recalculate prices considering the new item (might trigger scale for group)
+            newItemsContext = get()._recalculateCartPrices(updatedItems);
+
+            return {
+                carts: state.carts.map(c =>
+                    c.id === state.activeCartId
+                        ? {
+                            ...c,
+                            items: newItemsContext
+                        }
+                        : c
+                )
+            };
+        });
     },
 
 
@@ -2255,41 +2465,57 @@ export const useStore = create(persist((set, get) => ({
             }
         }
 
-        set(state => ({
-            carts: state.carts.map(c =>
-                c.id === state.activeCartId
-                    ? {
-                        ...c,
-                        items: c.items.map(item => {
-                            if (item.id === productId) {
-                                // Apply updates
-                                const isPriceUpdate = updates.price !== undefined;
-                                const baseUpdate = typeof updates === 'object' ? updates : { quantity: updates };
-                                return {
-                                    ...item,
-                                    ...baseUpdate,
-                                    isManualPrice: isPriceUpdate ? true : item.isManualPrice
-                                };
-                            }
-                            return item;
-                        })
-                    }
-                    : c
-            )
-        }));
+        set(state => {
+            const currentCart = state.carts.find(c => c.id === state.activeCartId);
+            const updatedItemsRaw = currentCart.items.map(item => {
+                if (item.id === productId) {
+                    // Apply updates
+                    const isPriceUpdate = updates.price !== undefined;
+                    const baseUpdate = typeof updates === 'object' ? updates : { quantity: updates };
+                    return {
+                        ...item,
+                        ...baseUpdate,
+                        isManualPrice: isPriceUpdate ? true : item.isManualPrice
+                    };
+                }
+                return item;
+            });
+
+            // Recalculate prices for the whole cart
+            const itemsWithPrices = get()._recalculateCartPrices(updatedItemsRaw);
+
+            return {
+                carts: state.carts.map(c =>
+                    c.id === state.activeCartId
+                        ? {
+                            ...c,
+                            items: itemsWithPrices
+                        }
+                        : c
+                )
+            };
+        });
     },
 
     removeFromCart: (productId) => {
-        set(state => ({
-            carts: state.carts.map(c =>
-                c.id === state.activeCartId
-                    ? {
-                        ...c,
-                        items: c.items.filter(item => item.id !== productId)
-                    }
-                    : c
-            )
-        }));
+        set(state => {
+            const currentCart = state.carts.find(c => c.id === state.activeCartId);
+            const remainingItemsRaw = currentCart.items.filter(item => item.id !== productId);
+
+            // Recalculate prices (e.g. if removing an item affects scale group total)
+            const itemsWithPrices = get()._recalculateCartPrices(remainingItemsRaw);
+
+            return {
+                carts: state.carts.map(c =>
+                    c.id === state.activeCartId
+                        ? {
+                            ...c,
+                            items: itemsWithPrices
+                        }
+                        : c
+                )
+            };
+        });
     },
 
     clearCart: () => {

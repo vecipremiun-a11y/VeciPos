@@ -1,10 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Search, UserPlus, X, User, Check } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 
 const ClientSearchWidget = () => {
-    const { clients, posSelectedClient, setPosSelectedClient, addClient } = useStore();
+    const { clients, carts, activeCartId, setPosSelectedClient, addClient } = useStore();
+
+    // Derivar el cliente seleccionado desde el carrito activo
+    const posSelectedClient = useMemo(() => {
+        return carts.find(c => c.id === activeCartId)?.client || null;
+    }, [carts, activeCartId]);
     const [searchTerm, setSearchTerm] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);

@@ -254,8 +254,8 @@ const Purchases = () => {
         setIsProductModalOpen(false);
     };
 
-    const subtotal = invoiceItems.reduce((sum, item) => sum + item.total, 0);
-    const taxAmount = invoiceItems.reduce((sum, item) => sum + (item.total * (item.tax / 100)), 0);
+    const subtotal = invoiceItems.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
+    const taxAmount = invoiceItems.reduce((sum, item) => sum + ((parseFloat(item.total) || 0) * ((parseFloat(item.tax) || 0) / 100)), 0);
     const totalAmount = subtotal + taxAmount;
 
     return (

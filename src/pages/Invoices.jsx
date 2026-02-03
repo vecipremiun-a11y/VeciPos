@@ -99,7 +99,7 @@ const Invoices = () => {
                                                     {inv.supplier_name || 'Desconocido'}
                                                 </span>
                                                 <span className="text-[var(--color-text-muted)]">
-                                                    {inv.date ? format(new Date(inv.date), 'dd/MM/yyyy') : '-'}
+                                                    {inv.date ? format(new Date(inv.date + 'T00:00:00'), 'dd/MM/yyyy') : '-'}
                                                 </span>
                                             </div>
                                             <div className="flex justify-between items-center mt-2">
@@ -150,7 +150,7 @@ const Invoices = () => {
                                                 </td>
                                                 <td className="px-6 py-4 text-[var(--color-text-muted)]">{inv.supplier_name || 'Desconocido'}</td>
                                                 <td className="px-6 py-4 text-[var(--color-text-muted)]">
-                                                    {inv.date ? format(new Date(inv.date), 'dd/MM/yyyy') : '-'}
+                                                    {inv.date ? format(new Date(inv.date + 'T00:00:00'), 'dd/MM/yyyy') : '-'}
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     {inv.is_credit ? (

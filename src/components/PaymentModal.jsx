@@ -1,10 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, Banknote, CreditCard, Landmark, Coins, ArrowLeft, Check, Plus, Trash2, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
 
 const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
-    const { posSelectedClient } = useStore();
+    const { carts, activeCartId } = useStore();
+
+    // Derivar el cliente seleccionado desde el carrito activo
+    const posSelectedClient = useMemo(() => {
+        return carts.find(c => c.id === activeCartId)?.client || null;
+    }, [carts, activeCartId]);
+
     const [step, setStep] = useState('select-method'); // 'select-method' | 'payment-details'
     const [method, setMethod] = useState(null);
     const [amountPaid, setAmountPaid] = useState('');

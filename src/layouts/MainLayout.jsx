@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
@@ -35,6 +35,15 @@ const MainLayout = () => {
         { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', roles: ['Administrador', 'Vendedor', 'super_admin', 'owner'] },
         { icon: Users, label: 'Clientes', path: '/clients', roles: ['Administrador', 'Vendedor', 'super_admin', 'owner'] },
         { icon: History, label: 'Historial', path: '/sales-history', roles: ['Administrador', 'Vendedor', 'Supervisor', 'super_admin', 'owner'] },
+        {
+            icon: ShoppingBag,
+            label: 'Pedidos',
+            roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'],
+            subItems: [
+                { icon: ClipboardList, label: 'Pedido', path: '/orders', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
+                { icon: ClipboardList, label: 'Pedidos Realizados', path: '/orders/history', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] }
+            ]
+        },
         {
             icon: Package,
             label: 'Inventario',
@@ -263,7 +272,7 @@ const MainLayout = () => {
                 </header>
 
                 {/* Content Area */}
-                <main className="flex-1 overflow-auto p-6 relative">
+                <main className="flex-1 overflow-auto p-2 lg:p-6 relative">
                     <div className="absolute top-[20%] right-[10%] w-[300px] h-[300px] rounded-full bg-[var(--color-primary)] opacity-5 blur-[80px] pointer-events-none"></div>
                     <Outlet />
                 </main>

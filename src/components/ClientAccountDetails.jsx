@@ -26,7 +26,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
     useEffect(() => {
         if (client) {
             // Get ALL sales for this client
-            const allSales = sales.filter(s => s.clientId === client.id)
+            const allSales = sales.filter(s => s.client_id === client.id)
                 .sort((a, b) => new Date(b.date) - new Date(a.date));
             setRawClientSales(allSales);
         }
@@ -36,7 +36,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
 
     // Calculate Total Debt (Always from pending credit sales)
     const pendingSales = rawClientSales.filter(s =>
-        s.paymentMethod === 'Crédito' && s.status !== 'paid' && s.status !== 'cancelled'
+        s.payment_method === 'Crédito' && s.status !== 'paid' && s.status !== 'cancelled'
     );
     const totalDebt = pendingSales.reduce((sum, sale) => sum + parseFloat(sale.total), 0);
 
@@ -44,13 +44,13 @@ const ClientAccountDetails = ({ client, onBack }) => {
     const salesToShow = rawClientSales.filter(sale => {
         // Mode Filter
         if (viewMode === 'pending') {
-            if (sale.paymentMethod !== 'Crédito' || sale.status === 'paid' || sale.status === 'cancelled') return false;
+            if (sale.payment_method !== 'Crédito' || sale.status === 'paid' || sale.status === 'cancelled') return false;
         } else {
             // History: Show Paid, Cancelled, or non-credit sales
             // User asked for "ventas pagadas o canceladas", basically history.
             // We usually exclude pending from history to avoid duplication, or show everything?
             // "cambiar de estado de cuentas [pending] a ventas pagadas..." implies they are mutually exclusive sets.
-            if (sale.paymentMethod === 'Crédito' && sale.status !== 'paid' && sale.status !== 'cancelled') return false;
+            if (sale.payment_method === 'Crédito' && sale.status !== 'paid' && sale.status !== 'cancelled') return false;
         }
 
         // Apply Common Filters (Date/Amount)
@@ -295,7 +295,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
                                             <p className="text-xs text-[var(--color-text-muted)] italic mt-0.5">{sale.observation || 'Sin observaciones'}</p>
 
                                             {/* STATUS BADGES */}
-                                            {sale.paymentMethod === 'Crédito' && sale.status === 'paid' && (
+                                            {sale.payment_method === 'Crédito' && sale.status === 'paid' && (
                                                 <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-500/20 text-green-400 border border-green-500/30">
                                                     DEUDA PAGADA
                                                 </span>
@@ -306,7 +306,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
                                                 </span>
                                             )}
                                             {/* Check if it's an Abono/Payment Receipt */}
-                                            {sale.status === 'completed' && sale.summary.includes('Abono') && (
+                                            {sale.status === 'completed' && sale.summary?.includes('Abono') && (
                                                 <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
                                                     COMPROBANTE DE PAGO
                                                 </span>
@@ -315,7 +315,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
                                         <td className="p-4 text-right">
                                             {(() => {
                                                 // Determine styling based on type
-                                                const isAbono = sale.status === 'completed' && sale.summary.includes('Abono');
+                                                const isAbono = sale.status === 'completed' && sale.summary?.includes('Abono');
                                                 const isPaid = sale.status === 'paid';
                                                 const isCancelled = sale.status === 'cancelled';
 
