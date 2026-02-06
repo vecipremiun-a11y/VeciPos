@@ -32,13 +32,22 @@ const Users = () => {
         setIsModalOpen(true);
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
+
+        let result;
         if (editingUser) {
-            updateUser(editingUser.id, formData);
+            result = await updateUser(editingUser.id, formData);
         } else {
-            addUser(formData);
+            result = await addUser(formData);
         }
+
+        // Verificar si hubo error de permisos
+        if (result && !result.success) {
+            alert(result.error);
+            return;
+        }
+
         setIsModalOpen(false);
     };
 
@@ -73,7 +82,14 @@ const Users = () => {
                             </button>
                             {user.username !== 'admin' && (
                                 <button
-                                    onClick={() => deleteUser(user.id)}
+                                    onClick={async () => {
+                                        if (window.confirm(`¿Eliminar usuario ${user.name}?`)) {
+                                            const result = await deleteUser(user.id);
+                                            if (result && !result.success) {
+                                                alert(result.error);
+                                            }
+                                        }
+                                    }}
                                     className="p-2 text-[var(--color-text-muted)] hover:text-red-400 transition-colors"
                                 >
                                     <Trash2 size={18} />

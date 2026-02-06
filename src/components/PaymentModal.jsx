@@ -502,7 +502,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                         type="number"
                                         value={amountPaid}
                                         onChange={(e) => setAmountPaid(e.target.value)}
-                                        className="glass-input w-full text-center text-3xl font-bold py-4 h-16"
+                                        className="glass-input w-full text-center !text-4xl font-bold py-4 h-16"
                                         autoFocus
                                         placeholder="0"
                                     />

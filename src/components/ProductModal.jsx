@@ -355,7 +355,8 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 name="price"
                                 value={formData.price}
                                 onChange={handleChange}
-                                className="glass-input w-full text-3xl font-bold text-center pl-8 text-white h-16"
+                                style={{ fontSize: '42px' }}
+                                className="glass-input w-full font-bold text-center pl-8 text-white h-16"
                                 required
                             />
                         </div>
