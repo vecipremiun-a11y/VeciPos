@@ -40,7 +40,11 @@ const Login = () => {
                 console.log('✅ Data loaded, navigating to dashboard');
                 navigate('/dashboard');
             } else {
-                setError(result.error || 'Credenciales inválidas. Intente nuevamente.');
+                if (result.needsRenewal) {
+                    navigate('/renew-subscription');
+                } else {
+                    setError(result.error || 'Credenciales inválidas. Intente nuevamente.');
+                }
             }
         } catch (err) {
             console.error("Login error wrapper:", err);

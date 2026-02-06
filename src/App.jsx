@@ -1,5 +1,11 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import Register from './pages/Register';
+import SelectPlan from './pages/SelectPlan';
 import Login from './pages/Login';
+import PaymentSuccess from './pages/PaymentSuccess';
+import PaymentPending from './pages/PaymentPending';
+import PaymentFailure from './pages/PaymentFailure';
+import RenewSubscription from './pages/RenewSubscription';
 import Dashboard from './pages/Dashboard';
 import POS from './pages/POS';
 import SalesHistory from './pages/SalesHistory';
@@ -148,6 +154,12 @@ function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/registro" element={<Register />} />
+        <Route path="/select-plan" element={<SelectPlan />} />
+        <Route path="/payment-success" element={<PaymentSuccess />} />
+        <Route path="/payment-pending" element={<PaymentPending />} />
+        <Route path="/payment-failure" element={<PaymentFailure />} />
+        <Route path="/renew-subscription" element={<RenewSubscription />} />
 
         {/* Protected Routes */}
         <Route path="/" element={

@@ -111,6 +111,20 @@ const Dashboard = () => {
 
     return (
         <div className="space-y-6">
+            {/* Subscription Banner */}
+            {(() => {
+                // Logic directly in render to use existing hooks/store
+                // We need to fetch company info. But 'activeCompanyId' is available.
+                // We might need to fetch detailed status if not in 'activeCompany' object.
+                // However, let's assume we can check a store selector or we fetched it.
+                // For simplicity, we can fetch it in useEffect or check availableCompanies which has data?
+                // availableCompanies only has basic info.
+                // Let's use a quick state for banner info.
+                return null; // Will replace standard render with Component logic below
+            })()}
+
+            <SubscriptionBanner />
+
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
                 {/* Ventas Hoy */}
                 <div className="glass-card p-4">
@@ -327,6 +341,48 @@ const Dashboard = () => {
                 </div>
             </div>
         </div >
+    );
+};
+
+
+const SubscriptionBanner = () => {
+    const { activeCompanyId, checkSubscriptionStatus } = useStore();
+    const [info, setInfo] = React.useState(null);
+
+    React.useEffect(() => {
+        if (activeCompanyId && checkSubscriptionStatus) {
+            checkSubscriptionStatus(activeCompanyId).then(setInfo);
+        }
+    }, [activeCompanyId, checkSubscriptionStatus]);
+
+    if (!info || info.status !== 'trial') return null;
+
+    const trialEnd = new Date(info.trial_ends_at);
+    const now = new Date();
+    const daysLeft = Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24));
+
+    if (daysLeft < 0) return null;
+
+    return (
+        <div className="bg-blue-500/10 border border-blue-500/30 p-4 rounded-xl mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-500/20 rounded-lg text-blue-400">
+                    <Clock size={20} />
+                </div>
+                <div>
+                    <h3 className="text-blue-400 font-bold text-sm">Periodo de Prueba Activo</h3>
+                    <p className="text-blue-500/70 text-xs">
+                        Te quedan <span className="text-white font-bold">{daysLeft} días</span> de prueba gratuita.
+                    </p>
+                </div>
+            </div>
+            <button
+                onClick={() => window.location.href = '/select-plan'}
+                className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold rounded-lg transition-colors"
+            >
+                Suscribirme Ahora
+            </button>
+        </div>
     );
 };
 

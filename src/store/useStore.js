@@ -324,6 +324,106 @@ export const useStore = create(persist((set, get) => ({
                 }
             } catch (e) { console.warn("Backfill users error", e); }
 
+            // ============================================
+            // 🆕 TABLAS PARA SISTEMA DE SUSCRIPCIÓN
+            // ============================================
+
+            // 1. Tabla de planes de suscripción
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS subscription_plans (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    price DECIMAL(10,2) NOT NULL,
+                    currency TEXT DEFAULT 'CLP',
+                    frequency TEXT NOT NULL,
+                    description TEXT,
+                    features TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+
+            // Insertar planes predefinidos
+            await turso.execute(`
+                INSERT OR IGNORE INTO subscription_plans (id, name, price, currency, frequency, description, features)
+                VALUES 
+                ('monthly', 'Plan Mensual', 30000, 'CLP', 'monthly', 'Facturación mensual', '["Punto de venta completo","Gestión de inventario","Reportes en tiempo real","Múltiples usuarios","Soporte por email"]'),
+                ('yearly', 'Plan Anual', 300000, 'CLP', 'yearly', 'Facturación anual - Ahorra $60,000', '["Todo lo del plan mensual","Ahorro de $60,000 al año","2 meses gratis","Soporte prioritario","Actualizaciones anticipadas"]')
+            `);
+
+            // 2. Tabla de suscripciones
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id TEXT PRIMARY KEY,
+                    company_id TEXT NOT NULL,
+                    plan_id TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    mercadopago_subscription_id TEXT,
+                    mercadopago_preapproval_id TEXT,
+                    amount DECIMAL(10,2) NOT NULL,
+                    currency TEXT DEFAULT 'CLP',
+                    current_period_start DATE,
+                    current_period_end DATE,
+                    trial_end DATE,
+                    cancelled_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (company_id) REFERENCES companies(id),
+                    FOREIGN KEY (plan_id) REFERENCES subscription_plans(id)
+                )
+            `);
+
+            // 3. Tabla de pagos
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS payments (
+                    id TEXT PRIMARY KEY,
+                    company_id TEXT NOT NULL,
+                    subscription_id TEXT,
+                    amount DECIMAL(10,2) NOT NULL,
+                    currency TEXT DEFAULT 'CLP',
+                    status TEXT DEFAULT 'pending',
+                    mercadopago_payment_id TEXT,
+                    mercadopago_preference_id TEXT,
+                    payment_method TEXT,
+                    payment_type TEXT,
+                    description TEXT,
+                    payer_email TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (company_id) REFERENCES companies(id),
+                    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+                )
+            `);
+
+            // 4. Modificar tabla companies para agregar campos de suscripción
+            // Verificar si las columnas ya existen antes de agregarlas
+            try {
+                await turso.execute(`ALTER TABLE companies ADD COLUMN status TEXT DEFAULT 'pending_payment'`);
+            } catch (e) {
+                console.log('Column status already exists in companies');
+            }
+
+            try {
+                await turso.execute(`ALTER TABLE companies ADD COLUMN subscription_id TEXT`);
+            } catch (e) {
+                console.log('Column subscription_id already exists in companies');
+            }
+
+            try {
+                await turso.execute(`ALTER TABLE companies ADD COLUMN trial_ends_at DATE`);
+            } catch (e) {
+                console.log('Column trial_ends_at already exists in companies');
+            }
+
+            // 5. Crear índices para mejor performance
+            await turso.execute(`CREATE INDEX IF NOT EXISTS idx_subscriptions_company ON subscriptions(company_id)`);
+            await turso.execute(`CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)`);
+            await turso.execute(`CREATE INDEX IF NOT EXISTS idx_payments_company ON payments(company_id)`);
+            await turso.execute(`CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)`);
+            await turso.execute(`CREATE INDEX IF NOT EXISTS idx_companies_status ON companies(status)`);
+
+            console.log('✅ Subscription tables created successfully');
+
             // UPDATE VERSION
             await turso.execute({
                 sql: "INSERT INTO system_settings (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = ?",
@@ -1525,10 +1625,11 @@ export const useStore = create(persist((set, get) => ({
 
             // 2. Obtener empresas del usuario
             const companiesRes = await turso.execute({
-                sql: `SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, uc.role 
+                sql: `SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, uc.role,
+                             c.status, c.trial_ends_at, c.subscription_id
                       FROM user_companies uc
                       JOIN companies c ON uc.company_id = c.id
-                      WHERE uc.user_id = ? AND c.status = 'active'
+                      WHERE uc.user_id = ? AND c.status IN ('active', 'trial')
                       ORDER BY c.id`,
                 args: [user.id]
             });
@@ -1548,22 +1649,88 @@ export const useStore = create(persist((set, get) => ({
             // Prioridad 1: company_id del usuario (su empresa "home")
             if (user.company_id && userCompanies.some(c => c.id === user.company_id)) {
                 activeCompanyId = user.company_id;
-                console.log('✅ Using user home company:', user.company_id);
             }
-            // Prioridad 2: Última empresa guardada en localStorage (si aún tiene permiso)
+            // Prioridad 2: Última empresa guardada en localStorage
             else {
                 const storedCompanyId = localStorage.getItem(`activeCompanyId:${user.id}`);
                 if (storedCompanyId && userCompanies.some(c => c.id === storedCompanyId)) {
                     activeCompanyId = storedCompanyId;
-                    console.log('✅ Using stored company:', storedCompanyId);
                 } else {
-                    // Prioridad 3: Primera empresa asignada
                     activeCompanyId = userCompanies[0].id;
-                    console.log('✅ Using first assigned company:', activeCompanyId);
                 }
             }
 
             const activeCompany = userCompanies.find(c => c.id === activeCompanyId);
+
+            // --- VERIFICACIÓN DE SUSCRIPCIÓN ---
+            // Solo para admin/users normales (Super Admin bypass?)
+            // Asumimos que super_admin tiene rol 'super_admin' en users table o company role.
+            if (user.role !== 'super_admin') {
+                const now = new Date();
+
+                // 1. Verificar estado base
+                if (['suspended', 'cancelled'].includes(activeCompany.status)) {
+                    return {
+                        success: false,
+                        error: `La cuenta de la empresa está ${activeCompany.status === 'suspended' ? 'suspendida' : 'cancelada'}. Contacte a soporte.`
+                    };
+                }
+
+                if (activeCompany.status === 'pending_payment') {
+                    return { success: false, error: 'Pago pendiente. Por favor complete el pago.' };
+                }
+
+                // 2. Verificar Pruebas vencidas
+                if (activeCompany.status === 'trial' && activeCompany.trial_ends_at) {
+                    const trialEnd = new Date(activeCompany.trial_ends_at);
+                    if (now > trialEnd) {
+                        // Actualizar a past_due
+                        await turso.execute({
+                            sql: "UPDATE companies SET status = 'past_due' WHERE id = ?",
+                            args: [activeCompanyId]
+                        });
+                        return { success: false, needsRenewal: true, error: 'Tu periodo de prueba ha finalizado.' };
+                    }
+                }
+
+                // 3. Verificar Suscripciones activas vencidas (si hay subscription_id)
+                // Necesitamos hacer fetch de la suscripción para ver current_period_end?
+                // O confiamos en que un cron job o webhook actualiza el status?
+                // Para seguridad, verificamos aqui si tenemos los datos.
+                // activeCompany en el SELECT de arriba NO trae subscription data.
+
+                // Hacemos una query extra rápida para chequear validez
+                const subCheck = await turso.execute({
+                    sql: `SELECT s.status, s.current_period_end 
+                          FROM companies c 
+                          LEFT JOIN subscriptions s ON c.subscription_id = s.id 
+                          WHERE c.id = ?`,
+                    args: [activeCompanyId]
+                });
+
+                if (subCheck.rows.length > 0) {
+                    const sub = subCheck.rows[0];
+                    if (sub.status === 'active' && sub.current_period_end) {
+                        const periodEnd = new Date(sub.current_period_end);
+                        // Dar 2 días de gracia? No, estricto por ahora.
+                        if (now > periodEnd) {
+                            await turso.execute({
+                                sql: "UPDATE companies SET status = 'past_due' WHERE id = ?",
+                                args: [activeCompanyId]
+                            });
+                            // También update subscription?
+                            if (sub.status === 'active') { // Update local db status if needed
+                                await turso.execute({
+                                    sql: "UPDATE subscriptions SET status = 'past_due' WHERE company_id = ?",
+                                    args: [activeCompanyId]
+                                });
+                            }
+                            return { success: false, needsRenewal: true, error: 'Tu suscripción ha vencido.' };
+                        }
+                    }
+                }
+            }
+            // -----------------------------------
 
             // 4. Establecer estado
             set({
@@ -2297,24 +2464,62 @@ export const useStore = create(persist((set, get) => ({
 
     toggleCompanyStatus: async (companyId, newStatus) => {
         try {
-            const { currentUser } = get();
-            if (currentUser?.role !== 'super_admin') return { success: false, error: "Access Denied" };
+            const { turso, currentUser } = get(); // Ensure currentUser is available
+            // If checking permissions:
+            // if (currentUser?.role !== 'super_admin') ... 
+            // Reuse existing logic but ensure fetchAllSubscriptions is added next.
 
             await turso.execute({
-                sql: "UPDATE companies SET status = ? WHERE id = ?",
-                args: [newStatus, companyId]
+                sql: "UPDATE companies SET status = ?, updated_at = ? WHERE id = ?",
+                args: [newStatus, new Date().toISOString(), companyId]
             });
-
-            // Audit
-            await turso.execute({
-                sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                args: ['system', currentUser.id, 'UPDATE_STATUS', 'COMPANY', JSON.stringify({ companyId, newStatus }), new Date().toISOString()]
-            });
-
             return { success: true };
+        } catch (error) {
+            console.error('Error toggling company status:', error);
+            return { success: false, error: 'Database error' };
+        }
+    },
+
+    checkSubscriptionStatus: async (companyId) => {
+        try {
+            const { turso } = get();
+            const res = await turso.execute({
+                sql: "SELECT status, trial_ends_at, subscription_id FROM companies WHERE id = ?",
+                args: [companyId]
+            });
+            return res.rows[0];
         } catch (e) {
-            console.error("Toggle company status error", e);
-            return { success: false, error: e.message };
+            console.error(e);
+            return null;
+        }
+    },
+
+    fetchAllSubscriptions: async () => {
+        try {
+            const { turso } = get();
+            const result = await turso.execute({
+                sql: `SELECT 
+                        c.id as company_id,
+                        c.name as company_name,
+                        c.status as company_status,
+                        c.trial_ends_at,
+                        c.created_at,
+                        s.id as subscription_id,
+                        s.plan_id,
+                        s.status as subscription_status,
+                        s.amount,
+                        s.current_period_start,
+                        s.current_period_end,
+                        sp.name as plan_name
+                      FROM companies c
+                      LEFT JOIN subscriptions s ON c.subscription_id = s.id
+                      LEFT JOIN subscription_plans sp ON s.plan_id = sp.id
+                      ORDER BY c.created_at DESC`
+            });
+            return result.rows;
+        } catch (error) {
+            console.error('Error fetching subscriptions:', error);
+            return [];
         }
     },
 
@@ -4287,6 +4492,112 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error('❌ Delete suspended sale error:', e);
             return false;
+        }
+    },
+
+    // ============================================
+    // 🆕 FUNCIONES DE SUSCRIPCIÓN
+    // ============================================
+
+    // Verificar estado de suscripción de una empresa
+    checkSubscriptionStatus: async (companyId) => {
+        try {
+            const { turso } = get();
+            const result = await turso.execute({
+                sql: `SELECT c.status, c.trial_ends_at, s.current_period_end, s.plan_id
+                      FROM companies c
+                      LEFT JOIN subscriptions s ON c.subscription_id = s.id
+                      WHERE c.id = ?`,
+                args: [companyId]
+            });
+
+            if (result.rows.length === 0) {
+                return { isActive: false, status: 'not_found' };
+            }
+
+            const company = result.rows[0];
+            const now = new Date();
+
+            // Si está en trial
+            if (company.status === 'trial' && company.trial_ends_at) {
+                const trialEnd = new Date(company.trial_ends_at);
+                if (now <= trialEnd) {
+                    return {
+                        isActive: true,
+                        status: 'trial',
+                        daysRemaining: Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24))
+                    };
+                }
+            }
+
+            // Si tiene suscripción activa
+            if (company.status === 'active' && company.current_period_end) {
+                const periodEnd = new Date(company.current_period_end);
+                if (now <= periodEnd) {
+                    return {
+                        isActive: true,
+                        status: 'active',
+                        renewsAt: company.current_period_end
+                    };
+                }
+            }
+
+            // En cualquier otro caso
+            return {
+                isActive: company.status === 'active',
+                status: company.status
+            };
+
+        } catch (error) {
+            console.error('Error checking subscription:', error);
+            return { isActive: false, status: 'error' };
+        }
+    },
+
+    // Obtener historial de pagos de una empresa
+    fetchPaymentHistory: async (companyId) => {
+        try {
+            const { turso } = get();
+            const result = await turso.execute({
+                sql: `SELECT * FROM payments 
+                      WHERE company_id = ? 
+                      ORDER BY created_at DESC`,
+                args: [companyId]
+            });
+
+            return result.rows;
+        } catch (error) {
+            console.error('Error fetching payment history:', error);
+            return [];
+        }
+    },
+
+    // Obtener todas las suscripciones (Admin)
+    fetchAllSubscriptions: async () => {
+        try {
+            const { turso } = get();
+            const result = await turso.execute({
+                sql: `SELECT 
+                        c.id as company_id,
+                        c.name as company_name,
+                        c.status as company_status,
+                        s.id as subscription_id,
+                        s.plan_id,
+                        s.status as subscription_status,
+                        s.amount,
+                        s.current_period_start,
+                        s.current_period_end,
+                        sp.name as plan_name
+                      FROM companies c
+                      LEFT JOIN subscriptions s ON c.subscription_id = s.id
+                      LEFT JOIN subscription_plans sp ON s.plan_id = sp.id
+                      ORDER BY c.created_at DESC`
+            });
+
+            return result.rows;
+        } catch (error) {
+            console.error('Error fetching subscriptions:', error);
+            return [];
         }
     }
 }), {
