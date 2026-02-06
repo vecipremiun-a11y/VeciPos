@@ -1,5 +1,5 @@
-import { createClient } from '@libsql/client';
-import mercadopago from 'mercadopago';
+const { createClient } = require('@libsql/client');
+const mercadopago = require('mercadopago');
 
 // Configurar MercadoPago
 mercadopago.configure({
@@ -12,7 +12,7 @@ const turso = createClient({
     authToken: process.env.VITE_TURSO_AUTH_TOKEN
 });
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
     // Solo permitir POST
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
@@ -20,6 +20,8 @@ export default async function handler(req, res) {
 
     try {
         const { planId, planName, amount, currency, registrationData } = req.body;
+
+        console.log('📝 Creating payment preference:', { planId, amount });
 
         // Validar datos
         if (!planId || !amount || !registrationData) {
@@ -36,6 +38,8 @@ export default async function handler(req, res) {
                   VALUES (?, ?, 'America/Santiago', 'pending_payment', ?)`,
             args: [companyId, registrationData.company.name, new Date().toISOString()]
         });
+
+        console.log('✅ Company created:', companyId);
 
         // Guardar datos de registro temporalmente
         await turso.execute({
@@ -60,7 +64,7 @@ export default async function handler(req, res) {
             items: [
                 {
                     title: `POSVECI - ${planName}`,
-                    description: `Suscripción al sistema POS (14 días de prueba incluidos)`,
+                    description: `Suscripción al sistema POS (15 días de prueba incluidos)`,
                     quantity: 1,
                     unit_price: amount,
                     currency_id: currency
@@ -76,7 +80,7 @@ export default async function handler(req, res) {
                 pending: `${process.env.VITE_APP_URL}/payment-pending`
             },
             auto_return: 'approved',
-            external_reference: companyId, // Para identificar la empresa en el webhook
+            external_reference: companyId,
             metadata: {
                 company_id: companyId,
                 payment_id: paymentId,
@@ -86,7 +90,11 @@ export default async function handler(req, res) {
             notification_url: `${process.env.VITE_APP_URL}/api/webhook`
         };
 
+        console.log('🔄 Creating MercadoPago preference...');
+
         const response = await mercadopago.preferences.create(preference);
+
+        console.log('✅ Preference created:', response.body.id);
 
         // Actualizar payment con preference_id
         await turso.execute({
@@ -101,10 +109,11 @@ export default async function handler(req, res) {
         });
 
     } catch (error) {
-        console.error('Error creating payment:', error);
+        console.error('❌ Error creating payment:', error);
         return res.status(500).json({
             success: false,
-            error: 'Error al crear el pago'
+            error: 'Error al crear el pago',
+            details: error.message
         });
     }
-}
+};

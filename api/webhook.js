@@ -1,9 +1,10 @@
-import { createClient } from '@libsql/client';
-import { MercadoPagoConfig, Payment } from 'mercadopago';
+const { createClient } = require('@libsql/client');
+const mercadopago = require('mercadopago');
 
-// Configurar MercadoPago (SDK v2)
-const client = new MercadoPagoConfig({ accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN });
-const paymentClient = new Payment(client);
+// Configurar MercadoPago
+mercadopago.configure({
+    access_token: process.env.MERCADOPAGO_ACCESS_TOKEN
+});
 
 // Configurar Turso
 const turso = createClient({
@@ -11,7 +12,7 @@ const turso = createClient({
     authToken: process.env.VITE_TURSO_AUTH_TOKEN
 });
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
     // Solo permitir POST
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
@@ -19,25 +20,18 @@ export default async function handler(req, res) {
 
     try {
         const { type, data } = req.body;
-        // MercadoPago a veces envía 'action' en vez de type en algunos webhooks, pero para pagos suele ser type='payment'
-        // Si data.id viene, asumimos que es el payment ID.
-
         const paymentId = data?.id;
 
         console.log('🔔 Webhook received:', { type, paymentId });
 
         // Solo procesar notificaciones de pago
-        if (type !== 'payment' && type !== 'payment.created' && type !== 'payment.updated') {
-            // A veces viene como topic 'payment' en query params, pero aquí asumimos body structure
-            if (!paymentId) return res.status(200).json({ received: true });
-        }
-
-        if (!paymentId) {
+        if (!paymentId || (type !== 'payment' && type !== 'payment.created' && type !== 'payment.updated')) {
             return res.status(200).json({ received: true });
         }
 
         // Obtener información del pago desde MercadoPago
-        const paymentData = await paymentClient.get({ id: paymentId });
+        const payment = await mercadopago.payment.findById(paymentId);
+        const paymentData = payment.body;
 
         console.log('💳 Payment data:', {
             id: paymentData.id,
@@ -59,8 +53,7 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: 'Missing required data' });
         }
 
-        // Parsear datos de registro (MercadoPago a veces devuelve metadata con keys en snake_case si se enviaron así, o limpias)
-        // En create-payment enviamos: registration_data, plan_id
+        // Parsear datos de registro
         const registrationData = typeof metadata.registration_data === 'string'
             ? JSON.parse(metadata.registration_data)
             : metadata.registration_data;
@@ -72,7 +65,7 @@ export default async function handler(req, res) {
         // Calcular fechas de suscripción
         const now = new Date();
         const trialEnd = new Date(now);
-        trialEnd.setDate(trialEnd.getDate() + 14); // 14 días de prueba
+        trialEnd.setDate(trialEnd.getDate() + 15); // 15 días de prueba
 
         const periodStart = new Date(trialEnd);
         const periodEnd = new Date(periodStart);
@@ -86,13 +79,13 @@ export default async function handler(req, res) {
         // Generar ID de suscripción
         const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-        // TRANSACCIÓN: Activar empresa, crear admin y suscripción
         try {
-            // Verificar si ya se procesó este pago para evitar duplicados
+            // Verificar si ya se procesó este pago
             const check = await turso.execute({
                 sql: "SELECT id FROM payments WHERE mercadopago_payment_id = ?",
                 args: [paymentData.id.toString()]
             });
+
             if (check.rows.length > 0) {
                 console.log('⚠️ Payment already processed');
                 return res.status(200).json({ message: 'Already processed' });
@@ -116,6 +109,8 @@ export default async function handler(req, res) {
                 ]
             });
 
+            console.log('✅ Subscription created:', subscriptionId);
+
             // 2. Actualizar empresa a estado trial
             await turso.execute({
                 sql: `UPDATE companies 
@@ -132,6 +127,8 @@ export default async function handler(req, res) {
                 ]
             });
 
+            console.log('✅ Company updated to trial');
+
             // 3. Crear usuario administrador
             const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             await turso.execute({
@@ -142,12 +139,14 @@ export default async function handler(req, res) {
                     userId,
                     registrationData.admin.name,
                     registrationData.admin.username,
-                    registrationData.admin.password, // Ya viene hasheada del frontend
+                    registrationData.admin.password,
                     companyId,
                     registrationData.admin.email,
                     now.toISOString()
                 ]
             });
+
+            console.log('✅ Admin user created:', registrationData.admin.username);
 
             // 4. Actualizar payment como aprobado
             await turso.execute({
@@ -165,8 +164,9 @@ export default async function handler(req, res) {
                 ]
             });
 
-            console.log('✅ Company activated successfully:', companyId);
-            console.log('👤 Admin user created:', registrationData.admin.username);
+            console.log('✅ Payment updated');
+
+            console.log('🎉 Company activated successfully:', companyId);
 
             return res.status(200).json({
                 success: true,
@@ -175,9 +175,6 @@ export default async function handler(req, res) {
 
         } catch (dbError) {
             console.error('❌ Database error:', dbError);
-            // No hacemos throw para no reintentar infinitamente en el webhook si es un error de lógica
-            // Pero si es de conexión, sí.
-            // Para simplicidad, devolvemos 500
             throw dbError;
         }
 
@@ -188,4 +185,4 @@ export default async function handler(req, res) {
             message: error.message
         });
     }
-}
+};
