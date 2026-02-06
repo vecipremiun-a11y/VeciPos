@@ -143,6 +143,16 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
     };
 
     const handleConfirm = () => {
+        // ============================================
+        // 🔒 VALIDACIÓN ROBUSTA DE PAGOS
+        // ============================================
+
+        // Validar método de pago seleccionado
+        if (!method) {
+            alert('Debes seleccionar un método de pago');
+            return;
+        }
+
         let finalPayData = {
             method,
             total,
@@ -150,15 +160,101 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
         };
 
         if (method === 'Mixto') {
+            // VALIDACIÓN DE PAGO MIXTO
             const paid = getMixedTotal();
+
+            // 1. Validar que cada pago individual sea positivo
+            for (const p of mixedPayments) {
+                const amount = parseFloat(p.amount);
+
+                if (isNaN(amount)) {
+                    alert(`Monto inválido en método ${p.method}`);
+                    return;
+                }
+
+                if (amount <= 0) {
+                    alert(`El monto de ${p.method} debe ser mayor a cero`);
+                    return;
+                }
+
+                // Validar campos requeridos según método
+                if (p.method === 'Tarjeta' && !p.terminal) {
+                    alert('Debes seleccionar el datáfono para pago con tarjeta');
+                    return;
+                }
+
+                if (p.method === 'Transferencia' && !p.account) {
+                    alert('Debes seleccionar la cuenta para transferencia');
+                    return;
+                }
+            }
+
+            // 2. Validar que el total cubra el monto (con margen de error de centavos)
+            const diff = Math.abs(paid - total);
+            if (diff > 0.01) {
+                if (paid < total) {
+                    alert(`Faltan $${(total - paid).toFixed(2)} por pagar`);
+                } else {
+                    alert(`Hay $${(paid - total).toFixed(2)} de más. Ajusta los montos.`);
+                }
+                return;
+            }
+
             finalPayData = {
                 ...finalPayData,
                 amountPaid: paid,
-                change: paid - total,
+                change: 0, // En pago mixto, el cambio debe ser exacto
                 mixedPayments: mixedPayments
             };
+
         } else {
-            const paid = parseFloat(amountPaid) || 0;
+            // VALIDACIÓN DE PAGO SIMPLE
+            const paid = parseFloat(amountPaid);
+
+            // 1. Validar que sea un número válido
+            if (isNaN(paid)) {
+                alert('Monto de pago inválido');
+                return;
+            }
+
+            // 2. Validar que no sea negativo
+            if (paid < 0) {
+                alert('El monto de pago no puede ser negativo');
+                return;
+            }
+
+            // 3. Validar según método de pago
+            if (method === 'Crédito') {
+                // En crédito, verificar que haya cliente seleccionado
+                if (!posSelectedClient) {
+                    alert('Debes seleccionar un cliente para ventas a crédito');
+                    return;
+                }
+                // En crédito, el monto debe ser exacto
+                if (Math.abs(paid - total) > 0.01) {
+                    alert('En ventas a crédito, el monto debe ser exacto al total');
+                    return;
+                }
+            } else if (method === 'Efectivo') {
+                // En efectivo, validar que cubra el total
+                if (paid < total) {
+                    alert(`Monto insuficiente. Faltan $${(total - paid).toFixed(2)}`);
+                    return;
+                }
+            } else {
+                // Tarjeta, Transferencia: debe ser exacto
+                if (Math.abs(paid - total) > 0.01) {
+                    alert('El monto debe ser exacto al total de la venta');
+                    return;
+                }
+
+                // Validar terminal para tarjeta
+                if (method === 'Tarjeta' && !selectedTerminal) {
+                    alert('Debes seleccionar el datáfono utilizado');
+                    return;
+                }
+            }
+
             finalPayData = {
                 ...finalPayData,
                 amountPaid: paid,
@@ -167,6 +263,8 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
             };
         }
 
+        // Si todas las validaciones pasaron, confirmar pago
+        console.log('✅ Payment validated:', finalPayData);
         onConfirm(finalPayData);
         onClose();
     };
