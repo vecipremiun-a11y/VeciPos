@@ -8,17 +8,14 @@ import * as XLSX from 'xlsx';
 import { formatInCompanyTime, getNowInCompanyTime } from '../lib/dateHelpers';
 
 const Reports = () => {
-    const { fetchSales, currentCompanyTimezone } = useStore();
-    const [sales, setSales] = useState([]);
+    const { fetchProductProfitReport, currentCompanyTimezone } = useStore();
     const [isLoading, setIsLoading] = useState(true);
     const [dateRange, setDateRange] = useState('today'); // today, yesterday, custom
     const [customStart, setCustomStart] = useState('');
     const [customEnd, setCustomEnd] = useState('');
-    const [flattenedItems, setFlattenedItems] = useState([]);
+    const [items, setItems] = useState([]);
     const [stats, setStats] = useState({
         totalCost: 0,
-        totalDiscount: 0,
-        totalTax: 0,
         totalSales: 0,
         totalProfit: 0,
         profitMargin: 0
@@ -28,37 +25,49 @@ const Reports = () => {
         loadData();
     }, [dateRange, customStart, customEnd]);
 
+    // Removed manual handler
+
     const loadData = async () => {
         setIsLoading(true);
         try {
-            const allSales = await fetchSales();
+            // Determine start and end dates in company timezone
+            let startDate, endDate;
+            const nowInCompany = getNowInCompanyTime(currentCompanyTimezone);
+            const todayStr = formatInCompanyTime(nowInCompany.toISOString(), currentCompanyTimezone, 'yyyy-MM-dd');
 
-            // Filter by Date
-            // Filter by Date
-            const filtered = allSales.filter(sale => {
-                if (!sale.date) return false;
-
-                // Convert sale date AND comparison dates to Company Time
-                const saleDateStr = formatInCompanyTime(sale.date, currentCompanyTimezone, 'yyyy-MM-dd');
-                const nowInCompany = getNowInCompanyTime(currentCompanyTimezone);
-                const todayStr = formatInCompanyTime(nowInCompany.toISOString(), currentCompanyTimezone, 'yyyy-MM-dd');
-
-                // Calculate yesterday string properly in company time
+            if (dateRange === 'today') {
+                startDate = todayStr;
+                endDate = todayStr;
+            } else if (dateRange === 'yesterday') {
                 const yesterday = new Date(nowInCompany);
                 yesterday.setDate(yesterday.getDate() - 1);
-                const yesterdayStr = formatInCompanyTime(yesterday.toISOString(), currentCompanyTimezone, 'yyyy-MM-dd');
-
-                if (dateRange === 'today') return saleDateStr === todayStr;
-                if (dateRange === 'yesterday') return saleDateStr === yesterdayStr;
-
-                if (dateRange === 'custom' && customStart && customEnd) {
-                    return saleDateStr >= customStart && saleDateStr <= customEnd;
+                startDate = formatInCompanyTime(yesterday.toISOString(), currentCompanyTimezone, 'yyyy-MM-dd');
+                endDate = startDate;
+            } else if (dateRange === 'custom') {
+                if (!customStart || !customEnd) {
+                    setIsLoading(false);
+                    return;
                 }
-                return true;
+                startDate = customStart;
+                endDate = customEnd;
+            }
+
+            const reportData = await fetchProductProfitReport(startDate, endDate);
+
+            // Calculate totals from aggregated data
+            const totalCost = reportData.reduce((acc, item) => acc + (item.totalCost || 0), 0);
+            const totalSales = reportData.reduce((acc, item) => acc + (item.totalSale || 0), 0);
+            const totalProfit = reportData.reduce((acc, item) => acc + (item.totalProfit || 0), 0);
+            const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0;
+
+            setStats({
+                totalCost,
+                totalSales,
+                totalProfit,
+                profitMargin
             });
 
-            processSales(filtered);
-            setSales(filtered);
+            setItems(reportData);
         } catch (e) {
             console.error("Error loading sales report:", e);
         } finally {
@@ -66,82 +75,21 @@ const Reports = () => {
         }
     };
 
-    const processSales = (salesData) => {
-        let items = [];
-        let totalCost = 0;
-        let totalDiscount = 0;
-        let totalTax = 0;
-        let totalSales = 0;
-
-        salesData.forEach(sale => {
-            if (sale.status === 'cancelled') return; // Skip cancelled
-
-            let saleItems = [];
-            try {
-                saleItems = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items;
-            } catch (e) { console.error("Error parsing items for sale", sale.id); }
-
-            saleItems.forEach(item => {
-                const qty = item.quantity || 0;
-                const price = item.price || 0;
-                const cost = item.cost || 0;
-                const taxRate = item.tax_rate || 0;
-
-                const lineSale = price * qty;
-                const lineTax = lineSale * ((taxRate || 0) / 100);
-                const lineProfit = lineSale - lineTax - (cost * qty);
-
-                totalCost += (cost * qty);
-                totalSales += lineSale;
-                totalTax += lineTax;
-
-                items.push({
-                    saleId: sale.id,
-                    saleDate: sale.date,
-                    productName: item.name,
-                    barcode: item.sku || item.barcode || '-',
-                    quantity: qty,
-                    unitCost: cost,
-                    unitPrice: price,
-                    tax: lineTax,
-                    totalCost: cost * qty,
-                    totalSale: lineSale,
-                    totalProfit: lineProfit
-                });
-            });
-        });
-
-        const totalProfit = totalSales - totalCost;
-        const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0;
-
-        setStats({
-            totalCost,
-            totalDiscount,
-            totalTax,
-            totalSales,
-            totalProfit,
-            profitMargin
-        });
-
-        items.sort((a, b) => new Date(b.saleDate) - new Date(a.saleDate));
-        setFlattenedItems(items);
-    };
-
     const exportToExcel = () => {
-        const ws = XLSX.utils.json_to_sheet(flattenedItems.map(item => ({
-            'ID Venta': item.saleId,
-            'Fecha': formatInCompanyTime(item.saleDate, currentCompanyTimezone, 'dd/MM/yyyy HH:mm'),
+        const ws = XLSX.utils.json_to_sheet(items.map(item => ({
+            'Fecha': item.day,
             'Producto': item.productName,
             'Codigo': item.barcode,
             'Cantidad': item.quantity,
-            'Costo Unit.': item.unitCost,
-            'Precio Venta': item.unitPrice,
+            'Costo Prom. Unit': item.unitCost,
+            'Precio Prom. Unit': item.unitPrice,
             'Total Venta': item.totalSale,
-            'Utilidad': item.totalProfit
+            'Total Costo': item.totalCost,
+            'Ganancia': item.totalProfit
         })));
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Reporte Ventas");
-        XLSX.writeFile(wb, "Reporte_Ventas_Utilidad.xlsx");
+        XLSX.utils.book_append_sheet(wb, ws, "Reporte de Utilidad");
+        XLSX.writeFile(wb, `reporte_utilidad_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
     };
 
     const chartData = [
@@ -151,46 +99,87 @@ const Reports = () => {
     ];
 
     return (
-        <div className="space-y-6 relative z-10">
-            <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
+        <div className="p-4 space-y-6 pb-20 md:pb-4 animate-in fade-in duration-500">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-[var(--color-text)] neon-text">Reporte de Ventas</h1>
-                    <p className="text-[var(--color-text-muted)]">Análisis detallado de utilidad y productos</p>
-                </div>
-
-                <div className="flex flex-wrap gap-2 items-center bg-[var(--surface-light)] p-2 rounded-xl border border-[var(--glass-border)]">
-                    <select
-                        className="glass-input !py-1"
-                        value={dateRange}
-                        onChange={(e) => setDateRange(e.target.value)}
-                    >
-                        <option value="today">Hoy</option>
-                        <option value="yesterday">Ayer</option>
-                        <option value="custom">Personalizado</option>
-                    </select>
-
-                    {dateRange === 'custom' && (
-                        <>
-                            <input type="date" className="glass-input !py-1" value={customStart} onChange={e => setCustomStart(e.target.value)} />
-                            <span className="text-gray-400">-</span>
-                            <input type="date" className="glass-input !py-1" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
-                        </>
-                    )}
-
-                    <button onClick={loadData} className="btn-primary !py-1 flex items-center gap-2">
-                        <Search size={16} /> Buscar
-                    </button>
-                    <button onClick={exportToExcel} className="btn-secondary !py-1 flex items-center gap-2">
-                        <Download size={16} /> Excel
-                    </button>
+                    <h1 className="text-2xl font-bold bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] bg-clip-text text-transparent">
+                        Reporte de Utilidad por Producto
+                    </h1>
+                    <p className="text-[var(--text-secondary)] text-sm">
+                        Análisis detallado de rentabilidad y margen por item
+                    </p>
                 </div>
             </div>
 
+            {/* Filters */}
+            <div className="flex flex-wrap gap-2 items-center bg-[var(--surface-light)] p-2 rounded-xl border border-[var(--glass-border)]">
+                <button
+                    onClick={() => setDateRange('today')}
+                    className={cn(
+                        "px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                        dateRange === 'today'
+                            ? "bg-[var(--primary)] text-white shadow-lg shadow-[var(--primary)]/20"
+                            : "bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+                    )}
+                >
+                    Hoy
+                </button>
+                <button
+                    onClick={() => setDateRange('yesterday')}
+                    className={cn(
+                        "px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                        dateRange === 'yesterday'
+                            ? "bg-[var(--primary)] text-white shadow-lg shadow-[var(--primary)]/20"
+                            : "bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+                    )}
+                >
+                    Ayer
+                </button>
+                <button
+                    onClick={() => setDateRange('custom')}
+                    className={cn(
+                        "px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                        dateRange === 'custom'
+                            ? "bg-[var(--primary)] text-white shadow-lg shadow-[var(--primary)]/20"
+                            : "bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+                    )}
+                >
+                    Personalizado
+                </button>
+
+                {dateRange === 'custom' && (
+                    <div className="flex items-center gap-2 ml-2 animate-in slide-in-from-left-5">
+                        <input
+                            type="date"
+                            value={customStart}
+                            onChange={(e) => setCustomStart(e.target.value)}
+                            className="input-field py-1"
+                        />
+                        <span className="text-[var(--text-muted)]">-</span>
+                        <input
+                            type="date"
+                            value={customEnd}
+                            onChange={(e) => setCustomEnd(e.target.value)}
+                            className="input-field py-1"
+                        />
+                        <button onClick={loadData} className="btn-primary !py-1">
+                            <Search size={16} />
+                        </button>
+                    </div>
+                )}
+
+                <div className="flex-1" />
+
+                {/* Recalculate button removed as requested */}
+
+                <button onClick={exportToExcel} className="btn-secondary !py-1 flex items-center gap-2">
+                    <Download size={16} /> Exportar Excel
+                </button>
+            </div>
             {/* Summary Cards */}
             <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <StatCard title="Total Costos" value={stats.totalCost} color="text-red-400" icon={<TrendingUp size={16} />} />
-                <StatCard title="Descuentos" value={stats.totalDiscount} color="text-orange-400" icon={<Percent size={16} />} />
-                <StatCard title="Impuestos" value={stats.totalTax} color="text-yellow-400" icon={<DollarSign size={16} />} />
+                {/* Removed Discounts/Tax columns as they are not in daily profit table yet, or need calculation */}
                 <StatCard title="Total Ventas" value={stats.totalSales} color="text-blue-400" icon={<DollarSign size={16} />} />
                 <StatCard title="Total Utilidad" value={stats.totalProfit} color="text-green-400" icon={<DollarSign size={16} />} />
                 <StatCard title="% Utilidad" value={`${stats.profitMargin.toFixed(2)}%`} isCurrency={false} color="text-purple-400" icon={<Percent size={16} />} />
@@ -216,39 +205,37 @@ const Reports = () => {
             <div className="glass-card p-0 overflow-hidden">
                 <div className="p-4 border-b border-[var(--glass-border)]">
                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                        <FileText size={18} className="text-[var(--color-primary)]" /> Detalle de Productos Vendidos
+                        <FileText size={18} className="text-[var(--color-primary)]" /> Detalle de Productos (Resumen Diario)
                     </h3>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
                         <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] uppercase text-xs font-semibold">
                             <tr>
-                                <th className="px-6 py-3">ID Venta</th>
                                 <th className="px-6 py-3">Fecha</th>
                                 <th className="px-6 py-3">Producto</th>
                                 <th className="px-6 py-3">Cód. Barra</th>
                                 <th className="px-6 py-3 text-right">Cant.</th>
-                                <th className="px-6 py-3 text-right">Costo U.</th>
-                                <th className="px-6 py-3 text-right">Impuesto</th>
-                                <th className="px-6 py-3 text-right">Precio Venta</th>
+                                <th className="px-6 py-3 text-right">Costo Prom.</th>
+                                <th className="px-6 py-3 text-right">Precio Prom.</th>
+                                <th className="px-6 py-3 text-right">Total Venta</th>
                                 <th className="px-6 py-3 text-right">Utilidad</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-[var(--glass-border)]">
                             {isLoading ? (
-                                <tr><td colSpan="9" className="text-center py-8">Cargando datos...</td></tr>
-                            ) : flattenedItems.length === 0 ? (
-                                <tr><td colSpan="9" className="text-center py-8 text-gray-500">No hay ventas registradas.</td></tr>
+                                <tr><td colSpan="8" className="text-center py-8">Cargando datos...</td></tr>
+                            ) : items.length === 0 ? (
+                                <tr><td colSpan="8" className="text-center py-8 text-gray-500">No hay ventas registradas.</td></tr>
                             ) : (
-                                flattenedItems.map((item, idx) => (
-                                    <tr key={`${item.saleId}-${idx}`} className="hover:bg-[var(--glass-bg)] transition-colors">
-                                        <td className="px-6 py-3 text-gray-400">#{item.saleId}</td>
-                                        <td className="px-6 py-3 text-gray-400">{formatInCompanyTime(item.saleDate, currentCompanyTimezone, 'dd/MM HH:mm')}</td>
+                                items.map((item, idx) => (
+                                    <tr key={`${item.day}-${item.productId}-${idx}`} className="hover:bg-[var(--glass-bg)] transition-colors">
+                                        <td className="px-6 py-3 text-gray-400">{item.day}</td>
                                         <td className="px-6 py-3 font-medium text-white">{item.productName}</td>
                                         <td className="px-6 py-3 text-gray-500">{item.barcode}</td>
                                         <td className="px-6 py-3 text-right text-white font-bold">{item.quantity}</td>
                                         <td className="px-6 py-3 text-right text-gray-400">${item.unitCost.toFixed(2)}</td>
-                                        <td className="px-6 py-3 text-right text-yellow-400/80">${item.tax.toFixed(2)}</td>
+                                        <td className="px-6 py-3 text-right text-blue-300">${item.unitPrice.toFixed(2)}</td>
                                         <td className="px-6 py-3 text-right text-blue-300 font-bold">${item.totalSale.toFixed(2)}</td>
                                         <td className={cn(
                                             "px-6 py-3 text-right font-bold font-mono",

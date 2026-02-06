@@ -104,12 +104,12 @@ const MainLayout = () => {
                 className={cn(
                     "glass border-r border-[var(--glass-border)] transition-all duration-300 flex flex-col z-50",
                     isMobile ? "fixed inset-y-0 left-0 h-full shadow-2xl" : "relative",
-                    isSidebarOpen ? "w-[333px] translate-x-0" : (isMobile ? "-translate-x-full w-[333px]" : "w-20")
+                    isSidebarOpen ? "w-[266px] translate-x-0" : (isMobile ? "-translate-x-full w-[266px]" : "w-20")
                 )}
             >
                 <div className="h-16 flex items-center justify-center border-b border-[var(--glass-border)] relative">
                     <h1 className={cn("font-bold text-2xl neon-text transition-opacity duration-300 text-[var(--color-text)]", !isSidebarOpen && !isMobile && "opacity-0 hidden")}>
-                        POSKEM
+                        POSVECI
                     </h1>
                     <button
                         onClick={() => setIsSidebarOpen(!isSidebarOpen)}

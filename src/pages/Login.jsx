@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { Lock, User, AlertCircle, ArrowRight } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 const Login = () => {
     const navigate = useNavigate();
@@ -62,7 +63,7 @@ const Login = () => {
                     <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-tr from-[var(--color-primary)] to-[var(--color-secondary)] rounded-2xl flex items-center justify-center shadow-[0_0_20px_rgba(0,240,255,0.3)]">
                         <Lock className="text-black" size={32} />
                     </div>
-                    <h1 className="text-4xl font-bold text-[var(--color-text)] tracking-tight mb-2">POSKEM</h1>
+                    <h1 className={cn("text-3xl font-bold text-[var(--color-text)] tracking-tight mb-2")}>POSVECI</h1>
                     <p className="text-[var(--color-text-muted)] text-sm tracking-widest uppercase">Acceso al Sistema</p>
                 </div>
 

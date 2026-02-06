@@ -1169,7 +1169,7 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    fetchProductLotsReport: async () => {
+    fetchProductLotsReport: async (limit = 30, offset = 0) => {
         const { activeCompanyId } = get();
         try {
             // Fetch lots joined with products to get all details in one go
@@ -1179,9 +1179,10 @@ export const useStore = create(persist((set, get) => ({
                 "FROM product_lots pl " +
                 "JOIN products p ON pl.product_id = p.id " +
                 "WHERE pl.company_id = ? AND pl.quantity > 0 " +
-                "ORDER BY pl.expiry_date ASC";
+                "ORDER BY pl.expiry_date ASC " +
+                "LIMIT ? OFFSET ?";
 
-            const res = await turso.execute({ sql, args: [activeCompanyId] });
+            const res = await turso.execute({ sql, args: [activeCompanyId, limit, offset] });
 
             return res.rows.map(row => ({
                 id: row.id,
@@ -1202,11 +1203,253 @@ export const useStore = create(persist((set, get) => ({
             }));
 
         } catch (e) {
-            console.error("Failed to fetch product lots report", e);
+            console.error("Error fetching product profit report:", e);
             return [];
         }
     },
 
+    fetchProductLotsGlobalStats: async () => {
+        const { activeCompanyId, currentCompanyTimezone } = get();
+        try {
+            // Calculate stats server-side
+            const today = new Date().toISOString().split('T')[0];
+            // Calc date + 30 days for "near expiry" (matching the default logic in component)
+            const d = new Date();
+            d.setDate(d.getDate() + 30);
+            const nextMonth = d.toISOString().split('T')[0];
+
+            const sql = `
+                SELECT 
+                    COUNT(*) as total_lots,
+                    COUNT(DISTINCT product_id) as total_products,
+                    SUM(CASE WHEN expiry_date < ? THEN 1 ELSE 0 END) as expired_lots,
+                    SUM(CASE WHEN expiry_date >= ? AND expiry_date <= ? THEN 1 ELSE 0 END) as near_expiry_lots,
+                    SUM(CASE WHEN expiry_date < ? THEN (cost * quantity) ELSE 0 END) as expiry_value_lost,
+                    SUM(CASE WHEN (expiry_date >= ? OR expiry_date IS NULL) AND NOT (expiry_date >= ? AND expiry_date <= ?) THEN 1 ELSE 0 END) as valid_lots
+                FROM product_lots 
+                WHERE company_id = ? AND quantity > 0
+            `;
+            // Params: today (expired <), today (near >=), nextMonth (near <=), today (value <), today (valid >=), today(valid_near_start), nextMonth(valid_near_end), company
+            // Simplified valid logic: Total - Expired - Near = Valid (roughly, seeing how component did it)
+            // Component logic: 
+            // - Expired: < today
+            // - Near: >= startDate (today) AND <= endDate (today+1mo)
+            // - Valid: The rest.
+
+            const res = await turso.execute({
+                sql: `SELECT 
+                        COUNT(*) as total_lots,
+                        COUNT(DISTINCT product_id) as total_products,
+                        SUM(CASE WHEN expiry_date < ? THEN 1 ELSE 0 END) as expired_lots,
+                        SUM(CASE WHEN expiry_date >= ? AND expiry_date <= ? THEN 1 ELSE 0 END) as near_expiry_lots,
+                        SUM(CASE WHEN expiry_date < ? THEN (cost * quantity) ELSE 0 END) as expiry_value_lost
+                      FROM product_lots 
+                      WHERE company_id = ? AND quantity > 0`,
+                args: [today, today, nextMonth, today, activeCompanyId]
+            });
+
+            const row = res.rows[0];
+            const total = row.total_lots || 0;
+            const expired = row.expired_lots || 0;
+            const near = row.near_expiry_lots || 0;
+            const valid = total - expired - near; // Derive valid from others to ensure sum matches
+
+            return {
+                validLots: valid,
+                nearExpiryLots: near,
+                expiredLots: expired,
+                totalLots: total,
+                totalItems: row.total_products || 0,
+                expiryValueLost: row.expiry_value_lost || 0
+            };
+        } catch (e) {
+            console.error("Error fetching stats:", e);
+            return null;
+        }
+    },
+
+    fetchProductProfitReport: async (startDate, endDate) => {
+        const { activeCompanyId } = get();
+        try {
+            const result = await turso.execute({
+                sql: `SELECT 
+                        pdp.day,
+                        pdp.product_id,
+                        pdp.total_quantity,
+                        pdp.total_revenue,
+                        pdp.total_cost,
+                        pdp.total_profit,
+                        p.name as product_name,
+                        p.sku as product_sku
+                      FROM product_daily_profit pdp
+                      JOIN products p ON pdp.product_id = p.id
+                      WHERE pdp.company_id = ?
+                      AND pdp.day >= ?
+                      AND pdp.day <= ?
+                      ORDER BY pdp.day DESC, pdp.total_revenue DESC`,
+                args: [activeCompanyId, startDate, endDate]
+            });
+
+            return result.rows.map(row => ({
+                day: row.day,
+                productId: row.product_id,
+                productName: row.product_name,
+                barcode: row.product_sku || '-',
+                quantity: row.total_quantity,
+                totalSale: row.total_revenue,
+                totalCost: row.total_cost,
+                totalProfit: row.total_profit,
+                unitCost: row.total_quantity > 0 ? row.total_cost / row.total_quantity : 0,
+                unitPrice: row.total_quantity > 0 ? row.total_revenue / row.total_quantity : 0
+            }));
+        } catch (e) {
+            console.error("Error fetching report:", e);
+            return [];
+        }
+    },
+
+    recalculateProductProfits: async () => {
+        const { activeCompanyId, currentCompanyTimezone } = get();
+        try {
+            console.time('⏱️ recalculateProductProfits');
+            console.log('🔄 Starting full backfill of product_daily_profit...');
+
+            // 2. Fetch and Process Sales in Batches (Pagination to avoid Mem/Response limits)
+            const BATCH_SIZE = 100;
+            const dailyData = {}; // Key: "day_productId"
+            let offset = 0;
+            let hasMore = true;
+            let totalSalesProcessed = 0;
+
+            console.log(`🔄 Fetching sales for company: ${activeCompanyId}...`);
+
+            while (hasMore) {
+                const salesRes = await turso.execute({
+                    sql: "SELECT id, date, items FROM sales WHERE company_id = ? AND status != 'cancelled' LIMIT ? OFFSET ?",
+                    args: [activeCompanyId, BATCH_SIZE, offset]
+                });
+
+                const sales = salesRes.rows;
+                if (sales.length < BATCH_SIZE) {
+                    hasMore = false;
+                } else {
+                    offset += BATCH_SIZE;
+                }
+
+                if (sales.length > 0) {
+                    totalSalesProcessed += sales.length;
+                    // 3. Process Batch
+                    sales.forEach(sale => {
+                        if (!sale.items) return;
+
+                        // Format date to company day YYYY-MM-DD
+                        const day = formatInCompanyTime(sale.date, currentCompanyTimezone, 'yyyy-MM-dd');
+
+                        let items = [];
+                        try { items = JSON.parse(sale.items); } catch (e) { return; }
+
+                        items.forEach(item => {
+                            const pid = item.id;
+                            const key = `${day}_${pid}`;
+
+                            if (!dailyData[key]) {
+                                dailyData[key] = {
+                                    company_id: activeCompanyId,
+                                    product_id: pid,
+                                    day: day,
+                                    total_quantity: 0,
+                                    total_revenue: 0,
+                                    total_cost: 0,
+                                    total_tax: 0,
+                                    total_profit: 0
+                                };
+                            }
+
+                            const qty = parseFloat(item.quantity) || 0;
+                            const price = parseFloat(item.price) || 0;
+                            const cost = parseFloat(item.cost) || 0;
+
+                            // Simplified tax logic matching addSale
+                            const netPrice = price;
+                            const taxRate = parseFloat(item.tax_rate) || 0;
+                            const netPriceTax = price / (1 + (taxRate / 100));
+
+                            const revenue = price * qty;
+                            const costTotal = cost * qty;
+                            const taxTotal = revenue - (netPriceTax * qty);
+                            const profitTotal = (netPriceTax - cost) * qty;
+
+                            dailyData[key].total_quantity += qty;
+                            dailyData[key].total_revenue += revenue;
+                            dailyData[key].total_cost += costTotal;
+                            dailyData[key].total_tax += taxTotal;
+                            dailyData[key].total_profit += profitTotal;
+                        });
+                    });
+                }
+            }
+
+            // 4. Process Batch Inserts (Chunks of 50 to avoid limits)
+            const entries = Object.values(dailyData);
+            console.log(`📝 Backfill Debug: Processed ${totalSalesProcessed} sales. Generated ${entries.length} daily stats.`);
+
+            if (entries.length === 0) {
+                console.warn("⚠️ No entries generated. Aborting delete to preserve existing data.");
+                return { success: false, count: 0, message: "No data found to recalculate." };
+            }
+
+            // ONLY DELETE IF WE HAVE DATA TO REPLACE
+            console.log("🗑️ Clearing old product_daily_profit records...");
+            await turso.execute({
+                sql: "DELETE FROM product_daily_profit WHERE company_id = ?",
+                args: [activeCompanyId]
+            });
+
+            const INSERT_BATCH_SIZE = 50;
+            let insertedCount = 0;
+
+            for (let i = 0; i < entries.length; i += INSERT_BATCH_SIZE) {
+                const batch = entries.slice(i, i + INSERT_BATCH_SIZE);
+                const queries = [];
+
+                for (const entry of batch) {
+                    queries.push({
+                        sql: `INSERT INTO product_daily_profit
+                          (company_id, product_id, day, total_quantity, total_revenue, total_cost, total_tax, total_profit, updated_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        args: [
+                            entry.company_id,
+                            entry.product_id,
+                            entry.day,
+                            entry.total_quantity,
+                            entry.total_revenue,
+                            entry.total_cost,
+                            entry.total_tax,
+                            entry.total_profit,
+                            new Date().toISOString()
+                        ]
+                    });
+                }
+
+                if (queries.length > 0) {
+                    try {
+                        await turso.batch(queries);
+                        insertedCount += queries.length;
+                    } catch (batchError) {
+                        console.error("❌ Error inserting batch:", batchError);
+                    }
+                }
+            }
+
+            console.timeEnd('⏱️ recalculateProductProfits');
+            console.log(`✅ Backfilled ${insertedCount} daily product records successfully.`);
+            return { success: true, count: insertedCount };
+
+        } catch (e) {
+            console.error("Backfill error:", e);
+            return { success: false, error: e.message };
+        }
+    },
     login: async (username, password) => {
         try {
             // 1. Autenticar usuario

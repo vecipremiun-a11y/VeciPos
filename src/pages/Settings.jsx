@@ -53,7 +53,7 @@ const Settings = () => {
                     </div>
                     <div className="flex justify-between border-b border-[var(--glass-border)] pb-2">
                         <span className="text-[var(--color-text-muted)]">Desarrollador</span>
-                        <span className="text-[var(--color-text)]">POSKEM Dev</span>
+                        <span className="text-[var(--color-text)]">POSVECI Dev</span>
                     </div>
                     <div className="flex justify-between border-b border-[var(--glass-border)] pb-2">
                         <span className="text-[var(--color-text-muted)]">Estado de Licencia</span>
