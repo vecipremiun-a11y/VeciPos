@@ -123,6 +123,19 @@ const Login = () => {
                 </form>
 
                 <div className="mt-8 text-center">
+                    <p className="text-sm text-[var(--color-text-muted)]">
+                        ¿No tienes cuenta?{' '}
+                        <button
+                            type="button"
+                            onClick={() => navigate('/registro')}
+                            className="text-[var(--color-primary)] hover:underline font-bold"
+                        >
+                            Regístrate aquí
+                        </button>
+                    </p>
+                </div>
+
+                <div className="mt-8 text-center">
                     <p className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest">
                         Minimarket POS System v1.0
                     </p>
