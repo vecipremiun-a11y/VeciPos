@@ -1,10 +1,11 @@
 import { createClient } from '@libsql/client';
-import mercadopago from 'mercadopago';
+import { MercadoPagoConfig, Payment } from 'mercadopago';
 
 // Configurar MercadoPago
-mercadopago.configure({
-    access_token: process.env.MERCADOPAGO_ACCESS_TOKEN
+const client = new MercadoPagoConfig({
+    accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN
 });
+const paymentClient = new Payment(client);
 
 // Configurar Turso
 const turso = createClient({
@@ -13,7 +14,6 @@ const turso = createClient({
 });
 
 export default async function handler(req, res) {
-    // Solo permitir POST
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
@@ -24,14 +24,11 @@ export default async function handler(req, res) {
 
         console.log('🔔 Webhook received:', { type, paymentId });
 
-        // Solo procesar notificaciones de pago
         if (!paymentId || (type !== 'payment' && type !== 'payment.created' && type !== 'payment.updated')) {
             return res.status(200).json({ received: true });
         }
 
-        // Obtener información del pago desde MercadoPago
-        const payment = await mercadopago.payment.findById(paymentId);
-        const paymentData = payment.body;
+        const paymentData = await paymentClient.get({ id: paymentId });
 
         console.log('💳 Payment data:', {
             id: paymentData.id,
@@ -39,7 +36,6 @@ export default async function handler(req, res) {
             external_reference: paymentData.external_reference
         });
 
-        // Solo procesar pagos aprobados
         if (paymentData.status !== 'approved') {
             console.log('⏸️ Payment not approved yet:', paymentData.status);
             return res.status(200).json({ received: true });
@@ -53,7 +49,6 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: 'Missing required data' });
         }
 
-        // Parsear datos de registro
         const registrationData = typeof metadata.registration_data === 'string'
             ? JSON.parse(metadata.registration_data)
             : metadata.registration_data;
@@ -62,10 +57,9 @@ export default async function handler(req, res) {
 
         console.log('🏢 Processing registration for company:', companyId);
 
-        // Calcular fechas de suscripción
         const now = new Date();
         const trialEnd = new Date(now);
-        trialEnd.setDate(trialEnd.getDate() + 15); // 15 días de prueba
+        trialEnd.setDate(trialEnd.getDate() + 15);
 
         const periodStart = new Date(trialEnd);
         const periodEnd = new Date(periodStart);
@@ -76,11 +70,9 @@ export default async function handler(req, res) {
             periodEnd.setFullYear(periodEnd.getFullYear() + 1);
         }
 
-        // Generar ID de suscripción
         const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
         try {
-            // Verificar si ya se procesó este pago
             const check = await turso.execute({
                 sql: "SELECT id FROM payments WHERE mercadopago_payment_id = ?",
                 args: [paymentData.id.toString()]
@@ -91,7 +83,6 @@ export default async function handler(req, res) {
                 return res.status(200).json({ message: 'Already processed' });
             }
 
-            // 1. Crear suscripción
             await turso.execute({
                 sql: `INSERT INTO subscriptions (
                     id, company_id, plan_id, status, amount, currency,
@@ -111,7 +102,6 @@ export default async function handler(req, res) {
 
             console.log('✅ Subscription created:', subscriptionId);
 
-            // 2. Actualizar empresa a estado trial
             await turso.execute({
                 sql: `UPDATE companies 
                       SET status = 'trial', 
@@ -129,7 +119,6 @@ export default async function handler(req, res) {
 
             console.log('✅ Company updated to trial');
 
-            // 3. Crear usuario administrador
             const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             await turso.execute({
                 sql: `INSERT INTO users (
@@ -148,7 +137,6 @@ export default async function handler(req, res) {
 
             console.log('✅ Admin user created:', registrationData.admin.username);
 
-            // 4. Actualizar payment como aprobado
             await turso.execute({
                 sql: `UPDATE payments 
                       SET status = 'approved',
@@ -165,7 +153,6 @@ export default async function handler(req, res) {
             });
 
             console.log('✅ Payment updated');
-
             console.log('🎉 Company activated successfully:', companyId);
 
             return res.status(200).json({
@@ -185,4 +172,4 @@ export default async function handler(req, res) {
             message: error.message
         });
     }
-};
+}

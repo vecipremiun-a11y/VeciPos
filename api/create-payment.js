@@ -1,10 +1,11 @@
 import { createClient } from '@libsql/client';
-import mercadopago from 'mercadopago';
+import { MercadoPagoConfig, Preference } from 'mercadopago';
 
 // Configurar MercadoPago
-mercadopago.configure({
-    access_token: process.env.MERCADOPAGO_ACCESS_TOKEN
+const client = new MercadoPagoConfig({
+    accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN
 });
+const preferenceClient = new Preference(client);
 
 // Configurar Turso
 const turso = createClient({
@@ -13,7 +14,6 @@ const turso = createClient({
 });
 
 export default async function handler(req, res) {
-    // Solo permitir POST
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
@@ -23,16 +23,13 @@ export default async function handler(req, res) {
 
         console.log('📝 Creating payment preference:', { planId, amount });
 
-        // Validar datos
         if (!planId || !amount || !registrationData) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
-        // Generar IDs únicos
         const companyId = `company_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const paymentId = `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-        // Crear empresa en estado pending
         await turso.execute({
             sql: `INSERT INTO companies (id, name, timezone, status, created_at) 
                   VALUES (?, ?, 'America/Santiago', 'pending_payment', ?)`,
@@ -41,7 +38,6 @@ export default async function handler(req, res) {
 
         console.log('✅ Company created:', companyId);
 
-        // Guardar datos de registro temporalmente
         await turso.execute({
             sql: `INSERT INTO payments (id, company_id, amount, currency, status, description, payer_email, created_at)
                   VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)`,
@@ -56,10 +52,8 @@ export default async function handler(req, res) {
             ]
         });
 
-        // Guardar datos de registro en JSON para uso posterior
         const registrationJson = JSON.stringify(registrationData);
 
-        // Crear preferencia de pago en MercadoPago
         const preference = {
             items: [
                 {
@@ -92,20 +86,19 @@ export default async function handler(req, res) {
 
         console.log('🔄 Creating MercadoPago preference...');
 
-        const response = await mercadopago.preferences.create(preference);
+        const response = await preferenceClient.create({ body: preference });
 
-        console.log('✅ Preference created:', response.body.id);
+        console.log('✅ Preference created:', response.id);
 
-        // Actualizar payment con preference_id
         await turso.execute({
             sql: `UPDATE payments SET mercadopago_preference_id = ? WHERE id = ?`,
-            args: [response.body.id, paymentId]
+            args: [response.id, paymentId]
         });
 
         return res.status(200).json({
             success: true,
-            init_point: response.body.init_point,
-            preference_id: response.body.id
+            init_point: response.init_point,
+            preference_id: response.id
         });
 
     } catch (error) {
@@ -116,4 +109,4 @@ export default async function handler(req, res) {
             details: error.message
         });
     }
-};
+}
