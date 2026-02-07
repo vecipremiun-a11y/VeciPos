@@ -1,5 +1,5 @@
-const { createClient } = require('@libsql/client');
-const mercadopago = require('mercadopago');
+import { createClient } from '@libsql/client';
+import mercadopago from 'mercadopago';
 
 // Configurar MercadoPago
 mercadopago.configure({
@@ -12,7 +12,7 @@ const turso = createClient({
     authToken: process.env.VITE_TURSO_AUTH_TOKEN
 });
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
     // Solo permitir POST
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
