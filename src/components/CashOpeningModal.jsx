@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DollarSign, ArrowRight, Wallet, ArrowLeft } from 'lucide-react';
+import { DollarSign, ArrowRight, Wallet, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 
@@ -8,6 +8,7 @@ const CashOpeningModal = ({ isOpen }) => {
     const navigate = useNavigate();
     const [amount, setAmount] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState(null);
 
     if (!isOpen) return null;
 
@@ -16,8 +17,26 @@ const CashOpeningModal = ({ isOpen }) => {
         if (!amount || isNaN(amount) || !currentUser) return;
 
         setIsLoading(true);
-        await openRegister(currentUser.id, parseFloat(amount));
-        setIsLoading(false); // Modal will unmount/hide because parent state checks cashRegister presence
+        setError(null);
+
+        // ✅ Llamar a openRegister y manejar la respuesta
+        const result = await openRegister(currentUser.id, parseFloat(amount));
+
+        if (result.success === false) {
+            // Si hay error (caja ya abierta), mostrar mensaje
+            setError(result.error || 'Error al abrir la caja');
+            setIsLoading(false);
+
+            // Si hay una caja existente, redirigir automáticamente después de 3 segundos
+            if (result.existingRegister) {
+                setTimeout(() => {
+                    navigate('/pos');
+                }, 3000);
+            }
+        } else {
+            // Éxito - el modal se cerrará automáticamente porque el parent verifica cashRegister
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -43,6 +62,20 @@ const CashOpeningModal = ({ isOpen }) => {
                     </p>
                 </div>
 
+                {/* ✅ Mensaje de error si ya hay una caja abierta */}
+                {error && (
+                    <div className="mb-6 bg-red-500/10 border border-red-500/30 p-4 rounded-xl flex gap-3 items-start">
+                        <div className="mt-1 text-red-400">
+                            <AlertTriangle size={20} />
+                        </div>
+                        <div className="space-y-1">
+                            <p className="text-red-200 font-bold text-sm">¡Atención!</p>
+                            <p className="text-xs text-red-300/80">{error}</p>
+                            <p className="text-xs text-red-300/60 mt-2">Redirigiendo al punto de venta...</p>
+                        </div>
+                    </div>
+                )}
+
                 <form onSubmit={handleSubmit} className="space-y-6">
                     <div className="space-y-2">
                         <label className="text-sm font-bold text-white ml-1">Monto de Apertura</label>
@@ -57,6 +90,7 @@ const CashOpeningModal = ({ isOpen }) => {
                                 autoFocus
                                 required
                                 min="0"
+                                disabled={!!error}
                             />
                         </div>
                     </div>
@@ -76,11 +110,11 @@ const CashOpeningModal = ({ isOpen }) => {
 
                     <button
                         type="submit"
-                        disabled={isLoading || !amount}
+                        disabled={isLoading || !amount || !!error}
                         className="btn-primary w-full py-4 text-lg flex items-center justify-center gap-2 group disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <span>{isLoading ? 'Abriendo...' : 'Abrir Caja'}</span>
-                        {!isLoading && <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />}
+                        {!isLoading && !error && <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />}
                     </button>
                 </form>
             </div>

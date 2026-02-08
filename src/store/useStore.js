@@ -2559,18 +2559,14 @@ export const useStore = create(persist((set, get) => ({
                 }
             ];
 
-            // For each item, update stock and cost in products table
+            // For each item, update stock, cost AND supplier in products table
             purchase.items.forEach(item => {
                 queries.push({
-                    sql: "UPDATE products SET stock = stock + ?, cost = ?, price = ?, sku = ?, tax_rate = ? WHERE id = ? AND company_id = ?",
-                    args: [item.quantity, item.cost, item.price, item.sku, item.tax || 0, item.id, activeCompanyId]
+                    sql: "UPDATE products SET stock = stock + ?, cost = ?, price = ?, sku = ?, tax_rate = ?, supplier = ? WHERE id = ? AND company_id = ?",
+                    args: [item.quantity, item.cost, item.price, item.sku, item.tax || 0, purchase.supplierName, item.id, activeCompanyId]
                 });
 
-                // Create Lot (with company_id from schema update, even if we left it implicit default in code before, we should be explicit now if possible, 
-                // but checking table schema we added it. Let's add it to args.)
-                // Wait, in _runMigrations we added company_id related to tables. 
-                // product_lots was one of them? Yes.
-
+                // Create Lot
                 queries.push({
                     sql: "INSERT INTO product_lots (product_id, batch_number, expiry_date, quantity, cost, supplier_name, created_at, status, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)",
                     args: [
@@ -2629,7 +2625,8 @@ export const useStore = create(persist((set, get) => ({
                             cost: parseFloat(purchasedItem.cost),
                             price: parseFloat(purchasedItem.price),
                             sku: purchasedItem.sku,
-                            tax_rate: parseFloat(purchasedItem.tax || 0)
+                            tax_rate: parseFloat(purchasedItem.tax || 0),
+                            supplier: purchase.supplierName // Update supplier
                         };
                     }
                     return p;
@@ -3455,32 +3452,132 @@ export const useStore = create(persist((set, get) => ({
 
     cancelSale: async (saleId, observation = '') => {
         try {
-            const { sales } = get();
-            const saleToCancel = sales.find(s => s.id === saleId);
-            if (!saleToCancel) return false;
+            const { sales, activeCompanyId, fetchSaleDetails, cashRegister, currentUser } = get();
 
-            await turso.batch([
+            // 1. Get Sale & Complete Details
+            let sale = sales.find(s => s.id === saleId);
+
+            // Check if we have full items details. If not, fetch them.
+            if (!sale || !sale.items || (Array.isArray(sale.items) && sale.items.length === 0) || typeof sale.items === 'string') {
+                const details = await fetchSaleDetails(saleId);
+                if (!details) {
+                    console.error("Sale not found for cancellation");
+                    return false;
+                }
+                sale = details;
+            }
+
+            // Ensure items is an array
+            const items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items;
+
+            // Safe Parsing of date for daily profit update
+            const saleDateObj = new Date(sale.date);
+            const saleDay = !isNaN(saleDateObj.getTime())
+                ? saleDateObj.toISOString().split('T')[0]
+                : new Date().toISOString().split('T')[0];
+
+            console.log(`🚫 Cancelling Sale #${saleId} - Items: ${items.length}`);
+
+            // 2. Prepare Transaction Queries
+            const queries = [
+                // Mark sale as cancelled
                 {
-                    sql: "UPDATE sales SET status = 'cancelled', observation = ? WHERE id = ?",
-                    args: [observation, saleId]
-                },
-                ...saleToCancel.items.map(item => ({
-                    sql: "UPDATE products SET stock = stock + ? WHERE id = ?",
-                    args: [item.quantity, item.id] // Restore stock
-                }))
-            ]);
+                    sql: "UPDATE sales SET status = 'cancelled', observation = ? WHERE id = ? AND company_id = ?",
+                    args: [observation, saleId, activeCompanyId]
+                }
+            ];
 
+            // 3. Process Items Restoration
+            for (const item of items) {
+                // A. Restore Product Total Stock
+                queries.push({
+                    sql: "UPDATE products SET stock = stock + ? WHERE id = ? AND company_id = ?",
+                    args: [item.quantity, item.id, activeCompanyId]
+                });
+
+                // B. Revert Product Daily Profit (Reports)
+                // Calculate values to subtract
+                const revenue = item.price * item.quantity;
+                const cost = (item.cost || 0) * item.quantity;
+                const taxRate = item.tax_rate || 0;
+                // Net price logic should match addSale: price / (1 + tax/100)
+                const netPrice = item.price / (1 + (taxRate / 100));
+                const totalTax = revenue - (netPrice * item.quantity);
+                const totalProfit = (netPrice - (item.cost || 0)) * item.quantity;
+
+                queries.push({
+                    sql: `UPDATE product_daily_profit 
+                           SET total_quantity = total_quantity - ?,
+                               total_revenue = total_revenue - ?,
+                               total_cost = total_cost - ?,
+                               total_tax = total_tax - ?,
+                               total_profit = total_profit - ?
+                           WHERE product_id = ? AND day = ? AND company_id = ?`,
+                    args: [item.quantity, revenue, cost, totalTax, totalProfit, item.id, saleDay, activeCompanyId]
+                });
+
+                // C. Restore to Lot (Add to most recent lot)
+                // We use a subquery to find the most recent lot for this product to restore stock to.
+                queries.push({
+                    sql: `UPDATE product_lots 
+                           SET quantity = quantity + ? 
+                           WHERE id = (
+                               SELECT id FROM product_lots 
+                               WHERE product_id = ? AND company_id = ? 
+                               ORDER BY created_at DESC LIMIT 1
+                           )`,
+                    args: [item.quantity, item.id, activeCompanyId]
+                });
+            }
+
+            // 4. Refund from Cash Register (If open)
+            // This assumes cancellation implies returning money from the current drawer
+            if (cashRegister && cashRegister.id) {
+                queries.push({
+                    sql: "UPDATE cash_registers SET current_balance = current_balance - ? WHERE id = ? AND company_id = ?",
+                    args: [sale.total, cashRegister.id, activeCompanyId]
+                });
+
+                // Audit Refund
+                queries.push({
+                    sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    args: [activeCompanyId, currentUser?.id, 'REFUND', 'SALE', JSON.stringify({ saleId, total: sale.total, reason: observation }), new Date().toISOString()]
+                });
+            }
+
+            // 5. Update Daily Sales Summary
+            queries.push({
+                sql: `UPDATE sales_daily_summary 
+                      SET total_sales = total_sales - ?, 
+                          total_orders = total_orders - 1 
+                      WHERE day = ? AND company_id = ?`,
+                args: [sale.total, saleDay, activeCompanyId]
+            });
+
+            // Execute Batch Transaction
+            await turso.batch(queries);
+
+            // 5. Update Local State
             set(state => ({
                 sales: state.sales.map(s => s.id === saleId ? { ...s, status: 'cancelled', observation } : s),
+
+                // Optimistically update products stock in UI
                 products: state.products.map(p => {
-                    const item = saleToCancel.items.find(i => i.id === p.id);
+                    const item = items.find(i => i.id === p.id);
                     if (item) {
-                        return { ...p, stock: p.stock + item.quantity };
+                        return { ...p, stock: (parseFloat(p.stock) || 0) + parseFloat(item.quantity) };
                     }
                     return p;
-                })
+                }),
+
+                // Update local cash register balance if matches
+                cashRegister: (state.cashRegister && cashRegister && state.cashRegister.id === cashRegister.id)
+                    ? { ...state.cashRegister, current_balance: (state.cashRegister.current_balance || 0) - sale.total }
+                    : state.cashRegister
             }));
+
             return true;
+
         } catch (e) {
             console.error("Cancel sale error", e);
             return false;
@@ -3574,12 +3671,15 @@ export const useStore = create(persist((set, get) => ({
             console.time('⏱️ fetchActiveRegisters');
             const { activeCompanyId } = get();
 
-            // 1. Get all open registers with user details
+            // 1. Get all open registers with user details (VALIDATED by company membership)
             const result = await turso.execute({
                 sql: `SELECT cr.*, u.name as user_name 
                       FROM cash_registers cr 
                       LEFT JOIN users u ON cr.user_id = u.id 
-                      WHERE cr.status = 'open' AND cr.company_id = ?`,
+                      INNER JOIN user_companies uc ON cr.user_id = uc.user_id 
+                                                    AND cr.company_id = uc.company_id
+                      WHERE cr.status = 'open' 
+                      AND cr.company_id = ?`,
                 args: [activeCompanyId]
             });
 
@@ -3600,14 +3700,15 @@ export const useStore = create(persist((set, get) => ({
                     sql: `SELECT total, payment_method, payment_details 
                           FROM sales 
                           WHERE user_id = ? 
-                          AND date >= ?`,
-                    args: [reg.user_id, reg.opening_time]
+                          AND date >= ? 
+                          AND company_id = ?`,
+                    args: [reg.user_id, reg.opening_time, activeCompanyId]
                 });
 
                 // Query para movimientos de este registro
                 queries.push({
-                    sql: "SELECT type, amount FROM cash_movements WHERE register_id = ?",
-                    args: [reg.id]
+                    sql: "SELECT type, amount FROM cash_movements WHERE register_id = ? AND company_id = ?",
+                    args: [reg.id, activeCompanyId]
                 });
             });
 
@@ -3697,15 +3798,32 @@ export const useStore = create(persist((set, get) => ({
     openRegister: async (userId, amount) => {
         try {
             const { activeCompanyId, currentCompanyTimezone } = get();
+
+            // ✅ VALIDACIÓN CRÍTICA: Verificar si ya existe una caja abierta para este usuario
+            const existingRegisterCheck = await turso.execute({
+                sql: "SELECT * FROM cash_registers WHERE user_id = ? AND company_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1",
+                args: [userId, activeCompanyId]
+            });
+
+            if (existingRegisterCheck.rows.length > 0) {
+                console.error("⚠️ User already has an open register:", existingRegisterCheck.rows[0]);
+                // Cargar la caja existente en el estado
+                set({ cashRegister: existingRegisterCheck.rows[0] });
+                return { success: false, error: 'Ya tienes una caja abierta. Debes cerrarla antes de abrir una nueva.', existingRegister: existingRegisterCheck.rows[0] };
+            }
+
+            // Si no hay caja abierta, proceder con la apertura
             const result = await turso.execute({
                 sql: "INSERT INTO cash_registers (user_id, opening_amount, opening_time, status, company_id) VALUES (?, ?, ?, ?, ?) RETURNING *",
                 args: [userId, amount, getNowInCompanyTime(currentCompanyTimezone).toISOString(), 'open', activeCompanyId]
             });
+
             set({ cashRegister: result.rows[0] });
-            return true;
+            console.log("✅ Cash register opened successfully:", result.rows[0]);
+            return { success: true, register: result.rows[0] };
         } catch (e) {
-            console.error("Open register error", e);
-            return false;
+            console.error("❌ Open register error", e);
+            return { success: false, error: 'Error al abrir la caja. Intenta nuevamente.' };
         }
     },
 
@@ -3907,18 +4025,30 @@ export const useStore = create(persist((set, get) => ({
     },
 
     // Historical Reports
-    fetchClosedRegisters: async () => {
+    fetchClosedRegisters: async (limit = 20, offset = 0) => {
         try {
             const { activeCompanyId } = get();
+
+            // Get total count first (optional but good for UI)
+            /* 
+            const countResult = await turso.execute({
+                sql: "SELECT COUNT(*) as total FROM cash_registers WHERE status = 'closed' AND company_id = ?",
+                args: [activeCompanyId]
+            });
+            const totalCount = countResult.rows[0].total; 
+            */
+
             const result = await turso.execute({
                 sql: `SELECT cr.*, u.name as user_name 
                       FROM cash_registers cr 
                       LEFT JOIN users u ON cr.user_id = u.id 
                       WHERE cr.status = 'closed' AND cr.company_id = ?
-                      ORDER BY cr.closing_time DESC`,
-                args: [activeCompanyId]
+                      ORDER BY cr.closing_time DESC
+                      LIMIT ? OFFSET ?`,
+                args: [activeCompanyId, limit, offset]
             });
-            return result?.rows || [];
+
+            return result.rows;
         } catch (e) {
             console.error("Fetch closed registers error", e);
             return [];
@@ -3939,79 +4069,93 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    fetchCashMovements: async () => {
+    fetchCashMovements: async (limit = 20, offset = 0) => {
         try {
             const { activeCompanyId } = get();
-            console.log("Fetching cash movements for company:", activeCompanyId);
+            console.log(`Fetching cash movements (limit: ${limit}, offset: ${offset}) for company:`, activeCompanyId);
 
-            // 1. Fetch Raw Tables
-            const [movementsRes, registersRes, usersRes] = await Promise.all([
-                turso.execute({
-                    sql: "SELECT * FROM cash_movements WHERE company_id = ?",
-                    args: [activeCompanyId]
-                }),
-                turso.execute({
-                    sql: "SELECT * FROM cash_registers WHERE company_id = ?",
-                    args: [activeCompanyId]
-                }),
-                turso.execute({
-                    sql: "SELECT * FROM users WHERE company_id = ?",
-                    args: [activeCompanyId]
-                })
-            ]);
+            // 1. Fetch Registers (Paginated)
+            const registersRes = await turso.execute({
+                sql: `SELECT cr.*, u.name as user_name 
+                      FROM cash_registers cr 
+                      LEFT JOIN users u ON cr.user_id = u.id 
+                      WHERE cr.company_id = ? 
+                      ORDER BY cr.opening_time DESC 
+                      LIMIT ? OFFSET ?`,
+                args: [activeCompanyId, limit, offset]
+            });
 
-            const movements = movementsRes?.rows || [];
-            const registers = registersRes?.rows || [];
-            const users = usersRes?.rows || [];
+            const registers = registersRes.rows;
 
-            console.log(`Fetched: ${movements.length} movs, ${registers.length} regs, ${users.length} users`);
+            if (registers.length === 0) {
+                return [];
+            }
 
-            // Helper to find user name
-            const getUserName = (userId) => {
-                const u = users.find(u => u.id === userId);
-                return u ? u.name : 'Desconocido';
-            };
+            const registerIds = registers.map(r => r.id);
+            const placeholders = registerIds.map(() => '?').join(',');
 
-            // 2. Process Initial Openings (from Registers)
+            // 2. Fetch Movements for these registers
+            // Note: We filter by company_id AND register_id to cover indexes better, though register_id alone is sufficient logically.
+            const movementsRes = await turso.execute({
+                sql: `SELECT cm.* 
+                      FROM cash_movements cm 
+                      WHERE cm.company_id = ? 
+                      AND cm.register_id IN (${placeholders})`,
+                args: [activeCompanyId, ...registerIds]
+            });
+
+            const movements = movementsRes.rows;
+
+            console.log(`Fetched: ${registers.length} registers, ${movements.length} movements`);
+
+            // 3. Process Initial Openings (from Registers)
             const openingsNode = registers.map(reg => ({
-                id: `opening - ${reg.id}`,
-                register_id: reg.id, // Explicit ID for grouping
+                id: `opening-${reg.id}`,
+                register_id: reg.id,
                 created_at: reg.opening_time,
                 type: 'in',
                 amount: reg.opening_amount,
                 reason: 'Apertura de Caja',
-                user_name: getUserName(reg.user_id),
+                user_name: reg.user_name || 'Desconocido',
                 source: 'opening'
             }));
 
-            // 3. Process Manual Movements
+            // 4. Process Movements
+            // We need to attach user_name to movements. Since we fetched registers with user_name, we can look it up.
+            // Create a map for quick lookup: register_id -> user_name
+            const regUserMap = registers.reduce((acc, r) => {
+                acc[r.id] = r.user_name || 'Desconocido';
+                return acc;
+            }, {});
+
             const movementsNode = movements.map(mov => {
-                // Robust ID Check
                 const regId = mov.register_id || mov.cash_register_id;
-                const reg = registers.find(r => r.id === regId);
-                const userId = reg ? reg.user_id : null;
+                // Since we only fetched movements for the fetched registers, this lookup should always succeed.
+                const userName = regUserMap[regId] || 'Desconocido';
 
                 return {
                     id: mov.id,
                     register_id: regId,
                     created_at: mov.date || mov.created_at, // Robust Date Check
-                    type: String(mov.type).toLowerCase() === 'in' ? 'in' : 'out',
+                    type: String(mov.type).toLowerCase() === 'in' ? 'in' : 'out', // Normalize type
                     amount: mov.amount,
                     reason: mov.reason,
-                    user_name: getUserName(userId),
+                    user_name: userName,
                     source: 'movement'
                 };
             });
 
-            // 4. Combine and Sort
-            const combined = [...movementsNode, ...openingsNode].sort((a, b) => {
-                return new Date(b.created_at || 0) - new Date(a.created_at || 0);
-            });
+            // 5. Combine (no need to sort globally if we rely on component sorting, 
+            // but sorting here helps ensure the return value is consistent)
+            // The component groups by register and sorts groups by opening time.
+            // Inside groups, it sorts by movement time.
+            // Returning a flat list is fine.
+            const combined = [...openingsNode, ...movementsNode];
 
             return combined;
 
         } catch (e) {
-            console.error("Fetch cash movements error FULL:", e);
+            console.error("Fetch cash movements error:", e);
             return [];
         }
     },

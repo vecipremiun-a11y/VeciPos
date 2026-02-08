@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useStore } from '../store/useStore';
 import { format, isValid } from 'date-fns';
 import { Search, Eye, Filter, X } from 'lucide-react';
@@ -15,7 +15,11 @@ const safeFormat = (dateString, fmt) => {
 const CashClosuresReport = () => {
     const { fetchClosedRegisters, getRegisterReport } = useStore();
     const [closures, setClosures] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
+    const [offset, setOffset] = useState(0);
+    const LIMIT = 20;
+
     const [showFilters, setShowFilters] = useState(false);
     const [filterUser, setFilterUser] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
@@ -27,29 +31,58 @@ const CashClosuresReport = () => {
     const [selectedRegister, setSelectedRegister] = useState(null);
     const [reportDetails, setReportDetails] = useState(null);
 
-    useEffect(() => {
-        loadData();
-    }, []);
+    const observer = useRef();
 
-    const loadData = async () => {
+    const loadData = async (currentOffset, isReset = false) => {
+        if (isLoading) return;
         try {
             setIsLoading(true);
-            const data = await fetchClosedRegisters();
-            // Ensure data is an array
-            setClosures(Array.isArray(data) ? data : []);
+            const data = await fetchClosedRegisters(LIMIT, currentOffset);
+
+            if (isReset) {
+                setClosures(Array.isArray(data) ? data : []);
+                setOffset(LIMIT);
+            } else {
+                setClosures(prev => [...prev, ...data]);
+                setOffset(prev => prev + LIMIT);
+            }
+
+            if (data.length < LIMIT) {
+                setHasMore(false);
+            } else {
+                setHasMore(true);
+            }
+
         } catch (error) {
             console.error("Error loading closures:", error);
-            setClosures([]);
         } finally {
             setIsLoading(false);
         }
     };
 
+    // Initial load
+    useEffect(() => {
+        loadData(0, true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const lastClosureRef = useCallback(node => {
+        if (isLoading) return;
+        if (observer.current) observer.current.disconnect();
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && hasMore) {
+                // Pass current offset to load next batch
+                loadData(offset);
+            }
+        });
+        if (node) observer.current.observe(node);
+    }, [isLoading, hasMore, offset]); // loadData is stable enough or we ignore it if it causes issues, but offset is key
+
     const handleViewDetails = async (register) => {
         if (!register) return;
         setDetailModalOpen(true);
         setSelectedRegister(register);
-        setReportDetails(null); // Reset details while loading
+        setReportDetails(null);
 
         try {
             const report = await getRegisterReport(register);
@@ -65,39 +98,40 @@ const CashClosuresReport = () => {
         setReportDetails(null);
     };
 
-    // Extract unique users for filter dropdown (safely)
     const uniqueUsers = Array.from(new Set(closures.map(c => c?.user_name))).filter(Boolean);
 
-    const filteredClosures = closures.filter(c => {
-        if (!c) return false;
+    const filteredClosures = React.useMemo(() => {
+        return closures.filter(c => {
+            if (!c) return false;
 
-        const obs = c.observations || '';
-        const uname = c.user_name || '';
-        const search = searchTerm || '';
+            const obs = c.observations || '';
+            const uname = c.user_name || '';
+            const search = searchTerm || '';
 
-        try {
-            const matchesSearch =
-                String(obs).toLowerCase().includes(search.toLowerCase()) ||
-                String(uname).toLowerCase().includes(search.toLowerCase());
+            try {
+                const matchesSearch =
+                    String(obs).toLowerCase().includes(search.toLowerCase()) ||
+                    String(uname).toLowerCase().includes(search.toLowerCase());
 
-            const matchesUser = filterUser ? String(c.user_name) === String(filterUser) : true;
+                const matchesUser = filterUser ? String(c.user_name) === String(filterUser) : true;
 
-            let matchesDate = true;
-            if (filterStartDate && c.closing_time) {
-                const closeDate = new Date(c.closing_time);
-                matchesDate = matchesDate && isValid(closeDate) && closeDate >= new Date(filterStartDate);
+                let matchesDate = true;
+                if (filterStartDate && c.closing_time) {
+                    const closeDate = new Date(c.closing_time);
+                    matchesDate = matchesDate && isValid(closeDate) && closeDate >= new Date(filterStartDate);
+                }
+                if (filterEndDate && c.closing_time) {
+                    const closeDate = new Date(c.closing_time);
+                    matchesDate = matchesDate && isValid(closeDate) && closeDate <= new Date(filterEndDate);
+                }
+
+                return matchesSearch && matchesUser && matchesDate;
+            } catch (error) {
+                console.error("Filter error:", error);
+                return false;
             }
-            if (filterEndDate && c.closing_time) {
-                const closeDate = new Date(c.closing_time);
-                matchesDate = matchesDate && isValid(closeDate) && closeDate <= new Date(filterEndDate);
-            }
-
-            return matchesSearch && matchesUser && matchesDate;
-        } catch (error) {
-            console.error("Filter error:", error);
-            return false;
-        }
-    });
+        });
+    }, [closures, searchTerm, filterUser, filterStartDate, filterEndDate]);
 
     const clearFilters = () => {
         setFilterUser('');
@@ -201,15 +235,14 @@ const CashClosuresReport = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-[var(--glass-border)]">
-                            {isLoading ? (
-                                <tr><td colSpan="6" className="text-center py-8">Cargando...</td></tr>
-                            ) : filteredClosures.length === 0 ? (
-                                <tr><td colSpan="6" className="text-center py-8 text-[var(--color-text-muted)]">
-                                    {closures.length > 0 ? 'No se encontraron resultados.' : 'No hay cierres registrados.'}
-                                </td></tr>
-                            ) : (
-                                filteredClosures.map((item) => (
-                                    <tr key={item?.id || Math.random()} className="hover:bg-[var(--glass-bg)] transition-colors">
+                            {filteredClosures.map((item, index) => {
+                                const isLast = filteredClosures.length === index + 1;
+                                return (
+                                    <tr
+                                        key={item?.id || index}
+                                        ref={isLast ? lastClosureRef : null}
+                                        className="hover:bg-[var(--glass-bg)] transition-colors"
+                                    >
                                         <td className="px-6 py-4">
                                             <div className="flex flex-col">
                                                 <span className="text-[var(--color-text)] font-medium">
@@ -243,7 +276,24 @@ const CashClosuresReport = () => {
                                             </button>
                                         </td>
                                     </tr>
-                                ))
+                                );
+                            })}
+
+                            {/* Loading State or Empty State */}
+                            {isLoading && (
+                                <tr>
+                                    <td colSpan="6" className="text-center py-4 text-[var(--color-primary)] animate-pulse">
+                                        Cargando más registros...
+                                    </td>
+                                </tr>
+                            )}
+
+                            {!isLoading && filteredClosures.length === 0 && (
+                                <tr>
+                                    <td colSpan="6" className="text-center py-8 text-[var(--color-text-muted)]">
+                                        No se encontraron resultados.
+                                    </td>
+                                </tr>
                             )}
                         </tbody>
                     </table>
@@ -355,3 +405,5 @@ const CashClosuresReport = () => {
 };
 
 export default CashClosuresReport;
+
+

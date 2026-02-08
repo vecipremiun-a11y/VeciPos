@@ -68,7 +68,7 @@ const PaymentSuccess = () => {
                 {/* Trial Info */}
                 <div className="bg-blue-500/5 border border-blue-500/20 p-4 rounded-xl mb-8">
                     <p className="text-sm text-blue-400">
-                        🎉 Tu prueba gratuita de <strong>14 días</strong> comienza ahora
+                        🎉 Tu prueba gratuita de <strong>15 días</strong> comienza ahora
                     </p>
                 </div>
 

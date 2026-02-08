@@ -94,7 +94,7 @@ const SelectPlan = () => {
                         Elige tu plan
                     </h1>
                     <p className="text-[var(--color-text-muted)] text-lg">
-                        Comienza con 14 días de prueba gratuita, sin tarjeta requerida
+                        Comienza con 15 días de prueba gratuita, sin tarjeta requerida
                     </p>
                 </div>
 
@@ -239,7 +239,7 @@ const SelectPlan = () => {
                         )}
                     </button>
                     <p className="text-xs text-[var(--color-text-muted)] mt-4">
-                        14 días gratis, cancela cuando quieras
+                        15 días gratis, cancela cuando quieras
                     </p>
                 </div>
             </div>

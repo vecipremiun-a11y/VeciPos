@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useStore } from '../store/useStore';
 import { Search, Filter, ArrowUpCircle, ArrowDownCircle, ChevronDown, ChevronRight, User } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 
-// Helper for safe date formatting
 // Helper for safe date formatting
 const safeFormat = (dateString, fmt, timezone) => {
     if (!dateString) return '-';
@@ -14,7 +13,11 @@ const safeFormat = (dateString, fmt, timezone) => {
 const CashMovementsReport = () => {
     const { fetchCashMovements, currentCompanyTimezone } = useStore();
     const [movements, setMovements] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
+    const [offset, setOffset] = useState(0);
+    const LIMIT = 20;
+
     const [expandedGroups, setExpandedGroups] = useState({}); // { registerId: boolean }
 
     // Filters
@@ -22,22 +25,56 @@ const CashMovementsReport = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [showFilters, setShowFilters] = useState(false);
 
-    useEffect(() => {
-        loadData();
-    }, []);
+    const observer = useRef();
 
-    const loadData = async () => {
+    const loadData = async (currentOffset, isReset = false) => {
+        if (isLoading) return;
         try {
             setIsLoading(true);
-            const data = await fetchCashMovements();
-            setMovements(Array.isArray(data) ? data : []);
+            const data = await fetchCashMovements(LIMIT, currentOffset);
+
+            // Determine how many registers we actually fetched
+            // Since our backend fetches registers and then their movements,
+            // counting 'opening' nodes gives us the count of registers.
+            const fetchedRegistersCount = data.filter(item => item.source === 'opening').length;
+
+            if (isReset) {
+                setMovements(Array.isArray(data) ? data : []);
+                setOffset(LIMIT);
+            } else {
+                setMovements(prev => [...prev, ...data]);
+                setOffset(prev => prev + LIMIT);
+            }
+
+            if (fetchedRegistersCount < LIMIT) {
+                setHasMore(false);
+            } else {
+                setHasMore(true);
+            }
+
         } catch (error) {
             console.error("Error loading movements:", error);
-            setMovements([]);
+            if (isReset) setMovements([]);
         } finally {
             setIsLoading(false);
         }
     };
+
+    useEffect(() => {
+        loadData(0, true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const lastGroupRef = useCallback(node => {
+        if (isLoading) return;
+        if (observer.current) observer.current.disconnect();
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && hasMore) {
+                loadData(offset);
+            }
+        });
+        if (node) observer.current.observe(node);
+    }, [isLoading, hasMore, offset]);
 
     const uniqueUsers = Array.from(new Set(movements.map(m => m?.user_name))).filter(Boolean);
 
@@ -50,6 +87,17 @@ const CashMovementsReport = () => {
             const search = searchTerm.toLowerCase();
             const reason = (m.reason || '').toLowerCase();
             const uname = (m.user_name || '').toLowerCase();
+
+            // Simple search filter: if using search, check current item or user
+            // Note: Since we are grouping, ideally we want to show the GROUP if any of its items match,
+            // OR if the group user matches.
+            // The current logic filters INDIVIDUAL items.
+            // If we filter individual items, we might end up with empty groups or groups with partial items.
+            // Let's stick to the existing logic which seems to filter inputs before grouping?
+            // Wait, existing logic was:
+            // "if (searchTerm && !reason.includes(search) && !uname.includes(search)) return;"
+            // This filters OUT items that don't match.
+            // If all items in a group are filtered out, the group won't exist (unless the opening matches).
 
             if (searchTerm && !reason.includes(search) && !uname.includes(search)) return;
             if (filterUser && m.user_name !== filterUser) return;
@@ -135,13 +183,18 @@ const CashMovementsReport = () => {
             </div>
 
             <div className="space-y-4">
-                {isLoading ? (
-                    <div className="text-center py-12 text-gray-500">Cargando movimientos...</div>
-                ) : groupedMovements.length === 0 ? (
+                {groupedMovements.length === 0 && !isLoading && (
                     <div className="text-center py-12 text-gray-500">No se encontraron registros.</div>
-                ) : (
-                    groupedMovements.map(group => (
-                        <div key={group.register_id} className="glass-card p-0 overflow-hidden border border-[var(--glass-border)]">
+                )}
+
+                {groupedMovements.map((group, index) => {
+                    const isLast = groupedMovements.length === index + 1;
+                    return (
+                        <div
+                            key={group.register_id}
+                            ref={isLast ? lastGroupRef : null}
+                            className="glass-card p-0 overflow-hidden border border-[var(--glass-border)]"
+                        >
 
                             {/* Group Header (Turn) */}
                             <div
@@ -173,12 +226,7 @@ const CashMovementsReport = () => {
                                             -${group.totalOut.toLocaleString('es-CL')}
                                         </span>
                                     </div>
-                                    <div className="text-right pl-4 border-l border-white/10">
-                                        <span className="text-xs text-gray-500 uppercase block">Balance Caja</span>
-                                        <span className="text-[var(--color-primary)] font-bold font-mono text-xl">
-                                            ${group.balance.toLocaleString('es-CL')}
-                                        </span>
-                                    </div>
+
 
                                     <div className={cn("transition-transform duration-300", expandedGroups[group.register_id] ? "rotate-180" : "")}>
                                         <ChevronDown size={20} className="text-gray-400" />
@@ -226,12 +274,17 @@ const CashMovementsReport = () => {
                                                 </tr>
                                             ))}
                                         </tbody>
-                                        {/* Footer per group if needed, effectively duplicate of header balance */}
                                     </table>
                                 </div>
                             )}
                         </div>
-                    ))
+                    );
+                })}
+
+                {isLoading && (
+                    <div className="text-center py-4 text-[var(--color-primary)] animate-pulse">
+                        Cargando más registros...
+                    </div>
                 )}
             </div>
         </div>

@@ -85,7 +85,7 @@ const Register = () => {
                     </div>
                     <h1 className="text-3xl font-bold text-[var(--color-text)] tracking-tight mb-2">Crear cuenta POSVECI</h1>
                     <p className="text-[var(--color-text-muted)] text-sm">
-                        Comienza tu prueba gratuita de 14 días
+                        Comienza tu prueba gratuita de 15 días
                     </p>
                 </div>
 
@@ -259,7 +259,7 @@ const Register = () => {
                         <p className="text-[var(--color-primary)] font-bold text-sm mb-3">✨ Incluye en tu prueba gratuita:</p>
                         <ul className="space-y-2">
                             {[
-                                '14 días de acceso completo',
+                                '15 días de acceso completo',
                                 'Sin tarjeta de crédito requerida',
                                 'Configuración guiada',
                                 'Soporte por email'

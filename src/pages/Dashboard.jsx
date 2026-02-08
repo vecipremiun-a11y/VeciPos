@@ -196,29 +196,50 @@ const Dashboard = () => {
                 <div className="glass-card h-[400px] overflow-hidden flex flex-col">
                     <h3 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Actividad Reciente</h3>
                     <div className="space-y-4 overflow-y-auto flex-1 pr-2 custom-scrollbar">
-                        {recentSales.map((sale) => ( // Using recentSales instead of broad 'sales'
-                            <div key={sale.id} className="flex items-center gap-3 p-3 hover:bg-[var(--glass-bg)] rounded-lg transition-colors border border-transparent hover:border-[var(--glass-border)]">
-                                <div className="w-10 h-10 rounded-full bg-[var(--color-primary)]/20 flex flex-col items-center justify-center text-[var(--color-primary)] text-xs font-bold">
-                                    <span>#{String(sale.id).slice(-4)}</span>
+                        {recentSales.map((sale) => {
+                            const getPaymentMethodStyle = (method) => {
+                                const styles = {
+                                    'Efectivo': 'bg-green-500/20 text-green-400 border-green-500/30',
+                                    'Tarjeta': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+                                    'Transferencia': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+                                    'Mixto': 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+                                    'Fiado': 'bg-red-500/20 text-red-400 border-red-500/30',
+                                    'default': 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                                };
+                                return styles[method] || styles['default'];
+                            };
+
+                            const paymentMethodRaw = sale.paymentMethod || sale.payment_method || 'Efectivo';
+                            // Normalize in case it's 'Mixto' or others
+                            const paymentMethod = paymentMethodRaw === 'Mixto' ? 'Mixto' : paymentMethodRaw;
+                            const style = getPaymentMethodStyle(paymentMethod);
+
+                            return (
+                                <div key={sale.id} className="flex items-center gap-3 p-3 hover:bg-[var(--glass-bg)] rounded-lg transition-colors border border-transparent hover:border-[var(--glass-border)]">
+                                    <div className="w-10 h-10 rounded-full bg-[var(--color-primary)]/20 flex flex-col items-center justify-center text-[var(--color-primary)] text-xs font-bold">
+                                        <span>#{String(sale.id).slice(-4)}</span>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className={`text-[10px] px-2 py-0.5 rounded border font-bold uppercase tracking-wider ${style}`}>
+                                                {paymentMethod}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-[var(--color-text-muted)]">
+                                            {format(new Date(sale.date), "d MMM, HH:mm", { locale: es })}
+                                        </p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-sm font-bold text-[var(--color-text)]">
+                                            ${parseFloat(sale.total).toLocaleString('es-CL')}
+                                        </p>
+                                        <p className="text-[10px] text-[var(--color-text-muted)]">
+                                            {(sale.items && sale.items.length) || 0} prod.
+                                        </p>
+                                    </div>
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-[var(--color-text)] truncate font-medium">
-                                        {sale.method === 'Mixto' ? 'Pago Mixto' : sale.method || 'Venta'}
-                                    </p>
-                                    <p className="text-xs text-[var(--color-text-muted)]">
-                                        {formatInCompanyTime(sale.date, currentCompanyTimezone, "d MMM, HH:mm")}
-                                    </p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-sm font-bold text-[var(--color-text)]">
-                                        ${parseFloat(sale.total).toLocaleString('es-CL')}
-                                    </p>
-                                    <p className="text-[10px] text-[var(--color-text-muted)]">
-                                        {(sale.items && sale.items.length) || 0} prod.
-                                    </p>
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                         {recentSales.length === 0 && (
                             <p className="text-[var(--color-text-muted)] text-center py-10">No hay ventas recientes.</p>
                         )}
