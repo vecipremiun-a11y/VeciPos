@@ -226,8 +226,8 @@
   }
 }
 
-/* Custom breakpoint for wide screens (1400px+) - 4 columns */
-@media (min-width: 1400px) {
+/* Custom breakpoint for wide screens (1380px+) - 4 columns */
+@media (min-width: 1380px) {
   .pos-product-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
   }
