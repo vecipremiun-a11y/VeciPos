@@ -219,15 +219,15 @@
   }
 }
 
-/* Custom breakpoint for desktop screens (1240px+) - 3 columns */
-@media (min-width: 1240px) {
+/* Custom breakpoint for desktop screens (1200px+) - 3 columns */
+@media (min-width: 1200px) {
   .pos-product-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   }
 }
 
-/* Custom breakpoint for wide screens (1380px+) - 4 columns */
-@media (min-width: 1380px) {
+/* Custom breakpoint for wide screens (1340px+) - 4 columns */
+@media (min-width: 1340px) {
   .pos-product-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
   }
