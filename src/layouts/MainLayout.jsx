@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
@@ -55,7 +55,8 @@ const MainLayout = () => {
                 { icon: Tag, label: 'Categorías', path: '/categories', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
                 { icon: Truck, label: 'Proveedores', path: '/suppliers', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
                 { icon: FileText, label: 'Facturas', path: '/invoices', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
-                { icon: ClipboardList, label: 'Compras', path: '/purchases', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] }
+                { icon: ClipboardList, label: 'Compras', path: '/purchases', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
+                { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] }
             ]
         },
         {
@@ -68,7 +69,8 @@ const MainLayout = () => {
                 { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
                 { icon: DollarSign, label: 'Cierre de Caja', path: '/reports/closures', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
                 { icon: ArrowLeftRight, label: 'Movimientos de Caja', path: '/reports/movements', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
-                { icon: Receipt, label: 'Pagos Facturas', path: '/reports/invoice-payments', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] }
+                { icon: Receipt, label: 'Pagos Facturas', path: '/reports/invoice-payments', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
+                { icon: TrendingUp, label: 'Utilidad', path: '/reports/profit', roles: ['Administrador', 'super_admin', 'owner'] }
             ]
         },
         { icon: Users, label: 'Usuarios', path: '/users', roles: ['Administrador', 'super_admin', 'owner'] },

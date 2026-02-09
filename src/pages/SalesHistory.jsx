@@ -272,6 +272,26 @@ const SalesHistory = () => {
                             <option value="Crédito" className="bg-[var(--color-surface)]">Crédito</option>
                         </select>
                     </div>
+
+                    {/* Sale ID Search */}
+                    <div className="flex items-center gap-1.5 bg-[var(--glass-bg)] text-[var(--color-text)] px-3 py-1.5 lg:px-4 lg:py-2 rounded-xl border-b-2 lg:border-b-4 border-black/50 shadow-lg text-xs lg:text-sm font-bold">
+                        <Search size={14} className="text-[var(--color-primary)]" />
+                        <input
+                            type="text"
+                            placeholder="N° Boleta"
+                            className="bg-transparent border-none outline-none text-xs lg:text-sm font-bold w-20 lg:w-24 placeholder:text-[var(--color-text-muted)]"
+                            value={saleIdFilter}
+                            onChange={(e) => setSaleIdFilter(e.target.value.replace(/\D/g, ''))}
+                        />
+                        {saleIdFilter && (
+                            <button
+                                onClick={() => setSaleIdFilter('')}
+                                className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] ml-1"
+                            >
+                                <X size={12} />
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -438,6 +458,17 @@ const SalesHistory = () => {
                                                             <span>{formatCurrency(selectedSale.paymentDetails.change || 0, currentCurrency)}</span>
                                                         </div>
                                                     </>
+                                                )}
+                                                {selectedSale.paymentMethod === 'Crédito' && (
+                                                    <div className="flex justify-between text-sm text-[var(--color-text-muted)] mt-2 pt-2 border-t border-[var(--glass-border)]">
+                                                        <span className="flex items-center gap-1">
+                                                            <User size={14} className="text-orange-400" />
+                                                            Cliente Fiado
+                                                        </span>
+                                                        <span className="text-orange-400 font-semibold">
+                                                            {selectedSale.clientName || selectedSale.client_name || 'No especificado'}
+                                                        </span>
+                                                    </div>
                                                 )}
                                             </div>
 
@@ -673,6 +704,17 @@ const SalesHistory = () => {
                                                 <span>{formatCurrency(selectedSale.paymentDetails.change || 0, currentCurrency)}</span>
                                             </div>
                                         </>
+                                    )}
+                                    {selectedSale.paymentMethod === 'Crédito' && (
+                                        <div className="flex justify-between text-sm text-[var(--color-text-muted)] mt-2 pt-2 border-t border-[var(--glass-border)]">
+                                            <span className="flex items-center gap-1">
+                                                <User size={14} className="text-orange-400" />
+                                                Cliente Fiado
+                                            </span>
+                                            <span className="text-orange-400 font-semibold">
+                                                {selectedSale.clientName || selectedSale.client_name || 'No especificado'}
+                                            </span>
+                                        </div>
                                     )}
                                 </div>
 

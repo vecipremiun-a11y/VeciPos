@@ -14,6 +14,7 @@ import Invoices from './pages/Invoices';
 import Categories from './pages/Categories';
 import Suppliers from './pages/Suppliers';
 import Purchases from './pages/Purchases';
+import ProductProfile from './pages/ProductProfile';
 import Users from './pages/Users';
 import Reports from './pages/Reports';
 import ExpiringProductsReport from './pages/ExpiringProductsReport';
@@ -30,6 +31,7 @@ import RequireAdmin from './components/RequireAdmin';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminCompanies from './pages/admin/AdminCompanies';
 import SupportInbox from './pages/admin/SupportInbox';
+import ProfitReport from './pages/admin/ProfitReport';
 
 import React, { useEffect } from 'react';
 import { useStore } from './store/useStore';
@@ -178,6 +180,7 @@ function App() {
           <Route path="categories" element={<Categories />} />
           <Route path="suppliers" element={<Suppliers />} />
           <Route path="purchases" element={<Purchases />} />
+          <Route path="product-profile" element={<ProductProfile />} />
           <Route path="users" element={<Users />} />
           <Route path="clients" element={<Clients />} />
           <Route path="orders" element={<Orders />} />
@@ -187,6 +190,7 @@ function App() {
           <Route path="reports/closures" element={<CashClosuresReport />} />
           <Route path="reports/movements" element={<CashMovementsReport />} />
           <Route path="reports/invoice-payments" element={<InvoicePaymentsReport />} />
+          <Route path="reports/profit" element={<ProfitReport />} />
           <Route path="settings" element={<Settings />} />
         </Route>
 

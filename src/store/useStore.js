@@ -2664,6 +2664,9 @@ export const useStore = create(persist((set, get) => ({
                 })
             }));
 
+            // UPDATE AGGREGATION
+            await get().updateSupplierPurchaseSummary({ ...purchase, date: purchase.date || new Date().toISOString() }, activeCompanyId);
+
             return { success: true };
         } catch (e) {
             console.error("Add purchase error", e);
@@ -3462,6 +3465,19 @@ export const useStore = create(persist((set, get) => ({
                 const postSaleCashRegister = get().cashRegister;
                 if (postSaleCashRegister && postSaleCashRegister.id) {
                     get().refreshRegisterStats(postSaleCashRegister.id);
+                }
+
+                // Actualizar agregaciones para reportes rápidos (no bloquea la venta si falla)
+                try {
+                    await get().updateAllAggregations(
+                        { ...sale, total: saleTotal, date: new Date().toISOString() },
+                        currentUser?.id,
+                        currentUser?.name,
+                        activeCompanyId,
+                        get().currentCompanyTimezone
+                    );
+                } catch (aggErr) {
+                    console.error('⚠️ Aggregation update failed (sale still OK):', aggErr);
                 }
 
                 return { success: true };
@@ -5170,7 +5186,629 @@ export const useStore = create(persist((set, get) => ({
             console.error('Error marking as read by admin:', e);
             return { success: false, error: e.message };
         }
-    }
+    },
+
+    // ═══════════════════════════════════════════════════════════════
+    // SISTEMA DE AGREGACIÓN Y ESTADÍSTICAS
+    // ═══════════════════════════════════════════════════════════════
+
+    updateSalesDailySummary: async (saleData, companyId, timezone) => {
+        try {
+            const saleDate = new Date(saleData.date);
+            const dateStr = saleDate.toLocaleDateString('en-CA');
+            const summaryId = `summary_${companyId}_${dateStr}`;
+
+            const existing = await turso.execute({
+                sql: 'SELECT * FROM sales_daily_summary WHERE company_id = ? AND date = ?',
+                args: [companyId, dateStr]
+            });
+
+            if (existing.rows.length === 0) {
+                const now = new Date().toISOString();
+                await turso.execute({
+                    sql: `INSERT INTO sales_daily_summary 
+                          (id, company_id, date, total_sales, total_amount, total_cost, total_profit,
+                           cash_sales, cash_amount, card_sales, card_amount, transfer_sales, transfer_amount,
+                           mixed_sales, mixed_amount, total_items_sold, created_at, updated_at)
+                          VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?)`,
+                    args: [summaryId, companyId, dateStr, now, now]
+                });
+            }
+
+            const itemsSold = saleData.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
+            const cost = saleData.items?.reduce((sum, item) => sum + (item.cost || 0) * item.quantity, 0) || 0;
+            const profit = saleData.total - cost;
+
+            let paymentColumn = 'cash';
+            if (saleData.paymentMethod === 'Tarjeta') paymentColumn = 'card';
+            else if (saleData.paymentMethod === 'Transferencia') paymentColumn = 'transfer';
+            else if (saleData.paymentMethod === 'Mixto') paymentColumn = 'mixed';
+
+            await turso.execute({
+                sql: `UPDATE sales_daily_summary SET
+                        total_sales = total_sales + 1,
+                        total_amount = total_amount + ?,
+                        total_cost = total_cost + ?,
+                        total_profit = total_profit + ?,
+                        ${paymentColumn}_sales = ${paymentColumn}_sales + 1,
+                        ${paymentColumn}_amount = ${paymentColumn}_amount + ?,
+                        total_items_sold = total_items_sold + ?,
+                        updated_at = ?
+                      WHERE company_id = ? AND date = ?`,
+                args: [saleData.total, cost, profit, saleData.total, itemsSold, new Date().toISOString(), companyId, dateStr]
+            });
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating daily summary:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updateVendorDailyPerformance: async (saleData, userId, userName, companyId) => {
+        try {
+            const saleDate = new Date(saleData.date);
+            const dateStr = saleDate.toLocaleDateString('en-CA');
+            const performanceId = `perf_${companyId}_${userId}_${dateStr}`;
+
+            const existing = await turso.execute({
+                sql: 'SELECT * FROM vendor_daily_performance WHERE company_id = ? AND user_id = ? AND date = ?',
+                args: [companyId, userId, dateStr]
+            });
+
+            const itemsSold = saleData.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
+            const cost = saleData.items?.reduce((sum, item) => sum + (item.cost || 0) * item.quantity, 0) || 0;
+            const profit = saleData.total - cost;
+            const saleTime = new Date(saleData.date).toISOString();
+
+            if (existing.rows.length === 0) {
+                const now = new Date().toISOString();
+                await turso.execute({
+                    sql: `INSERT INTO vendor_daily_performance
+                          (id, company_id, user_id, user_name, date, total_sales, total_amount, total_profit,
+                           avg_ticket, total_items_sold, first_sale_time, last_sale_time, created_at, updated_at)
+                          VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    args: [performanceId, companyId, userId, userName, dateStr, saleData.total,
+                        profit, saleData.total, itemsSold, saleTime, saleTime, now, now]
+                });
+            } else {
+                const current = existing.rows[0];
+                const newTotalSales = current.total_sales + 1;
+                const newTotalAmount = current.total_amount + saleData.total;
+                const newAvgTicket = newTotalAmount / newTotalSales;
+
+                await turso.execute({
+                    sql: `UPDATE vendor_daily_performance SET
+                            total_sales = ?,
+                            total_amount = ?,
+                            total_profit = total_profit + ?,
+                            avg_ticket = ?,
+                            total_items_sold = total_items_sold + ?,
+                            last_sale_time = ?,
+                            updated_at = ?
+                          WHERE id = ?`,
+                    args: [newTotalSales, newTotalAmount, profit, newAvgTicket, itemsSold,
+                        saleTime, new Date().toISOString(), performanceId]
+                });
+            }
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating vendor performance:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updateProductDailyProfit: async (items, companyId, date) => {
+        try {
+            const dateStr = new Date(date).toLocaleDateString('en-CA');
+
+            for (const item of items) {
+                const profitId = `profit_${companyId}_${item.id}_${dateStr}`;
+
+                const existing = await turso.execute({
+                    sql: 'SELECT * FROM product_daily_profit WHERE company_id = ? AND product_id = ? AND date = ?',
+                    args: [companyId, item.id, dateStr]
+                });
+
+                const revenue = item.price * item.quantity;
+                const cost = (item.cost || 0) * item.quantity;
+                const profit = revenue - cost;
+                const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+
+                if (existing.rows.length === 0) {
+                    const now = new Date().toISOString();
+                    await turso.execute({
+                        sql: `INSERT INTO product_daily_profit
+                              (id, company_id, product_id, product_name, date, units_sold, total_revenue,
+                               total_cost, total_profit, profit_margin, created_at, updated_at)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        args: [profitId, companyId, item.id, item.name, dateStr, item.quantity,
+                            revenue, cost, profit, margin, now, now]
+                    });
+                } else {
+                    const current = existing.rows[0];
+                    const newRevenue = current.total_revenue + revenue;
+                    const newCost = current.total_cost + cost;
+                    const newProfit = current.total_profit + profit;
+                    const newMargin = newRevenue > 0 ? (newProfit / newRevenue) * 100 : 0;
+
+                    await turso.execute({
+                        sql: `UPDATE product_daily_profit SET
+                                units_sold = units_sold + ?,
+                                total_revenue = ?,
+                                total_cost = ?,
+                                total_profit = ?,
+                                profit_margin = ?,
+                                updated_at = ?
+                              WHERE id = ?`,
+                        args: [item.quantity, newRevenue, newCost, newProfit, newMargin,
+                        new Date().toISOString(), profitId]
+                    });
+                }
+            }
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating product profit:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updateProductMovementStats: async (items, companyId) => {
+        try {
+            const now = new Date().toISOString();
+
+            for (const item of items) {
+                const statsId = `stats_${companyId}_${item.id}`;
+
+                const existing = await turso.execute({
+                    sql: 'SELECT * FROM product_movement_stats WHERE company_id = ? AND product_id = ?',
+                    args: [companyId, item.id]
+                });
+
+                const revenue = item.price * item.quantity;
+
+                if (existing.rows.length === 0) {
+                    await turso.execute({
+                        sql: `INSERT INTO product_movement_stats
+                              (id, company_id, product_id, product_name, total_sold_all_time,
+                               total_revenue_all_time, sold_last_7_days, revenue_last_7_days,
+                               sold_last_30_days, revenue_last_30_days, last_sale_date, updated_at)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        args: [statsId, companyId, item.id, item.name, item.quantity, revenue,
+                            item.quantity, revenue, item.quantity, revenue, now, now]
+                    });
+                } else {
+                    await turso.execute({
+                        sql: `UPDATE product_movement_stats SET
+                                total_sold_all_time = total_sold_all_time + ?,
+                                total_revenue_all_time = total_revenue_all_time + ?,
+                                sold_last_7_days = sold_last_7_days + ?,
+                                revenue_last_7_days = revenue_last_7_days + ?,
+                                sold_last_30_days = sold_last_30_days + ?,
+                                revenue_last_30_days = revenue_last_30_days + ?,
+                                last_sale_date = ?,
+                                updated_at = ?
+                              WHERE id = ?`,
+                        args: [item.quantity, revenue, item.quantity, revenue, item.quantity,
+                            revenue, now, now, statsId]
+                    });
+                }
+            }
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating product stats:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updateHourlySalesStats: async (saleData, companyId) => {
+        try {
+            const saleDate = new Date(saleData.date);
+            const dateStr = saleDate.toLocaleDateString('en-CA');
+            const hour = saleDate.getHours();
+            const hourlyId = `hourly_${companyId}_${dateStr}_${hour}`;
+
+            const existing = await turso.execute({
+                sql: 'SELECT * FROM hourly_sales_stats WHERE company_id = ? AND date = ? AND hour = ?',
+                args: [companyId, dateStr, hour]
+            });
+
+            if (existing.rows.length === 0) {
+                const now = new Date().toISOString();
+                await turso.execute({
+                    sql: `INSERT INTO hourly_sales_stats
+                          (id, company_id, date, hour, total_sales, total_amount, created_at, updated_at)
+                          VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
+                    args: [hourlyId, companyId, dateStr, hour, saleData.total, now, now]
+                });
+            } else {
+                await turso.execute({
+                    sql: `UPDATE hourly_sales_stats SET
+                            total_sales = total_sales + 1,
+                            total_amount = total_amount + ?,
+                            updated_at = ?
+                          WHERE id = ?`,
+                    args: [saleData.total, new Date().toISOString(), hourlyId]
+                });
+            }
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating hourly stats:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updateSupplierPurchaseSummary: async (purchase, companyId) => {
+        try {
+            const purchaseDate = new Date(purchase.date);
+            const dateStr = purchaseDate.toLocaleDateString('en-CA');
+            const supplierId = purchase.supplierId;
+            const summaryId = `supp_buy_${companyId}_${supplierId}_${dateStr}`;
+            const totalItems = purchase.items.reduce((sum, item) => sum + Number(item.quantity), 0);
+
+            const existing = await turso.execute({
+                sql: 'SELECT * FROM supplier_purchase_summary WHERE company_id = ? AND supplier_id = ? AND date = ?',
+                args: [companyId, supplierId, dateStr]
+            });
+
+            if (existing.rows.length === 0) {
+                const now = new Date().toISOString();
+                await turso.execute({
+                    sql: `INSERT INTO supplier_purchase_summary
+                          (id, company_id, supplier_id, supplier_name, date, total_purchases, total_amount, total_items, created_at, updated_at)
+                          VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+                    args: [summaryId, companyId, supplierId, purchase.supplierName, dateStr, purchase.total, totalItems, now, now]
+                });
+            } else {
+                await turso.execute({
+                    sql: `UPDATE supplier_purchase_summary SET
+                            total_purchases = total_purchases + 1,
+                            total_amount = total_amount + ?,
+                            total_items = total_items + ?,
+                            updated_at = ?
+                          WHERE id = ?`,
+                    args: [purchase.total, totalItems, new Date().toISOString(), summaryId]
+                });
+            }
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating supplier summary:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+
+    updateAllAggregations: async (saleData, userId, userName, companyId, timezone) => {
+        try {
+            await Promise.all([
+                get().updateSalesDailySummary(saleData, companyId, timezone),
+                get().updateVendorDailyPerformance(saleData, userId, userName, companyId),
+                get().updateProductDailyProfit(saleData.items, companyId, saleData.date),
+                get().updateProductMovementStats(saleData.items, companyId),
+                get().updateHourlySalesStats(saleData, companyId)
+            ]);
+
+            console.log('✅ All aggregations updated');
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating aggregations:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // ═══════════════════════════════════════════════════════════════
+    // REPORTES INSTANTÁNEOS (PRE-CALCULADOS)
+    // ═══════════════════════════════════════════════════════════════
+
+    getSalesSummaryByDate: async (date, companyId) => {
+        try {
+            const result = await turso.execute({
+                sql: 'SELECT * FROM sales_daily_summary WHERE company_id = ? AND date = ?',
+                args: [companyId || get().activeCompanyId, date]
+            });
+            return { success: true, summary: result.rows[0] || null };
+        } catch (e) {
+            console.error('Error getting sales summary:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getSalesSummaryByRange: async (startDate, endDate, companyId) => {
+        try {
+            const result = await turso.execute({
+                sql: `SELECT date, total_sales, total_amount, total_profit,
+                        cash_amount, card_amount, transfer_amount
+                      FROM sales_daily_summary 
+                      WHERE company_id = ? AND date BETWEEN ? AND ?
+                      ORDER BY date ASC`,
+                args: [companyId || get().activeCompanyId, startDate, endDate]
+            });
+
+            const totals = result.rows.reduce((acc, day) => ({
+                totalSales: acc.totalSales + day.total_sales,
+                totalAmount: acc.totalAmount + day.total_amount,
+                totalProfit: acc.totalProfit + day.total_profit,
+                cashAmount: acc.cashAmount + day.cash_amount,
+                cardAmount: acc.cardAmount + day.card_amount,
+                transferAmount: acc.transferAmount + day.transfer_amount
+            }), { totalSales: 0, totalAmount: 0, totalProfit: 0, cashAmount: 0, cardAmount: 0, transferAmount: 0 });
+
+            return { success: true, daily: result.rows, totals };
+        } catch (e) {
+            console.error('Error getting sales range:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    compareSalesWithPreviousPeriod: async (startDate, endDate, companyId) => {
+        try {
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+
+            const prevEnd = new Date(start);
+            prevEnd.setDate(prevEnd.getDate() - 1);
+            const prevStart = new Date(prevEnd);
+            prevStart.setDate(prevStart.getDate() - daysDiff);
+
+            const prevStartStr = prevStart.toLocaleDateString('en-CA');
+            const prevEndStr = prevEnd.toLocaleDateString('en-CA');
+
+            const current = await get().getSalesSummaryByRange(startDate, endDate, companyId);
+            const previous = await get().getSalesSummaryByRange(prevStartStr, prevEndStr, companyId);
+
+            if (!current.success || !previous.success) {
+                return { success: false, error: 'Error fetching data' };
+            }
+
+            const comparison = {
+                current: current.totals,
+                previous: previous.totals,
+                changes: {
+                    salesChange: ((current.totals.totalSales - previous.totals.totalSales) / (previous.totals.totalSales || 1)) * 100,
+                    amountChange: ((current.totals.totalAmount - previous.totals.totalAmount) / (previous.totals.totalAmount || 1)) * 100,
+                    profitChange: ((current.totals.totalProfit - previous.totals.totalProfit) / (previous.totals.totalProfit || 1)) * 100
+                }
+            };
+
+            return { success: true, comparison };
+        } catch (e) {
+            console.error('Error comparing periods:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getVendorRanking: async (startDate, endDate, companyId) => {
+        try {
+            const result = await turso.execute({
+                sql: `SELECT user_id, user_name,
+                        SUM(total_sales) as total_sales,
+                        SUM(total_amount) as total_amount,
+                        SUM(total_profit) as total_profit,
+                        AVG(avg_ticket) as avg_ticket,
+                        SUM(total_items_sold) as total_items_sold
+                      FROM vendor_daily_performance
+                      WHERE company_id = ? AND date BETWEEN ? AND ?
+                      GROUP BY user_id, user_name
+                      ORDER BY total_amount DESC`,
+                args: [companyId || get().activeCompanyId, startDate, endDate]
+            });
+            return { success: true, ranking: result.rows };
+        } catch (e) {
+            console.error('Error getting vendor ranking:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getTopProducts: async (startDate, endDate, limit = 10, companyId) => {
+        try {
+            const result = await turso.execute({
+                sql: `SELECT product_id, product_name,
+                        SUM(units_sold) as total_sold,
+                        SUM(total_revenue) as total_revenue,
+                        SUM(total_profit) as total_profit,
+                        AVG(profit_margin) as avg_margin
+                      FROM product_daily_profit
+                      WHERE company_id = ? AND date BETWEEN ? AND ?
+                      GROUP BY product_id, product_name
+                      ORDER BY total_sold DESC
+                      LIMIT ?`,
+                args: [companyId || get().activeCompanyId, startDate, endDate, limit]
+            });
+            return { success: true, products: result.rows };
+        } catch (e) {
+            console.error('Error getting top products:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getBestMarginProducts: async (startDate, endDate, limit = 10, companyId) => {
+        try {
+            const result = await turso.execute({
+                sql: `SELECT product_id, product_name,
+                        SUM(units_sold) as total_sold,
+                        SUM(total_revenue) as total_revenue,
+                        SUM(total_profit) as total_profit,
+                        AVG(profit_margin) as avg_margin
+                      FROM product_daily_profit
+                      WHERE company_id = ? AND date BETWEEN ? AND ?
+                      GROUP BY product_id, product_name
+                      HAVING total_sold > 0
+                      ORDER BY avg_margin DESC
+                      LIMIT ?`,
+                args: [companyId || get().activeCompanyId, startDate, endDate, limit]
+            });
+            return { success: true, products: result.rows };
+        } catch (e) {
+            console.error('Error getting best margin products:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getPeakHoursAnalysis: async (startDate, endDate, companyId) => {
+        try {
+            const result = await turso.execute({
+                sql: `SELECT hour,
+                        SUM(total_sales) as total_sales,
+                        SUM(total_amount) as total_amount,
+                        AVG(total_amount / NULLIF(total_sales, 0)) as avg_ticket
+                      FROM hourly_sales_stats
+                      WHERE company_id = ? AND date BETWEEN ? AND ?
+                      GROUP BY hour
+                      ORDER BY hour ASC`,
+                args: [companyId || get().activeCompanyId, startDate, endDate]
+            });
+            return { success: true, hours: result.rows };
+        } catch (e) {
+            console.error('Error getting peak hours:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getSupplierPurchaseSummary: async (startDate, endDate, companyId) => {
+        try {
+            const result = await turso.execute({
+                sql: `SELECT supplier_id, supplier_name,
+                        SUM(total_purchases) as total_purchases,
+                        SUM(total_amount) as total_amount,
+                        SUM(total_items) as total_items
+                      FROM supplier_purchase_summary
+                      WHERE company_id = ? AND date BETWEEN ? AND ?
+                      GROUP BY supplier_id, supplier_name
+                      ORDER BY total_amount DESC`,
+                args: [companyId || get().activeCompanyId, startDate, endDate]
+            });
+            return { success: true, suppliers: result.rows };
+        } catch (e) {
+            console.error('Error getting supplier summary:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getSlowMovingProducts: async (companyId) => {
+        try {
+            const result = await turso.execute({
+                sql: `SELECT product_id, product_name,
+                        total_sold_all_time, sold_last_7_days, sold_last_30_days,
+                        avg_daily_sales, last_sale_date
+                      FROM product_movement_stats
+                      WHERE company_id = ? AND avg_daily_sales < 1
+                      ORDER BY avg_daily_sales ASC, last_sale_date ASC
+                      LIMIT 20`,
+                args: [companyId || get().activeCompanyId]
+            });
+            return { success: true, products: result.rows };
+        } catch (e) {
+            console.error('Error getting slow moving products:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getAggregatedDashboardMetrics: async (companyId) => {
+        try {
+            const today = new Date().toLocaleDateString('en-CA');
+            const yesterday = new Date(Date.now() - 86400000).toLocaleDateString('en-CA');
+
+            const [todayData, yesterdayData] = await Promise.all([
+                get().getSalesSummaryByDate(today, companyId),
+                get().getSalesSummaryByDate(yesterday, companyId)
+            ]);
+
+            const todaySum = todayData.summary || {};
+            const yesterdaySum = yesterdayData.summary || {};
+
+            const metrics = {
+                today: {
+                    sales: todaySum.total_sales || 0,
+                    amount: todaySum.total_amount || 0,
+                    profit: todaySum.total_profit || 0,
+                    items: todaySum.total_items_sold || 0
+                },
+                yesterday: {
+                    sales: yesterdaySum.total_sales || 0,
+                    amount: yesterdaySum.total_amount || 0,
+                    profit: yesterdaySum.total_profit || 0,
+                    items: yesterdaySum.total_items_sold || 0
+                },
+                changes: {
+                    salesChange: ((todaySum.total_sales || 0) - (yesterdaySum.total_sales || 0)) / ((yesterdaySum.total_sales || 1)) * 100,
+                    amountChange: ((todaySum.total_amount || 0) - (yesterdaySum.total_amount || 0)) / ((yesterdaySum.total_amount || 1)) * 100,
+                    profitChange: ((todaySum.total_profit || 0) - (yesterdaySum.total_profit || 0)) / ((yesterdaySum.total_profit || 1)) * 100
+                }
+            };
+
+            return { success: true, metrics };
+        } catch (e) {
+            console.error('Error getting dashboard metrics:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // ═══════════════════════════════════════════════════════════════
+    // MANTENIMIENTO DE AGREGACIONES
+    // ═══════════════════════════════════════════════════════════════
+
+    cleanOldProductStats: async (companyId) => {
+        try {
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - 90);
+            const cutoffStr = cutoffDate.toLocaleDateString('en-CA');
+
+            await turso.execute({
+                sql: 'DELETE FROM product_daily_profit WHERE company_id = ? AND date < ?',
+                args: [companyId, cutoffStr]
+            });
+
+            await turso.execute({
+                sql: 'DELETE FROM hourly_sales_stats WHERE company_id = ? AND date < ?',
+                args: [companyId, cutoffStr]
+            });
+
+            console.log('✅ Old stats cleaned');
+            return { success: true };
+        } catch (e) {
+            console.error('Error cleaning stats:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    recalculateProductAverages: async (companyId) => {
+        try {
+            const products = await turso.execute({
+                sql: 'SELECT DISTINCT product_id FROM product_movement_stats WHERE company_id = ?',
+                args: [companyId]
+            });
+
+            for (const p of products.rows) {
+                const sales = await turso.execute({
+                    sql: `SELECT SUM(units_sold) as total 
+                          FROM product_daily_profit 
+                          WHERE company_id = ? AND product_id = ? 
+                          AND date >= date('now', '-30 days')`,
+                    args: [companyId, p.product_id]
+                });
+
+                const total = sales.rows[0]?.total || 0;
+                const avgDaily = total / 30;
+
+                await turso.execute({
+                    sql: 'UPDATE product_movement_stats SET avg_daily_sales = ? WHERE company_id = ? AND product_id = ?',
+                    args: [avgDaily, companyId, p.product_id]
+                });
+            }
+
+            console.log('✅ Averages recalculated');
+            return { success: true };
+        } catch (e) {
+            console.error('Error recalculating averages:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
 }), {
     name: 'pos-storage',
     partialize: (state) => ({
@@ -5189,3 +5827,4 @@ export const useStore = create(persist((set, get) => ({
         state?.setHasHydrated(true);
     }
 }));
+
