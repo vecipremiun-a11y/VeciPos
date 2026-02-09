@@ -219,8 +219,15 @@
   }
 }
 
-/* Custom breakpoint for extra wide screens (1900px+) - 5 columns */
-@media (min-width: 1900px) {
+/* Custom breakpoint for wide screens (1450px+) - 4 columns */
+@media (min-width: 1450px) {
+  .pos-product-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Custom breakpoint for extra wide screens (1700px+) - 5 columns */
+@media (min-width: 1700px) {
   .pos-product-grid {
     grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
   }
