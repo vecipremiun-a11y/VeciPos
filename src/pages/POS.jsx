@@ -396,9 +396,10 @@ const POS = () => {
                     </div>
                 </div>
 
-                {/* Grid */}
+                {/* Grid - Responsive columns based on available space */}
+                {/* Mobile: min 180px, Tablet: min 200px, Desktop: 4→5→6 columns progressively */}
                 <div
-                    className="flex-1 overflow-y-auto pr-2 grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 min-[1801px]:grid-cols-7 min-[2201px]:grid-cols-8 gap-2 lg:gap-4 content-start pb-28 lg:pb-4 custom-scrollbar"
+                    className="pos-product-grid flex-1 overflow-y-auto pr-2 grid gap-2 lg:gap-4 content-start pb-28 lg:pb-4 custom-scrollbar grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
                     onScroll={handleScroll}
                 >
                     {isLoadingProducts ? (

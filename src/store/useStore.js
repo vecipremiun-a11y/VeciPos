@@ -309,6 +309,24 @@ export const useStore = create(persist((set, get) => ({
                 console.warn("Migration error for products wholesale columns:", e);
             }
 
+            // 9. Add Payment Tracking Columns to Purchases
+            try {
+                const purchasesInfo = await turso.execute(`PRAGMA table_info(purchases)`);
+                const hasAmountPaid = purchasesInfo.rows.some(col => col.name === 'amount_paid');
+                const hasPaymentDate = purchasesInfo.rows.some(col => col.name === 'payment_date');
+
+                if (!hasAmountPaid) {
+                    console.log('Adding amount_paid to purchases...');
+                    await turso.execute(`ALTER TABLE purchases ADD COLUMN amount_paid REAL DEFAULT 0`);
+                }
+                if (!hasPaymentDate) {
+                    console.log('Adding payment_date to purchases...');
+                    await turso.execute(`ALTER TABLE purchases ADD COLUMN payment_date TEXT`);
+                }
+            } catch (e) {
+                console.warn("Migration error for purchases payment columns:", e);
+            }
+
             // 6. Backfill User Permissions (Self-Healing)
             try {
                 const users = await turso.execute("SELECT * FROM users");
@@ -2550,7 +2568,7 @@ export const useStore = create(persist((set, get) => ({
             // Transaction: Insert Purchase + Update Product Stock/Cost
             const queries = [
                 {
-                    sql: "INSERT INTO purchases (supplier_id, supplier_name, invoice_number, date, total, items, status, user_id, is_credit, credit_days, expiry_date, deposit, payment_method, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    sql: "INSERT INTO purchases (supplier_id, supplier_name, invoice_number, date, total, items, status, user_id, is_credit, credit_days, expiry_date, deposit, payment_method, company_id, payment_observation, payment_document) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     args: [
                         purchase.supplierId,
                         purchase.supplierName,
@@ -2565,7 +2583,9 @@ export const useStore = create(persist((set, get) => ({
                         purchase.expiryDate || null,
                         purchase.deposit || 0,
                         purchase.paymentMethod || 'Efectivo',
-                        activeCompanyId
+                        activeCompanyId,
+                        purchase.observation || null,
+                        purchase.document || null
                     ]
                 }
             ];
@@ -2656,7 +2676,7 @@ export const useStore = create(persist((set, get) => ({
             const { activeCompanyId } = get();
             // Optimized query: Not selecting 'items' to keep list lightweight
             const result = await turso.execute({
-                sql: "SELECT id, supplier_name, invoice_number, date, total, status, is_credit, credit_days, expiry_date, deposit, payment_method, company_id FROM purchases WHERE company_id = ? ORDER BY date DESC LIMIT 50 OFFSET ?",
+                sql: "SELECT * FROM purchases WHERE company_id = ? ORDER BY date DESC LIMIT 50 OFFSET ?",
                 args: [activeCompanyId, offset]
             });
             return result.rows || [];

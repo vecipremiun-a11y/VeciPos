@@ -212,9 +212,17 @@
     from {
       background-position: 0 0;
     }
+
     to {
       background-position: 1000px 1000px;
     }
+  }
+}
+
+/* Custom breakpoint for extra wide screens (1900px+) - 5 columns */
+@media (min-width: 1900px) {
+  .pos-product-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
   }
 }
 

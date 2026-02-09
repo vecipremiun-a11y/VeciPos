@@ -19,6 +19,7 @@ import Reports from './pages/Reports';
 import ExpiringProductsReport from './pages/ExpiringProductsReport';
 import CashClosuresReport from './pages/CashClosuresReport';
 import CashMovementsReport from './pages/CashMovementsReport';
+import InvoicePaymentsReport from './pages/InvoicePaymentsReport';
 import Settings from './pages/Settings';
 import Clients from './pages/Clients';
 import Orders from './pages/Orders';
@@ -185,6 +186,7 @@ function App() {
           <Route path="reports/expiring" element={<ExpiringProductsReport />} />
           <Route path="reports/closures" element={<CashClosuresReport />} />
           <Route path="reports/movements" element={<CashMovementsReport />} />
+          <Route path="reports/invoice-payments" element={<InvoicePaymentsReport />} />
           <Route path="settings" element={<Settings />} />
         </Route>
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus, Edit, X, ArrowLeft } from 'lucide-react';
+import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus, Edit, X, ArrowLeft, Paperclip } from 'lucide-react';
 import ProductModal from '../components/ProductModal';
 
 const Purchases = () => {
@@ -31,7 +31,9 @@ const Purchases = () => {
         creditDays: '',
         expiryDate: '',
         deposit: '',
-        paymentMethod: 'Efectivo'
+        paymentMethod: 'Efectivo',
+        observation: '',
+        document: null
     });
     const [invoiceItems, setInvoiceItems] = useState([]);
 
@@ -215,6 +217,21 @@ const Purchases = () => {
 
         const supplier = suppliers.find(s => s.id === parseInt(invoiceData.supplierId));
 
+        // Convert document file to base64 if exists
+        let documentBase64 = null;
+        if (invoiceData.document) {
+            try {
+                documentBase64 = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(invoiceData.document);
+                });
+            } catch (err) {
+                console.error('Error converting document to base64:', err);
+            }
+        }
+
         const purchase = {
             supplierId: parseInt(invoiceData.supplierId),
             supplierName: supplier ? supplier.name : 'Unknown',
@@ -226,14 +243,16 @@ const Purchases = () => {
             creditDays: invoiceData.creditDays ? parseInt(invoiceData.creditDays) : null,
             expiryDate: invoiceData.expiryDate,
             deposit: invoiceData.deposit ? parseFloat(invoiceData.deposit) : 0,
-            paymentMethod: invoiceData.paymentMethod
+            paymentMethod: invoiceData.paymentMethod,
+            observation: invoiceData.observation || null,
+            document: documentBase64
         };
 
         const success = await addPurchase(purchase);
         if (success) {
             alert('Compra guardada exitosamente');
             setInvoiceItems([]);
-            setInvoiceData({ ...invoiceData, invoiceNumber: '' });
+            setInvoiceData({ ...invoiceData, invoiceNumber: '', observation: '', document: null });
         } else {
             alert('Error al guardar la compra');
         }
@@ -428,6 +447,35 @@ const Purchases = () => {
                                     <option value="Tarjeta">Tarjeta</option>
                                     <option value="Transferencia">Transferencia</option>
                                 </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Comprobante (opcional)</label>
+                                <label className="flex items-center gap-2 p-3 bg-[var(--color-surface)] border border-dashed border-[var(--glass-border)] rounded-lg cursor-pointer">
+                                    <Paperclip size={16} className="text-[var(--color-text-muted)]" />
+                                    <span className="text-sm text-[var(--color-text-muted)] truncate flex-1">
+                                        {invoiceData.document ? invoiceData.document.name : 'Adjuntar imagen o documento'}
+                                    </span>
+                                    {invoiceData.document && (
+                                        <button type="button" onClick={(e) => { e.preventDefault(); setInvoiceData({ ...invoiceData, document: null }); }} className="text-red-400">
+                                            <X size={16} />
+                                        </button>
+                                    )}
+                                    <input
+                                        type="file"
+                                        accept="image/*,.pdf"
+                                        onChange={(e) => setInvoiceData({ ...invoiceData, document: e.target.files?.[0] || null })}
+                                        className="hidden"
+                                    />
+                                </label>
+                            </div>
+                            <div>
+                                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Observación (opcional)</label>
+                                <textarea
+                                    value={invoiceData.observation}
+                                    onChange={(e) => setInvoiceData({ ...invoiceData, observation: e.target.value })}
+                                    placeholder="Notas de la compra..."
+                                    className="glass-input w-full resize-none h-16 text-sm"
+                                />
                             </div>
                         </div>
 
@@ -780,17 +828,43 @@ const Purchases = () => {
                                     </div>
                                 </div>
                             ) : (
-                                <div>
-                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Método de Pago</label>
-                                    <select
-                                        value={invoiceData.paymentMethod}
-                                        onChange={(e) => setInvoiceData({ ...invoiceData, paymentMethod: e.target.value })}
-                                        className="glass-input w-full"
-                                    >
-                                        <option value="Efectivo">Efectivo in Cash</option>
-                                        <option value="Tarjeta">Tarjeta Débito/Crédito</option>
-                                        <option value="Transferencia">Transferencia Bancaria</option>
-                                    </select>
+                                <div className="flex gap-4 items-end">
+                                    <div className="flex-1">
+                                        <label className="block text-xs text-[var(--color-text-muted)] mb-1">Método de Pago</label>
+                                        <select
+                                            value={invoiceData.paymentMethod}
+                                            onChange={(e) => setInvoiceData({ ...invoiceData, paymentMethod: e.target.value })}
+                                            className="glass-input w-full"
+                                        >
+                                            <option value="Efectivo">Efectivo in Cash</option>
+                                            <option value="Tarjeta">Tarjeta Débito/Crédito</option>
+                                            <option value="Transferencia">Transferencia Bancaria</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-[var(--color-text-muted)] mb-1">Comprobante</label>
+                                        <label className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-dashed border-[var(--glass-border)] rounded-lg cursor-pointer hover:bg-white/5 transition-colors">
+                                            <Paperclip size={18} className="text-[var(--color-text-muted)]" />
+                                            <span className="text-sm text-[var(--color-text-muted)] truncate max-w-[150px]">
+                                                {invoiceData.document ? invoiceData.document.name : 'Adjuntar'}
+                                            </span>
+                                            <input
+                                                type="file"
+                                                accept="image/*,.pdf"
+                                                onChange={(e) => setInvoiceData({ ...invoiceData, document: e.target.files?.[0] || null })}
+                                                className="hidden"
+                                            />
+                                        </label>
+                                    </div>
+                                    {invoiceData.document && (
+                                        <button
+                                            onClick={() => setInvoiceData({ ...invoiceData, document: null })}
+                                            className="p-2.5 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                            title="Quitar documento"
+                                        >
+                                            <X size={18} />
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -853,25 +927,38 @@ const Purchases = () => {
                         </div>
 
                         {/* Footer Totals */}
-                        <div className="bg-[var(--glass-bg)] p-4 border-t border-[var(--glass-border)] flex justify-between items-center gap-4">
-                            <div>
-                                <span className="text-[var(--color-text-muted)] text-sm">Items: {invoiceItems.length}</span>
+                        <div className="bg-[var(--glass-bg)] p-4 border-t border-[var(--glass-border)]">
+                            {/* Observation Row */}
+                            <div className="mb-4">
+                                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Observación de la compra (opcional)</label>
+                                <textarea
+                                    value={invoiceData.observation}
+                                    onChange={(e) => setInvoiceData({ ...invoiceData, observation: e.target.value })}
+                                    placeholder="Notas adicionales sobre la compra..."
+                                    className="glass-input w-full resize-none h-16 text-sm"
+                                />
                             </div>
-                            <div className="flex items-center gap-6">
-                                <div className="text-right">
-                                    <div className="text-xs text-[var(--color-text-muted)]">Subtotal (Neto): ${subtotal.toLocaleString()}</div>
-                                    <div className="text-xs text-green-400">Total IVA: ${taxAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                                    <div className="text-sm text-[var(--color-text-muted)] mt-1">Total Factura</div>
-                                    <div className="text-3xl font-bold text-[var(--color-text)] neon-text">
-                                        ${totalAmount.toLocaleString()}
-                                    </div>
+                            {/* Totals Row */}
+                            <div className="flex justify-between items-center gap-4">
+                                <div>
+                                    <span className="text-[var(--color-text-muted)] text-sm">Items: {invoiceItems.length}</span>
                                 </div>
-                                <button
-                                    onClick={handleSavePurchase}
-                                    className="btn-primary py-3 px-8 flex items-center gap-2 shadow-lg hover:shadow-[0_0_20px_rgba(0,240,255,0.4)] transition-all"
-                                >
-                                    <Save size={20} /> Guardar Compra
-                                </button>
+                                <div className="flex items-center gap-6">
+                                    <div className="text-right">
+                                        <div className="text-xs text-[var(--color-text-muted)]">Subtotal (Neto): ${subtotal.toLocaleString()}</div>
+                                        <div className="text-xs text-green-400">Total IVA: ${taxAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                                        <div className="text-sm text-[var(--color-text-muted)] mt-1">Total Factura</div>
+                                        <div className="text-3xl font-bold text-[var(--color-text)] neon-text">
+                                            ${totalAmount.toLocaleString()}
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={handleSavePurchase}
+                                        className="btn-primary py-3 px-8 flex items-center gap-2 shadow-lg hover:shadow-[0_0_20px_rgba(0,240,255,0.4)] transition-all"
+                                    >
+                                        <Save size={20} /> Guardar Compra
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
