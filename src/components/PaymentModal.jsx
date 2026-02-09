@@ -2,9 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { X, Banknote, CreditCard, Landmark, Coins, ArrowLeft, Check, Plus, Trash2, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
-    const { carts, activeCartId } = useStore();
+    const { carts, activeCartId, currentCurrency } = useStore();
 
     // Derivar el cliente seleccionado desde el carrito activo
     const posSelectedClient = useMemo(() => {
@@ -193,9 +194,9 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
             const diff = Math.abs(paid - total);
             if (diff > 0.01) {
                 if (paid < total) {
-                    alert(`Faltan $${(total - paid).toFixed(2)} por pagar`);
+                    alert(`Faltan ${formatCurrency(total - paid, currentCurrency)} por pagar`);
                 } else {
-                    alert(`Hay $${(paid - total).toFixed(2)} de más. Ajusta los montos.`);
+                    alert(`Hay ${formatCurrency(paid - total, currentCurrency)} de más. Ajusta los montos.`);
                 }
                 return;
             }
@@ -238,7 +239,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
             } else if (method === 'Efectivo') {
                 // En efectivo, validar que cubra el total
                 if (paid < total) {
-                    alert(`Monto insuficiente. Faltan $${(total - paid).toFixed(2)}`);
+                    alert(`Monto insuficiente. Faltan ${formatCurrency(total - paid, currentCurrency)}`);
                     return;
                 }
             } else {
@@ -317,7 +318,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                     {step === 'select-method' && (
                         <div className="flex flex-col gap-6">
                             <h3 className="text-center text-gray-300 text-lg">
-                                Elige cómo quieres procesar el pago por <span className="text-[var(--color-primary)] font-bold text-xl">${total.toFixed(2)}</span>
+                                Elige cómo quieres procesar el pago por <span className="text-[var(--color-primary)] font-bold text-xl">{formatCurrency(total, currentCurrency)}</span>
                             </h3>
 
                             <div className="grid grid-cols-2 gap-4">
@@ -370,7 +371,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                 </p>
                                 <div className="bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 p-8 rounded-xl shadow-[0_0_20px_rgba(0,240,255,0.1)]">
                                     <p className="text-[var(--color-primary)] font-bold mb-2 uppercase text-sm tracking-wider">Monto a cobrar</p>
-                                    <span className="text-6xl font-extrabold text-white tracking-tight text-glow">${total.toLocaleString('es-CL')}</span>
+                                    <span className="text-6xl font-extrabold text-white tracking-tight text-glow">{formatCurrency(total, currentCurrency)}</span>
                                     <p className="text-gray-400 text-sm mt-3 font-medium">Se cobrará el monto total con tarjeta</p>
                                 </div>
                             </div>
@@ -416,7 +417,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                 <p className="text-gray-300">El cliente ya realizó la transferencia por el monto exacto.</p>
                                 <div className="bg-green-500/10 border border-green-500/30 p-6 rounded-xl shadow-[0_0_15px_rgba(34,197,94,0.2)]">
                                     <p className="text-green-400 font-bold mb-1 uppercase text-xs tracking-wider">Monto transferido</p>
-                                    <span className="text-5xl font-bold text-white tracking-tight">${total.toLocaleString('es-CL')}</span>
+                                    <span className="text-5xl font-bold text-white tracking-tight">{formatCurrency(total, currentCurrency)}</span>
                                     <p className="text-green-400/80 text-sm mt-2 font-medium">El cliente transfirió el monto total exacto</p>
                                 </div>
                             </div>
@@ -446,13 +447,13 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                     {step === 'payment-details' && method === 'Mixto' && (
                         <div className="flex flex-col gap-6 max-w-2xl mx-auto w-full">
                             <div className="text-center mb-2">
-                                <h3 className="text-4xl font-bold text-white tracking-tight">${total.toFixed(2)}</h3>
+                                <h3 className="text-4xl font-bold text-white tracking-tight">{formatCurrency(total, currentCurrency)}</h3>
                                 <div className="flex justify-center gap-4 text-sm font-medium mt-2">
-                                    <span className="text-green-400">Total recibido: ${getMixedTotal().toFixed(2)}</span>
+                                    <span className="text-green-400">Total recibido: {formatCurrency(getMixedTotal(), currentCurrency)}</span>
                                     <span className={cn(
                                         Math.abs(getMixedTotal() - total) < 0.01 ? "text-green-500" : "text-red-400"
                                     )}>
-                                        {getMixedTotal() >= total ? 'Cobro cubierto' : `Por cobrar: ${(total - getMixedTotal()).toFixed(2)}`}
+                                        {getMixedTotal() >= total ? 'Cobro cubierto' : `Por cobrar: ${formatCurrency(total - getMixedTotal(), currentCurrency)}`}
                                     </span>
                                 </div>
                             </div>
@@ -561,7 +562,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                 <div className="bg-red-500/10 border border-red-500/30 p-6 rounded-xl shadow-[0_0_15px_rgba(239,68,68,0.2)]">
                                     <p className="text-red-400 font-bold mb-1 uppercase text-xs tracking-wider">Cliente</p>
                                     <span className="text-3xl font-bold text-white tracking-tight">{posSelectedClient?.name}</span>
-                                    <p className="text-red-400/80 text-sm mt-2 font-medium">Monto a anotar: ${total.toLocaleString('es-CL')}</p>
+                                    <p className="text-red-400/80 text-sm mt-2 font-medium">Monto a anotar: {formatCurrency(total, currentCurrency)}</p>
                                 </div>
                             </div>
                             <div className="space-y-4">
@@ -587,8 +588,8 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                         <div className="flex flex-col gap-6 max-w-md mx-auto">
 
                             <div className="text-center">
-                                <span className="text-5xl font-bold text-white tracking-tight">${total.toFixed(2)}</span>
-                                <p className="text-red-400 text-sm mt-1 font-medium">Por cobrar: ${total.toFixed(2)}</p>
+                                <span className="text-5xl font-bold text-white tracking-tight">{formatCurrency(total, currentCurrency)}</span>
+                                <p className="text-red-400 text-sm mt-1 font-medium">Por cobrar: {formatCurrency(total, currentCurrency)}</p>
                             </div>
 
                             <div className="space-y-4">
@@ -608,13 +609,13 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                 <div className="grid grid-cols-3 gap-2">
                                     {suggestions.map((amt) => (
                                         <button key={amt} onClick={() => handleAmountClick(amt)} className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-white font-medium text-sm">
-                                            ${amt.toFixed(2)}
+                                            {formatCurrency(amt, currentCurrency)}
                                         </button>
                                     ))}
                                 </div>
                                 <div className="text-center py-2">
                                     <span className={cn("text-xl font-bold", (parseFloat(amountPaid) - total) >= 0 ? "text-green-500" : "text-gray-500")}>
-                                        Cambio: ${((parseFloat(amountPaid) || 0) - total).toFixed(2)}
+                                        Cambio: {formatCurrency((parseFloat(amountPaid) || 0) - total, currentCurrency)}
                                     </span>
                                 </div>
                                 <div>

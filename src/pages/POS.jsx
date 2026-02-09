@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
+import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
 import PaymentModal from '../components/PaymentModal';
 import CashOpeningModal from '../components/CashOpeningModal';
 import CashStatusWidget from '../components/CashStatusWidget';
@@ -87,7 +88,8 @@ const POS = () => {
         activeCartId,
         addCart,
         setActiveCart,
-        removeCart
+        removeCart,
+        currentCurrency
     } = useStore();
 
     // Derivar cart y client manualmente (fix para computed getters)
@@ -463,15 +465,15 @@ const POS = () => {
                                             {(product.is_offer === 1 || product.is_offer === true) && product.offer_price > 0 ? (
                                                 <div className="flex flex-col items-start leading-none gap-0.5">
                                                     <span className="text-[9px] lg:text-xs text-red-400 line-through decoration-red-400 opacity-70 font-semibold">
-                                                        ${product.price ? product.price.toFixed(2) : '0.00'}
+                                                        {formatCurrency(product.price, currentCurrency)}
                                                     </span>
                                                     <span className="text-yellow-400 font-extrabold text-base lg:text-xl drop-shadow-sm">
-                                                        ${Number(product.offer_price).toFixed(2)}
+                                                        {formatCurrency(product.offer_price, currentCurrency)}
                                                     </span>
                                                 </div>
                                             ) : (
                                                 <span className="text-green-400 font-bold text-sm lg:text-lg tracking-tight">
-                                                    ${product.price ? product.price.toFixed(2) : '0.00'}
+                                                    {formatCurrency(product.price, currentCurrency)}
                                                 </span>
                                             )}
                                         </div>
@@ -629,7 +631,7 @@ const POS = () => {
                                         <div className="flex items-center gap-2">
                                             <span>{item.unit === 'Kg' ? 'Kg:' : 'Und:'}</span>
                                             <div className="flex items-center gap-1">
-                                                <span className="text-[var(--color-text-muted)] text-sm">$</span>
+                                                <span className="text-[var(--color-text-muted)] text-sm">{getCurrencySymbol(currentCurrency)}</span>
                                                 <input
                                                     type="number"
                                                     className="w-20 bg-transparent text-sm font-bold text-[var(--color-text)] outline-none border-b border-[var(--glass-border)] focus:border-[var(--color-primary)] transition-colors"
@@ -645,7 +647,7 @@ const POS = () => {
 
                                             {discountPercent > 0 && (
                                                 <span className="text-green-400 font-bold ml-1 text-xs">
-                                                    (${discountedUnitPrice.toLocaleString('es-CL')})
+                                                    ({formatCurrency(discountedUnitPrice, currentCurrency)})
                                                 </span>
                                             )}
                                             {(!item.is_offer && item.price < (item.original_price || item.price) && item.price_ranges?.length > 0) && (
@@ -656,7 +658,7 @@ const POS = () => {
                                         </div>
                                         <div className="flex flex-col items-end">
                                             <span className="text-[var(--color-primary)] font-bold text-base">
-                                                Total: ${finalPrice.toLocaleString('es-CL')}
+                                                Total: {formatCurrency(finalPrice, currentCurrency)}
                                             </span>
                                         </div>
                                     </div>
@@ -734,15 +736,15 @@ const POS = () => {
                 <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] space-y-4">
                     <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
                         <span>Subtotal (Neto)</span>
-                        <span>${subTotal.toFixed(2)}</span>
+                        <span>{formatCurrency(subTotal, currentCurrency)}</span>
                     </div>
                     <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
                         <span>Impuestos Total</span>
-                        <span>${taxTotal.toFixed(2)}</span>
+                        <span>{formatCurrency(taxTotal, currentCurrency)}</span>
                     </div>
                     <div className="flex justify-between text-[var(--color-text)] text-2xl font-bold pt-2 border-t border-[var(--glass-border)]">
                         <span>Total</span>
-                        <span className="neon-text">${finalTotal.toFixed(2)}</span>
+                        <span className="neon-text">{formatCurrency(finalTotal, currentCurrency)}</span>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
@@ -809,7 +811,7 @@ const POS = () => {
                                 <span className="text-blue-200">•</span>
                                 <span className="text-sm">{cart.reduce((sum, item) => sum + item.quantity, 0)} Items</span>
                                 <span className="bg-white/20 px-3 py-1 rounded-full text-sm font-bold ml-auto">
-                                    ${finalTotal.toLocaleString('es-CL')}
+                                    {formatCurrency(finalTotal, currentCurrency)}
                                 </span>
                             </>
                         )}
@@ -903,7 +905,7 @@ const POS = () => {
                                                         </button>
                                                     </div>
                                                     <span className="text-green-400 font-bold text-lg">
-                                                        ${finalPrice.toLocaleString('es-CL')}
+                                                        {formatCurrency(finalPrice, currentCurrency)}
                                                     </span>
                                                 </div>
                                             </div>
@@ -917,7 +919,7 @@ const POS = () => {
                                 <div className="flex justify-between items-center">
                                     <span className="text-gray-400">Total a Pagar</span>
                                     <span className="text-2xl font-black text-green-400">
-                                        ${finalTotal.toLocaleString('es-CL')}
+                                        {formatCurrency(finalTotal, currentCurrency)}
                                     </span>
                                 </div>
                                 <button

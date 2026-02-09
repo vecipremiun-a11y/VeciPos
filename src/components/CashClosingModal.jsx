@@ -5,8 +5,10 @@ import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => {
+    const { currentCurrency } = useStore();
     const [actualAmount, setActualAmount] = useState('');
     const [observations, setObservations] = useState('');
     const [difference, setDifference] = useState(0);
@@ -67,20 +69,20 @@ const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => 
                         </h3>
                         <div className="grid grid-cols-2 gap-y-2 text-sm">
                             <span className="text-gray-400">Apertura:</span>
-                            <span className="text-right text-white font-mono">${stats.initial?.toLocaleString('es-CL')}</span>
+                            <span className="text-right text-white font-mono">{formatCurrency(stats.initial, currentCurrency)}</span>
 
                             <span className="text-green-400/80">Ventas (Efectivo):</span>
-                            <span className="text-right text-green-400 font-mono">+${stats.sales?.toLocaleString('es-CL')}</span>
+                            <span className="text-right text-green-400 font-mono">+{formatCurrency(stats.sales, currentCurrency)}</span>
 
                             <span className="text-blue-400/80">Ingresos:</span>
-                            <span className="text-right text-blue-400 font-mono">+${stats.movements_in?.toLocaleString('es-CL')}</span>
+                            <span className="text-right text-blue-400 font-mono">+{formatCurrency(stats.movements_in, currentCurrency)}</span>
 
                             <span className="text-orange-400/80">Retiros:</span>
-                            <span className="text-right text-orange-400 font-mono">-${stats.movements_out?.toLocaleString('es-CL')}</span>
+                            <span className="text-right text-orange-400 font-mono">-{formatCurrency(stats.movements_out, currentCurrency)}</span>
                         </div>
                         <div className="pt-2 border-t border-white/10 flex justify-between items-center">
                             <span className="font-bold text-white">Saldo Esperado:</span>
-                            <span className="font-bold text-xl text-[var(--color-primary)]">${expectedBalance.toLocaleString('es-CL')}</span>
+                            <span className="font-bold text-xl text-[var(--color-primary)]">{formatCurrency(expectedBalance, currentCurrency)}</span>
                         </div>
                     </div>
 
@@ -122,7 +124,7 @@ const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => 
                                 <div className="flex-1">
                                     <h4 className="font-bold text-red-400">Diferencia Detectada</h4>
                                     <p className="text-xs text-red-300/80">
-                                        {difference > 0 ? `Sobra dinero: +$${difference.toLocaleString('es-CL')}` : `Falta dinero: -$${Math.abs(difference).toLocaleString('es-CL')}`}
+                                        {difference > 0 ? `Sobra dinero: +${formatCurrency(difference, currentCurrency)}` : `Falta dinero: ${formatCurrency(difference, currentCurrency)}`}
                                     </p>
                                 </div>
                             </>

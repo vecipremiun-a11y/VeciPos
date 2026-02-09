@@ -4,9 +4,10 @@ import { X, Clock, User, ShoppingCart, Trash2, RotateCcw, Loader } from 'lucide-
 import { useStore } from '../store/useStore';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const SuspendedSalesModal = ({ isOpen, onClose }) => {
-    const { fetchSuspendedSales, recoverSale, deleteSuspendedSale } = useStore();
+    const { fetchSuspendedSales, recoverSale, deleteSuspendedSale, currentCurrency } = useStore();
     const [sales, setSales] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [recoveringId, setRecoveringId] = useState(null);
@@ -82,7 +83,7 @@ const SuspendedSalesModal = ({ isOpen, onClose }) => {
                                 <div className="flex-1">
                                     <div className="flex items-center gap-3 mb-2">
                                         <span className="text-white font-bold text-xl">
-                                            ${sale.total.toLocaleString('es-CL')}
+                                            {formatCurrency(sale.total, currentCurrency)}
                                         </span>
                                         <span className="text-gray-400 text-sm flex items-center gap-1 bg-white/5 px-2 py-1 rounded">
                                             <ShoppingCart size={14} />

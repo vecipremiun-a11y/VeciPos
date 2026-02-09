@@ -4,7 +4,7 @@ import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 
 const CashOpeningModal = ({ isOpen }) => {
-    const { openRegister, currentUser } = useStore();
+    const { openRegister, currentUser, currentCurrency } = useStore();
     const navigate = useNavigate();
     const [amount, setAmount] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -80,10 +80,10 @@ const CashOpeningModal = ({ isOpen }) => {
                     <div className="space-y-2">
                         <label className="text-sm font-bold text-white ml-1">Monto de Apertura</label>
                         <div className="relative">
-                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg">$</span>
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg">{currentCurrency}</span>
                             <input
                                 type="number"
-                                className="glass-input w-full !pl-10 h-14 text-2xl font-bold text-white placeholder-gray-600 focus:border-[var(--color-primary)] transition-all"
+                                className="glass-input w-full !pl-16 h-14 text-2xl font-bold text-white placeholder-gray-600 focus:border-[var(--color-primary)] transition-all"
                                 placeholder="0"
                                 value={amount}
                                 onChange={(e) => setAmount(e.target.value)}

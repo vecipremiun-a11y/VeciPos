@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore';
 import { Search, Filter, ArrowUpCircle, ArrowDownCircle, ChevronDown, ChevronRight, User } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatInCompanyTime } from '../lib/dateHelpers';
+import { formatCurrency } from '../utils/formatCurrency';
 
 // Helper for safe date formatting
 const safeFormat = (dateString, fmt, timezone) => {
@@ -11,7 +12,7 @@ const safeFormat = (dateString, fmt, timezone) => {
 };
 
 const CashMovementsReport = () => {
-    const { fetchCashMovements, currentCompanyTimezone } = useStore();
+    const { fetchCashMovements, currentCompanyTimezone, currentCurrency } = useStore();
     const [movements, setMovements] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [hasMore, setHasMore] = useState(true);
@@ -217,13 +218,13 @@ const CashMovementsReport = () => {
                                     <div className="text-right">
                                         <span className="text-xs text-gray-500 uppercase block">Total Ingresos</span>
                                         <span className="text-green-400 font-bold font-mono">
-                                            +${group.totalIn.toLocaleString('es-CL')}
+                                            +{formatCurrency(group.totalIn, currentCurrency)}
                                         </span>
                                     </div>
                                     <div className="text-right">
                                         <span className="text-xs text-gray-500 uppercase block">Total Retiros</span>
                                         <span className="text-orange-400 font-bold font-mono">
-                                            -${group.totalOut.toLocaleString('es-CL')}
+                                            -{formatCurrency(group.totalOut, currentCurrency)}
                                         </span>
                                     </div>
 
@@ -269,7 +270,7 @@ const CashMovementsReport = () => {
                                                         "px-6 py-3 font-mono font-bold text-right",
                                                         item.type === 'in' ? "text-green-400" : "text-orange-400"
                                                     )}>
-                                                        {item.type === 'in' ? '+' : '-'}${Number(item.amount).toLocaleString('es-CL')}
+                                                        {item.type === 'in' ? '+' : '-'}{formatCurrency(Number(item.amount), currentCurrency)}
                                                     </td>
                                                 </tr>
                                             ))}

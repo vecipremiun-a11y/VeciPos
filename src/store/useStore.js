@@ -76,9 +76,15 @@ export const useStore = create(persist((set, get) => ({
     activeCompanyId: 'default',
     availableCompanies: [], // List of companies the user can access
     currentCompanyTimezone: 'America/Santiago', // <-- Timezone support
+    currentCurrency: 'CLP', // Moneda activa de la empresa
     // Default to default for migration, but logic should update this. 
     // Wait, I should probably load this from localStorage? 
     // For now 'default' is safe as we backfilled everything to 'default'.
+
+    // Estado del sistema de soporte
+    supportTickets: [],
+    currentTicket: null,
+    unreadSupportCount: 0,
 
     currentUserCompanyRole: null,
 
@@ -531,7 +537,7 @@ export const useStore = create(persist((set, get) => ({
         try {
             const res = await turso.execute({
                 sql: `
-                    SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, uc.role 
+                    SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, c.currency, uc.role 
                     FROM user_companies uc
                     JOIN companies c ON uc.company_id = c.id
                     WHERE uc.user_id = ? AND c.status = 'active'
@@ -642,7 +648,7 @@ export const useStore = create(persist((set, get) => ({
 
                 // Cargar empresas del usuario
                 const companiesRes = await turso.execute({
-                    sql: `SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, uc.role 
+                    sql: `SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, c.currency, uc.role 
                           FROM user_companies uc
                           JOIN companies c ON uc.company_id = c.id
                           WHERE uc.user_id = ? AND c.status = 'active'`,
@@ -680,6 +686,7 @@ export const useStore = create(persist((set, get) => ({
                     availableCompanies,
                     activeCompanyId,
                     currentCompanyTimezone: activeCompany.timezone || 'America/Santiago',
+                    currentCurrency: activeCompany.currency || 'CLP',
                     currentUserCompanyRole: activeCompany.role,
                     inventoryAdjustmentMode: activeCompany.inventory_adjustment_mode === 1
                 });
@@ -694,13 +701,17 @@ export const useStore = create(persist((set, get) => ({
             if (currentUser && activeCompanyId) {
                 try {
                     const companyRes = await turso.execute({
-                        sql: 'SELECT inventory_adjustment_mode FROM companies WHERE id = ?',
+                        sql: 'SELECT inventory_adjustment_mode, currency FROM companies WHERE id = ?',
                         args: [activeCompanyId]
                     });
                     if (companyRes.rows.length > 0) {
                         const freshMode = companyRes.rows[0].inventory_adjustment_mode === 1;
-                        set({ inventoryAdjustmentMode: freshMode });
-                        console.log('🔧 Inventory adjustment mode loaded from DB:', freshMode);
+                        const freshCurrency = companyRes.rows[0].currency || 'CLP';
+                        set({
+                            inventoryAdjustmentMode: freshMode,
+                            currentCurrency: freshCurrency
+                        });
+                        console.log('🔧 Inventory/Currency loaded from DB:', freshMode, freshCurrency);
                     }
                 } catch (e) {
                     console.warn('Could not load inventory_adjustment_mode:', e);
@@ -4698,6 +4709,21 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    updateCurrency: async (newCurrency) => {
+        const { activeCompanyId } = get();
+        try {
+            await turso.execute({
+                sql: 'UPDATE companies SET currency = ? WHERE id = ?',
+                args: [newCurrency, activeCompanyId]
+            });
+            set({ currentCurrency: newCurrency });
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating currency:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
     // Obtener historial de pagos de una empresa
     fetchPaymentHistory: async (companyId) => {
         try {
@@ -4743,6 +4769,387 @@ export const useStore = create(persist((set, get) => ({
             console.error('Error fetching subscriptions:', error);
             return [];
         }
+    },
+
+    // ═══════════════════════════════════════════════════════════════
+    // SISTEMA DE SOPORTE
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Crear nuevo ticket de soporte
+     */
+    createSupportTicket: async (subject, category = 'general', initialMessage = '') => {
+        const { activeCompanyId, currentUser } = get();
+
+        try {
+            const ticketId = `ticket_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const now = new Date().toISOString();
+
+            // Crear ticket
+            await turso.execute({
+                sql: `INSERT INTO support_tickets 
+                      (id, company_id, user_id, subject, category, status, priority, created_at, updated_at, last_message_at)
+                      VALUES (?, ?, ?, ?, ?, 'open', 'normal', ?, ?, ?)`,
+                args: [ticketId, activeCompanyId, currentUser.id, subject, category, now, now, now]
+            });
+
+            // Si hay mensaje inicial, crearlo
+            if (initialMessage) {
+                const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                await turso.execute({
+                    sql: `INSERT INTO support_messages 
+                          (id, ticket_id, sender_type, sender_id, sender_name, message, created_at)
+                          VALUES (?, ?, 'client', ?, ?, ?, ?)`,
+                    args: [messageId, ticketId, currentUser.id.toString(), currentUser.name, initialMessage, now]
+                });
+            }
+
+            return { success: true, ticketId };
+        } catch (e) {
+            console.error('Error creating support ticket:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * Obtener tickets de la empresa actual
+     */
+    fetchSupportTickets: async () => {
+        const { activeCompanyId } = get();
+
+        try {
+            const result = await turso.execute({
+                sql: `SELECT t.*, 
+                             u.name as user_name,
+                             (SELECT COUNT(*) FROM support_messages 
+                              WHERE ticket_id = t.id AND sender_type = 'admin' AND read_by_client = 0) as unread_count
+                      FROM support_tickets t
+                      LEFT JOIN users u ON t.user_id = u.id
+                      WHERE t.company_id = ?
+                      ORDER BY t.updated_at DESC`,
+                args: [activeCompanyId]
+            });
+
+            const tickets = result.rows || [];
+            const unreadTotal = tickets.reduce((sum, t) => sum + (t.unread_count || 0), 0);
+
+            set({
+                supportTickets: tickets,
+                unreadSupportCount: unreadTotal
+            });
+
+            return { success: true, tickets };
+        } catch (e) {
+            console.error('Error fetching support tickets:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * Obtener mensajes de un ticket
+     */
+    fetchTicketMessages: async (ticketId) => {
+        try {
+            const result = await turso.execute({
+                sql: `SELECT m.*,
+                             (SELECT COUNT(*) FROM support_attachments WHERE message_id = m.id) as attachment_count
+                      FROM support_messages m
+                      WHERE m.ticket_id = ? AND m.is_internal_note = 0
+                      ORDER BY m.created_at ASC`,
+                args: [ticketId]
+            });
+
+            return { success: true, messages: result.rows || [] };
+        } catch (e) {
+            console.error('Error fetching messages:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * Enviar mensaje en un ticket (cliente)
+     */
+    sendSupportMessage: async (ticketId, message) => {
+        const { currentUser } = get();
+
+        try {
+            const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const now = new Date().toISOString();
+
+            // Insertar mensaje
+            await turso.execute({
+                sql: `INSERT INTO support_messages 
+                      (id, ticket_id, sender_type, sender_id, sender_name, message, created_at, read_by_admin)
+                      VALUES (?, ?, 'client', ?, ?, ?, ?, 0)`,
+                args: [messageId, ticketId, currentUser.id.toString(), currentUser.name, message, now]
+            });
+
+            // Actualizar ticket
+            await turso.execute({
+                sql: `UPDATE support_tickets 
+                      SET updated_at = ?, last_message_at = ?, unread_by_admin = unread_by_admin + 1
+                      WHERE id = ?`,
+                args: [now, now, ticketId]
+            });
+
+            return { success: true, messageId };
+        } catch (e) {
+            console.error('Error sending message:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * Marcar mensajes como leídos (cliente)
+     */
+    markMessagesAsRead: async (ticketId) => {
+        try {
+            await turso.execute({
+                sql: `UPDATE support_messages 
+                      SET read_by_client = 1 
+                      WHERE ticket_id = ? AND sender_type = 'admin' AND read_by_client = 0`,
+                args: [ticketId]
+            });
+
+            await turso.execute({
+                sql: `UPDATE support_tickets 
+                      SET unread_by_client = 0 
+                      WHERE id = ?`,
+                args: [ticketId]
+            });
+
+            // Actualizar contadores locales
+            get().fetchSupportTickets();
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error marking as read:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * Subir adjunto
+     */
+    uploadSupportAttachment: async (ticketId, messageId, file) => {
+        try {
+            // Convertir a base64 para guardar en BD (solo para archivos pequeños)
+            const reader = new FileReader();
+            const base64Promise = new Promise((resolve, reject) => {
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+
+            const base64 = await base64Promise;
+            const attachmentId = `att_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const now = new Date().toISOString();
+
+            await turso.execute({
+                sql: `INSERT INTO support_attachments 
+                      (id, message_id, ticket_id, filename, file_type, file_url, file_size, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                args: [attachmentId, messageId, ticketId, file.name, file.type, base64, file.size, now]
+            });
+
+            return { success: true, attachmentId, url: base64 };
+        } catch (e) {
+            console.error('Error uploading attachment:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * Obtener adjuntos de un mensaje
+     */
+    fetchMessageAttachments: async (messageId) => {
+        try {
+            const result = await turso.execute({
+                sql: `SELECT * FROM support_attachments WHERE message_id = ?`,
+                args: [messageId]
+            });
+
+            return { success: true, attachments: result.rows || [] };
+        } catch (e) {
+            console.error('Error fetching attachments:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // ═══════════════════════════════════════════════════════════════
+    // FUNCIONES ADMIN (para el panel de administración)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Obtener TODOS los tickets (admin)
+     */
+    fetchAllSupportTickets: async (filters = {}) => {
+        try {
+            let sql = `SELECT t.*, 
+                              u.name as user_name,
+                              c.name as company_name,
+                              (SELECT COUNT(*) FROM support_messages 
+                               WHERE ticket_id = t.id AND sender_type = 'client' AND read_by_admin = 0) as unread_count
+                       FROM support_tickets t
+                       LEFT JOIN users u ON t.user_id = u.id
+                       LEFT JOIN companies c ON t.company_id = c.id
+                       WHERE 1=1`;
+
+            const args = [];
+
+            if (filters.status) {
+                sql += ` AND t.status = ?`;
+                args.push(filters.status);
+            }
+
+            if (filters.assigned_to) {
+                sql += ` AND t.assigned_to = ?`;
+                args.push(filters.assigned_to);
+            }
+
+            if (filters.priority) {
+                sql += ` AND t.priority = ?`;
+                args.push(filters.priority);
+            }
+
+            if (filters.search) {
+                sql += ` AND (t.subject LIKE ? OR c.name LIKE ?)`;
+                const searchTerm = `%${filters.search}%`;
+                args.push(searchTerm, searchTerm);
+            }
+
+            sql += ` ORDER BY t.updated_at DESC LIMIT 100`;
+
+            const result = await turso.execute({ sql, args });
+
+            return { success: true, tickets: result.rows || [] };
+        } catch (e) {
+            console.error('Error fetching all tickets:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * Responder ticket (admin)
+     */
+    replyToTicket: async (ticketId, message, isInternalNote = false) => {
+        const { currentUser } = get();
+
+        try {
+            const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const now = new Date().toISOString();
+
+            await turso.execute({
+                sql: `INSERT INTO support_messages 
+                      (id, ticket_id, sender_type, sender_id, sender_name, message, created_at, is_internal_note, read_by_client)
+                      VALUES (?, ?, 'admin', ?, ?, ?, ?, ?, 0)`,
+                args: [messageId, ticketId, currentUser.id.toString(), currentUser.name || 'Admin', message, now, isInternalNote ? 1 : 0]
+            });
+
+            if (!isInternalNote) {
+                await turso.execute({
+                    sql: `UPDATE support_tickets 
+                          SET updated_at = ?, last_message_at = ?, unread_by_client = unread_by_client + 1, unread_by_admin = 0
+                          WHERE id = ?`,
+                    args: [now, now, ticketId]
+                });
+            }
+
+            return { success: true, messageId };
+        } catch (e) {
+            console.error('Error replying to ticket:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * Actualizar estado del ticket
+     */
+    updateTicketStatus: async (ticketId, status) => {
+        try {
+            const now = new Date().toISOString();
+            const resolvedAt = status === 'resolved' ? now : null;
+
+            await turso.execute({
+                sql: `UPDATE support_tickets 
+                      SET status = ?, updated_at = ?, resolved_at = ?
+                      WHERE id = ?`,
+                args: [status, now, resolvedAt, ticketId]
+            });
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating ticket status:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * Actualizar prioridad del ticket
+     */
+    updateTicketPriority: async (ticketId, priority) => {
+        try {
+            const now = new Date().toISOString();
+
+            await turso.execute({
+                sql: `UPDATE support_tickets 
+                      SET priority = ?, updated_at = ?
+                      WHERE id = ?`,
+                args: [priority, now, ticketId]
+            });
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating ticket priority:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * Asignar ticket a admin
+     */
+    assignTicket: async (ticketId, adminId) => {
+        try {
+            const now = new Date().toISOString();
+
+            await turso.execute({
+                sql: `UPDATE support_tickets 
+                      SET assigned_to = ?, updated_at = ?
+                      WHERE id = ?`,
+                args: [adminId, now, ticketId]
+            });
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error assigning ticket:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    /**
+     * Marcar mensajes como leídos (admin)
+     */
+    markTicketAsReadByAdmin: async (ticketId) => {
+        try {
+            await turso.execute({
+                sql: `UPDATE support_messages 
+                      SET read_by_admin = 1 
+                      WHERE ticket_id = ? AND sender_type = 'client' AND read_by_admin = 0`,
+                args: [ticketId]
+            });
+
+            await turso.execute({
+                sql: `UPDATE support_tickets 
+                      SET unread_by_admin = 0 
+                      WHERE id = ?`,
+                args: [ticketId]
+            });
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error marking as read by admin:', e);
+            return { success: false, error: e.message };
+        }
     }
 }), {
     name: 'pos-storage',
@@ -4754,6 +5161,7 @@ export const useStore = create(persist((set, get) => ({
         activeCompanyId: state.activeCompanyId,
         availableCompanies: state.availableCompanies,
         currentCompanyTimezone: state.currentCompanyTimezone,
+        currentCurrency: state.currentCurrency,
         currentUserCompanyRole: state.currentUserCompanyRole,
         darkMode: state.darkMode
     }),

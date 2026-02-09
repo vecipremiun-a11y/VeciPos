@@ -5,13 +5,15 @@ import { useStore } from '../store/useStore';
 import { format, subDays, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { formatInCompanyTime } from '../lib/dateHelpers';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const Dashboard = () => {
     const {
         fetchDashboardData,
         currentCompanyTimezone,
         activeCompanyId,
-        activeRegisters
+        activeRegisters,
+        currentCurrency
     } = useStore();
 
     // Separate state for different data needs
@@ -125,12 +127,12 @@ const Dashboard = () => {
 
             <SubscriptionBanner />
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
                 {/* Ventas Hoy */}
                 <div className="glass-card p-4">
                     <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Ventas Hoy</h3>
                     <p className="text-lg sm:text-2xl font-bold text-[var(--color-text)] neon-text truncate">
-                        ${stats.totalSalesToday.toLocaleString('es-CL')}
+                        {formatCurrency(stats.totalSalesToday, currentCurrency)}
                     </p>
                     <div className="mt-2 text-[10px] md:text-xs text-[var(--color-primary)]">
                         {stats.ticketsToday} tickets procesados
@@ -141,7 +143,7 @@ const Dashboard = () => {
                 <div className="glass-card p-4">
                     <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Ventas del Mes</h3>
                     <p className="text-lg sm:text-2xl font-bold text-[var(--color-text)] neon-text truncate">
-                        ${stats.totalSalesMonth.toLocaleString('es-CL')}
+                        {formatCurrency(stats.totalSalesMonth, currentCurrency)}
                     </p>
                     <div className="mt-2 text-[10px] md:text-xs text-[var(--color-text-muted)]">Acumulado mensual</div>
                 </div>
@@ -150,7 +152,7 @@ const Dashboard = () => {
                 <div className="glass-card p-4">
                     <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Utilidad Hoy (Neta)</h3>
                     <p className="text-lg sm:text-2xl font-bold text-green-400 neon-text truncate">
-                        ${stats.utilityToday.toLocaleString('es-CL')}
+                        {formatCurrency(stats.utilityToday, currentCurrency)}
                     </p>
                     <div className="mt-2 text-[10px] md:text-xs text-[var(--color-text-muted)]">Post-impuestos y costo</div>
                 </div>
@@ -185,7 +187,7 @@ const Dashboard = () => {
                                 <Tooltip
                                     contentStyle={{ backgroundColor: 'rgba(0,0,0,0.9)', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }}
                                     itemStyle={{ color: 'var(--color-primary)' }}
-                                    formatter={(value) => [`$${value.toLocaleString('es-CL')}`, 'Ventas']}
+                                    formatter={(value) => [formatCurrency(value, currentCurrency), 'Ventas']}
                                 />
                                 <Area type="monotone" dataKey="sales" stroke="var(--color-primary)" fillOpacity={1} fill="url(#colorSales)" />
                             </AreaChart>
@@ -231,7 +233,7 @@ const Dashboard = () => {
                                     </div>
                                     <div className="text-right">
                                         <p className="text-sm font-bold text-[var(--color-text)]">
-                                            ${parseFloat(sale.total).toLocaleString('es-CL')}
+                                            {formatCurrency(parseFloat(sale.total), currentCurrency)}
                                         </p>
                                         <p className="text-[10px] text-[var(--color-text-muted)]">
                                             {(sale.items && sale.items.length) || 0} prod.
@@ -350,7 +352,7 @@ const Dashboard = () => {
                                         <div className="flex justify-between items-end border-t border-[var(--glass-border)] pt-2">
                                             <span className="text-[var(--color-text-muted)] text-[10px]">Saldo Actual</span>
                                             <span className="text-orange-400 font-bold text-sm">
-                                                ${(reg.currentBalance || 0).toLocaleString('es-CL')}
+                                                {formatCurrency(reg.currentBalance || 0, currentCurrency)}
                                             </span>
                                         </div>
                                     </div>

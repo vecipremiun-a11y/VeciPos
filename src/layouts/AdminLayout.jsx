@@ -1,10 +1,10 @@
 import React from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useStore } from '../store/useStore';
-import { LogOut, LayoutDashboard, Building2, ArrowLeft } from 'lucide-react';
+import { LogOut, LayoutDashboard, Building2, ArrowLeft, MessageCircle } from 'lucide-react';
 
 const AdminLayout = () => {
-    const { logout, currentUser } = useStore();
+    const { logout, currentUser, unreadSupportCount } = useStore();
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -30,8 +30,8 @@ const AdminLayout = () => {
                     <Link
                         to="/admin"
                         className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive('/admin')
-                                ? 'bg-red-500/10 text-red-500 border border-red-500/20'
-                                : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                            ? 'bg-red-500/10 text-red-500 border border-red-500/20'
+                            : 'text-gray-400 hover:bg-white/5 hover:text-white'
                             }`}
                     >
                         <LayoutDashboard size={20} />
@@ -41,12 +41,28 @@ const AdminLayout = () => {
                     <Link
                         to="/admin/companies"
                         className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive('/admin/companies')
-                                ? 'bg-red-500/10 text-red-500 border border-red-500/20'
-                                : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                            ? 'bg-red-500/10 text-red-500 border border-red-500/20'
+                            : 'text-gray-400 hover:bg-white/5 hover:text-white'
                             }`}
                     >
                         <Building2 size={20} />
                         <span>Empresas</span>
+                    </Link>
+
+                    <Link
+                        to="/admin/soporte"
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive('/admin/soporte')
+                            ? 'bg-red-500/10 text-red-500 border border-red-500/20'
+                            : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                            }`}
+                    >
+                        <MessageCircle size={20} />
+                        <span className="flex-1">Soporte</span>
+                        {unreadSupportCount > 0 && (
+                            <span className="px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full">
+                                {unreadSupportCount}
+                            </span>
+                        )}
                     </Link>
                 </nav>
 

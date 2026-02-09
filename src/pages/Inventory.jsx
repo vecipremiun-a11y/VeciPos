@@ -3,6 +3,7 @@ import { Search, Plus, Edit, Trash2, Filter, Loader } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import ProductModal from '../components/ProductModal';
 import OptimizedImage from '../components/OptimizedImage';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const Inventory = () => {
     const {
@@ -12,7 +13,8 @@ const Inventory = () => {
         deleteProduct,
         categories,
         fetchInventoryProducts,
-        activeCompanyId
+        activeCompanyId,
+        currentCurrency
     } = useStore();
 
     // --- PRODUCTS STATE ---
@@ -288,8 +290,8 @@ const Inventory = () => {
                                     </div>
                                     <p className="text-xs text-[var(--color-text-muted)] font-mono mb-1">{product.sku}</p>
                                     <div className="flex items-center gap-3">
-                                        <span className="text-base font-bold text-green-400">${product.price.toFixed(2)}</span>
-                                        <span className="text-xs text-[var(--color-text-muted)]">Costo: ${(product.cost || 0).toFixed(2)}</span>
+                                        <span className="text-base font-bold text-green-400">{formatCurrency(product.price, currentCurrency)}</span>
+                                        <span className="text-xs text-[var(--color-text-muted)]">Costo: {formatCurrency(product.cost || 0, currentCurrency)}</span>
                                     </div>
                                 </div>
 
@@ -370,8 +372,8 @@ const Inventory = () => {
                                             </span>
                                         </td>
                                         <td className="px-6 py-5 text-[var(--color-text-muted)] font-mono text-base">{product.sku}</td>
-                                        <td className="px-6 py-5 text-[var(--color-text)] font-bold text-xl">${product.price.toFixed(2)}</td>
-                                        <td className="px-6 py-5 text-[var(--color-text-muted)] text-lg">${(product.cost || 0).toFixed(2)}</td>
+                                        <td className="px-6 py-5 text-[var(--color-text)] font-bold text-xl">{formatCurrency(product.price, currentCurrency)}</td>
+                                        <td className="px-6 py-5 text-[var(--color-text-muted)] text-lg">{formatCurrency(product.cost || 0, currentCurrency)}</td>
                                         <td className="px-6 py-5 text-[var(--color-text-muted)] text-sm">
                                             {product.tax_rate > 0 ? `IVA (${product.tax_rate}%)` : 'Exento (0%)'}
                                         </td>
@@ -391,7 +393,7 @@ const Inventory = () => {
                                                             {margin.toFixed(1)}%
                                                         </span>
                                                         <span className="text-sm text-[var(--color-text-muted)]">
-                                                            ${marginValue.toFixed(2)}
+                                                            {formatCurrency(marginValue, currentCurrency)}
                                                         </span>
                                                     </div>
                                                 );

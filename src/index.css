@@ -207,6 +207,15 @@
     padding-bottom: 30px;
     /* Space for the jagged edge */
   }
+
+  @keyframes fly {
+    from {
+      background-position: 0 0;
+    }
+    to {
+      background-position: 1000px 1000px;
+    }
+  }
 }
 
 body {

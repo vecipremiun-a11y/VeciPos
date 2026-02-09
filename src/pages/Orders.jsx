@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore';
 import { Search, Package, Truck, Box, AlertTriangle, TrendingDown, DollarSign, Barcode, Tag, Info, ChevronDown, Trash2, ArrowLeft } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { createClient } from '@libsql/client';
+import { formatCurrency } from '../utils/formatCurrency';
 
 // Create turso client
 const turso = createClient({
@@ -19,7 +20,8 @@ const Orders = () => {
         addProduct,
         updateProduct,
         deleteProduct,
-        createSupplierOrder
+        createSupplierOrder,
+        currentCurrency
     } = useStore();
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -305,9 +307,7 @@ const Orders = () => {
         return supplier?.name || 'Sin proveedor';
     };
 
-    const formatMoney = (amount) => {
-        return `$${parseFloat(amount || 0).toLocaleString('es-CL')}`;
-    };
+
 
     return (
         <div className="h-full flex flex-col gap-1 lg:gap-4 pt-0 px-3 pb-2 lg:p-0">
@@ -479,7 +479,7 @@ const Orders = () => {
                             <span>Ver Factura</span>
                             {orderItems.length > 0 && (
                                 <span className="bg-white/20 px-2 py-0.5 rounded-full text-sm">
-                                    {orderItems.length} items • {formatMoney(orderTotal)}
+                                    {orderItems.length} items • {formatCurrency(orderTotal, currentCurrency)}
                                 </span>
                             )}
                         </button>
@@ -634,7 +634,7 @@ const Orders = () => {
                                             <div className="border-t border-[var(--glass-border)] mt-3 pt-3 space-y-2">
                                                 <div className="flex justify-between text-sm">
                                                     <span className="text-[var(--color-text-muted)]">Costo última compra</span>
-                                                    <span className="font-bold text-[var(--color-text)]">{formatMoney(productStats.lastPurchaseCost)}</span>
+                                                    <span className="font-bold text-[var(--color-text)]">{formatCurrency(productStats.lastPurchaseCost, currentCurrency)}</span>
                                                 </div>
 
                                                 {/* Price variation */}
@@ -652,7 +652,7 @@ const Orders = () => {
                                                             {productStats.priceVariation.direction === 'same' && '→'}
                                                             {productStats.priceVariation.percent}%
                                                             <span className="text-xs text-[var(--color-text-muted)]">
-                                                                ({formatMoney(Math.abs(productStats.priceVariation.diff))})
+                                                                ({formatCurrency(Math.abs(productStats.priceVariation.diff), currentCurrency)})
                                                             </span>
                                                         </span>
                                                     </div>
@@ -747,7 +747,7 @@ const Orders = () => {
                                             {/* Costo */}
                                             <div className="flex justify-between">
                                                 <span className="text-sm text-[var(--color-text-muted)]">Costo</span>
-                                                <span className="font-bold text-[var(--color-text)]">{formatMoney(selectedProduct.cost)}</span>
+                                                <span className="font-bold text-[var(--color-text)]">{formatCurrency(selectedProduct.cost, currentCurrency)}</span>
                                             </div>
 
                                             {/* Costo con IVA - solo si tiene impuesto */}
@@ -755,7 +755,7 @@ const Orders = () => {
                                                 <div className="flex justify-between">
                                                     <span className="text-sm text-[var(--color-text-muted)]">Costo + IVA ({selectedProduct.tax_rate}%)</span>
                                                     <span className="font-bold text-[var(--color-text)]">
-                                                        {formatMoney(selectedProduct.cost * (1 + selectedProduct.tax_rate / 100))}
+                                                        {formatCurrency(selectedProduct.cost * (1 + selectedProduct.tax_rate / 100), currentCurrency)}
                                                     </span>
                                                 </div>
                                             )}
@@ -763,7 +763,7 @@ const Orders = () => {
                                             {/* Precio Venta */}
                                             <div className="flex justify-between">
                                                 <span className="text-sm text-[var(--color-text-muted)]">Precio Venta</span>
-                                                <span className="font-bold text-green-400">{formatMoney(selectedProduct.price)}</span>
+                                                <span className="font-bold text-green-400">{formatCurrency(selectedProduct.price, currentCurrency)}</span>
                                             </div>
 
                                             <div className="border-t border-[var(--glass-border)] pt-3 space-y-2">
@@ -791,7 +791,7 @@ const Orders = () => {
                                                             const taxRate = selectedProduct.tax_rate || 0;
                                                             const netPrice = selectedProduct.price / (1 + taxRate / 100);
                                                             const netCost = selectedProduct.cost || 0;
-                                                            return formatMoney(netPrice - netCost);
+                                                            return formatCurrency(netPrice - netCost, currentCurrency);
                                                         })()}
                                                     </span>
                                                 </div>
@@ -819,7 +819,7 @@ const Orders = () => {
                                             <div className="flex justify-between">
                                                 <span className="text-sm text-[var(--color-text-muted)]">Valor en Inventario</span>
                                                 <span className="font-bold text-[var(--color-text)]">
-                                                    {formatMoney((selectedProduct.cost || 0) * (selectedProduct.stock || 0))}
+                                                    {formatCurrency((selectedProduct.cost || 0) * (selectedProduct.stock || 0), currentCurrency)}
                                                 </span>
                                             </div>
                                         </div>
@@ -909,7 +909,7 @@ const Orders = () => {
                                                     const targetNetPrice = netCost * 1.30;
                                                     // Gross Price = Target Net Price * (1 + Tax Rate)
                                                     const targetGrossPrice = targetNetPrice * (1 + taxRate / 100);
-                                                    return formatMoney(targetGrossPrice);
+                                                    return formatCurrency(targetGrossPrice, currentCurrency);
                                                 })()}
                                             </div>
                                         </div>
@@ -932,8 +932,9 @@ const Orders = () => {
                                     <div className="flex justify-between items-center p-3 bg-[var(--glass-bg)] rounded-lg mb-4">
                                         <span className="text-sm text-[var(--color-text-muted)]">Total del Pedido:</span>
                                         <span className="text-xl font-bold text-[var(--color-primary)]">
-                                            {formatMoney(
-                                                Number(orderCostGross || 0) * Number(orderQuantity || 0)
+                                            {formatCurrency(
+                                                Number(orderCostGross || 0) * Number(orderQuantity || 0),
+                                                currentCurrency
                                             )}
                                         </span>
                                     </div>
@@ -1064,15 +1065,15 @@ const Orders = () => {
                                 <div className="space-y-1 text-xs">
                                     <div className="flex justify-between">
                                         <span className="text-[var(--color-text-muted)]">Costo</span>
-                                        <span className="font-bold text-[var(--color-text)]">{formatMoney(selectedProduct.cost)}</span>
+                                        <span className="font-bold text-[var(--color-text)]">{formatCurrency(selectedProduct.cost, currentCurrency)}</span>
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-[var(--color-text-muted)]">Costo+IVA</span>
-                                        <span className="font-bold text-[var(--color-text)]">{formatMoney(selectedProduct.costWithTax || (selectedProduct.cost * (1 + (selectedProduct.tax_rate || 0) / 100)))}</span>
+                                        <span className="font-bold text-[var(--color-text)]">{formatCurrency(selectedProduct.costWithTax || (selectedProduct.cost * (1 + (selectedProduct.tax_rate || 0) / 100)), currentCurrency)}</span>
                                     </div>
                                     <div className="flex justify-between pt-1 border-t border-[var(--glass-border)]">
                                         <span className="text-[var(--color-text-muted)]">Venta</span>
-                                        <span className="font-bold text-green-400">{formatMoney(selectedProduct.price)}</span>
+                                        <span className="font-bold text-green-400">{formatCurrency(selectedProduct.price, currentCurrency)}</span>
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-[var(--color-text-muted)]">Margen</span>
@@ -1097,7 +1098,7 @@ const Orders = () => {
                                     </div>
                                     <div>
                                         <div className="text-[var(--color-text-muted)] text-[10px]">Valor Inventario</div>
-                                        <div className="font-bold text-[var(--color-text)]">{formatMoney((selectedProduct.cost || 0) * (selectedProduct.stock || 0))}</div>
+                                        <div className="font-bold text-[var(--color-text)]">{formatCurrency((selectedProduct.cost || 0) * (selectedProduct.stock || 0), currentCurrency)}</div>
                                     </div>
                                 </div>
                             </div>
@@ -1167,7 +1168,7 @@ const Orders = () => {
                                             const netCost = parseFloat(orderCost);
                                             if (isNaN(netCost)) return '$0';
                                             const taxRate = selectedProduct.tax_rate || 0;
-                                            return formatMoney((netCost * 1.30) * (1 + taxRate / 100));
+                                            return formatCurrency((netCost * 1.30) * (1 + taxRate / 100), currentCurrency);
                                         })()}
                                     </div>
                                 </div>
@@ -1189,7 +1190,7 @@ const Orders = () => {
                             <div className="flex items-center justify-between gap-3 bg-[var(--glass-bg)] p-2 rounded-lg mb-3">
                                 <div className="text-[var(--color-text-muted)] text-xs">Total del Pedido:</div>
                                 <div className="text-lg font-bold text-[var(--color-primary)]">
-                                    {formatMoney(Number(orderCostGross || 0) * (Number(orderQuantity) || 1))}
+                                    {formatCurrency(Number(orderCostGross || 0) * (Number(orderQuantity) || 1), currentCurrency)}
                                 </div>
                             </div>
 
@@ -1292,8 +1293,8 @@ const Orders = () => {
                                                 <p className="font-medium text-[var(--color-text)] truncate">{item.name}</p>
                                                 <p className="text-xs text-[var(--color-text-muted)]">{item.sku}</p>
                                                 <div className="flex gap-3 mt-1 text-xs text-[var(--color-text-muted)]">
-                                                    <span>Costo: {formatMoney(item.cost)}</span>
-                                                    {item.taxRate > 0 && <span>+IVA: {formatMoney(item.costWithTax)}</span>}
+                                                    <span>Costo: {formatCurrency(item.cost, currentCurrency)}</span>
+                                                    {item.taxRate > 0 && <span>+IVA: {formatCurrency(item.costWithTax, currentCurrency)}</span>}
                                                 </div>
                                             </div>
                                             <div className="text-center px-4">
@@ -1301,7 +1302,7 @@ const Orders = () => {
                                                 <p className="text-xs text-[var(--color-text-muted)]">uds</p>
                                             </div>
                                             <div className="text-right">
-                                                <p className="text-lg font-bold text-[var(--color-primary)]">{formatMoney(item.total)}</p>
+                                                <p className="text-lg font-bold text-[var(--color-primary)]">{formatCurrency(item.total, currentCurrency)}</p>
                                             </div>
                                             <button
                                                 onClick={() => removeFromOrder(item.id)}
@@ -1320,7 +1321,7 @@ const Orders = () => {
                             {/* Totals */}
                             <div className="flex justify-between items-center text-lg">
                                 <span className="text-[var(--color-text-muted)]">Total ({orderItems.length} productos)</span>
-                                <span className="text-2xl font-bold text-[var(--color-primary)]">{formatMoney(orderTotal)}</span>
+                                <span className="text-2xl font-bold text-[var(--color-primary)]">{formatCurrency(orderTotal, currentCurrency)}</span>
                             </div>
 
                             {/* Actions */}

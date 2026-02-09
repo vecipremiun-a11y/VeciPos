@@ -3,9 +3,10 @@ import { X, ArrowLeft, Trash2, Plus } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { compressImage, validateImage } from '../lib/imageCompression';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
-    const { categories, suppliers } = useStore();
+    const { categories, suppliers, currentCurrency } = useStore();
     const [formData, setFormData] = useState({
         name: '',
         price: '',
@@ -339,7 +340,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     <div className="text-right">
                         <label className="block text-xs text-gray-500 mb-1">Precio Neto Calc.</label>
                         <div className="text-lg font-mono text-gray-300">
-                            ${(parseFloat(formData.cost || 0) * (1 + (parseFloat(marginPercentage || 0)) / 100)).toFixed(0)}
+                            {formatCurrency(parseFloat(formData.cost || 0) * (1 + (parseFloat(marginPercentage || 0)) / 100), currentCurrency)}
                         </div>
                     </div>
 

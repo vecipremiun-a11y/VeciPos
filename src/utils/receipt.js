@@ -1,11 +1,22 @@
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import { formatCurrency } from './formatCurrency';
 
-export const formatMoney = (amount) => {
-    return '$' + Number(amount).toLocaleString('es-CL');
-};
+export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = null, currencyCode = 'CLP') => {
+    // Si no se pasa config, usar valores por defecto
+    const config = receiptConfig || {
+        business_name: 'VECI',
+        address: 'Sotomayor 1460-A',
+        tax_id: null,
+        phone: null,
+        email: null,
+        header_message: null,
+        footer_message: '¡GRACIAS POR SU COMPRA!\nVuelva pronto',
+        show_tax_id: false,
+        show_phone: false,
+        show_email: false
+    };
 
-export const generateReceiptPDF = (saleDetails, seller) => {
     const doc = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
@@ -16,26 +27,64 @@ export const generateReceiptPDF = (saleDetails, seller) => {
     doc.setFont('courier', 'bold');
     doc.setFontSize(10);
 
-    // Header
-    doc.text('VECI', 29, 10, { align: 'center' });
+    let yPos = 10;
+
+    // Header - Nombre del Negocio
+    doc.text(config.business_name || 'VECI', 29, yPos, { align: 'center' });
+    yPos += 5;
+
+    // Dirección
     doc.setFont('courier', 'normal');
     doc.setFontSize(8);
-    doc.text('Sotomayor 1460-A', 29, 15, { align: 'center' });
+    doc.text(config.address || 'Sotomayor 1460-A', 29, yPos, { align: 'center' });
+    yPos += 4;
+
+    // RUT/NIT (si está configurado y habilitado)
+    if (config.show_tax_id && config.tax_id) {
+        doc.text(`RUT: ${config.tax_id}`, 29, yPos, { align: 'center' });
+        yPos += 4;
+    }
+
+    // Teléfono (si está configurado y habilitado)
+    if (config.show_phone && config.phone) {
+        doc.text(`Tel: ${config.phone}`, 29, yPos, { align: 'center' });
+        yPos += 4;
+    }
+
+    // Email (si está configurado y habilitado)
+    if (config.show_email && config.email) {
+        doc.text(config.email, 29, yPos, { align: 'center' });
+        yPos += 4;
+    }
+
+    // Mensaje cabecera personalizado (si existe)
+    if (config.header_message) {
+        yPos += 2;
+        const headerLines = doc.splitTextToSize(config.header_message, 54);
+        headerLines.forEach(line => {
+            doc.text(line, 29, yPos, { align: 'center' });
+            yPos += 3;
+        });
+    }
+
+    yPos += 2;
 
     const sellerName = seller?.name || 'Vendedor';
     const date = new Date(saleDetails.date || Date.now()).toLocaleString('es-CL');
-    // If ticketId is not in saleDetails, generate one from id or date
     const ticketId = saleDetails.id ? `T-${String(saleDetails.id).slice(-6)}` : `T-${Date.now().toString().slice(-6)}`;
 
     doc.setFontSize(7);
-    doc.text(`Boleta: ${ticketId}`, 2, 25);
-    doc.text(`Fecha: ${date}`, 2, 29);
-    doc.text(`Vend: ${sellerName}`, 2, 33);
+    doc.text(`Boleta: ${ticketId}`, 2, yPos);
+    yPos += 4;
+    doc.text(`Fecha: ${date}`, 2, yPos);
+    yPos += 4;
+    doc.text(`Vend: ${sellerName}`, 2, yPos);
+    yPos += 4;
 
-    doc.text('--------------------------------', 2, 37);
+    doc.text('--------------------------------', 2, yPos);
+    yPos += 5;
 
     // Items
-    let yPos = 42;
     doc.setFont('courier', 'bold');
     doc.text('DESCRIPCIÓN', 2, yPos);
     doc.text('TOTAL', 56, yPos, { align: 'right' });
@@ -46,13 +95,12 @@ export const generateReceiptPDF = (saleDetails, seller) => {
 
     const items = saleDetails.items || [];
     items.forEach(item => {
-        // Split name if too long
         const splitName = doc.splitTextToSize(item.name, 54);
         doc.text(splitName, 2, yPos);
         yPos += splitName.length * 3;
 
-        doc.text(`${item.quantity} x ${Number(item.price).toLocaleString('es-CL')}`, 2, yPos);
-        doc.text(`$${(item.price * item.quantity).toLocaleString('es-CL')}`, 56, yPos, { align: 'right' });
+        doc.text(`${item.quantity} x ${formatCurrency(item.price, currencyCode)}`, 2, yPos);
+        doc.text(`${formatCurrency(item.price * item.quantity, currencyCode)}`, 56, yPos, { align: 'right' });
         yPos += 5;
     });
 
@@ -68,7 +116,7 @@ export const generateReceiptPDF = (saleDetails, seller) => {
     doc.setFont('courier', 'bold');
     doc.setFontSize(10);
     doc.text('TOTAL', 2, yPos);
-    doc.text(`$${Number(saleDetails.total).toLocaleString('es-CL')}`, 56, yPos, { align: 'right' });
+    doc.text(`${formatCurrency(saleDetails.total, currencyCode)}`, 56, yPos, { align: 'right' });
     yPos += 6;
 
     if (saleDetails.status === 'cancelled') {
@@ -86,24 +134,40 @@ export const generateReceiptPDF = (saleDetails, seller) => {
 
     if (isCash) {
         doc.text('Pagó con:', 2, yPos);
-        doc.text(`$${Number(amountPaid).toLocaleString('es-CL')}`, 56, yPos, { align: 'right' });
+        doc.text(`${formatCurrency(amountPaid, currencyCode)}`, 56, yPos, { align: 'right' });
         yPos += 5;
         doc.text('Vuelto:', 2, yPos);
-        doc.text(`$${Number(change).toLocaleString('es-CL')}`, 56, yPos, { align: 'right' });
+        doc.text(`${formatCurrency(change, currencyCode)}`, 56, yPos, { align: 'right' });
         yPos += 5;
     }
 
-    // Footer
+    // Footer personalizado
     yPos += 10;
     doc.setFontSize(8);
-    doc.text('¡GRACIAS POR SU COMPRA!', 29, yPos, { align: 'center' });
-    yPos += 5;
-    doc.text('Vuelva pronto', 29, yPos, { align: 'center' });
+    const footerMessage = config.footer_message || '¡GRACIAS POR SU COMPRA!\nVuelva pronto';
+    const footerLines = footerMessage.split('\n');
+    footerLines.forEach(line => {
+        doc.text(line, 29, yPos, { align: 'center' });
+        yPos += 5;
+    });
 
     return doc.output('blob');
 };
 
-export const generateWhatsAppLink = (phoneNumber, saleDetails, seller) => {
+export const generateWhatsAppLink = (phoneNumber, saleDetails, seller, receiptConfig = null, currencyCode = 'CLP') => {
+    const config = receiptConfig || {
+        business_name: 'VECI',
+        address: 'Sotomayor 1460-A',
+        tax_id: null,
+        phone: null,
+        email: null,
+        header_message: null,
+        footer_message: '*¡GRACIAS POR SU COMPRA!*',
+        show_tax_id: false,
+        show_phone: false,
+        show_email: false
+    };
+
     const cleanNumber = phoneNumber.replace(/\D/g, '');
     const fullNumber = `569${cleanNumber}`;
     const sellerName = seller?.name || 'Vendedor';
@@ -113,8 +177,24 @@ export const generateWhatsAppLink = (phoneNumber, saleDetails, seller) => {
     const isCash = ['cash', 'efectivo', 'Efectivo'].includes(saleDetails.paymentMethod);
     const paymentLabel = isCash ? 'Efectivo' : saleDetails.paymentMethod;
 
-    let receiptText = `*COMPROBANTE VECI*\n`;
-    receiptText += `Sotomayor 1460-A\n\n`;
+    let receiptText = `*COMPROBANTE ${config.business_name || 'VECI'}*\n`;
+    receiptText += `${config.address || 'Sotomayor 1460-A'}\n`;
+
+    if (config.show_tax_id && config.tax_id) {
+        receiptText += `RUT: ${config.tax_id}\n`;
+    }
+    if (config.show_phone && config.phone) {
+        receiptText += `Tel: ${config.phone}\n`;
+    }
+    if (config.show_email && config.email) {
+        receiptText += `${config.email}\n`;
+    }
+
+    if (config.header_message) {
+        receiptText += `\n_${config.header_message}_\n`;
+    }
+
+    receiptText += `\n`;
     receiptText += `Boleta: ${ticketId}\n`;
     receiptText += `Fecha: ${date}\n`;
     receiptText += `Vend: ${sellerName}\n`;
@@ -133,8 +213,8 @@ export const generateWhatsAppLink = (phoneNumber, saleDetails, seller) => {
         const total = item.price * item.quantity;
         receiptText += `${name}\n`;
 
-        const qtyPrice = `${item.quantity} x ${formatMoney(item.price)}`;
-        const totalStr = formatMoney(total);
+        const qtyPrice = `${item.quantity} x ${formatCurrency(item.price, currencyCode)}`;
+        const totalStr = formatCurrency(total, currencyCode);
 
         const spaceNeeded = 27 - qtyPrice.length - totalStr.length;
         const spaces = spaceNeeded > 0 ? ' '.repeat(spaceNeeded) : ' ';
@@ -145,7 +225,7 @@ export const generateWhatsAppLink = (phoneNumber, saleDetails, seller) => {
     receiptText += `---------------------------\n`;
 
     const totalLabel = "TOTAL";
-    const totalValue = formatMoney(saleDetails.total);
+    const totalValue = formatCurrency(saleDetails.total, currencyCode);
     const totalSpaces = 27 - totalLabel.length - totalValue.length;
     receiptText += `${totalLabel}${' '.repeat(totalSpaces > 0 ? totalSpaces : 1)}${totalValue}\n`;
 
@@ -155,11 +235,11 @@ export const generateWhatsAppLink = (phoneNumber, saleDetails, seller) => {
     if (isCash) {
         const amountPaid = saleDetails.paymentDetails?.amount || saleDetails.total;
         const change = saleDetails.paymentDetails?.change || 0;
-        receiptText += `Pagó con: ${formatMoney(Number(amountPaid))}\n`;
-        receiptText += `Vuelto: ${formatMoney(Number(change))}\n`;
+        receiptText += `Pagó con: ${formatCurrency(Number(amountPaid), currencyCode)}\n`;
+        receiptText += `Vuelto: ${formatCurrency(Number(change), currencyCode)}\n`;
     }
 
-    receiptText += `\n*¡GRACIAS POR SU COMPRA!*`;
+    receiptText += `\n${config.footer_message || '*¡GRACIAS POR SU COMPRA!*'}`;
 
     const encodedMessage = encodeURIComponent(receiptText);
     return `https://wa.me/${fullNumber}?text=${encodedMessage}`;

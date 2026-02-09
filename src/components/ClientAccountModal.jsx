@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { X, Calendar, DollarSign, FileText, ArrowRight, Check } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const ClientAccountModal = ({ isOpen, onClose, client }) => {
-    const { sales } = useStore(); // Ensure we have latest sales
+    const { sales, currentCurrency } = useStore(); // Ensure we have latest sales
     const [clientSales, setClientSales] = useState([]);
 
     useEffect(() => {
@@ -47,7 +48,7 @@ const ClientAccountModal = ({ isOpen, onClose, client }) => {
                 <div className="p-6 bg-red-500/5 border-b border-[var(--glass-border)] flex justify-between items-center">
                     <div>
                         <p className="text-[var(--color-text-muted)] text-sm font-medium uppercase tracking-wider">Deuda Total</p>
-                        <p className="text-4xl font-bold text-red-500 mt-1">${totalDebt.toLocaleString('es-CL')}</p>
+                        <p className="text-4xl font-bold text-red-500 mt-1">{formatCurrency(totalDebt, currentCurrency)}</p>
                     </div>
                     {/* Placeholder for Pay Debt button */}
                     <button className="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg text-sm font-bold cursor-not-allowed opacity-70" title="Próximamente">
@@ -70,7 +71,7 @@ const ClientAccountModal = ({ isOpen, onClose, client }) => {
                                         <p className="text-xs text-[var(--color-text-muted)] italic">{sale.observation || 'Sin observaciones'}</p>
                                     </div>
                                     <div className="text-right">
-                                        <p className="font-bold text-red-400 text-lg">-${parseFloat(sale.total).toLocaleString('es-CL')}</p>
+                                        <p className="font-bold text-red-400 text-lg">-{formatCurrency(parseFloat(sale.total), currentCurrency)}</p>
                                         <span className="text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded-full">Crédito</span>
                                     </div>
                                 </div>

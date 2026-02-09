@@ -4,9 +4,10 @@ import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import ClientReceiptModal from './ClientReceiptModal';
 import ClientPaymentModal from './ClientPaymentModal';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const ClientAccountDetails = ({ client, onBack }) => {
-    const { sales, users, registerClientPayment, fetchSales } = useStore();
+    const { sales, users, registerClientPayment, fetchSales, currentCurrency } = useStore();
     const [rawClientSales, setRawClientSales] = useState([]); // All sales for this client
     const [viewMode, setViewMode] = useState('pending'); // 'pending' | 'history'
     const [selectedSale, setSelectedSale] = useState(null);
@@ -87,7 +88,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
         const date = new Date(sale.date).toLocaleString('es-CL');
         const ticketId = `T-${new Date(sale.date).getTime().toString().slice(-6)}`;
 
-        const formatMoney = (amount) => `$${parseFloat(amount).toLocaleString('es-CL')}`;
+
 
         let receiptText = `*COMPROBANTE DETALLE*\n`;
         receiptText += `Sotomayor 1460-A\n\n`;
@@ -106,8 +107,8 @@ const ClientAccountDetails = ({ client, onBack }) => {
             const total = item.price * item.quantity;
             receiptText += `${name}\n`;
 
-            const qtyPrice = `${item.quantity} x ${formatMoney(item.price)}`;
-            const totalStr = formatMoney(total);
+            const qtyPrice = `${item.quantity} x ${formatCurrency(item.price, currentCurrency)}`;
+            const totalStr = formatCurrency(total, currentCurrency);
 
             const spaceNeeded = 27 - qtyPrice.length - totalStr.length;
             const spaces = spaceNeeded > 0 ? ' '.repeat(spaceNeeded) : ' ';
@@ -118,7 +119,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
         receiptText += `---------------------------\n`;
 
         const totalLabel = "TOTAL";
-        const totalValue = formatMoney(sale.total);
+        const totalValue = formatCurrency(sale.total, currentCurrency);
         const totalSpaces = 27 - totalLabel.length - totalValue.length;
         receiptText += `${totalLabel}${' '.repeat(totalSpaces > 0 ? totalSpaces : 1)}${totalValue}\n`;
 
@@ -187,7 +188,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
                 <div className="glass-card p-6 bg-red-500/10 border-red-500/20 relative overflow-hidden group">
                     <div className="relative z-10">
                         <p className="text-red-400 text-sm font-bold uppercase tracking-wider mb-2">Deuda Total</p>
-                        <p className="text-4xl font-black text-white tracking-tight">${totalDebt.toLocaleString('es-CL')}</p>
+                        <p className="text-4xl font-black text-white tracking-tight">{formatCurrency(totalDebt, currentCurrency)}</p>
                     </div>
                     <div className="absolute right-[-20px] top-[-20px] opacity-10 group-hover:opacity-20 transition-opacity">
                         <DollarSignIcon size={120} />
@@ -334,7 +335,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
 
                                                 return (
                                                     <span className={`font-bold text-sm ${colorClass}`}>
-                                                        {sign}${Math.abs(parseFloat(sale.total)).toLocaleString('es-CL')}
+                                                        {sign}{formatCurrency(Math.abs(parseFloat(sale.total)), currentCurrency)}
                                                     </span>
                                                 );
                                             })()}

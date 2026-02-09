@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useStore } from '../store/useStore';
+import { turso } from '../lib/turso';
 import { Search, Calendar, CreditCard, User, Download, Send, Trash2, Printer, AlertTriangle, FileText, X } from 'lucide-react';
-import { formatMoney, generateReceiptPDF, generateWhatsAppLink } from '../utils/receipt';
+import { generateReceiptPDF, generateWhatsAppLink } from '../utils/receipt';
+import { formatCurrency } from '../utils/formatCurrency';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 
 const SalesHistory = () => {
-    const { sales, users, cancelSale, currentUser, currentCompanyTimezone, fetchSales, fetchSaleDetails } = useStore();
+    const { sales, users, cancelSale, currentUser, currentCompanyTimezone, fetchSales, fetchSaleDetails, activeCompanyId, currentCurrency } = useStore();
     const [selectedSale, setSelectedSale] = useState(null);
     const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
@@ -79,29 +81,87 @@ const SalesHistory = () => {
     const totalSales = sales.reduce((acc, curr) => acc + (curr.status === 'cancelled' ? 0 : curr.total), 0);
     const totalCount = sales.filter(s => s.status !== 'cancelled').length;
 
-    const handleDownloadPDF = () => {
+    const handleDownloadPDF = async () => {
         if (!selectedSale || !selectedSale.items) return; // Guard against missing details
         const seller = users.find(u => u.id === selectedSale.user_id);
-        const pdfBlob = generateReceiptPDF(selectedSale, seller);
-        const url = window.URL.createObjectURL(pdfBlob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `boleta_${selectedSale.id}.pdf`;
-        link.click();
-        window.URL.revokeObjectURL(url);
+
+        try {
+            const configResult = await turso.execute({
+                sql: `SELECT 
+                        receipt_business_name as business_name,
+                        receipt_address as address,
+                        receipt_tax_id as tax_id,
+                        receipt_phone as phone,
+                        receipt_email as email,
+                        receipt_header_message as header_message,
+                        receipt_footer_message as footer_message,
+                        receipt_show_tax_id as show_tax_id,
+                        receipt_show_phone as show_phone,
+                        receipt_show_email as show_email
+                      FROM companies WHERE id = ?`,
+                args: [activeCompanyId]
+            });
+
+            const receiptConfig = configResult.rows.length > 0 ? {
+                ...configResult.rows[0],
+                show_tax_id: configResult.rows[0].show_tax_id === 1,
+                show_phone: configResult.rows[0].show_phone === 1,
+                show_email: configResult.rows[0].show_email === 1
+            } : null;
+
+            const pdfBlob = await generateReceiptPDF(selectedSale, seller, receiptConfig, currentCurrency);
+            const url = window.URL.createObjectURL(pdfBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `boleta_${selectedSale.id}.pdf`;
+            link.click();
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Error generating PDF:", error);
+            alert("Error al generar el PDF");
+        }
     };
 
     const handleWhatsAppClick = () => {
         setShowPhoneInput(true);
     };
 
-    const confirmWhatsAppShare = () => {
+    const confirmWhatsAppShare = async () => {
         if (!selectedSale || phoneNumber.length < 8) return;
         const seller = users.find(u => u.id === selectedSale.user_id);
-        const link = generateWhatsAppLink(phoneNumber, selectedSale, seller);
-        window.open(link, '_blank');
-        setShowPhoneInput(false);
-        setPhoneNumber('');
+
+        try {
+            const configResult = await turso.execute({
+                sql: `SELECT 
+                        receipt_business_name as business_name,
+                        receipt_address as address,
+                        receipt_tax_id as tax_id,
+                        receipt_phone as phone,
+                        receipt_email as email,
+                        receipt_header_message as header_message,
+                        receipt_footer_message as footer_message,
+                        receipt_show_tax_id as show_tax_id,
+                        receipt_show_phone as show_phone,
+                        receipt_show_email as show_email
+                      FROM companies WHERE id = ?`,
+                args: [activeCompanyId]
+            });
+
+            const receiptConfig = configResult.rows.length > 0 ? {
+                ...configResult.rows[0],
+                show_tax_id: configResult.rows[0].show_tax_id === 1,
+                show_phone: configResult.rows[0].show_phone === 1,
+                show_email: configResult.rows[0].show_email === 1
+            } : null;
+
+            const link = generateWhatsAppLink(phoneNumber, selectedSale, seller, receiptConfig, currentCurrency);
+            window.open(link, '_blank');
+            setShowPhoneInput(false);
+            setPhoneNumber('');
+        } catch (error) {
+            console.error("Error sharing WhatsApp:", error);
+            alert("Error al compartir por WhatsApp");
+        }
     };
 
     const handleCancelSale = () => {
@@ -242,7 +302,7 @@ const SalesHistory = () => {
                                 </div>
                                 <div className="flex justify-between items-end">
                                     <div>
-                                        <p className="font-bold text-green-400 text-base lg:text-lg">{formatMoney(sale.total)}</p>
+                                        <p className="font-bold text-green-400 text-base lg:text-lg">{formatCurrency(sale.total, currentCurrency)}</p>
                                         <p className="text-[10px] lg:text-xs text-[var(--color-text-muted)]">
                                             {formatInCompanyTime(sale.date, currentCompanyTimezone, 'dd-MM-yyyy HH:mm')}
                                         </p>
@@ -289,7 +349,7 @@ const SalesHistory = () => {
                                     </div>
                                     <div className="text-right">
                                         <div className="text-3xl font-bold text-[var(--color-primary)]">
-                                            {formatMoney(selectedSale.total)}
+                                            {formatCurrency(selectedSale.total, currentCurrency)}
                                         </div>
                                         <div className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold mt-2 ${selectedSale.status === 'cancelled' ? 'bg-red-500/20 text-red-500' : 'bg-green-500/20 text-green-500'
                                             }`}>
@@ -338,8 +398,8 @@ const SalesHistory = () => {
                                                     <td className="py-3 text-right text-[var(--color-text)] bg-[var(--glass-bg)] rounded w-16 text-center mx-auto" style={{ display: 'table-cell' }}>
                                                         <span className="px-2 py-1 rounded bg-[var(--glass-bg)]">{item.quantity}</span>
                                                     </td>
-                                                    <td className="py-3 text-right">{formatMoney(item.price)}</td>
-                                                    <td className="py-3 text-right font-bold text-[var(--color-text)]">{formatMoney(item.price * item.quantity)}</td>
+                                                    <td className="py-3 text-right">{formatCurrency(item.price, currentCurrency)}</td>
+                                                    <td className="py-3 text-right font-bold text-[var(--color-text)]">{formatCurrency(item.price * item.quantity, currentCurrency)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -350,15 +410,15 @@ const SalesHistory = () => {
                                         <div className="w-64 space-y-2">
                                             <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
                                                 <span>Subtotal</span>
-                                                <span>{formatMoney(selectedSale.total)}</span>
+                                                <span>{formatCurrency(selectedSale.total, currentCurrency)}</span>
                                             </div>
                                             <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
                                                 <span>Impuestos</span>
-                                                <span>$0</span>
+                                                <span>{formatCurrency(0, currentCurrency)}</span>
                                             </div>
                                             <div className="border-t border-[var(--glass-border)] pt-2 flex justify-between text-[var(--color-text)] font-bold text-lg">
                                                 <span>Total</span>
-                                                <span className="text-[var(--color-primary)]">{formatMoney(selectedSale.total)}</span>
+                                                <span className="text-[var(--color-primary)]">{formatCurrency(selectedSale.total, currentCurrency)}</span>
                                             </div>
 
                                             <div className="mt-6 p-4 bg-[var(--glass-bg)] rounded-lg border border-[var(--glass-border)]">
@@ -371,11 +431,11 @@ const SalesHistory = () => {
                                                     <>
                                                         <div className="flex justify-between text-sm text-[var(--color-text-muted)] mb-1">
                                                             <span>Pagado</span>
-                                                            <span>{formatMoney(selectedSale.paymentDetails.amount || selectedSale.total)}</span>
+                                                            <span>{formatCurrency(selectedSale.paymentDetails.amount || selectedSale.total, currentCurrency)}</span>
                                                         </div>
                                                         <div className="flex justify-between text-sm text-[var(--color-text-muted)]">
                                                             <span>Vuelto</span>
-                                                            <span>{formatMoney(selectedSale.paymentDetails.change || 0)}</span>
+                                                            <span>{formatCurrency(selectedSale.paymentDetails.change || 0, currentCurrency)}</span>
                                                         </div>
                                                     </>
                                                 )}
@@ -519,7 +579,7 @@ const SalesHistory = () => {
                             </div>
                             <div className="text-right">
                                 <div className="text-2xl font-bold text-[var(--color-primary)]">
-                                    {formatMoney(selectedSale.total)}
+                                    {formatCurrency(selectedSale.total, currentCurrency)}
                                 </div>
                                 <div className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold mt-1 ${selectedSale.status === 'cancelled' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'}`}>
                                     {selectedSale.status === 'cancelled' ? 'ANULADA' : 'PAGADO'}
@@ -573,7 +633,7 @@ const SalesHistory = () => {
                                                 <td className="py-3 text-center">
                                                     <span className="px-2 py-1 bg-[var(--glass-bg)] rounded text-[var(--color-text)] text-sm">{item.quantity}</span>
                                                 </td>
-                                                <td className="py-3 text-right font-bold text-[var(--color-text)] text-sm">{formatMoney(item.price * item.quantity)}</td>
+                                                <td className="py-3 text-right font-bold text-[var(--color-text)] text-sm">{formatCurrency(item.price * item.quantity, currentCurrency)}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -583,15 +643,15 @@ const SalesHistory = () => {
                                 <div className="mt-6 space-y-2">
                                     <div className="flex justify-between text-sm text-[var(--color-text-muted)]">
                                         <span>Subtotal</span>
-                                        <span>{formatMoney(selectedSale.total)}</span>
+                                        <span>{formatCurrency(selectedSale.total, currentCurrency)}</span>
                                     </div>
                                     <div className="flex justify-between text-sm text-[var(--color-text-muted)]">
                                         <span>Impuestos</span>
-                                        <span>$0</span>
+                                        <span>{formatCurrency(0, currentCurrency)}</span>
                                     </div>
                                     <div className="border-t border-[var(--glass-border)] pt-2 flex justify-between font-bold text-[var(--color-text)]">
                                         <span>Total</span>
-                                        <span className="text-[var(--color-primary)] text-lg">{formatMoney(selectedSale.total)}</span>
+                                        <span className="text-[var(--color-primary)] text-lg">{formatCurrency(selectedSale.total, currentCurrency)}</span>
                                     </div>
                                 </div>
 
@@ -606,11 +666,11 @@ const SalesHistory = () => {
                                         <>
                                             <div className="flex justify-between text-sm text-[var(--color-text-muted)] mb-1">
                                                 <span>Pagado</span>
-                                                <span>{formatMoney(selectedSale.paymentDetails.amount || selectedSale.total)}</span>
+                                                <span>{formatCurrency(selectedSale.paymentDetails.amount || selectedSale.total, currentCurrency)}</span>
                                             </div>
                                             <div className="flex justify-between text-sm text-[var(--color-text-muted)]">
                                                 <span>Vuelto</span>
-                                                <span>{formatMoney(selectedSale.paymentDetails.change || 0)}</span>
+                                                <span>{formatCurrency(selectedSale.paymentDetails.change || 0, currentCurrency)}</span>
                                             </div>
                                         </>
                                     )}

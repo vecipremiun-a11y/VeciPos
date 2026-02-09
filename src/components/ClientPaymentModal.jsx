@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { X, Check, DollarSign, CreditCard, Calendar, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useStore } from '../store/useStore';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
+    const { currentCurrency } = useStore();
     const [selectedSales, setSelectedSales] = useState([]);
     const [paymentMethod, setPaymentMethod] = useState('Efectivo');
 
@@ -119,7 +122,7 @@ const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
                                                             {new Date(sale.date).toLocaleDateString()}
                                                         </span>
                                                         <span className={`font-mono font-bold ${isSelected ? 'text-green-400' : 'text-white/50'}`}>
-                                                            ${parseFloat(sale.total).toLocaleString('es-CL')}
+                                                            {formatCurrency(parseFloat(sale.total), currentCurrency)}
                                                         </span>
                                                     </div>
                                                     <p className="text-xs text-white/40 truncate mt-0.5">
@@ -140,15 +143,15 @@ const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
                                         <div className="space-y-2">
                                             <div className="flex justify-between text-sm">
                                                 <span className="text-white/60">Deuda Total</span>
-                                                <span className="text-white font-mono">${totalGlobalDebt.toLocaleString('es-CL')}</span>
+                                                <span className="text-white font-mono">{formatCurrency(totalGlobalDebt, currentCurrency)}</span>
                                             </div>
                                             <div className="flex justify-between text-sm">
                                                 <span className="text-green-400 font-bold">Abono Seleccionado</span>
-                                                <span className="text-green-400 font-mono font-bold">-${totalToPay.toLocaleString('es-CL')}</span>
+                                                <span className="text-green-400 font-mono font-bold">-{formatCurrency(totalToPay, currentCurrency)}</span>
                                             </div>
                                             <div className="border-t border-white/10 my-2 pt-2 flex justify-between text-sm">
                                                 <span className="text-white/60">Restante</span>
-                                                <span className="text-white font-mono opacity-80">${remainingDebt.toLocaleString('es-CL')}</span>
+                                                <span className="text-white font-mono opacity-80">{formatCurrency(remainingDebt, currentCurrency)}</span>
                                             </div>
                                         </div>
                                     </div>

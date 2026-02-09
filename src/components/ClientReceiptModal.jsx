@@ -1,8 +1,11 @@
 import React from 'react';
 import { X, Receipt, Calendar, User, DollarSign, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useStore } from '../store/useStore';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const ClientReceiptModal = ({ isOpen, onClose, sale, client }) => {
+    const { currentCurrency } = useStore();
     if (!isOpen || !sale) return null;
 
     const receiptItems = sale.items || [];
@@ -84,12 +87,12 @@ const ClientReceiptModal = ({ isOpen, onClose, sale, client }) => {
                                             <div className="flex-1 min-w-0 pr-4">
                                                 <p className="text-white/90 font-medium text-sm truncate">{item.name}</p>
                                                 <p className="text-white/40 text-xs">
-                                                    {item.quantity} x ${parseFloat(item.price).toLocaleString('es-CL')}
+                                                    {item.quantity} x {formatCurrency(parseFloat(item.price), currentCurrency)}
                                                 </p>
                                             </div>
                                             <div className="text-right shrink-0">
                                                 <p className="text-white font-bold tabular-nums">
-                                                    ${(item.quantity * item.price).toLocaleString('es-CL')}
+                                                    {formatCurrency(item.quantity * item.price, currentCurrency)}
                                                 </p>
                                             </div>
                                         </div>
@@ -106,7 +109,7 @@ const ClientReceiptModal = ({ isOpen, onClose, sale, client }) => {
                             <div className="space-y-3">
                                 <div className="flex justify-between items-center text-sm text-white/50">
                                     <span>Subtotal</span>
-                                    <span>${totalAmount.toLocaleString('es-CL')}</span>
+                                    <span>{formatCurrency(totalAmount, currentCurrency)}</span>
                                 </div>
 
                                 <div className="border-t border-dashed border-white/10 my-2" />
@@ -121,7 +124,7 @@ const ClientReceiptModal = ({ isOpen, onClose, sale, client }) => {
                                     </div>
                                     <div className="text-right">
                                         <p className="text-3xl font-black text-white tracking-tight tabular-nums" style={{ textShadow: '0 0 30px rgba(34, 211, 238, 0.3)' }}>
-                                            ${totalAmount.toLocaleString('es-CL')}
+                                            {formatCurrency(totalAmount, currentCurrency)}
                                         </p>
                                     </div>
                                 </div>

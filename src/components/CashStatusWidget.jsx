@@ -8,9 +8,10 @@ import { es } from 'date-fns/locale';
 import { cn } from '../lib/utils';
 import CashClosingModal from './CashClosingModal';
 import CashCloseSuccessModal from './CashCloseSuccessModal';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const CashStatusWidget = () => {
-    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser } = useStore();
+    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency } = useStore();
     const navigate = useNavigate();
     const [isOpen, setIsOpen] = useState(false);
     const [txModalType, setTxModalType] = useState(null); // 'IN' or 'OUT'
@@ -92,7 +93,7 @@ const CashStatusWidget = () => {
                     >
                         <div className="flex flex-col items-end">
                             <span className="text-[var(--color-primary)] font-bold text-lg leading-none">
-                                ${Math.floor(registerStats.balance).toLocaleString('es-CL')}
+                                {formatCurrency(Math.floor(registerStats.balance), currentCurrency)}
                             </span>
                             <span className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1">
                                 <Clock size={10} />
@@ -127,7 +128,7 @@ const CashStatusWidget = () => {
                                     {/* Main Balance */}
                                     <div className="p-4 bg-gradient-to-br from-[var(--color-primary)]/10 to-transparent flex flex-col items-center justify-center border-b border-[var(--glass-border)]">
                                         <span className="text-3xl lg:text-4xl font-extrabold text-[var(--color-primary)] mb-0.5 text-glow">
-                                            ${registerStats.balance.toLocaleString('es-CL')}
+                                            {formatCurrency(registerStats.balance, currentCurrency)}
                                         </span>
                                         <span className="text-xs lg:text-sm text-[var(--color-text-muted)] font-medium">Saldo Actual en Caja</span>
                                     </div>
@@ -136,12 +137,12 @@ const CashStatusWidget = () => {
                                     <div className="grid grid-cols-2 gap-2 p-3">
                                         <div className="p-2 lg:p-3 bg-blue-500/5 rounded-xl border border-blue-500/20 flex flex-col items-center">
                                             <TrendingUp size={14} className="text-blue-400 mb-0.5" />
-                                            <span className="text-lg lg:text-xl font-bold text-blue-400">${registerStats.sales.toLocaleString('es-CL')}</span>
+                                            <span className="text-lg lg:text-xl font-bold text-blue-400">{formatCurrency(registerStats.sales, currentCurrency)}</span>
                                             <span className="text-[10px] lg:text-xs text-blue-300/60">Ventas Efectivo</span>
                                         </div>
                                         <div className="p-2 lg:p-3 bg-orange-500/5 rounded-xl border border-orange-500/20 flex flex-col items-center">
                                             <TrendingDown size={14} className="text-orange-400 mb-0.5" />
-                                            <span className="text-lg lg:text-xl font-bold text-orange-400">${registerStats.movements_out.toLocaleString('es-CL')}</span>
+                                            <span className="text-lg lg:text-xl font-bold text-orange-400">{formatCurrency(registerStats.movements_out, currentCurrency)}</span>
                                             <span className="text-[10px] lg:text-xs text-orange-300/60">Retiros</span>
                                         </div>
                                     </div>
@@ -177,7 +178,7 @@ const CashStatusWidget = () => {
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <span className="block font-bold text-green-400 text-xs lg:text-sm">+${registerStats.initial.toLocaleString('es-CL')}</span>
+                                                    <span className="block font-bold text-green-400 text-xs lg:text-sm">+{formatCurrency(registerStats.initial, currentCurrency)}</span>
                                                     <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{format(new Date(cashRegister.opening_time), 'h:mm a')}</span>
                                                 </div>
                                             </div>
@@ -207,7 +208,7 @@ const CashStatusWidget = () => {
                                                         <span className={cn("block font-bold text-xs lg:text-sm",
                                                             (tx.type === 'VENTA' || tx.type === 'INGRESO') ? "text-green-400" : "text-orange-400"
                                                         )}>
-                                                            {(tx.type === 'VENTA' || tx.type === 'INGRESO') ? '+' : '-'}${tx.amount.toLocaleString('es-CL')}
+                                                            {(tx.type === 'VENTA' || tx.type === 'INGRESO') ? '+' : '-'}{formatCurrency(tx.amount, currentCurrency)}
                                                         </span>
                                                         <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{format(new Date(tx.date), 'h:mm a')}</span>
                                                     </div>

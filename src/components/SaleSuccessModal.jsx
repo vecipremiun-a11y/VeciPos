@@ -1,13 +1,74 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Printer, ShoppingCart, FileText, Send } from 'lucide-react';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import html2canvas from 'html2canvas';
-import { useRef } from 'react';
+
+import { turso } from '../lib/turso';
+import { useStore } from '../store/useStore';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) => {
+    const { activeCompanyId, currentCurrency } = useStore();
     const [phoneNumber, setPhoneNumber] = useState('');
     const receiptRef = useRef(null);
+    const [receiptConfig, setReceiptConfig] = useState({
+        business_name: 'VECI',
+        address: 'Sotomayor 1460-A',
+        tax_id: null,
+        phone: null,
+        email: null,
+        header_message: null,
+        footer_message: '¡GRACIAS POR SU COMPRA!\nVuelva pronto',
+        show_tax_id: false,
+        show_phone: false,
+        show_email: false
+    });
+
+    // Cargar configuración de boletas cuando se abre el modal
+    useEffect(() => {
+        const loadReceiptConfig = async () => {
+            if (!isOpen || !activeCompanyId) return;
+
+            try {
+                const result = await turso.execute({
+                    sql: `SELECT 
+                            receipt_business_name as business_name,
+                            receipt_address as address,
+                            receipt_tax_id as tax_id,
+                            receipt_phone as phone,
+                            receipt_email as email,
+                            receipt_header_message as header_message,
+                            receipt_footer_message as footer_message,
+                            receipt_show_tax_id as show_tax_id,
+                            receipt_show_phone as show_phone,
+                            receipt_show_email as show_email
+                          FROM companies WHERE id = ?`,
+                    args: [activeCompanyId]
+                });
+
+                if (result.rows.length > 0) {
+                    const data = result.rows[0];
+                    setReceiptConfig({
+                        business_name: data.business_name || 'VECI',
+                        address: data.address || 'Sotomayor 1460-A',
+                        tax_id: data.tax_id,
+                        phone: data.phone,
+                        email: data.email,
+                        header_message: data.header_message,
+                        footer_message: data.footer_message || '¡GRACIAS POR SU COMPRA!\nVuelva pronto',
+                        show_tax_id: data.show_tax_id === 1,
+                        show_phone: data.show_phone === 1,
+                        show_email: data.show_email === 1
+                    });
+                }
+            } catch (e) {
+                console.error('Error loading receipt config:', e);
+            }
+        };
+
+        loadReceiptConfig();
+    }, [isOpen, activeCompanyId]);
 
     if (!isOpen || !saleDetails) return null;
 
@@ -15,32 +76,70 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         const doc = new jsPDF({
             orientation: 'portrait',
             unit: 'mm',
-            format: [58, 200] // 58mm width, arbitrary long height
+            format: [58, 200]
         });
 
-        // Setup font styles
         doc.setFont('courier', 'bold');
         doc.setFontSize(10);
 
-        // Header
-        doc.text('VECI', 29, 10, { align: 'center' });
+        let yPos = 10;
+
+        // Header - Nombre del Negocio
+        doc.text(receiptConfig.business_name, 29, yPos, { align: 'center' });
+        yPos += 5;
+
+        // Dirección
         doc.setFont('courier', 'normal');
         doc.setFontSize(8);
-        doc.text('Sotomayor 1460-A', 29, 15, { align: 'center' });
+        doc.text(receiptConfig.address, 29, yPos, { align: 'center' });
+        yPos += 4;
+
+        // RUT/NIT (si está configurado y habilitado)
+        if (receiptConfig.show_tax_id && receiptConfig.tax_id) {
+            doc.text(`RUT: ${receiptConfig.tax_id}`, 29, yPos, { align: 'center' });
+            yPos += 4;
+        }
+
+        // Teléfono
+        if (receiptConfig.show_phone && receiptConfig.phone) {
+            doc.text(`Tel: ${receiptConfig.phone}`, 29, yPos, { align: 'center' });
+            yPos += 4;
+        }
+
+        // Email
+        if (receiptConfig.show_email && receiptConfig.email) {
+            doc.text(receiptConfig.email, 29, yPos, { align: 'center' });
+            yPos += 4;
+        }
+
+        // Mensaje cabecera
+        if (receiptConfig.header_message) {
+            yPos += 2;
+            const headerLines = doc.splitTextToSize(receiptConfig.header_message, 54);
+            headerLines.forEach(line => {
+                doc.text(line, 29, yPos, { align: 'center' });
+                yPos += 3;
+            });
+        }
+
+        yPos += 2;
 
         const sellerName = seller?.name || 'Vendedor';
         const date = new Date().toLocaleString('es-CL');
         const ticketId = `T-${Date.now().toString().slice(-6)}`;
 
         doc.setFontSize(7);
-        doc.text(`Boleta: ${ticketId}`, 2, 25);
-        doc.text(`Fecha: ${date}`, 2, 29);
-        doc.text(`Vend: ${sellerName}`, 2, 33);
+        doc.text(`Boleta: ${ticketId}`, 2, yPos);
+        yPos += 4;
+        doc.text(`Fecha: ${date}`, 2, yPos);
+        yPos += 4;
+        doc.text(`Vend: ${sellerName}`, 2, yPos);
+        yPos += 4;
 
-        doc.text('--------------------------------', 2, 37);
+        doc.text('--------------------------------', 2, yPos);
+        yPos += 5;
 
         // Items
-        let yPos = 42;
         doc.setFont('courier', 'bold');
         doc.text('DESCRIPCIÓN', 2, yPos);
         doc.text('TOTAL', 56, yPos, { align: 'right' });
@@ -50,13 +149,12 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         yPos += 4;
 
         saleDetails.items.forEach(item => {
-            // Split name if too long
             const splitName = doc.splitTextToSize(item.name, 54);
             doc.text(splitName, 2, yPos);
             yPos += splitName.length * 3;
 
-            doc.text(`${item.quantity} x $${item.price.toLocaleString('es-CL')}`, 2, yPos);
-            doc.text(`$${(item.price * item.quantity).toLocaleString('es-CL')}`, 56, yPos, { align: 'right' });
+            doc.text(`${item.quantity} x ${formatCurrency(item.price, currentCurrency)}`, 2, yPos);
+            doc.text(`${formatCurrency(item.price * item.quantity, currentCurrency)}`, 56, yPos, { align: 'right' });
             yPos += 5;
         });
 
@@ -72,7 +170,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         doc.setFont('courier', 'bold');
         doc.setFontSize(10);
         doc.text('TOTAL', 2, yPos);
-        doc.text(`$${saleDetails.total.toLocaleString('es-CL')}`, 56, yPos, { align: 'right' });
+        doc.text(`${formatCurrency(saleDetails.total, currentCurrency)}`, 56, yPos, { align: 'right' });
         yPos += 6;
 
         doc.setFont('courier', 'normal');
@@ -83,19 +181,21 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
 
         if (isCash) {
             doc.text('Pagó con:', 2, yPos);
-            doc.text(`$${Number(amountPaid).toLocaleString('es-CL')}`, 56, yPos, { align: 'right' });
+            doc.text(`${formatCurrency(Number(amountPaid), currentCurrency)}`, 56, yPos, { align: 'right' });
             yPos += 5;
             doc.text('Vuelto:', 2, yPos);
-            doc.text(`$${Number(change).toLocaleString('es-CL')}`, 56, yPos, { align: 'right' });
+            doc.text(`${formatCurrency(Number(change), currentCurrency)}`, 56, yPos, { align: 'right' });
             yPos += 5;
         }
 
-        // Footer
+        // Footer personalizado
         yPos += 10;
         doc.setFontSize(8);
-        doc.text('¡GRACIAS POR SU COMPRA!', 29, yPos, { align: 'center' });
-        yPos += 5;
-        doc.text('Vuelva pronto', 29, yPos, { align: 'center' });
+        const footerLines = receiptConfig.footer_message.split('\n');
+        footerLines.forEach(line => {
+            doc.text(line, 29, yPos, { align: 'center' });
+            yPos += 5;
+        });
 
         return doc.output('blob');
     };
@@ -110,10 +210,26 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         const isCash = ['cash', 'efectivo', 'Efectivo'].includes(saleDetails.paymentMethod);
         const paymentLabel = isCash ? 'Efectivo' : saleDetails.paymentMethod;
 
-        const formatMoney = (amount) => `$${amount.toLocaleString('es-CL')}`;
+        const formatMoney = (amount) => formatCurrency(amount, currentCurrency);
 
-        let receiptText = `*COMPROBANTE VECI*\n`;
-        receiptText += `Sotomayor 1460-A\n\n`;
+        let receiptText = `*COMPROBANTE ${receiptConfig.business_name}*\n`;
+        receiptText += `${receiptConfig.address}\n`;
+
+        if (receiptConfig.show_tax_id && receiptConfig.tax_id) {
+            receiptText += `RUT: ${receiptConfig.tax_id}\n`;
+        }
+        if (receiptConfig.show_phone && receiptConfig.phone) {
+            receiptText += `Tel: ${receiptConfig.phone}\n`;
+        }
+        if (receiptConfig.show_email && receiptConfig.email) {
+            receiptText += `${receiptConfig.email}\n`;
+        }
+
+        if (receiptConfig.header_message) {
+            receiptText += `\n_${receiptConfig.header_message}_\n`;
+        }
+
+        receiptText += `\n`;
         receiptText += `Boleta: ${ticketId}\n`;
         receiptText += `Fecha: ${date}\n`;
         receiptText += `Vend: ${sellerName}\n`;
@@ -154,7 +270,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
             receiptText += `Vuelto: ${formatMoney(Number(change))}\n`;
         }
 
-        receiptText += `\n*¡GRACIAS POR SU COMPRA!*`;
+        receiptText += `\n${receiptConfig.footer_message.replace('\n', ' ')}`;
 
         const encodedMessage = encodeURIComponent(receiptText);
         window.open(`https://wa.me/${fullNumber}?text=${encodedMessage}`, '_blank');
@@ -209,8 +325,12 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                 </head>
                 <body>
                     <div class="header text-center">
-                        <h2 style="margin:0; font-size: 16px;">VECI</h2>
-                        <div style="font-size: 10px;">Sotomayor 1460-A</div>
+                        <h1 style="margin: 0; font-size: 18px; font-weight: bold;">${receiptConfig.business_name}</h1>
+                        <p style="margin: 5px 0; font-size: 11px;">${receiptConfig.address}</p>
+                        ${receiptConfig.show_tax_id && receiptConfig.tax_id ? `<p style="margin: 2px 0; font-size: 10px;">RUT: ${receiptConfig.tax_id}</p>` : ''}
+                        ${receiptConfig.show_phone && receiptConfig.phone ? `<p style="margin: 2px 0; font-size: 10px;">Tel: ${receiptConfig.phone}</p>` : ''}
+                        ${receiptConfig.show_email && receiptConfig.email ? `<p style="margin: 2px 0; font-size: 10px;">${receiptConfig.email}</p>` : ''}
+                        ${receiptConfig.header_message ? `<p style="margin: 10px 0; font-size: 10px; font-style: italic;">${receiptConfig.header_message}</p>` : ''}
                         <br/>
                         <div style="font-size: 10px; text-align: left;">
                             <div>Boleta: ${ticketId}</div>
@@ -231,8 +351,8 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                         <div class="item">
                             <div class="item-name">${item.name}</div>
                             <div class="item-details">
-                                <span>${item.quantity} x $${item.price.toLocaleString('es-CL')}</span>
-                                <span>$${(item.price * item.quantity).toLocaleString('es-CL')}</span>
+                                <span>${item.quantity} x ${formatCurrency(item.price, currentCurrency)}</span>
+                                <span>${formatCurrency(item.price * item.quantity, currentCurrency)}</span>
                             </div>
                         </div>
                     `).join('')}
@@ -242,7 +362,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                     <div class="totals">
                         <div style="display: flex; justify-content: space-between; font-size: 14px;" class="bold">
                             <span>TOTAL</span>
-                            <span>$${saleDetails.total.toLocaleString('es-CL')}</span>
+                            <span>${formatCurrency(saleDetails.total, currentCurrency)}</span>
                         </div>
                         <br/>
                         <div style="display: flex; justify-content: space-between;">
@@ -252,18 +372,19 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                          ${isCash ? `
                             <div style="display: flex; justify-content: space-between;">
                                 <span>Pagó con:</span>
-                                <span>$${Number(amountPaid).toLocaleString('es-CL')}</span>
+                                <span>${formatCurrency(Number(amountPaid), currentCurrency)}</span>
                             </div>
                             <div style="display: flex; justify-content: space-between;">
                                 <span>Vuelto:</span>
-                                <span>$${Number(change).toLocaleString('es-CL')}</span>
+                                <span>${formatCurrency(Number(change), currentCurrency)}</span>
                             </div>
                         ` : ''}
                     </div>
                     
                     <div class="footer text-center">
-                        <div>¡GRACIAS POR SU COMPRA!</div>
-                        <div style="margin-top: 5px;">Vuelva pronto</div>
+                        <div style="margin-top: 20px; text-align: center; font-size: 11px;">
+                            ${receiptConfig.footer_message.split('\n').map(line => `<div style="margin: 3px 0;">${line}</div>`).join('')}
+                        </div>
                     </div>
                 </body>
             </html>
@@ -299,7 +420,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
 
                 <h2 className="text-2xl font-bold text-white mb-2">¡Venta completada!</h2>
                 <p className="text-4xl font-bold text-[var(--color-primary)] mb-8">
-                    ${saleDetails.total.toLocaleString('es-CL')}
+                    {formatCurrency(saleDetails.total, currentCurrency)}
                 </p>
 
                 <div className="w-full text-left bg-white/5 rounded-xl p-4 mb-6 border border-white/10">
@@ -366,8 +487,20 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                     lineHeight: '1.2'
                 }}>
                     <div style={{ textAlign: 'center', marginBottom: '10px' }}>
-                        <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>VECI</h2>
-                        <div style={{ fontSize: '10px' }}>Sotomayor 1460-A</div>
+                        <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>{receiptConfig.business_name}</h2>
+                        <div style={{ fontSize: '10px' }}>{receiptConfig.address}</div>
+                        {receiptConfig.show_tax_id && receiptConfig.tax_id && (
+                            <div style={{ fontSize: '10px' }}>RUT: {receiptConfig.tax_id}</div>
+                        )}
+                        {receiptConfig.show_phone && receiptConfig.phone && (
+                            <div style={{ fontSize: '10px' }}>Tel: {receiptConfig.phone}</div>
+                        )}
+                        {receiptConfig.show_email && receiptConfig.email && (
+                            <div style={{ fontSize: '10px' }}>{receiptConfig.email}</div>
+                        )}
+                        {receiptConfig.header_message && (
+                            <div style={{ fontSize: '10px', marginTop: '8px', fontStyle: 'italic' }}>{receiptConfig.header_message}</div>
+                        )}
                         <br />
                         <div style={{ textAlign: 'left', fontSize: '10px' }}>
                             <div>Boleta: {`T-${Date.now().toString().slice(-6)}`}</div>
@@ -391,8 +524,8 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                                 {item.name}
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <span>{item.quantity} x ${item.price.toLocaleString('es-CL')}</span>
-                                <span>${(item.price * item.quantity).toLocaleString('es-CL')}</span>
+                                <span>{item.quantity} x {formatCurrency(item.price, currentCurrency)}</span>
+                                <span>{formatCurrency(item.price * item.quantity, currentCurrency)}</span>
                             </div>
                         </div>
                     ))}
@@ -402,7 +535,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                     <div style={{ marginTop: '10px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', fontWeight: 'bold' }}>
                             <span>TOTAL</span>
-                            <span>${saleDetails.total.toLocaleString('es-CL')}</span>
+                            <span>{formatCurrency(saleDetails.total, currentCurrency)}</span>
                         </div>
                         <br />
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -413,19 +546,20 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                             <>
                                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                     <span>Pagó con:</span>
-                                    <span>${Number(saleDetails.paymentDetails?.amount || saleDetails.total).toLocaleString('es-CL')}</span>
+                                    <span>{formatCurrency(Number(saleDetails.paymentDetails?.amount || saleDetails.total), currentCurrency)}</span>
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                     <span>Vuelto:</span>
-                                    <span>${Number(saleDetails.paymentDetails?.change || 0).toLocaleString('es-CL')}</span>
+                                    <span>{formatCurrency(Number(saleDetails.paymentDetails?.change || 0), currentCurrency)}</span>
                                 </div>
                             </>
                         )}
                     </div>
 
                     <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '10px' }}>
-                        <div>¡GRACIAS POR SU COMPRA!</div>
-                        <div style={{ marginTop: '5px' }}>Vuelva pronto</div>
+                        {receiptConfig.footer_message.split('\n').map((line, i) => (
+                            <div key={i} style={{ marginTop: i > 0 ? '5px' : 0 }}>{line}</div>
+                        ))}
                     </div>
                 </div>
             </div>

@@ -3,8 +3,11 @@ import { createPortal } from 'react-dom';
 import { CheckCircle, X, ExternalLink, MessageCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { useStore } from '../store/useStore';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const CashCloseSuccessModal = ({ isOpen, onClose, data, onSendWhatsApp }) => {
+    const { currentCurrency } = useStore();
     if (!isOpen || !data) return null;
 
     const {
@@ -34,21 +37,21 @@ const CashCloseSuccessModal = ({ isOpen, onClose, data, onSendWhatsApp }) => {
 *VENDEDOR:* ${user?.name || 'Usuario'}
 *TURNO:* #${registerId}
 *Apertura:* ${openTimeStr}
-*Monto apertura:* $${openingAmount.toLocaleString('es-CL')}
+*Monto apertura:* ${formatCurrency(openingAmount, currentCurrency)}
 
 *RESUMEN DEL TURNO:*
-*Ventas en efectivo:* $${salesBreakdown?.cash?.toLocaleString('es-CL') || 0}
-*Ventas tarjetas:* $${salesBreakdown?.card?.toLocaleString('es-CL') || 0}
-*Ventas transfer:* $${salesBreakdown?.transfer?.toLocaleString('es-CL') || 0}
-*Total Ventas:* $${salesBreakdown?.total?.toLocaleString('es-CL') || 0}
+*Ventas en efectivo:* ${formatCurrency(salesBreakdown?.cash || 0, currentCurrency)}
+*Ventas tarjetas:* ${formatCurrency(salesBreakdown?.card || 0, currentCurrency)}
+*Ventas transfer:* ${formatCurrency(salesBreakdown?.transfer || 0, currentCurrency)}
+*Total Ventas:* ${formatCurrency(salesBreakdown?.total || 0, currentCurrency)}
 
-*Ingresos adicionales:* $${movementsIn.toLocaleString('es-CL')}
-*Retiros:* $${movementsOut.toLocaleString('es-CL')}
+*Ingresos adicionales:* ${formatCurrency(movementsIn, currentCurrency)}
+*Retiros:* ${formatCurrency(movementsOut, currentCurrency)}
 
 *SALDOS:*
-*Saldo esperado:* $${expectedBalance.toLocaleString('es-CL')}
-*Saldo real contado:* $${realBalance.toLocaleString('es-CL')}
-*Diferencia:* $${difference.toLocaleString('es-CL')} (${difference >= 0 ? 'Sobra' : 'Falta'})
+*Saldo esperado:* ${formatCurrency(expectedBalance, currentCurrency)}
+*Saldo real contado:* ${formatCurrency(realBalance, currentCurrency)}
+*Diferencia:* ${formatCurrency(difference, currentCurrency)} (${difference >= 0 ? 'Sobra' : 'Falta'})
 
 *Observaciones:* ${observations || 'Sin observaciones'}
 
@@ -79,11 +82,11 @@ const CashCloseSuccessModal = ({ isOpen, onClose, data, onSendWhatsApp }) => {
                     <div className="bg-white/5 rounded-xl p-4 border border-white/10 space-y-3">
                         <div className="flex justify-between items-center text-sm">
                             <span className="text-gray-400">Saldo esperado:</span>
-                            <span className="font-bold text-white">${expectedBalance.toLocaleString('es-CL')}</span>
+                            <span className="font-bold text-white">{formatCurrency(expectedBalance, currentCurrency)}</span>
                         </div>
                         <div className="flex justify-between items-center text-sm border-t border-white/5 pt-2">
                             <span className="text-gray-400">Saldo real:</span>
-                            <span className="font-bold text-[var(--color-primary)] text-lg">${realBalance.toLocaleString('es-CL')}</span>
+                            <span className="font-bold text-[var(--color-primary)] text-lg">{formatCurrency(realBalance, currentCurrency)}</span>
                         </div>
                     </div>
                 </div>

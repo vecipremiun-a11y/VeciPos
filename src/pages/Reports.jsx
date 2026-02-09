@@ -6,9 +6,10 @@ import { Search, Calendar, Download, DollarSign, TrendingUp, Percent, FileText }
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 import { formatInCompanyTime, getNowInCompanyTime } from '../lib/dateHelpers';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const Reports = () => {
-    const { fetchProductProfitReport, currentCompanyTimezone } = useStore();
+    const { fetchProductProfitReport, currentCompanyTimezone, currentCurrency } = useStore();
     const [isLoading, setIsLoading] = useState(true);
     const [dateRange, setDateRange] = useState('today'); // today, yesterday, custom
     const [customStart, setCustomStart] = useState('');
@@ -178,11 +179,11 @@ const Reports = () => {
             </div>
             {/* Summary Cards */}
             <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-                <StatCard title="Total Costos" value={stats.totalCost} color="text-red-400" icon={<TrendingUp size={16} />} />
+                <StatCard title="Total Costos" value={stats.totalCost} color="text-red-400" icon={<TrendingUp size={16} />} currency={currentCurrency} />
                 {/* Removed Discounts/Tax columns as they are not in daily profit table yet, or need calculation */}
-                <StatCard title="Total Ventas" value={stats.totalSales} color="text-blue-400" icon={<DollarSign size={16} />} />
-                <StatCard title="Total Utilidad" value={stats.totalProfit} color="text-green-400" icon={<DollarSign size={16} />} />
-                <StatCard title="% Utilidad" value={`${stats.profitMargin.toFixed(2)}%`} isCurrency={false} color="text-purple-400" icon={<Percent size={16} />} />
+                <StatCard title="Total Ventas" value={stats.totalSales} color="text-blue-400" icon={<DollarSign size={16} />} currency={currentCurrency} />
+                <StatCard title="Total Utilidad" value={stats.totalProfit} color="text-green-400" icon={<DollarSign size={16} />} currency={currentCurrency} />
+                <StatCard title="% Utilidad" value={`${stats.profitMargin.toFixed(2)}%`} isCurrency={false} color="text-purple-400" icon={<Percent size={16} />} currency={currentCurrency} />
             </div>
 
             {/* Chart */}
@@ -194,7 +195,7 @@ const Reports = () => {
                         <YAxis dataKey="name" type="category" stroke="#9ca3af" width={80} />
                         <Tooltip
                             contentStyle={{ backgroundColor: '#1a1a2e', borderColor: '#3b82f6', color: '#fff' }}
-                            formatter={(value) => `$${value.toLocaleString()}`}
+                            formatter={(value) => formatCurrency(value, currentCurrency)}
                         />
                         <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={40} />
                     </BarChart>
@@ -234,14 +235,14 @@ const Reports = () => {
                                         <td className="px-6 py-3 font-medium text-white">{item.productName}</td>
                                         <td className="px-6 py-3 text-gray-500">{item.barcode}</td>
                                         <td className="px-6 py-3 text-right text-white font-bold">{item.quantity}</td>
-                                        <td className="px-6 py-3 text-right text-gray-400">${item.unitCost.toFixed(2)}</td>
-                                        <td className="px-6 py-3 text-right text-blue-300">${item.unitPrice.toFixed(2)}</td>
-                                        <td className="px-6 py-3 text-right text-blue-300 font-bold">${item.totalSale.toFixed(2)}</td>
+                                        <td className="px-6 py-3 text-right text-gray-400">{formatCurrency(item.unitCost, currentCurrency)}</td>
+                                        <td className="px-6 py-3 text-right text-blue-300">{formatCurrency(item.unitPrice, currentCurrency)}</td>
+                                        <td className="px-6 py-3 text-right text-blue-300 font-bold">{formatCurrency(item.totalSale, currentCurrency)}</td>
                                         <td className={cn(
                                             "px-6 py-3 text-right font-bold font-mono",
                                             item.totalProfit >= 0 ? "text-green-400" : "text-red-400"
                                         )}>
-                                            ${item.totalProfit.toFixed(2)}
+                                            {formatCurrency(item.totalProfit, currentCurrency)}
                                         </td>
                                     </tr>
                                 ))
@@ -254,12 +255,12 @@ const Reports = () => {
     );
 };
 
-const StatCard = ({ title, value, color, icon, isCurrency = true }) => (
+const StatCard = ({ title, value, color, icon, isCurrency = true, currency }) => (
     <div className="glass-card p-4 flex flex-col items-center justify-center text-center">
         <div className={cn("p-2 rounded-full bg-white/5 mb-2", color)}>{icon}</div>
         <p className="text-xs text-gray-400 uppercase tracking-wider">{title}</p>
         <p className={cn("text-xl font-bold font-mono mt-1", color)}>
-            {isCurrency ? `$${Number(value).toLocaleString()}` : value}
+            {isCurrency ? formatCurrency(value, currency) : value}
         </p>
     </div>
 );

@@ -28,6 +28,7 @@ import AdminLayout from './layouts/AdminLayout';
 import RequireAdmin from './components/RequireAdmin';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminCompanies from './pages/admin/AdminCompanies';
+import SupportInbox from './pages/admin/SupportInbox';
 
 import React, { useEffect } from 'react';
 import { useStore } from './store/useStore';
@@ -195,6 +196,7 @@ function App() {
         }>
           <Route index element={<AdminDashboard />} />
           <Route path="companies" element={<AdminCompanies />} />
+          <Route path="soporte" element={<SupportInbox />} />
         </Route>
       </Routes>
     </Router>

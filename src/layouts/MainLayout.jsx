@@ -4,6 +4,7 @@ import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, 
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
+import SupportWidget from '../components/SupportWidget';
 
 const MainLayout = () => {
     // Helper to check window width strictly for initial state (avoid hydration mismatch if SSR, but this is SPA)
@@ -163,6 +164,7 @@ const MainLayout = () => {
                                                 key={subItem.path}
                                                 to={subItem.path}
                                                 end
+                                                onClick={() => isMobile && setIsSidebarOpen(false)}
                                                 className={({ isActive }) => cn(
                                                     "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 pl-11",
                                                     isActive
@@ -183,6 +185,7 @@ const MainLayout = () => {
                             <NavLink
                                 key={item.path}
                                 to={item.path}
+                                onClick={() => isMobile && setIsSidebarOpen(false)}
                                 className={({ isActive }) => cn(
                                     "flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group relative overflow-hidden",
                                     isActive
@@ -277,6 +280,9 @@ const MainLayout = () => {
                     <Outlet />
                 </main>
             </main>
+
+            {/* Widget de Soporte flotante */}
+            <SupportWidget />
         </div>
     );
 };

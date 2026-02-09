@@ -4,9 +4,10 @@ import { Search, Filter, Calendar, Eye, Package, ArrowLeft, Trash2 } from 'lucid
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const SupplierOrders = () => {
-    const { fetchSupplierOrders, suppliers } = useStore();
+    const { fetchSupplierOrders, suppliers, currentCurrency } = useStore();
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -40,9 +41,7 @@ const SupplierOrders = () => {
         );
     });
 
-    const formatMoney = (amount) => {
-        return `$${parseFloat(amount || 0).toLocaleString('es-CL')}`;
-    };
+
 
     const formatDate = (dateString) => {
         if (!dateString) return '-';
@@ -147,7 +146,7 @@ const SupplierOrders = () => {
                                         <td className="p-4 text-sm">{order.seller_name || '-'}</td>
                                         <td className="p-4 text-sm">{formatDate(order.created_at)}</td>
                                         <td className="p-4 text-sm">{order.expected_delivery_date ? format(new Date(order.expected_delivery_date), 'dd/MM/yyyy') : '-'}</td>
-                                        <td className="p-4 text-right font-bold text-[var(--color-primary)]">{formatMoney(order.total_amount)}</td>
+                                        <td className="p-4 text-right font-bold text-[var(--color-primary)]">{formatCurrency(order.total_amount, currentCurrency)}</td>
                                         <td className="p-4 text-center">{getStatusBadge(order.status)}</td>
                                         <td className="p-4 flex justify-center gap-2">
                                             <button
@@ -202,7 +201,7 @@ const SupplierOrders = () => {
                                 </div>
                                 <div className="p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
                                     <p className="text-[var(--color-text-muted)] text-xs mb-1">Total</p>
-                                    <p className="font-bold text-[var(--color-primary)]">{formatMoney(selectedOrder.total_amount)}</p>
+                                    <p className="font-bold text-[var(--color-primary)]">{formatCurrency(selectedOrder.total_amount, currentCurrency)}</p>
                                 </div>
                             </div>
 
@@ -227,15 +226,15 @@ const SupplierOrders = () => {
                                                         <p className="text-xs text-[var(--color-text-muted)]">{item.sku}</p>
                                                     </td>
                                                     <td className="p-3 text-center font-bold">{item.quantity}</td>
-                                                    <td className="p-3 text-right text-[var(--color-text-muted)]">{formatMoney(item.cost)}</td>
-                                                    <td className="p-3 text-right font-bold">{formatMoney(item.total)}</td>
+                                                    <td className="p-3 text-right text-[var(--color-text-muted)]">{formatCurrency(item.cost, currentCurrency)}</td>
+                                                    <td className="p-3 text-right font-bold">{formatCurrency(item.total, currentCurrency)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                         <tfoot className="bg-[var(--glass-bg)]">
                                             <tr>
                                                 <td colSpan="3" className="p-3 text-right font-bold">Total Pedido</td>
-                                                <td className="p-3 text-right font-bold text-[var(--color-primary)]">{formatMoney(selectedOrder.total_amount)}</td>
+                                                <td className="p-3 text-right font-bold text-[var(--color-primary)]">{formatCurrency(selectedOrder.total_amount, currentCurrency)}</td>
                                             </tr>
                                         </tfoot>
                                     </table>
