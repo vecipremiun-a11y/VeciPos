@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
@@ -123,6 +123,7 @@ const POS = () => {
     const [isLoadingProducts, setIsLoadingProducts] = useState(true);
     const [showSuspendedModal, setShowSuspendedModal] = useState(false);
     const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
+    const [showTotalsDetail, setShowTotalsDetail] = useState(false);
 
     // Cargar contador de ventas suspendidas
     React.useEffect(() => {
@@ -399,7 +400,7 @@ const POS = () => {
                 {/* Grid - Responsive columns based on available space */}
                 {/* Mobile: min 180px, Tablet: min 200px, Desktop: 4→5→6 columns progressively */}
                 <div
-                    className="pos-product-grid flex-1 overflow-y-auto pr-2 grid gap-2 lg:gap-4 content-start pb-28 lg:pb-4 custom-scrollbar grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] lg:grid-cols-2 xl:grid-cols-3"
+                    className="pos-product-grid flex-1 overflow-y-auto pr-2 grid gap-2 lg:gap-4 content-start pb-28 lg:pb-4 custom-scrollbar grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] lg:grid-cols-2"
                     onScroll={handleScroll}
                 >
                     {isLoadingProducts ? (
@@ -734,19 +735,32 @@ const POS = () => {
                     )}
                 </div>
 
-                <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] space-y-4">
-                    <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
-                        <span>Subtotal (Neto)</span>
-                        <span>{formatCurrency(subTotal, currentCurrency)}</span>
-                    </div>
-                    <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
-                        <span>Impuestos Total</span>
-                        <span>{formatCurrency(taxTotal, currentCurrency)}</span>
-                    </div>
-                    <div className="flex justify-between text-[var(--color-text)] text-2xl font-bold pt-2 border-t border-[var(--glass-border)]">
-                        <span>Total</span>
+                <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] space-y-2">
+                    {/* Total row - clickable to expand/collapse details */}
+                    <div
+                        className="flex justify-between items-center text-[var(--color-text)] text-2xl font-bold cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => setShowTotalsDetail(!showTotalsDetail)}
+                    >
+                        <div className="flex items-center gap-2">
+                            <span>Total</span>
+                            {showTotalsDetail ? <ChevronUp size={20} className="text-[var(--color-text-muted)]" /> : <ChevronDown size={20} className="text-[var(--color-text-muted)]" />}
+                        </div>
                         <span className="neon-text">{formatCurrency(finalTotal, currentCurrency)}</span>
                     </div>
+
+                    {/* Collapsible details */}
+                    {showTotalsDetail && (
+                        <div className="space-y-1 pt-2 border-t border-[var(--glass-border)] animate-in slide-in-from-top-2 duration-200">
+                            <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
+                                <span>Subtotal (Neto)</span>
+                                <span>{formatCurrency(subTotal, currentCurrency)}</span>
+                            </div>
+                            <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
+                                <span>Impuestos Total</span>
+                                <span>{formatCurrency(taxTotal, currentCurrency)}</span>
+                            </div>
+                        </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-3">
                         <button disabled={cart.length === 0} onClick={handleCheckoutClick} className="btn-primary col-span-2 flex items-center justify-center gap-2 py-3 rounded-xl">
