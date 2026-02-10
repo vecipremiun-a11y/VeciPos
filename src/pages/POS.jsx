@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, CakeSlice } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
@@ -91,6 +92,8 @@ const POS = () => {
         removeCart,
         currentCurrency
     } = useStore();
+
+    const navigate = useNavigate();
 
     // Derivar cart y client manualmente (fix para computed getters)
     // Key para forzar re-render cuando cambian items
@@ -346,6 +349,29 @@ const POS = () => {
 
             {/* Left Side: Product Grid */}
             <div className="flex-1 flex flex-col gap-2 lg:gap-4 overflow-hidden min-h-0">
+                {/* Tabs: Venta / Encargos */}
+                <div className="flex gap-2 shrink-0">
+                    <button
+                        className={cn(
+                            "flex-1 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all border",
+                            "bg-[var(--color-primary)] text-black border-[var(--color-primary)] shadow-[0_0_15px_rgba(0,240,255,0.3)]"
+                        )}
+                    >
+                        <ShoppingCart size={18} />
+                        Venta
+                    </button>
+                    <button
+                        onClick={() => navigate('/preorders')}
+                        className={cn(
+                            "flex-1 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all border",
+                            "bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
+                        )}
+                    >
+                        <CakeSlice size={18} />
+                        Encargos
+                    </button>
+                </div>
+
                 {/* Search & Categories - Compact on Mobile */}
                 <div className="glass-card p-2 lg:p-4 space-y-2 lg:space-y-4 shrink-0 relative z-10">
                     <div className="flex gap-2 lg:gap-4">

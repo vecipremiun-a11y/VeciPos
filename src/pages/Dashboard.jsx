@@ -7,6 +7,7 @@ import { es } from 'date-fns/locale';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import { formatCurrency } from '../utils/formatCurrency';
 
+
 const Dashboard = () => {
     const {
         fetchDashboardData,
@@ -113,6 +114,8 @@ const Dashboard = () => {
 
     return (
         <div className="space-y-6">
+
+
             {/* Subscription Banner */}
             {(() => {
                 // Logic directly in render to use existing hooks/store

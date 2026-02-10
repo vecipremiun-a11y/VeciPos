@@ -25,6 +25,7 @@ import Settings from './pages/Settings';
 import Clients from './pages/Clients';
 import Orders from './pages/Orders';
 import SupplierOrders from './pages/SupplierOrders';
+import Preorders from './pages/Preorders';
 import MainLayout from './layouts/MainLayout';
 import AdminLayout from './layouts/AdminLayout';
 import RequireAdmin from './components/RequireAdmin';
@@ -185,6 +186,7 @@ function App() {
           <Route path="clients" element={<Clients />} />
           <Route path="orders" element={<Orders />} />
           <Route path="orders/history" element={<SupplierOrders />} />
+          <Route path="preorders" element={<Preorders />} />
           <Route path="reports" element={<Reports />} />
           <Route path="reports/expiring" element={<ExpiringProductsReport />} />
           <Route path="reports/closures" element={<CashClosuresReport />} />

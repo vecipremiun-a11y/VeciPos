@@ -20,7 +20,10 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         tax_rate: 0,
         is_offer: false,
         offer_price: '',
-        price_ranges: []
+        price_ranges: [],
+        sale_mode: 'sale_only',
+        allow_item_notes: false,
+        preorder_unit: ''
     });
     const [marginPercentage, setMarginPercentage] = useState('');
 
@@ -45,7 +48,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                 setFormData(prev => ({ ...prev, is_offer: productToEdit.is_offer === 1 || productToEdit.is_offer === true, offer_price: productToEdit.offer_price || '' }));
             }
         } else {
-            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0, is_offer: false, offer_price: '' });
+            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0, is_offer: false, offer_price: '', sale_mode: 'sale_only', allow_item_notes: false, preorder_unit: '' });
             setMarginPercentage('');
         }
     }, [productToEdit, isOpen]);
@@ -113,17 +116,43 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
             "w-full relative",
             isInline ? "bg-[#1a1a3d] p-6 rounded-xl border border-white/10" : "glass-card max-w-4xl my-auto animate-[float_0.5s_ease-out]"
         )}>
-            <div className="flex items-center gap-4 mb-6 border-b border-white/10 pb-4">
-                <button
-                    onClick={onClose}
-                    className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
-                >
-                    {isInline ? <ArrowLeft size={24} /> : <X size={24} />}
-                    {isInline && <span className="text-sm font-bold uppercase tracking-wider">Volver</span>}
-                </button>
-                <h2 className="text-2xl font-bold neon-text">
-                    {productToEdit ? 'Editar Producto' : 'Nuevo Producto'}
-                </h2>
+            <div className="flex items-center justify-between mb-6 border-b border-white/10 pb-4">
+                <div className="flex items-center gap-4">
+                    <button
+                        onClick={onClose}
+                        className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+                    >
+                        {isInline ? <ArrowLeft size={24} /> : <X size={24} />}
+                        {isInline && <span className="text-sm font-bold uppercase tracking-wider">Volver</span>}
+                    </button>
+                    <h2 className="text-2xl font-bold neon-text">
+                        {productToEdit ? 'Editar Producto' : 'Nuevo Producto'}
+                    </h2>
+                </div>
+
+                {/* Sale Mode Selector moved to Header */}
+                <div className="flex bg-black/40 rounded-lg p-1 border border-white/10">
+                    {[
+                        { value: 'sale_only', label: 'Solo Venta', emoji: '🛒' },
+                        { value: 'preorder_only', label: 'Solo Encargo', emoji: '📋' },
+                        { value: 'both', label: 'Ambos', emoji: '🔄' }
+                    ].map(opt => (
+                        <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, sale_mode: opt.value }))}
+                            className={cn(
+                                "py-1.5 px-3 rounded-md text-xs font-bold transition-all flex items-center gap-2",
+                                formData.sale_mode === opt.value
+                                    ? "bg-[var(--color-primary)] text-black shadow-lg"
+                                    : "text-gray-400 hover:text-white hover:bg-white/5"
+                            )}
+                        >
+                            <span>{opt.emoji}</span>
+                            <span className="hidden sm:inline">{opt.label}</span>
+                        </button>
+                    ))}
+                </div>
             </div>
 
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -421,6 +450,53 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             Productos con el mismo ID sumarán sus cantidades para aplicar el precio mayorista.
                         </p>
                     </div>
+
+                    {/* AVAILABILITY / PREORDERS SECTION (Only shows specific options if enabled) */}
+                    {(formData.sale_mode === 'preorder_only' || formData.sale_mode === 'both') && (
+                        <div className="mt-6 border-t border-white/10 pt-6">
+                            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                                <span className="w-1 h-6 bg-orange-400 rounded-full"></span>
+                                Configuración de Encargos
+                            </h3>
+
+                            <div className="space-y-4">
+                                {/* Allow Item Notes */}
+                                <div className="flex justify-between items-center bg-black/20 p-3 rounded-xl border border-white/10">
+                                    <div>
+                                        <label className="text-white font-bold text-sm">Permitir notas por item</label>
+                                        <p className="text-[10px] text-gray-500">Ej: "sin sal", "rebanado grueso"</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData(prev => ({ ...prev, allow_item_notes: !prev.allow_item_notes }))}
+                                        className={`w-12 h-6 rounded-full flex items-center p-1 transition-all duration-300 ${formData.allow_item_notes ? 'bg-orange-400' : 'bg-gray-600'}`}
+                                    >
+                                        <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-all duration-300 ${formData.allow_item_notes ? 'translate-x-6' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
+
+                                {/* Preorder Unit */}
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">Unidad de encargo (opcional)</label>
+                                    <select
+                                        name="preorder_unit"
+                                        value={formData.preorder_unit || ''}
+                                        onChange={handleChange}
+                                        className="glass-input w-full"
+                                    >
+                                        <option value="" className="bg-gray-900">Usar unidad normal ({formData.unit || 'Und'})</option>
+                                        <option value="Kg" className="bg-gray-900">Kg</option>
+                                        <option value="Und" className="bg-gray-900">Unidad</option>
+                                        <option value="Docena" className="bg-gray-900">Docena</option>
+                                        <option value="Bandeja" className="bg-gray-900">Bandeja</option>
+                                        <option value="Porción" className="bg-gray-900">Porción</option>
+                                        <option value="Litro" className="bg-gray-900">Litro</option>
+                                    </select>
+                                    <p className="text-[10px] text-gray-500 mt-1">Unidad específica para encargos (ej: Torta se vende por unidad pero se encarga por Kg).</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* PRICE RANGES SECTION (Wholesale) */}
                     <div className="mt-6 border-t border-white/10 pt-6">

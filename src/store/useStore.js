@@ -1969,7 +1969,7 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             const result = await turso.execute({
-                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes, preorder_unit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     product.name,
                     product.price,
@@ -1985,7 +1985,10 @@ export const useStore = create(persist((set, get) => ({
                     product.offer_price || 0,
                     JSON.stringify(product.price_ranges || []),
                     product.scale_group_id || null,
-                    activeCompanyId
+                    activeCompanyId,
+                    product.sale_mode || 'sale_only',
+                    product.allow_item_notes ? 1 : 0,
+                    product.preorder_unit || null
                 ]
             });
             // Safely handle price_ranges for the local state update
@@ -2027,7 +2030,7 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             await turso.execute({
-                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=? WHERE id = ? AND company_id = ?",
+                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=?, sale_mode=?, allow_item_notes=?, preorder_unit=? WHERE id = ? AND company_id = ?",
                 args: [
                     updatedProduct.name,
                     updatedProduct.price,
@@ -2043,6 +2046,9 @@ export const useStore = create(persist((set, get) => ({
                     updatedProduct.offer_price || 0,
                     JSON.stringify(updatedProduct.price_ranges || []),
                     updatedProduct.scale_group_id || null,
+                    updatedProduct.sale_mode || 'sale_only',
+                    updatedProduct.allow_item_notes ? 1 : 0,
+                    updatedProduct.preorder_unit || null,
                     id,
                     activeCompanyId
                 ]
@@ -5196,47 +5202,29 @@ export const useStore = create(persist((set, get) => ({
         try {
             const saleDate = new Date(saleData.date);
             const dateStr = saleDate.toLocaleDateString('en-CA');
-            const summaryId = `summary_${companyId}_${dateStr}`;
 
             const existing = await turso.execute({
-                sql: 'SELECT * FROM sales_daily_summary WHERE company_id = ? AND date = ?',
+                sql: 'SELECT * FROM sales_daily_summary WHERE company_id = ? AND day = ?',
                 args: [companyId, dateStr]
             });
 
             if (existing.rows.length === 0) {
-                const now = new Date().toISOString();
                 await turso.execute({
                     sql: `INSERT INTO sales_daily_summary 
-                          (id, company_id, date, total_sales, total_amount, total_cost, total_profit,
-                           cash_sales, cash_amount, card_sales, card_amount, transfer_sales, transfer_amount,
-                           mixed_sales, mixed_amount, total_items_sold, created_at, updated_at)
-                          VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?)`,
-                    args: [summaryId, companyId, dateStr, now, now]
+                          (company_id, day, total_sales, total_orders, updated_at)
+                          VALUES (?, ?, ?, 1, datetime('now'))`,
+                    args: [companyId, dateStr, saleData.total]
+                });
+            } else {
+                await turso.execute({
+                    sql: `UPDATE sales_daily_summary SET
+                            total_sales = total_sales + ?,
+                            total_orders = total_orders + 1,
+                            updated_at = datetime('now')
+                          WHERE company_id = ? AND day = ?`,
+                    args: [saleData.total, companyId, dateStr]
                 });
             }
-
-            const itemsSold = saleData.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
-            const cost = saleData.items?.reduce((sum, item) => sum + (item.cost || 0) * item.quantity, 0) || 0;
-            const profit = saleData.total - cost;
-
-            let paymentColumn = 'cash';
-            if (saleData.paymentMethod === 'Tarjeta') paymentColumn = 'card';
-            else if (saleData.paymentMethod === 'Transferencia') paymentColumn = 'transfer';
-            else if (saleData.paymentMethod === 'Mixto') paymentColumn = 'mixed';
-
-            await turso.execute({
-                sql: `UPDATE sales_daily_summary SET
-                        total_sales = total_sales + 1,
-                        total_amount = total_amount + ?,
-                        total_cost = total_cost + ?,
-                        total_profit = total_profit + ?,
-                        ${paymentColumn}_sales = ${paymentColumn}_sales + 1,
-                        ${paymentColumn}_amount = ${paymentColumn}_amount + ?,
-                        total_items_sold = total_items_sold + ?,
-                        updated_at = ?
-                      WHERE company_id = ? AND date = ?`,
-                args: [saleData.total, cost, profit, saleData.total, itemsSold, new Date().toISOString(), companyId, dateStr]
-            });
 
             return { success: true };
         } catch (e) {
@@ -5304,46 +5292,43 @@ export const useStore = create(persist((set, get) => ({
             const dateStr = new Date(date).toLocaleDateString('en-CA');
 
             for (const item of items) {
-                const profitId = `profit_${companyId}_${item.id}_${dateStr}`;
-
                 const existing = await turso.execute({
-                    sql: 'SELECT * FROM product_daily_profit WHERE company_id = ? AND product_id = ? AND date = ?',
+                    sql: 'SELECT * FROM product_daily_profit WHERE company_id = ? AND product_id = ? AND day = ?',
                     args: [companyId, item.id, dateStr]
                 });
 
                 const revenue = item.price * item.quantity;
                 const cost = (item.cost || 0) * item.quantity;
-                const profit = revenue - cost;
-                const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+                const tax = (item.tax || 0) * item.quantity;
+                const profit = revenue - cost - tax;
 
                 if (existing.rows.length === 0) {
-                    const now = new Date().toISOString();
                     await turso.execute({
                         sql: `INSERT INTO product_daily_profit
-                              (id, company_id, product_id, product_name, date, units_sold, total_revenue,
-                               total_cost, total_profit, profit_margin, created_at, updated_at)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                        args: [profitId, companyId, item.id, item.name, dateStr, item.quantity,
-                            revenue, cost, profit, margin, now, now]
+                              (company_id, product_id, day, total_quantity, total_revenue,
+                               total_cost, total_tax, total_profit, updated_at)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+                        args: [companyId, item.id, dateStr, item.quantity,
+                            revenue, cost, tax, profit]
                     });
                 } else {
                     const current = existing.rows[0];
                     const newRevenue = current.total_revenue + revenue;
                     const newCost = current.total_cost + cost;
+                    const newTax = current.total_tax + tax;
                     const newProfit = current.total_profit + profit;
-                    const newMargin = newRevenue > 0 ? (newProfit / newRevenue) * 100 : 0;
 
                     await turso.execute({
                         sql: `UPDATE product_daily_profit SET
-                                units_sold = units_sold + ?,
+                                total_quantity = total_quantity + ?,
                                 total_revenue = ?,
                                 total_cost = ?,
+                                total_tax = ?,
                                 total_profit = ?,
-                                profit_margin = ?,
-                                updated_at = ?
-                              WHERE id = ?`,
-                        args: [item.quantity, newRevenue, newCost, newProfit, newMargin,
-                        new Date().toISOString(), profitId]
+                                updated_at = CURRENT_TIMESTAMP
+                              WHERE company_id = ? AND product_id = ? AND day = ?`,
+                        args: [item.quantity, newRevenue, newCost, newTax, newProfit,
+                            companyId, item.id, dateStr]
                     });
                 }
             }
@@ -5507,10 +5492,20 @@ export const useStore = create(persist((set, get) => ({
     getSalesSummaryByDate: async (date, companyId) => {
         try {
             const result = await turso.execute({
-                sql: 'SELECT * FROM sales_daily_summary WHERE company_id = ? AND date = ?',
+                sql: 'SELECT * FROM sales_daily_summary WHERE company_id = ? AND day = ?',
                 args: [companyId || get().activeCompanyId, date]
             });
-            return { success: true, summary: result.rows[0] || null };
+            const row = result.rows[0] || null;
+            // Map actual DB columns to expected field names
+            const summary = row ? {
+                ...row,
+                date: row.day,
+                total_amount: row.total_sales || 0,
+                total_profit: 0, // Not tracked in this table
+                total_items_sold: 0,
+                total_sales: row.total_orders || 0
+            } : null;
+            return { success: true, summary };
         } catch (e) {
             console.error('Error getting sales summary:', e);
             return { success: false, error: e.message };
@@ -5519,25 +5514,56 @@ export const useStore = create(persist((set, get) => ({
 
     getSalesSummaryByRange: async (startDate, endDate, companyId) => {
         try {
-            const result = await turso.execute({
-                sql: `SELECT date, total_sales, total_amount, total_profit,
-                        cash_amount, card_amount, transfer_amount
+            // Get sales summary from sales_daily_summary (has day, total_sales as amount, total_orders)
+            const salesResult = await turso.execute({
+                sql: `SELECT day, total_sales, total_orders
                       FROM sales_daily_summary 
-                      WHERE company_id = ? AND date BETWEEN ? AND ?
-                      ORDER BY date ASC`,
+                      WHERE company_id = ? AND day BETWEEN ? AND ?
+                      ORDER BY day ASC`,
                 args: [companyId || get().activeCompanyId, startDate, endDate]
             });
 
-            const totals = result.rows.reduce((acc, day) => ({
+            // Get profit data from product_daily_profit
+            const profitResult = await turso.execute({
+                sql: `SELECT day, SUM(total_revenue) as total_revenue, SUM(total_cost) as total_cost, SUM(total_profit) as total_profit
+                      FROM product_daily_profit
+                      WHERE company_id = ? AND day BETWEEN ? AND ?
+                      GROUP BY day
+                      ORDER BY day ASC`,
+                args: [companyId || get().activeCompanyId, startDate, endDate]
+            });
+
+            // Create a map of profit data by day
+            const profitByDay = {};
+            profitResult.rows.forEach(row => {
+                profitByDay[row.day] = row;
+            });
+
+            // Merge data: use sales_daily_summary for amounts and product_daily_profit for profit
+            const daily = salesResult.rows.map(row => {
+                const profitData = profitByDay[row.day] || {};
+                return {
+                    date: row.day,
+                    total_sales: row.total_orders || 0,
+                    total_amount: row.total_sales || 0,
+                    total_profit: profitData.total_profit || 0,
+                    total_cost: profitData.total_cost || 0,
+                    cash_amount: 0,
+                    card_amount: 0,
+                    transfer_amount: 0
+                };
+            });
+
+            const totals = daily.reduce((acc, day) => ({
                 totalSales: acc.totalSales + day.total_sales,
                 totalAmount: acc.totalAmount + day.total_amount,
                 totalProfit: acc.totalProfit + day.total_profit,
-                cashAmount: acc.cashAmount + day.cash_amount,
-                cardAmount: acc.cardAmount + day.card_amount,
-                transferAmount: acc.transferAmount + day.transfer_amount
+                cashAmount: 0,
+                cardAmount: 0,
+                transferAmount: 0
             }), { totalSales: 0, totalAmount: 0, totalProfit: 0, cashAmount: 0, cardAmount: 0, transferAmount: 0 });
 
-            return { success: true, daily: result.rows, totals };
+            return { success: true, daily, totals };
         } catch (e) {
             console.error('Error getting sales range:', e);
             return { success: false, error: e.message };
@@ -5607,14 +5633,17 @@ export const useStore = create(persist((set, get) => ({
     getTopProducts: async (startDate, endDate, limit = 10, companyId) => {
         try {
             const result = await turso.execute({
-                sql: `SELECT product_id, product_name,
-                        SUM(units_sold) as total_sold,
-                        SUM(total_revenue) as total_revenue,
-                        SUM(total_profit) as total_profit,
-                        AVG(profit_margin) as avg_margin
-                      FROM product_daily_profit
-                      WHERE company_id = ? AND date BETWEEN ? AND ?
-                      GROUP BY product_id, product_name
+                sql: `SELECT pdp.product_id, p.name as product_name,
+                        SUM(pdp.total_quantity) as total_sold,
+                        SUM(pdp.total_revenue) as total_revenue,
+                        SUM(pdp.total_profit) as total_profit,
+                        CASE WHEN SUM(pdp.total_revenue) > 0 
+                             THEN (SUM(pdp.total_profit) / SUM(pdp.total_revenue)) * 100 
+                             ELSE 0 END as avg_margin
+                      FROM product_daily_profit pdp
+                      LEFT JOIN products p ON pdp.product_id = p.id
+                      WHERE pdp.company_id = ? AND pdp.day BETWEEN ? AND ?
+                      GROUP BY pdp.product_id
                       ORDER BY total_sold DESC
                       LIMIT ?`,
                 args: [companyId || get().activeCompanyId, startDate, endDate, limit]
@@ -5629,14 +5658,17 @@ export const useStore = create(persist((set, get) => ({
     getBestMarginProducts: async (startDate, endDate, limit = 10, companyId) => {
         try {
             const result = await turso.execute({
-                sql: `SELECT product_id, product_name,
-                        SUM(units_sold) as total_sold,
-                        SUM(total_revenue) as total_revenue,
-                        SUM(total_profit) as total_profit,
-                        AVG(profit_margin) as avg_margin
-                      FROM product_daily_profit
-                      WHERE company_id = ? AND date BETWEEN ? AND ?
-                      GROUP BY product_id, product_name
+                sql: `SELECT pdp.product_id, p.name as product_name,
+                        SUM(pdp.total_quantity) as total_sold,
+                        SUM(pdp.total_revenue) as total_revenue,
+                        SUM(pdp.total_profit) as total_profit,
+                        CASE WHEN SUM(pdp.total_revenue) > 0 
+                             THEN (SUM(pdp.total_profit) / SUM(pdp.total_revenue)) * 100 
+                             ELSE 0 END as avg_margin
+                      FROM product_daily_profit pdp
+                      LEFT JOIN products p ON pdp.product_id = p.id
+                      WHERE pdp.company_id = ? AND pdp.day BETWEEN ? AND ?
+                      GROUP BY pdp.product_id
                       HAVING total_sold > 0
                       ORDER BY avg_margin DESC
                       LIMIT ?`,
@@ -5805,6 +5837,277 @@ export const useStore = create(persist((set, get) => ({
             return { success: true };
         } catch (e) {
             console.error('Error recalculating averages:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // ==========================================
+    // PREORDERS (ENCARGOS) MODULE
+    // ==========================================
+
+    preorders: [],
+    preorderCart: [],
+
+    addToPreorderCart: (product) => {
+        set(state => {
+            const existing = state.preorderCart.find(i => i.id === product.id);
+            if (existing) {
+                return {
+                    preorderCart: state.preorderCart.map(i =>
+                        i.id === product.id
+                            ? { ...i, qty: i.qty + 1, line_total: (i.qty + 1) * i.unit_price }
+                            : i
+                    )
+                };
+            }
+            const effectivePrice = (product.is_offer && product.offer_price > 0)
+                ? product.offer_price : product.price;
+            return {
+                preorderCart: [...state.preorderCart, {
+                    id: product.id,
+                    product_id: product.id,
+                    product_name: product.name,
+                    qty: 1,
+                    unit: product.preorder_unit || product.unit || 'Und',
+                    unit_price: effectivePrice,
+                    line_total: effectivePrice,
+                    note: '',
+                    allow_item_notes: product.allow_item_notes
+                }]
+            };
+        });
+    },
+
+    updatePreorderCartItem: (productId, updates) => {
+        set(state => ({
+            preorderCart: state.preorderCart.map(i => {
+                if (i.id !== productId) return i;
+                const updated = { ...i, ...updates };
+                updated.line_total = updated.qty * updated.unit_price;
+                return updated;
+            })
+        }));
+    },
+
+    removeFromPreorderCart: (productId) => {
+        set(state => ({
+            preorderCart: state.preorderCart.filter(i => i.id !== productId)
+        }));
+    },
+
+    clearPreorderCart: () => set({ preorderCart: [] }),
+
+    createPreorder: async (preorderData) => {
+        const { activeCompanyId, currentUser } = get();
+        try {
+            const result = await turso.execute({
+                sql: `INSERT INTO preorders
+                      (company_id, client_id, client_name, client_phone, due_date, due_time,
+                       status, total_amount, deposit_amount, remaining_amount,
+                       delivery_type, delivery_address, notes, created_by)
+                      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
+                args: [
+                    activeCompanyId,
+                    preorderData.client_id || null,
+                    preorderData.client_name || '',
+                    preorderData.client_phone || '',
+                    preorderData.due_date,
+                    preorderData.due_time,
+                    preorderData.total_amount,
+                    preorderData.deposit_amount || 0,
+                    preorderData.total_amount - (preorderData.deposit_amount || 0),
+                    preorderData.delivery_type || 'pickup',
+                    preorderData.delivery_address || '',
+                    preorderData.notes || '',
+                    currentUser?.name || ''
+                ]
+            });
+
+            const preorderId = Number(result.lastInsertRowid);
+
+            // Insert items
+            for (const item of preorderData.items) {
+                await turso.execute({
+                    sql: `INSERT INTO preorder_items
+                          (preorder_id, product_id, product_name, qty, unit, unit_price, line_total, note)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    args: [
+                        preorderId,
+                        item.product_id,
+                        item.product_name,
+                        item.qty,
+                        item.unit || 'Und',
+                        item.unit_price,
+                        item.line_total,
+                        item.note || ''
+                    ]
+                });
+            }
+
+            // Insert initial payment (deposit) if any
+            if (preorderData.deposit_amount > 0) {
+                await turso.execute({
+                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type)
+                          VALUES (?, ?, ?, 'deposit')`,
+                    args: [preorderId, preorderData.deposit_amount, preorderData.deposit_method || 'Efectivo']
+                });
+            }
+
+            // Refresh list
+            await get().fetchPreorders();
+            set({ preorderCart: [] });
+
+            return { success: true, preorderId };
+        } catch (e) {
+            console.error('Error creating preorder:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    fetchPreorders: async (filters = {}) => {
+        const { activeCompanyId } = get();
+        try {
+            let sql = `SELECT p.*, 
+                        (SELECT GROUP_CONCAT(pi.product_name || ' x' || pi.qty, ', ')
+                         FROM preorder_items pi WHERE pi.preorder_id = p.id) as items_summary
+                       FROM preorders p
+                       WHERE p.company_id = ?`;
+            const args = [activeCompanyId];
+
+            if (filters.date) {
+                sql += ' AND p.due_date = ?';
+                args.push(filters.date);
+            }
+            if (filters.status && filters.status !== 'all') {
+                sql += ' AND p.status = ?';
+                args.push(filters.status);
+            }
+            if (filters.startDate && filters.endDate) {
+                sql += ' AND p.due_date BETWEEN ? AND ?';
+                args.push(filters.startDate, filters.endDate);
+            }
+
+            sql += ' ORDER BY p.due_date ASC, p.due_time ASC';
+
+            const result = await turso.execute({ sql, args });
+            set({ preorders: result.rows });
+            return { success: true, preorders: result.rows };
+        } catch (e) {
+            console.error('Error fetching preorders:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getPreorderDetails: async (preorderId) => {
+        try {
+            const [preorderRes, itemsRes, paymentsRes] = await turso.batch([
+                {
+                    sql: 'SELECT * FROM preorders WHERE id = ?',
+                    args: [preorderId]
+                },
+                {
+                    sql: 'SELECT * FROM preorder_items WHERE preorder_id = ?',
+                    args: [preorderId]
+                },
+                {
+                    sql: 'SELECT * FROM preorder_payments WHERE preorder_id = ? ORDER BY created_at ASC',
+                    args: [preorderId]
+                }
+            ]);
+
+            return {
+                success: true,
+                preorder: preorderRes.rows[0] || null,
+                items: itemsRes.rows,
+                payments: paymentsRes.rows
+            };
+        } catch (e) {
+            console.error('Error getting preorder details:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updatePreorderStatus: async (preorderId, newStatus) => {
+        try {
+            await turso.execute({
+                sql: `UPDATE preorders SET status = ?, updated_at = datetime('now') WHERE id = ?`,
+                args: [newStatus, preorderId]
+            });
+            await get().fetchPreorders();
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating preorder status:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    addPreorderPayment: async (preorderId, amount, method, type = 'final') => {
+        try {
+            await turso.execute({
+                sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type) VALUES (?, ?, ?, ?)`,
+                args: [preorderId, amount, method, type]
+            });
+
+            // Update remaining amount
+            const paymentsRes = await turso.execute({
+                sql: 'SELECT SUM(amount) as total_paid FROM preorder_payments WHERE preorder_id = ?',
+                args: [preorderId]
+            });
+            const totalPaid = paymentsRes.rows[0]?.total_paid || 0;
+
+            const preorderRes = await turso.execute({
+                sql: 'SELECT total_amount FROM preorders WHERE id = ?',
+                args: [preorderId]
+            });
+            const totalAmount = preorderRes.rows[0]?.total_amount || 0;
+
+            await turso.execute({
+                sql: `UPDATE preorders SET deposit_amount = ?, remaining_amount = ?, updated_at = datetime('now') WHERE id = ?`,
+                args: [totalPaid, totalAmount - totalPaid, preorderId]
+            });
+
+            // If fully paid, mark as delivered
+            if (totalPaid >= totalAmount && type === 'final') {
+                await turso.execute({
+                    sql: `UPDATE preorders SET status = 'delivered', updated_at = datetime('now') WHERE id = ?`,
+                    args: [preorderId]
+                });
+            }
+
+            await get().fetchPreorders();
+            return { success: true };
+        } catch (e) {
+            console.error('Error adding preorder payment:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getPreorderableProducts: async (searchTerm = '', category = 'Todos') => {
+        const { activeCompanyId } = get();
+        try {
+            let sql = `SELECT * FROM products WHERE company_id = ? AND sale_mode IN ('preorder_only', 'both')`;
+            const args = [activeCompanyId];
+
+            if (searchTerm) {
+                sql += ' AND (name LIKE ? OR sku LIKE ?)';
+                args.push(`%${searchTerm}%`, `%${searchTerm}%`);
+            }
+            if (category && category !== 'Todos') {
+                sql += ' AND category = ?';
+                args.push(category);
+            }
+
+            sql += ' ORDER BY name ASC LIMIT 50';
+
+            const result = await turso.execute({ sql, args });
+            // Parse price_ranges for each product
+            const products = result.rows.map(p => ({
+                ...p,
+                price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
+            }));
+            return { success: true, products };
+        } catch (e) {
+            console.error('Error fetching preorderable products:', e);
             return { success: false, error: e.message };
         }
     },

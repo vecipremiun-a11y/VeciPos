@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
@@ -35,6 +35,7 @@ const MainLayout = () => {
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', roles: ['Administrador', 'Vendedor', 'Bodeguero', 'Supervisor', 'super_admin', 'owner'] },
         { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', roles: ['Administrador', 'Vendedor', 'super_admin', 'owner'] },
         { icon: Users, label: 'Clientes', path: '/clients', roles: ['Administrador', 'Vendedor', 'super_admin', 'owner'] },
+        { icon: CakeSlice, label: 'Encargos', path: '/preorders', roles: ['Administrador', 'Vendedor', 'super_admin', 'owner'] },
         { icon: History, label: 'Historial', path: '/sales-history', roles: ['Administrador', 'Vendedor', 'Supervisor', 'super_admin', 'owner'] },
         {
             icon: ShoppingBag,
