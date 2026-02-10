@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Banknote, CreditCard, Landmark, Coins, ArrowLeft, Check, Plus, Trash2, FileText } from 'lucide-react';
+import { X, Banknote, CreditCard, Landmark, Coins, ArrowLeft, Check, Plus, Trash2, FileText, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -143,10 +143,18 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
         }));
     };
 
-    const handleConfirm = () => {
+    const [isProcessing, setIsProcessing] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) setIsProcessing(false);
+    }, [isOpen]);
+
+    const handleConfirm = async () => {
         // ============================================
         // 🔒 VALIDACIÓN ROBUSTA DE PAGOS
         // ============================================
+
+        if (isProcessing) return;
 
         // Validar método de pago seleccionado
         if (!method) {
@@ -265,10 +273,23 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
         }
 
         // Si todas las validaciones pasaron, confirmar pago
-        console.log('✅ Payment validated:', finalPayData);
-        onConfirm(finalPayData);
-        onClose();
+        try {
+            setIsProcessing(true);
+            console.log('✅ Payment validated:', finalPayData);
+            await onConfirm(finalPayData);
+            onClose();
+        } catch (error) {
+            console.error("Payment error:", error);
+        } finally {
+            if (mounted.current) setIsProcessing(false);
+        }
     };
+
+    // Check if mounted to avoid state update on unmounted component
+    const mounted = React.useRef(true);
+    useEffect(() => {
+        return () => { mounted.current = false; };
+    }, []);
 
     // Validation for Mixed Payment
     const isMixedValid = () => {
@@ -639,15 +660,17 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                         <button
                             onClick={handleConfirm}
                             disabled={
-                                method === 'Mixto'
-                                    ? !isMixedValid()
-                                    : method === 'Tarjeta'
-                                        ? !selectedTerminal
-                                        : method === 'Transferencia'
-                                            ? !observations
-                                            : method === 'Crédito'
-                                                ? false // Always valid if arrived here (client check done before)
-                                                : (parseFloat(amountPaid) || 0) < total
+                                isProcessing || (
+                                    method === 'Mixto'
+                                        ? !isMixedValid()
+                                        : method === 'Tarjeta'
+                                            ? !selectedTerminal
+                                            : method === 'Transferencia'
+                                                ? !observations
+                                                : method === 'Crédito'
+                                                    ? false // Always valid if arrived here (client check done before)
+                                                    : (parseFloat(amountPaid) || 0) < total
+                                )
                             }
                             className={cn(
                                 "flex-1 py-3 rounded-xl flex items-center justify-center gap-2 font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all",
@@ -658,8 +681,15 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                         : "btn-primary text-black"
                             )}
                         >
-                            <Check size={20} />
-                            {method === 'Tarjeta' ? 'Confirmar y Pagar' : method === 'Transferencia' ? 'Confirmar Pago Recibido' : method === 'Crédito' ? 'Confirmar Crédito' : 'Pagar'}
+                            {isProcessing ? (
+                                <Loader2 size={20} className="animate-spin" />
+                            ) : (
+                                <Check size={20} />
+                            )}
+                            {isProcessing
+                                ? 'Procesando...'
+                                : (method === 'Tarjeta' ? 'Confirmar y Pagar' : method === 'Transferencia' ? 'Confirmar Pago Recibido' : method === 'Crédito' ? 'Confirmar Crédito' : 'Pagar')
+                            }
                         </button>
                     </div>
                 )}
