@@ -219,17 +219,19 @@ const POS = () => {
             client: posSelectedClient
         };
 
-        const result = await addSale(saleData);
+        // ⚡ UI INSTANTÁNEA - Mostrar éxito ANTES de que termine la BD
+        setLastSaleDetails(saleData);
+        setIsSuccessModalOpen(true);
+        setPosSelectedClient(null);
 
-        if (result.success) {
-            // Prepare data for success modal
-            setLastSaleDetails(saleData);
-            setIsSuccessModalOpen(true);
-            setPosSelectedClient(null);
-            // Do NOT clear cart here, wait for "New Sale" or modal close
-        } else {
-            alert(result.error || "Error al procesar la venta");
-        }
+        // Ejecutar venta en background (no bloquea UI)
+        addSale(saleData).then(result => {
+            if (!result.success) {
+                // Si falla (raro), cerrar modal y mostrar error
+                setIsSuccessModalOpen(false);
+                alert(`Error al procesar la venta: ${result.error}`);
+            }
+        });
     };
 
     const handleNewSale = () => {
@@ -991,6 +993,14 @@ const POS = () => {
                 onClose={() => setIsPaymentModalOpen(false)}
                 total={finalTotal}
                 onConfirm={handlePaymentConfirm}
+            />
+
+            <SaleSuccessModal
+                isOpen={isSuccessModalOpen}
+                onClose={() => setIsSuccessModalOpen(false)}
+                saleDetails={lastSaleDetails}
+                onNewSale={handleNewSale}
+                seller={currentUser}
             />
         </div>
     );

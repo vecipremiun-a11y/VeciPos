@@ -21,6 +21,12 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
     // State for Mixed Payment
     const [mixedPayments, setMixedPayments] = useState([]);
 
+    const [isProcessing, setIsProcessing] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) setIsProcessing(false);
+    }, [isOpen]);
+
     useEffect(() => {
         if (isOpen) {
             setStep('select-method');
@@ -31,6 +37,32 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
             setMixedPayments([]);
         }
     }, [isOpen, total]);
+
+    const mounted = React.useRef(true);
+    useEffect(() => {
+        return () => { mounted.current = false; };
+    }, []);
+
+    // Validation for Mixed Payment
+    const isMixedValid = () => {
+        const currentTotal = mixedPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+        // Check total covered (allowing slight floating point diffs)
+        if (Math.abs(currentTotal - total) > 0.01) return false;
+
+        // Check required fields for specific methods
+        return mixedPayments.every(p => {
+            if (p.method === 'Tarjeta' && !p.terminal) return false;
+            if (p.method === 'Transferencia' && !p.account) return false;
+            return true;
+        });
+    };
+
+    const suggestions = [
+        Math.ceil(total),
+        Math.ceil(total / 1000) * 1000 + 1000,
+        Math.ceil(total / 5000) * 5000 + 5000,
+        Math.ceil(total / 10000) * 10000 + 10000
+    ].filter((v, i, a) => a.indexOf(v) === i && v >= total).slice(0, 3);
 
     if (!isOpen) return null;
 
@@ -142,12 +174,6 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
             return p;
         }));
     };
-
-    const [isProcessing, setIsProcessing] = useState(false);
-
-    useEffect(() => {
-        if (isOpen) setIsProcessing(false);
-    }, [isOpen]);
 
     const handleConfirm = async () => {
         // ============================================
@@ -272,45 +298,20 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
             };
         }
 
-        // Si todas las validaciones pasaron, confirmar pago
-        try {
-            setIsProcessing(true);
-            console.log('✅ Payment validated:', finalPayData);
-            await onConfirm(finalPayData);
-            onClose();
-        } catch (error) {
-            console.error("Payment error:", error);
-        } finally {
-            if (mounted.current) setIsProcessing(false);
-        }
+        // ============================================
+        // ⚡ CONFIRMACIÓN INSTANTÁNEA (OPTIMISTIC UI)
+        // ============================================
+
+        setIsProcessing(true);
+        console.log('✅ Payment validated (Instant UI):', finalPayData);
+
+        // Ejecutar inmediatamente para cerrar modal y mostrar éxito
+        onConfirm(finalPayData);
+
+        // Cerrar modal visualmente
+        onClose();
     };
 
-    // Check if mounted to avoid state update on unmounted component
-    const mounted = React.useRef(true);
-    useEffect(() => {
-        return () => { mounted.current = false; };
-    }, []);
-
-    // Validation for Mixed Payment
-    const isMixedValid = () => {
-        const currentTotal = getMixedTotal();
-        // Check total covered (allowing slight floating point diffs)
-        if (Math.abs(currentTotal - total) > 0.01) return false;
-
-        // Check required fields for specific methods
-        return mixedPayments.every(p => {
-            if (p.method === 'Tarjeta' && !p.terminal) return false;
-            if (p.method === 'Transferencia' && !p.account) return false;
-            return true;
-        });
-    };
-
-    const suggestions = [
-        Math.ceil(total),
-        Math.ceil(total / 1000) * 1000 + 1000,
-        Math.ceil(total / 5000) * 5000 + 5000,
-        Math.ceil(total / 10000) * 10000 + 10000
-    ].filter((v, i, a) => a.indexOf(v) === i && v >= total).slice(0, 3);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">

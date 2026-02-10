@@ -3104,401 +3104,296 @@ export const useStore = create(persist((set, get) => ({
 
 
     addSale: async (sale) => {
+        // ============================================
+        // FASE 1: VALIDACIÓN RÁPIDA (PRE-PROCESAMIENTO)
+        // ============================================
+        const startTime = performance.now();
+
         try {
             const { productLots, products, currentUser, activeCompanyId, validateCompanyAccess } = get();
 
-            // ============================================
-            // 🆕 VALIDACIÓN DE DATOS
-            // ============================================
-
-            // Validar estructura básica de la venta
-            if (!sale || typeof sale !== 'object') {
-                console.error('❌ Venta inválida:', sale);
+            // Validación básica ultra-rápida
+            if (!sale?.items?.length || !sale.total || sale.total < 0) {
                 return { success: false, error: 'Datos de venta inválidos' };
             }
 
-            if (!Array.isArray(sale.items) || sale.items.length === 0) {
-                console.error('❌ Venta sin items');
-                return { success: false, error: 'La venta debe tener al menos un producto' };
+            if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) {
+                return { success: false, error: 'Acceso denegado' };
             }
 
-            // Validar total de venta
             const saleTotal = parseFloat(sale.total);
-            if (isNaN(saleTotal) || saleTotal < 0) {
-                console.error('❌ Total de venta inválido:', sale.total);
-                return { success: false, error: 'Total de venta inválido' };
-            }
+            const { inventoryAdjustmentMode } = get();
 
-            // Validar cada item
-            for (let i = 0; i < sale.items.length; i++) {
-                const item = sale.items[i];
+            // ============================================
+            // FASE 2: PRE-CÁLCULOS (ANTES DE TRANSACCIÓN)
+            // ============================================
 
-                // Validar ID y nombre
-                if (!item.id) {
-                    console.error(`❌ Item ${i + 1} sin ID`);
-                    return { success: false, error: `Producto ${i + 1} sin identificador` };
+            // Preparar todos los datos ANTES de entrar a la transacción
+            const itemsToProcess = [];
+            const productsToUpdate = [];
+            const lotsToUpdate = [];
+            const productsToMarkPending = [];
+
+            // Crear índices rápidos (Map es O(1) vs filter que es O(n))
+            const productsMap = new Map(products.map(p => [p.id, p]));
+            const lotsByProduct = new Map();
+
+            productLots.forEach(lot => {
+                if (!lotsByProduct.has(lot.product_id)) {
+                    lotsByProduct.set(lot.product_id, []);
                 }
+                lotsByProduct.get(lot.product_id).push(lot);
+            });
 
-                if (!item.name || typeof item.name !== 'string') {
-                    console.error(`❌ Item ${i + 1} sin nombre`);
-                    return { success: false, error: `Producto ${i + 1} sin nombre válido` };
-                }
+            const today = new Date().toISOString().split('T')[0];
+
+            // Procesar cada item UNA SOLA VEZ
+            for (const item of sale.items) {
+                const product = productsMap.get(item.id);
+                if (!product) continue;
+
+                const quantity = parseFloat(item.quantity);
+                const price = parseFloat(item.price);
+                const cost = parseFloat(item.cost) || 0;
 
                 // Validar cantidad
-                const quantity = parseFloat(item.quantity);
-                if (isNaN(quantity) || quantity <= 0) {
-                    console.error(`❌ Cantidad inválida para ${item.name}:`, item.quantity);
+                if (quantity <= 0) {
                     return { success: false, error: `Cantidad inválida para ${item.name}` };
                 }
 
-                // Validar precio
-                const price = parseFloat(item.price);
-                if (isNaN(price) || price < 0) {
-                    console.error(`❌ Precio inválido para ${item.name}:`, item.price);
-                    return { success: false, error: `Precio inválido para ${item.name}` };
-                }
-
-                // Validar costo (puede ser 0 pero no negativo ni NaN)
-                const cost = parseFloat(item.cost);
-                if (isNaN(cost) || cost < 0) {
-                    console.error(`❌ Costo inválido para ${item.name}:`, item.cost);
-                    return { success: false, error: `Costo inválido para ${item.name}` };
-                }
-
-                // Validar tax_rate (opcional pero si existe debe ser válido)
-                if (item.tax_rate !== undefined && item.tax_rate !== null) {
-                    const taxRate = parseFloat(item.tax_rate);
-                    if (isNaN(taxRate) || taxRate < 0 || taxRate > 100) {
-                        console.error(`❌ Tasa de impuesto inválida para ${item.name}:`, item.tax_rate);
-                        return { success: false, error: `Tasa de impuesto inválida para ${item.name}` };
-                    }
-                }
-
-                // Normalizar valores (convertir strings a números)
-                sale.items[i] = {
-                    ...item,
-                    quantity: quantity,
-                    price: price,
-                    cost: cost,
-                    tax_rate: item.tax_rate ? parseFloat(item.tax_rate) : 0
-                };
-            }
-
-            // Validar método de pago
-            if (!sale.paymentMethod || typeof sale.paymentMethod !== 'string') {
-                console.error('❌ Método de pago inválido:', sale.paymentMethod);
-                return { success: false, error: 'Método de pago inválido' };
-            }
-
-            // Normalizar sale.total
-            sale.total = saleTotal;
-
-            console.log('✅ Validación de datos completada');
-
-            // ============================================
-            // FIN VALIDACIÓN
-            // ============================================
-
-            // 0. Security Validation
-            if (!validateCompanyAccess(currentUser ? currentUser.id : null, activeCompanyId)) {
-                console.error("Access Denied: User cannot add sale to this company.");
-                return { success: false, error: "Acceso denegado." };
-            }
-
-            // Validation: Check strict stock availability (Legacy + Valid Lots)
-            for (const item of sale.items) {
-                const product = products.find(p => p.id === item.id);
-
-                // Extra Security: Ensure product belongs to active company (implicitly checked if products are filtered, but good to be explicit if we fetched all)
-                // Since 'products' in state are already filtered by activeCompanyId in fetchInitialData, this is safe.
-
-                if (!product) continue;
-
-                // 1. Calculate specific lot stats
-                const itemLots = productLots.filter(l => l.product_id === item.id && l.quantity > 0);
-                const totalLotQty = itemLots.reduce((sum, l) => sum + l.quantity, 0);
-
-                // 2. Calculate Legacy Stock (Stock not in any lot)
+                // Calcular stock disponible
+                const itemLots = lotsByProduct.get(item.id) || [];
+                const totalLotQty = itemLots.reduce((sum, l) => sum + (l.quantity || 0), 0);
                 const legacyStock = Math.max(0, product.stock - totalLotQty);
-
-                // 3. Calculate Valid Lot Stock (Not expired)
-                const today = new Date().toISOString().split('T')[0];
                 const validLotStock = itemLots
-                    .filter(l => !l.expiry_date || l.expiry_date >= today)
+                    .filter(l => l.quantity > 0 && (!l.expiry_date || l.expiry_date >= today))
                     .reduce((sum, l) => sum + l.quantity, 0);
 
                 const totalSellable = legacyStock + validLotStock;
-                const { inventoryAdjustmentMode } = get();
 
-                if (item.quantity > totalSellable) {
-                    if (inventoryAdjustmentMode) {
-                        // In adjustment mode, we allow selling but strictly block expired lots if NO other option?
-                        // Actually requirements say: "Never sell expired lots".
-                        // Logic below handles deduction. Here we just bypass quantity check.
-                        // But we verify we aren't literally forced to pull from an expired lot?
-                        // If totalSellable is 0, it means we have NO valid stock.
-                        // In adjustment mode, we sell "virtual/negative" stock. We do NOT touch expired lots.
-                        // So we proceed.
-                    } else {
-                        // Fail the entire sale if one item exceeds valid stock
-                        console.error(`Attempted to sell ${item.quantity} of ${product.name}, but only ${totalSellable} is valid / legacy. (Expired blocked)`);
-                        return { success: false, error: `Stock insuficiente(Vencido / No disponible) para: ${product.name}` };
-                    }
+                // Verificar stock
+                if (!inventoryAdjustmentMode && quantity > totalSellable) {
+                    return {
+                        success: false,
+                        error: `Stock insuficiente para: ${product.name}`
+                    };
                 }
-            }
 
-            // Transaction: Insert Sale + Deduct Stock
-            const itemsJson = JSON.stringify(sale.items);
-            const detailsJson = JSON.stringify(sale.paymentDetails);
-            const { inventoryAdjustmentMode } = get();
-
-            // Check if this sale triggers negative stock
-            let saleHasNegativeStock = false;
-
-            // Re-check logic to flag products
-            const productsToMarkPending = [];
-
-            for (const item of sale.items) {
-                const product = products.find(p => p.id === item.id);
-                if (!product) continue;
-                const itemLots = productLots.filter(l => l.product_id === item.id && l.quantity > 0);
-                const totalLotQty = itemLots.reduce((sum, l) => sum + l.quantity, 0);
-                const legacyStock = Math.max(0, product.stock - totalLotQty);
-                const today = new Date().toISOString().split('T')[0];
-                const validLotStock = itemLots
-                    .filter(l => !l.expiry_date || l.expiry_date >= today)
-                    .reduce((sum, l) => sum + l.quantity, 0);
-
-                if (item.quantity > (legacyStock + validLotStock)) {
-                    saleHasNegativeStock = true;
+                // Marcar productos que quedarán en negativo
+                if (quantity > totalSellable) {
                     productsToMarkPending.push(item.id);
                 }
+
+                // Preparar datos del item
+                itemsToProcess.push({
+                    id: item.id,
+                    name: item.name,
+                    quantity,
+                    price,
+                    cost,
+                    tax_rate: parseFloat(item.tax_rate) || 0
+                });
+
+                // Preparar UPDATE de producto
+                productsToUpdate.push({
+                    id: item.id,
+                    quantityToDeduct: quantity,
+                    markPending: productsToMarkPending.includes(item.id)
+                });
+
+                // Preparar UPDATEs de lotes (FEFO)
+                const validLots = itemLots
+                    .filter(l => l.quantity > 0)
+                    .sort((a, b) => {
+                        if (!a.expiry_date) return 1;
+                        if (!b.expiry_date) return -1;
+                        return new Date(a.expiry_date) - new Date(b.expiry_date);
+                    });
+
+                let remainingQty = quantity;
+                for (const lot of validLots) {
+                    if (remainingQty <= 0) break;
+                    if (lot.expiry_date && lot.expiry_date < today) continue;
+
+                    const deduct = Math.min(lot.quantity, remainingQty);
+                    lotsToUpdate.push({
+                        id: lot.id,
+                        deduct
+                    });
+                    remainingQty -= deduct;
+                }
             }
 
-            // 🆕 INICIO DE TRANSACCIÓN EXPLÍCITA
-            const tx = await turso.transaction('write');
+            console.log(`⚡ Pre-cálculos: ${(performance.now() - startTime).toFixed(2)}ms`);
+
+            // ============================================
+            // FASE 3: TRANSACCIÓN OPTIMIZADA
+            // ============================================
+
+            const tx = await turso.transaction();
 
             try {
-                // 1. Insert Sale
-                await tx.execute({
-                    sql: "INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id, status, has_negative_stock, client_id, client_name, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?)",
+                const now = new Date().toISOString();
+                const itemsJson = JSON.stringify(itemsToProcess);
+                const detailsJson = JSON.stringify(sale.paymentDetails);
+
+                // 1. INSERT sale (crítico)
+                const saleResult = await tx.execute({
+                    sql: `INSERT INTO sales 
+                          (company_id, user_id, date, items, total, summary, payment_method, payment_details, status, client_id) 
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)`,
                     args: [
-                        getNowInCompanyTime(get().currentCompanyTimezone).toISOString(),
-                        sale.total,
-                        sale.summary,
+                        activeCompanyId,
+                        currentUser?.id,
+                        now,
                         itemsJson,
+                        saleTotal,
+                        sale.summary,
                         sale.paymentMethod,
                         detailsJson,
-                        currentUser ? currentUser.id : null,
-                        saleHasNegativeStock ? 1 : 0,
-                        sale.client ? sale.client.id : null,
-                        sale.client ? sale.client.name : null,
-                        activeCompanyId
+                        sale.client?.id || null
                     ]
                 });
 
-                // 2. Update sales_daily_summary
-                const todayForSummary = new Date();
-                const todayStr = formatInCompanyTime(todayForSummary, get().currentCompanyTimezone, 'yyyy-MM-dd');
+                const saleId = saleResult.lastInsertRowid || Date.now();
 
-                await tx.execute({
-                    sql: `INSERT INTO sales_daily_summary (company_id, day, total_sales, total_orders, updated_at)
-                          VALUES (?, ?, ?, 1, ?)
-                          ON CONFLICT(company_id, day) 
-                          DO UPDATE SET 
-                            total_sales = total_sales + excluded.total_sales,
-                            total_orders = total_orders + 1,
-                            updated_at = excluded.updated_at`,
+                // 2. BATCH UPDATE de productos (UN SOLO QUERY por producto)
+                // En lugar de hacer un UPDATE por cada item, los agrupamos
+                const productUpdatePromises = productsToUpdate.map(p =>
+                    tx.execute({
+                        sql: `UPDATE products 
+                              SET stock = stock - ?, 
+                                  pending_adjustment = CASE WHEN ? THEN 1 ELSE pending_adjustment END
+                              WHERE id = ? AND company_id = ?`,
+                        args: [p.quantityToDeduct, p.markPending ? 1 : 0, p.id, activeCompanyId]
+                    })
+                );
+
+                // 3. BATCH UPDATE de lotes
+                const lotUpdatePromises = lotsToUpdate.map(l =>
+                    tx.execute({
+                        sql: `UPDATE product_lots SET quantity = quantity - ? WHERE id = ?`,
+                        args: [l.deduct, l.id]
+                    })
+                );
+
+                // 4. Cash register update (NO se actualiza aquí, se calcula en refreshRegisterStats)
+                // La caja NO tiene columna current_balance, se calcula sumando ventas
+                const cashRegisterPromise = Promise.resolve();
+
+                // 5. Audit log
+                const auditPromise = tx.execute({
+                    sql: `INSERT INTO audit_logs
+                          (company_id, user_id, action, entity, details, created_at)
+                          VALUES (?, ?, 'CREATE', 'SALE', ?, ?)`,
                     args: [
                         activeCompanyId,
-                        todayStr,
-                        sale.total,
-                        new Date().toISOString()
+                        currentUser?.id,
+                        JSON.stringify({ total: saleTotal, itemsCount: itemsToProcess.length }),
+                        now
                     ]
                 });
 
-                // 3. Update product_daily_profit por cada producto
-                for (const item of sale.items) {
-                    const quantity = parseFloat(item.quantity);
-                    const price = parseFloat(item.price) || 0;
-                    const cost = parseFloat(item.cost) || 0;
-                    const taxRate = parseFloat(item.tax_rate) || 0;
+                // PARALELIZAR: Ejecutar todos los UPDATEs simultáneamente
+                await Promise.all([
+                    ...productUpdatePromises,
+                    ...lotUpdatePromises,
+                    cashRegisterPromise,
+                    auditPromise
+                ]);
 
-                    const totalRevenue = price * quantity;
-                    const totalCost = cost * quantity;
-                    const netPrice = price / (1 + (taxRate / 100));
-                    const profitPerUnit = netPrice - cost;
-                    const totalProfit = profitPerUnit * quantity;
-                    const totalTax = totalRevenue - (netPrice * quantity);
-
-                    await tx.execute({
-                        sql: `INSERT INTO product_daily_profit 
-                              (company_id, product_id, day, total_quantity, total_revenue, total_cost, total_tax, total_profit, updated_at)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                              ON CONFLICT(company_id, product_id, day) 
-                              DO UPDATE SET 
-                                total_quantity = total_quantity + excluded.total_quantity,
-                                total_revenue = total_revenue + excluded.total_revenue,
-                                total_cost = total_cost + excluded.total_cost,
-                                total_tax = total_tax + excluded.total_tax,
-                                total_profit = total_profit + excluded.total_profit,
-                                updated_at = excluded.updated_at`,
-                        args: [
-                            activeCompanyId,
-                            item.id,
-                            todayStr,
-                            quantity,
-                            totalRevenue,
-                            totalCost,
-                            totalTax,
-                            totalProfit,
-                            new Date().toISOString()
-                        ]
-                    });
-
-                    console.log(`📊 Updating product_daily_profit: ${item.name}, qty: ${quantity}, profit: $${totalProfit.toFixed(2)}`);
-                }
-
-                // 4. Process stock deduction
-                const updatedLots = [...productLots];
-
-                for (const item of sale.items) {
-                    // Deduct from total stock
-                    await tx.execute({
-                        sql: "UPDATE products SET stock = stock - ? WHERE id = ? AND company_id = ?",
-                        args: [item.quantity, item.id, activeCompanyId]
-                    });
-
-                    if (productsToMarkPending.includes(item.id)) {
-                        await tx.execute({
-                            sql: "UPDATE products SET pending_adjustment = 1 WHERE id = ? AND company_id = ?",
-                            args: [item.id, activeCompanyId]
-                        });
-                    }
-
-                    // Deduct from Lots (FEFO Logic)
-                    const today = new Date().toISOString().split('T')[0];
-                    let remainingQty = parseFloat(item.quantity);
-
-                    const validLots = updatedLots
-                        .filter(l => l.product_id === item.id && l.quantity > 0)
-                        .sort((a, b) => {
-                            if (!a.expiry_date) return 1;
-                            if (!b.expiry_date) return -1;
-                            return new Date(a.expiry_date) - new Date(b.expiry_date);
-                        });
-
-                    for (const lot of validLots) {
-                        if (remainingQty <= 0) break;
-                        if (lot.expiry_date && lot.expiry_date < today) continue;
-
-                        const deduct = Math.min(lot.quantity, remainingQty);
-
-                        await tx.execute({
-                            sql: "UPDATE product_lots SET quantity = quantity - ? WHERE id = ?",
-                            args: [deduct, lot.id]
-                        });
-
-                        lot.quantity -= deduct;
-                        remainingQty -= deduct;
-                    }
-                }
-
-                // 5. Update cash register (solo si existe y está abierta)
-                // Re-obtener cashRegister del store para evitar referencias obsoletas
-                const currentCashRegister = get().cashRegister;
-
-                if (currentCashRegister && currentCashRegister.id) {
-                    console.log('📦 Updating cash register balance:', currentCashRegister.id);
-                    try {
-                        await tx.execute({
-                            sql: "UPDATE cash_registers SET current_balance = current_balance + ? WHERE id = ? AND company_id = ?",
-                            args: [sale.total, currentCashRegister.id, activeCompanyId]
-                        });
-                    } catch (cashRegisterError) {
-                        console.warn('⚠️ Failed to update cash register:', cashRegisterError);
-                        // No lanzar error, permitir que venta se complete
-                    }
-                } else {
-                    console.log('ℹ️ No cash register open, skipping balance update (this is normal)');
-                }
-
-                // 6. Audit Log
-                await tx.execute({
-                    sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    args: [
-                        activeCompanyId,
-                        currentUser ? currentUser.id : null,
-                        'CREATE',
-                        'SALE',
-                        JSON.stringify({ total: sale.total, itemsCount: sale.items.length }),
-                        new Date().toISOString()
-                    ]
-                });
-
-                // 🆕 COMMIT: Todo salió bien
+                // COMMIT
                 await tx.commit();
-                console.log('✅ Sale transaction committed successfully');
 
-                // Update local state (Copied from existing logic)
+                console.log(`⚡ Transacción: ${(performance.now() - startTime).toFixed(2)}ms`);
+
+                // ============================================
+                // FASE 4: ACTUALIZAR ESTADO LOCAL (OPTIMISTIC)
+                // ============================================
+
+                // Actualizar lotes localmente
+                const updatedLots = [...productLots];
+                lotsToUpdate.forEach(lotUpdate => {
+                    const lot = updatedLots.find(l => l.id === lotUpdate.id);
+                    if (lot) lot.quantity -= lotUpdate.deduct;
+                });
+
+                // Actualizar estado
                 set((state) => ({
                     sales: [{
-                        ...sale,
-                        id: Date.now(),
-                        date: new Date().toISOString(),
+                        id: saleId,
+                        date: now,
                         status: 'completed',
-                        clientId: sale.client ? sale.client.id : null,
-                        clientName: sale.client ? sale.client.name : null,
-                        company_id: activeCompanyId
+                        clientId: sale.client?.id || null,
+                        clientName: sale.client?.name || null,
+                        company_id: activeCompanyId,
+                        user_id: currentUser?.id,
+                        user_name: currentUser?.name,
+                        items: itemsToProcess,
+                        payment_method: sale.paymentMethod,
+                        payment_details: sale.paymentDetails,
+                        total: saleTotal,
+                        summary: sale.summary
                     }, ...state.sales],
                     productLots: updatedLots,
                     products: state.products.map(p => {
-                        const soldItem = sale.items.find(i => i.id === p.id);
-                        if (soldItem) {
-                            const isPending = productsToMarkPending.includes(p.id);
+                        const update = productsToUpdate.find(u => u.id === p.id);
+                        if (update) {
                             return {
                                 ...p,
-                                stock: p.stock - soldItem.quantity,
-                                pending_adjustment: isPending ? 1 : (p.pending_adjustment || 0)
+                                stock: p.stock - update.quantityToDeduct,
+                                pending_adjustment: update.markPending ? 1 : p.pending_adjustment
                             };
                         }
                         return p;
                     })
                 }));
 
-                // Force refresh
-                get().fetchSales();
+                // Actualizar stats de caja (no blocking)
                 const postSaleCashRegister = get().cashRegister;
-                if (postSaleCashRegister && postSaleCashRegister.id) {
+                if (postSaleCashRegister?.id) {
                     get().refreshRegisterStats(postSaleCashRegister.id);
                 }
 
-                // Actualizar agregaciones para reportes rápidos (no bloquea la venta si falla)
-                try {
-                    await get().updateAllAggregations(
-                        { ...sale, total: saleTotal, date: new Date().toISOString() },
-                        currentUser?.id,
-                        currentUser?.name,
-                        activeCompanyId,
-                        get().currentCompanyTimezone
-                    );
-                } catch (aggErr) {
-                    console.error('⚠️ Aggregation update failed (sale still OK):', aggErr);
-                }
+                // ============================================
+                // FASE 5: AGREGACIONES EN BACKGROUND (NO BLOQUEA)
+                // ============================================
 
-                return { success: true };
+                // Esto se ejecuta DESPUÉS de que la UI ya mostró éxito
+                // No afecta la velocidad percibida por el usuario
+                setTimeout(async () => {
+                    try {
+                        await get().updateAllAggregations(
+                            {
+                                ...sale,
+                                total: saleTotal,
+                                date: now,
+                                items: itemsToProcess
+                            },
+                            currentUser?.id,
+                            currentUser?.name,
+                            activeCompanyId,
+                            get().currentCompanyTimezone
+                        );
+                    } catch (aggErr) {
+                        console.error('⚠️ Aggregation update failed:', aggErr);
+                    }
+                }, 0);
+
+                const totalTime = (performance.now() - startTime).toFixed(2);
+                console.log(`✅ Venta completada en ${totalTime}ms`);
+
+                return { success: true, saleId };
 
             } catch (error) {
-                // 🆕 ROLLBACK: Revertir todo si falla
+                // ROLLBACK COMPLETO
                 await tx.rollback();
-                console.error('❌ Sale transaction failed, rolled back:', error);
+                console.error('❌ Sale failed, rolled back:', error);
                 return { success: false, error: error.message };
             }
 
-
-
         } catch (e) {
-            console.error("Sales transaction error", e);
+            console.error('❌ Sale error:', e);
             return { success: false, error: e.message };
         }
     },
