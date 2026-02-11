@@ -409,19 +409,33 @@ const SalesHistory = () => {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {selectedSale.items?.map((item, idx) => (
-                                                <tr key={idx} className="border-b border-[var(--glass-border)] text-[var(--color-text-muted)] text-sm">
-                                                    <td className="py-3">
-                                                        <div className="font-medium text-[var(--color-text)]">{item.name}</div>
-                                                        {item.sku && <div className="text-xs text-[var(--color-text-muted)]">{item.sku}</div>}
+                                            {(!selectedSale.items || selectedSale.items.length === 0) ? (
+                                                <tr>
+                                                    <td colSpan="4" className="py-8 text-center text-[var(--color-text-muted)]">
+                                                        No hay detalles de productos disponibles para esta venta.
                                                     </td>
-                                                    <td className="py-3 text-right text-[var(--color-text)] bg-[var(--glass-bg)] rounded w-16 text-center mx-auto" style={{ display: 'table-cell' }}>
-                                                        <span className="px-2 py-1 rounded bg-[var(--glass-bg)]">{item.quantity}</span>
-                                                    </td>
-                                                    <td className="py-3 text-right">{formatCurrency(item.price, currentCurrency)}</td>
-                                                    <td className="py-3 text-right font-bold text-[var(--color-text)]">{formatCurrency(item.price * item.quantity, currentCurrency)}</td>
                                                 </tr>
-                                            ))}
+                                            ) : (
+                                                selectedSale.items.map((item, idx) => (
+                                                    <tr key={idx} className="border-b border-[var(--glass-border)] text-[var(--color-text-muted)] text-sm hover:bg-[var(--glass-bg)]/30 transition-colors">
+                                                        <td className="py-3 pl-2">
+                                                            <div className="font-medium text-[var(--color-text)]">{item.name}</div>
+                                                            {item.sku && <div className="text-xs text-[var(--color-text-muted)] opacity-70">{item.sku}</div>}
+                                                        </td>
+                                                        <td className="py-3 text-center">
+                                                            <span className="px-2 py-1 rounded bg-[var(--glass-bg)] text-[var(--color-text)] font-medium text-xs border border-[var(--glass-border)]">
+                                                                {item.quantity} {item.unit || 'Und'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-3 text-right text-[var(--color-text)]">
+                                                            {formatCurrency(item.price, currentCurrency)}
+                                                        </td>
+                                                        <td className="py-3 text-right font-bold text-[var(--color-text)] pr-2">
+                                                            {formatCurrency((item.price * item.quantity), currentCurrency)}
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
                                         </tbody>
                                     </table>
 
@@ -655,18 +669,35 @@ const SalesHistory = () => {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {selectedSale.items?.map((item, idx) => (
-                                            <tr key={idx} className="border-b border-[var(--glass-border)]">
-                                                <td className="py-3">
-                                                    <div className="font-medium text-[var(--color-text)] text-sm">{item.name}</div>
-                                                    {item.sku && <div className="text-[10px] text-[var(--color-text-muted)]">{item.sku}</div>}
+                                        {(!selectedSale.items || selectedSale.items.length === 0) ? (
+                                            <tr>
+                                                <td colSpan="3" className="py-8 text-center text-[var(--color-text-muted)] text-sm">
+                                                    No hay detalles disponibles.
                                                 </td>
-                                                <td className="py-3 text-center">
-                                                    <span className="px-2 py-1 bg-[var(--glass-bg)] rounded text-[var(--color-text)] text-sm">{item.quantity}</span>
-                                                </td>
-                                                <td className="py-3 text-right font-bold text-[var(--color-text)] text-sm">{formatCurrency(item.price * item.quantity, currentCurrency)}</td>
                                             </tr>
-                                        ))}
+                                        ) : (
+                                            selectedSale.items.map((item, idx) => (
+                                                <tr key={idx} className="border-b border-[var(--glass-border)]">
+                                                    <td className="py-3 pr-2">
+                                                        <div className="font-medium text-[var(--color-text)] text-sm">{item.name}</div>
+                                                        {item.sku && <div className="text-[10px] text-[var(--color-text-muted)] opacity-70">{item.sku}</div>}
+                                                    </td>
+                                                    <td className="py-3 text-center">
+                                                        <span className="px-2 py-1 bg-[var(--glass-bg)] rounded text-[var(--color-text)] text-xs font-bold border border-[var(--glass-border)]">
+                                                            {item.quantity}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 text-right">
+                                                        <div className="font-bold text-[var(--color-text)] text-sm">
+                                                            {formatCurrency(item.price * item.quantity, currentCurrency)}
+                                                        </div>
+                                                        <div className="text-[10px] text-[var(--color-text-muted)]">
+                                                            {item.quantity} x {formatCurrency(item.price, currentCurrency)}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
                                     </tbody>
                                 </table>
 

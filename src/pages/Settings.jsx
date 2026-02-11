@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { turso } from '../lib/turso';
-import { Moon, Sun, Settings as SettingsIcon, FileText, Smartphone, Wrench, Building2, Save } from 'lucide-react';
+import { Moon, Sun, Settings as SettingsIcon, FileText, Smartphone, Wrench, Building2, Save, CreditCard } from 'lucide-react';
 
 import { recompressAllImages } from '../scripts/recompressImages';
 import ReceiptSettings from '../components/settings/ReceiptSettings';
+import PaymentMethodsSettings from '../components/settings/PaymentMethodsSettings';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
 
 const Settings = () => {
@@ -160,6 +161,7 @@ const Settings = () => {
                             { id: 'general', label: 'General', icon: SettingsIcon },
                             { id: 'company', label: 'Empresa', icon: Building2 },
                             { id: 'receipts', label: 'Boletas', icon: FileText },
+                            { id: 'payments', label: 'Medios de Pago', icon: CreditCard },
                             { id: 'system', label: 'Sistema', icon: Wrench },
                         ].map((item) => {
                             const Icon = item.icon;
@@ -465,6 +467,10 @@ const Settings = () => {
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <ReceiptSettings companyInfo={companyInfo} />
                         </div>
+                    )}
+
+                    {activeTab === 'payments' && (
+                        <PaymentMethodsSettings />
                     )}
 
                     {activeTab === 'system' && (

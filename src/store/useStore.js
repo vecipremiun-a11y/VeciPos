@@ -28,6 +28,17 @@ export const useStore = create(persist((set, get) => ({
     activeCartId: 1,
     nextCartId: 2,
 
+    // Payment Methods State
+    paymentMethodsConfig: {
+        cash_enabled: 1,
+        card_enabled: 1,
+        transfer_enabled: 1,
+        credit_enabled: 1,
+        mixed_enabled: 1
+    },
+    paymentTerminals: [],
+    bankAccounts: [],
+
     // Computed getters (derivados automáticamente, sin duplicación)
     get cart() {
         const { carts, activeCartId } = get();
@@ -785,6 +796,49 @@ export const useStore = create(persist((set, get) => ({
                 )
             `);
 
+            // ==========================================
+            // PAYMENT METHODS TABLES
+            // ==========================================
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS payment_methods_config (
+                    company_id TEXT PRIMARY KEY,
+                    cash_enabled INTEGER DEFAULT 1,
+                    card_enabled INTEGER DEFAULT 1,
+                    transfer_enabled INTEGER DEFAULT 1,
+                    credit_enabled INTEGER DEFAULT 1,
+                    mixed_enabled INTEGER DEFAULT 1,
+                    FOREIGN KEY(company_id) REFERENCES companies(id)
+                )
+            `);
+
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS payment_terminals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id TEXT,
+                    name TEXT,
+                    color TEXT DEFAULT '#3B82F6',
+                    is_active INTEGER DEFAULT 1,
+                    created_at TEXT,
+                    FOREIGN KEY(company_id) REFERENCES companies(id)
+                )
+            `);
+
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS bank_accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id TEXT,
+                    bank_name TEXT,
+                    account_number TEXT,
+                    account_type TEXT,
+                    owner_name TEXT,
+                    rut TEXT,
+                    email TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TEXT,
+                    FOREIGN KEY(company_id) REFERENCES companies(id)
+                )
+            `);
+
             // Migration: Add new columns to suppliers if they don't exist
             const newColumns = [
                 'ALTER TABLE suppliers ADD COLUMN seller_name TEXT',
@@ -799,6 +853,9 @@ export const useStore = create(persist((set, get) => ({
                     // Ignore error if column already exists
                 }
             }
+
+            // Load Payment Methods Settings
+            await get().fetchPaymentMethodsSettings();
 
             // 2. BATCH DATA FETCHING
             // ==========================================
@@ -1068,7 +1125,7 @@ export const useStore = create(persist((set, get) => ({
                 const fullSale = result.rows[0];
                 const processedSale = {
                     ...fullSale,
-                    items: JSON.parse(fullSale.items),
+                    items: fullSale.items ? JSON.parse(fullSale.items) : [],
                     paymentMethod: fullSale.payment_method,
                     paymentDetails: fullSale.payment_details ? JSON.parse(fullSale.payment_details) : null,
                     observation: fullSale.observation || '',
@@ -3110,7 +3167,7 @@ export const useStore = create(persist((set, get) => ({
         const startTime = performance.now();
 
         try {
-            const { productLots, products, currentUser, activeCompanyId, validateCompanyAccess } = get();
+            const { productLots, currentUser, activeCompanyId, validateCompanyAccess } = get();
 
             // Validación básica ultra-rápida
             if (!sale?.items?.length || !sale.total || sale.total < 0) {
@@ -3128,6 +3185,17 @@ export const useStore = create(persist((set, get) => ({
             // FASE 2: PRE-CÁLCULOS (ANTES DE TRANSACCIÓN)
             // ============================================
 
+            // Fetch fresh product data from DB to ensure we have all items (handling pagination/category switching)
+            // and to check REAL-TIME stock.
+            const itemIds = [...new Set(sale.items.map(i => i.id))];
+            const placeholders = itemIds.map(() => '?').join(',');
+
+            const dbProductsRes = await turso.execute({
+                sql: `SELECT * FROM products WHERE id IN (${placeholders}) AND company_id = ?`,
+                args: [...itemIds, activeCompanyId]
+            });
+            const dbProducts = dbProductsRes.rows;
+
             // Preparar todos los datos ANTES de entrar a la transacción
             const itemsToProcess = [];
             const productsToUpdate = [];
@@ -3135,22 +3203,35 @@ export const useStore = create(persist((set, get) => ({
             const productsToMarkPending = [];
 
             // Crear índices rápidos (Map es O(1) vs filter que es O(n))
-            const productsMap = new Map(products.map(p => [p.id, p]));
+            // Usamos dbProducts en lugar de get().products
+            // NORMALIZAR IDs a String para evitar mismatch de tipos (number vs string)
+            const productsMap = new Map(dbProducts.map(p => [String(p.id), p]));
             const lotsByProduct = new Map();
 
             productLots.forEach(lot => {
-                if (!lotsByProduct.has(lot.product_id)) {
-                    lotsByProduct.set(lot.product_id, []);
+                const pId = String(lot.product_id);
+                if (!lotsByProduct.has(pId)) {
+                    lotsByProduct.set(pId, []);
                 }
-                lotsByProduct.get(lot.product_id).push(lot);
+                lotsByProduct.get(pId).push(lot);
             });
 
             const today = new Date().toISOString().split('T')[0];
 
+            console.log(`🛒 Processing ${sale.items.length} items for sale`);
+
             // Procesar cada item UNA SOLA VEZ
             for (const item of sale.items) {
-                const product = productsMap.get(item.id);
-                if (!product) continue;
+                const itemIdStr = String(item.id);
+                const product = productsMap.get(itemIdStr);
+
+                if (!product) {
+                    console.error(`❌ ITEM SKIPPED (Not found in DB): Item ID ${item.id} (${item.name}). DB has ${dbProducts.length} products loaded.`);
+                    // OPTIONAL: Fail the sale if an item is missing? 
+                    // For now, continuing but logging error is better than silent failure.
+                    // Ideally we should alert but this runs in background.
+                    continue;
+                }
 
                 const quantity = parseFloat(item.quantity);
                 const price = parseFloat(item.price);
@@ -3158,11 +3239,12 @@ export const useStore = create(persist((set, get) => ({
 
                 // Validar cantidad
                 if (quantity <= 0) {
+                    console.error(`❌ Invalid quantity for ${item.name}: ${quantity}`);
                     return { success: false, error: `Cantidad inválida para ${item.name}` };
                 }
 
                 // Calcular stock disponible
-                const itemLots = lotsByProduct.get(item.id) || [];
+                const itemLots = lotsByProduct.get(itemIdStr) || [];
                 const totalLotQty = itemLots.reduce((sum, l) => sum + (l.quantity || 0), 0);
                 const legacyStock = Math.max(0, product.stock - totalLotQty);
                 const validLotStock = itemLots
@@ -3173,6 +3255,7 @@ export const useStore = create(persist((set, get) => ({
 
                 // Verificar stock
                 if (!inventoryAdjustmentMode && quantity > totalSellable) {
+                    console.error(`❌ Insufficient stock for ${item.name}. Required: ${quantity}, Available: ${totalSellable}`);
                     return {
                         success: false,
                         error: `Stock insuficiente para: ${product.name}`
@@ -6003,6 +6086,224 @@ export const useStore = create(persist((set, get) => ({
             return { success: true, products };
         } catch (e) {
             console.error('Error fetching preorderable products:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // ==========================================
+    // PAYMENT METHODS ACTIONS
+    // ==========================================
+    fetchPaymentMethodsSettings: async () => {
+        const { activeCompanyId } = get();
+        try {
+            // 1. Config
+            const configRes = await turso.execute({
+                sql: "SELECT * FROM payment_methods_config WHERE company_id = ?",
+                args: [activeCompanyId]
+            });
+
+            let config = configRes.rows[0];
+            if (!config) {
+                // Initialize default config if not exists
+                await turso.execute({
+                    sql: "INSERT INTO payment_methods_config (company_id) VALUES (?)",
+                    args: [activeCompanyId]
+                });
+                config = {
+                    company_id: activeCompanyId,
+                    cash_enabled: 1,
+                    card_enabled: 1,
+                    transfer_enabled: 1,
+                    credit_enabled: 1,
+                    mixed_enabled: 1
+                };
+            }
+
+            // 2. Terminals
+            const terminalsRes = await turso.execute({
+                sql: "SELECT * FROM payment_terminals WHERE company_id = ? AND is_active = 1",
+                args: [activeCompanyId]
+            });
+
+            // 3. Bank Accounts
+            const accountsRes = await turso.execute({
+                sql: "SELECT * FROM bank_accounts WHERE company_id = ? AND is_active = 1",
+                args: [activeCompanyId]
+            });
+
+            set({
+                paymentMethodsConfig: config,
+                paymentTerminals: terminalsRes.rows,
+                bankAccounts: accountsRes.rows
+            });
+
+            return { success: true };
+        } catch (e) {
+            console.error("Error fetching payment settings:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    togglePaymentMethod: async (method, isEnabled) => {
+        const { activeCompanyId, paymentMethodsConfig } = get();
+        const fieldMap = {
+            'cash': 'cash_enabled',
+            'card': 'card_enabled',
+            'transfer': 'transfer_enabled',
+            'credit': 'credit_enabled',
+            'mixed': 'mixed_enabled'
+        };
+        const dbField = fieldMap[method];
+        if (!dbField) return;
+
+        try {
+            await turso.execute({
+                sql: `UPDATE payment_methods_config SET ${dbField} = ? WHERE company_id = ?`,
+                args: [isEnabled ? 1 : 0, activeCompanyId]
+            });
+
+            set({
+                paymentMethodsConfig: {
+                    ...paymentMethodsConfig,
+                    [dbField]: isEnabled ? 1 : 0
+                }
+            });
+            return { success: true };
+        } catch (e) {
+            console.error("Error toggling payment method:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    addPaymentTerminal: async (terminalData) => {
+        const { activeCompanyId, paymentTerminals } = get();
+        try {
+            // First check if column color exists (migration on the fly for old concept)
+            // But since this is new, we assume create table is correct or alter if needed.
+            // Let's just do the insert. If code column exists it will error if we don't provide it? No, code was there.
+            // We are changing 'code' to 'color'.
+            // For safety let's ensure the table structure.
+
+            try {
+                // Quick migration check
+                const info = await turso.execute("PRAGMA table_info(payment_terminals)");
+                const hasColor = info.rows.some(col => col.name === 'color');
+                if (!hasColor) {
+                    await turso.execute("ALTER TABLE payment_terminals ADD COLUMN color TEXT DEFAULT '#3B82F6'");
+                }
+            } catch (e) { console.warn("Terminal migration check fail", e); }
+
+            const res = await turso.execute({
+                sql: "INSERT INTO payment_terminals (company_id, name, color, created_at) VALUES (?, ?, ?, ?) RETURNING *",
+                args: [activeCompanyId, terminalData.name, terminalData.color || '#3B82F6', new Date().toISOString()]
+            });
+            const newTerminal = res.rows[0];
+            set({ paymentTerminals: [...paymentTerminals, newTerminal] });
+            return { success: true };
+        } catch (e) {
+            console.error("Error adding terminal:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updatePaymentTerminal: async (id, terminalData) => {
+        const { paymentTerminals } = get();
+        try {
+            await turso.execute({
+                sql: "UPDATE payment_terminals SET name = ?, color = ? WHERE id = ?",
+                args: [terminalData.name, terminalData.color || '#3B82F6', id]
+            });
+            const updatedTerminals = paymentTerminals.map(t =>
+                t.id === id ? { ...t, name: terminalData.name, color: terminalData.color || '#3B82F6' } : t
+            );
+            set({ paymentTerminals: updatedTerminals });
+            return { success: true };
+        } catch (e) {
+            console.error("Error updating terminal:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deletePaymentTerminal: async (id) => {
+        const { activeCompanyId, paymentTerminals } = get();
+        try {
+            await turso.execute({
+                sql: "UPDATE payment_terminals SET is_active = 0 WHERE id = ? AND company_id = ?",
+                args: [id, activeCompanyId]
+            });
+            set({ paymentTerminals: paymentTerminals.filter(t => t.id !== id) });
+            return { success: true };
+        } catch (e) {
+            console.error("Error deleting terminal:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    addBankAccount: async (accountData) => {
+        const { activeCompanyId, bankAccounts } = get();
+        try {
+            const res = await turso.execute({
+                sql: `INSERT INTO bank_accounts 
+                      (company_id, bank_name, account_number, account_type, owner_name, rut, email, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+                args: [
+                    activeCompanyId,
+                    accountData.bank_name,
+                    accountData.account_number,
+                    accountData.account_type,
+                    accountData.owner_name,
+                    accountData.rut,
+                    accountData.email,
+                    new Date().toISOString()
+                ]
+            });
+            const newAccount = res.rows[0];
+            set({ bankAccounts: [...bankAccounts, newAccount] });
+            return { success: true };
+        } catch (e) {
+            console.error("Error adding bank account:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updateBankAccount: async (id, accountData) => {
+        const { bankAccounts } = get();
+        try {
+            await turso.execute({
+                sql: "UPDATE bank_accounts SET bank_name = ?, account_number = ?, account_type = ?, owner_name = ?, rut = ?, email = ? WHERE id = ?",
+                args: [
+                    accountData.bank_name,
+                    accountData.account_number,
+                    accountData.account_type,
+                    accountData.owner_name,
+                    accountData.rut,
+                    accountData.email,
+                    id
+                ]
+            });
+
+            const updatedAccounts = bankAccounts.map(a =>
+                a.id === id ? { ...a, ...accountData } : a
+            );
+            set({ bankAccounts: updatedAccounts });
+            return { success: true };
+        } catch (e) {
+            console.error("Error updating bank account:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deleteBankAccount: async (id) => {
+        const { activeCompanyId, bankAccounts } = get();
+        try {
+            await turso.execute({
+                sql: "UPDATE bank_accounts SET is_active = 0 WHERE id = ? AND company_id = ?",
+                args: [id, activeCompanyId]
+            });
+            set({ bankAccounts: bankAccounts.filter(a => a.id !== id) });
+            return { success: true };
+        } catch (e) {
+            console.error("Error deleting bank account:", e);
             return { success: false, error: e.message };
         }
     },

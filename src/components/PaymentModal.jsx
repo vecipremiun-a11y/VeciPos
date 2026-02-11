@@ -5,7 +5,15 @@ import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
-    const { carts, activeCartId, currentCurrency } = useStore();
+    const {
+        carts,
+        activeCartId,
+        currentCurrency,
+        paymentMethodsConfig,
+        paymentTerminals,
+        bankAccounts,
+        fetchPaymentMethodsSettings
+    } = useStore();
 
     // Derivar el cliente seleccionado desde el carrito activo
     const posSelectedClient = useMemo(() => {
@@ -40,6 +48,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
 
     const mounted = React.useRef(true);
     useEffect(() => {
+        fetchPaymentMethodsSettings();
         return () => { mounted.current = false; };
     }, []);
 
@@ -344,42 +353,52 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                             </h3>
 
                             <div className="grid grid-cols-2 gap-4">
-                                <MethodButton
-                                    icon={<Banknote size={40} />}
-                                    label="Efectivo"
-                                    color="text-green-400"
-                                    onClick={() => handleMethodSelect('Efectivo')}
-                                />
-                                <MethodButton
-                                    icon={<CreditCard size={40} />}
-                                    label="Tarjeta"
-                                    color="text-yellow-400"
-                                    onClick={() => handleMethodSelect('Tarjeta')}
-                                />
-                                <MethodButton
-                                    icon={<Landmark size={40} />}
-                                    label="Transferencia"
-                                    color="text-blue-400"
-                                    onClick={() => handleMethodSelect('Transferencia')}
-                                />
-                                <MethodButton
-                                    icon={<Coins size={40} />}
-                                    label="Pago Mixto"
-                                    color="text-purple-400"
-                                    onClick={() => handleMethodSelect('Mixto')}
-                                />
-                                <MethodButton
-                                    icon={<FileText size={40} />}
-                                    label="Crédito"
-                                    color="text-red-400"
-                                    onClick={() => {
-                                        if (!posSelectedClient) {
-                                            alert("Debes seleccionar un cliente para ventas a crédito.");
-                                            return;
-                                        }
-                                        handleMethodSelect('Crédito');
-                                    }}
-                                />
+                                {paymentMethodsConfig.cash_enabled === 1 && (
+                                    <MethodButton
+                                        icon={<Banknote size={40} />}
+                                        label="Efectivo"
+                                        color="text-green-400"
+                                        onClick={() => handleMethodSelect('Efectivo')}
+                                    />
+                                )}
+                                {paymentMethodsConfig.card_enabled === 1 && (
+                                    <MethodButton
+                                        icon={<CreditCard size={40} />}
+                                        label="Tarjeta"
+                                        color="text-blue-400"
+                                        onClick={() => handleMethodSelect('Tarjeta')}
+                                    />
+                                )}
+                                {paymentMethodsConfig.transfer_enabled === 1 && (
+                                    <MethodButton
+                                        icon={<Landmark size={40} />}
+                                        label="Transferencia"
+                                        color="text-purple-400"
+                                        onClick={() => handleMethodSelect('Transferencia')}
+                                    />
+                                )}
+                                {paymentMethodsConfig.mixed_enabled === 1 && (
+                                    <MethodButton
+                                        icon={<Coins size={40} />}
+                                        label="Pago Mixto"
+                                        color="text-pink-400"
+                                        onClick={() => handleMethodSelect('Mixto')}
+                                    />
+                                )}
+                                {paymentMethodsConfig.credit_enabled === 1 && (
+                                    <MethodButton
+                                        icon={<FileText size={40} />}
+                                        label="Crédito"
+                                        color="text-orange-400"
+                                        onClick={() => {
+                                            if (!posSelectedClient) {
+                                                alert("Debes seleccionar un cliente para ventas a crédito.");
+                                                return;
+                                            }
+                                            handleMethodSelect('Crédito');
+                                        }}
+                                    />
+                                )}
                             </div>
                         </div>
                     )}
@@ -400,34 +419,34 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                             <div className="space-y-4 mt-4">
                                 <h4 className="font-bold text-white text-lg">Datáfono utilizado</h4>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <button
-                                        onClick={() => setSelectedTerminal('TUU')}
-                                        className={cn(
-                                            "flex flex-col items-center justify-center p-6 rounded-xl border-2 transition-all relative overflow-hidden group",
-                                            selectedTerminal === 'TUU'
-                                                ? "bg-blue-600 border-blue-400 shadow-[0_0_20px_rgba(37,99,235,0.4)]"
-                                                : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/30"
-                                        )}
-                                    >
-                                        <div className={cn("mb-3 rounded-full p-3 transition-colors", selectedTerminal === 'TUU' ? "bg-white/20" : "bg-white/10 group-hover:bg-white/20")}>
-                                            <CreditCard size={32} className="text-white" />
-                                        </div>
-                                        <span className="font-bold text-lg text-white">Datáfono TUU</span>
-                                        {selectedTerminal === 'TUU' && <div className="absolute top-2 right-2 text-white"><Check size={16} strokeWidth={4} /></div>}
-                                    </button>
-                                    <button
-                                        onClick={() => setSelectedTerminal('CompraAqui')}
-                                        className={cn(
-                                            "flex flex-col items-center justify-center p-6 rounded-xl border-2 transition-all relative overflow-hidden group",
-                                            selectedTerminal === 'CompraAqui'
-                                                ? "bg-[#ff6600] border-orange-400 shadow-[0_0_20px_rgba(234,88,12,0.4)]"
-                                                : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/30"
-                                        )}
-                                    >
-                                        <div className="mb-3 rounded-md bg-white p-2 shadow-sm"><div className="w-8 h-5 bg-[#ff6600] rounded-sm"></div></div>
-                                        <span className="font-bold text-lg text-white">CompraAquí</span>
-                                        {selectedTerminal === 'CompraAqui' && <div className="absolute top-2 right-2 text-white"><Check size={16} strokeWidth={4} /></div>}
-                                    </button>
+                                    {paymentTerminals.length === 0 ? (
+                                        <p className="col-span-2 text-center text-gray-400 py-4 italic">
+                                            No hay terminales configurados. Ve a Configuración &gt; Medios de Pago.
+                                        </p>
+                                    ) : (
+                                        paymentTerminals.map(terminal => (
+                                            <button
+                                                key={terminal.id}
+                                                onClick={() => setSelectedTerminal(terminal.name)}
+                                                className={cn(
+                                                    "flex flex-col items-center justify-center p-6 rounded-xl border-2 transition-all relative overflow-hidden group",
+                                                    selectedTerminal === terminal.name
+                                                        ? "bg-white/10 border-white shadow-[0_0_15px_rgba(255,255,255,0.3)]"
+                                                        : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/30"
+                                                )}
+                                                style={{ borderColor: selectedTerminal === terminal.name ? terminal.color || '#3B82F6' : undefined }}
+                                            >
+                                                <div
+                                                    className={cn("mb-3 rounded-full p-3 transition-colors", selectedTerminal === terminal.name ? "bg-white/20" : "bg-white/10 group-hover:bg-white/20")}
+                                                    style={{ color: terminal.color || '#3B82F6' }}
+                                                >
+                                                    <CreditCard size={32} />
+                                                </div>
+                                                <span className="font-bold text-lg text-white">{terminal.name}</span>
+                                                {selectedTerminal === terminal.name && <div className="absolute top-2 right-2 text-white"><Check size={16} strokeWidth={4} /></div>}
+                                            </button>
+                                        ))
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -453,8 +472,11 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                         defaultValue=""
                                     >
                                         <option value="" disabled className="bg-gray-900 text-gray-400">Selecciona la cuenta bancaria</option>
-                                        <option value="24.480.416-0 kevin javier" className="bg-gray-900 text-white">24.480.416-0 Kevin Javier</option>
-                                        <option value="24.294.898-k hilda guzman" className="bg-gray-900 text-white">24.294.898-k Hilda Guzman</option>
+                                        {bankAccounts.map(account => (
+                                            <option key={account.id} value={`${account.bank_name} - ${account.owner_name}`} className="bg-gray-900 text-white">
+                                                {account.bank_name} - {account.account_type} {account.account_number} ({account.owner_name})
+                                            </option>
+                                        ))}
                                     </select>
                                 </div>
                                 <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-lg flex gap-3 items-start">
@@ -531,8 +553,9 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                                     onChange={(e) => updatePaymentRow(row.id, 'terminal', e.target.value)}
                                                 >
                                                     <option value="" disabled className="bg-gray-900">Seleccionar datáfono...</option>
-                                                    <option value="TUU" className="bg-gray-900">Datáfono TUU</option>
-                                                    <option value="CompraAqui" className="bg-gray-900">Datáfono CompraAquí</option>
+                                                    {paymentTerminals.map(t => (
+                                                        <option key={t.id} value={t.name} className="bg-gray-900">{t.name}</option>
+                                                    ))}
                                                 </select>
                                             </div>
                                         )}
@@ -545,8 +568,11 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                                     onChange={(e) => updatePaymentRow(row.id, 'account', e.target.value)}
                                                 >
                                                     <option value="" disabled className="bg-gray-900">Seleccionar cuenta...</option>
-                                                    <option value="24.480.416-0 kevin javier" className="bg-gray-900">24.480.416-0 Kevin Javier</option>
-                                                    <option value="24.294.898-k hilda guzman" className="bg-gray-900">24.294.898-k Hilda Guzman</option>
+                                                    {bankAccounts.map(a => (
+                                                        <option key={a.id} value={`${a.bank_name} - ${a.owner_name}`} className="bg-gray-900">
+                                                            {a.bank_name} - {a.account_type} ({a.owner_name})
+                                                        </option>
+                                                    ))}
                                                 </select>
                                             </div>
                                         )}
