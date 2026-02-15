@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { Search, Filter, Calendar, Eye, Package, ArrowLeft, Trash2 } from 'lucide-react';
+import { usePermissions } from '../hooks/usePermissions'; // Import usePermissions
+import { Search, Filter, Calendar, Eye, Package, ArrowLeft, Trash2, Share2, Download } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { formatCurrency } from '../utils/formatCurrency';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const SupplierOrders = () => {
-    const { fetchSupplierOrders, suppliers, currentCurrency } = useStore();
+    const { fetchSupplierOrders, deleteSupplierOrder, suppliers, currentCurrency } = useStore(); // Add deleteSupplierOrder
+    const { can } = usePermissions(); // Helper for permissions
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -20,6 +24,78 @@ const SupplierOrders = () => {
     useEffect(() => {
         loadOrders();
     }, [selectedSupplier, statusFilter]);
+
+
+
+    const handleDelete = async (id) => {
+        if (!confirm('¿Estás seguro de eliminar este pedido? Esta acción no se puede deshacer.')) return;
+
+        const res = await deleteSupplierOrder(id);
+        if (res.success) {
+            loadOrders(); // Refresh list
+        } else {
+            alert('Error al eliminar el pedido: ' + (res.error || 'Desconocido'));
+        }
+    };
+
+    const handleDownloadPDF = (order) => {
+        const doc = new jsPDF();
+
+        // Header
+        doc.setFontSize(18);
+        doc.text('Orden de Compra', 14, 22);
+
+        doc.setFontSize(10);
+        doc.text(`ID Pedido: #${order.id}`, 14, 30);
+        doc.text(`Fecha: ${formatDate(order.created_at)}`, 14, 35);
+        doc.text(`Estado: ${order.status.toUpperCase()}`, 14, 40);
+
+        // Supplier Info
+        doc.setFontSize(12);
+        doc.text('Proveedor:', 14, 50);
+        doc.setFontSize(10);
+        doc.text(order.supplier_name || 'N/A', 14, 56);
+        if (order.seller_name) doc.text(`Vendedor: ${order.seller_name}`, 14, 61);
+
+        // Items Table
+        const tableColumn = ["Producto", "SKU", "Cant.", "Costo", "Total"];
+        const tableRows = [];
+
+        order.items.forEach(item => {
+            const itemData = [
+                item.name,
+                item.sku,
+                item.quantity,
+                formatCurrency(item.cost, currentCurrency),
+                formatCurrency(item.total, currentCurrency)
+            ];
+            tableRows.push(itemData);
+        });
+
+        autoTable(doc, {
+            head: [tableColumn],
+            body: tableRows,
+            startY: 70,
+        });
+
+        // Totals
+        const finalY = doc.lastAutoTable.finalY + 10;
+        doc.text(`Total: ${formatCurrency(order.total_amount, currentCurrency)}`, 14, finalY);
+
+        // Save
+        doc.save(`Pedido_${order.id}_${order.supplier_name}.pdf`);
+    };
+
+    const handleShareWhatsApp = (order) => {
+        const itemsList = order.items.map(i => `- ${i.quantity}x ${i.name}`).join('%0A');
+        const text = `*Orden de Compra #${order.id}*%0A%0A` +
+            `*Proveedor:* ${order.supplier_name}%0A` +
+            `*Fecha:* ${formatDate(order.created_at)}%0A` +
+            `*Total:* ${formatCurrency(order.total_amount, currentCurrency)}%0A%0A` +
+            `*Productos Solicitados:*%0A${itemsList}`;
+
+        window.open(`https://wa.me/?text=${text}`, '_blank');
+    };
 
     const loadOrders = async () => {
         setIsLoading(true);
@@ -156,6 +232,16 @@ const SupplierOrders = () => {
                                             >
                                                 <Eye size={18} />
                                             </button>
+
+                                            {can('supplier_orders.delete') && (
+                                                <button
+                                                    onClick={() => handleDelete(order.id)}
+                                                    className="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
+                                                    title="Eliminar Pedido"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                            )}
                                         </td>
                                     </tr>
                                 ))
@@ -244,6 +330,20 @@ const SupplierOrders = () => {
 
                         {/* Footer */}
                         <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] flex justify-end">
+                            <button
+                                onClick={() => handleShareWhatsApp(selectedOrder)}
+                                className="px-4 py-2 bg-green-500/20 text-green-500 border border-green-500/30 rounded-lg hover:bg-green-500/30 transition-colors flex items-center gap-2 mr-auto"
+                            >
+                                <Share2 size={18} />
+                                <span className="hidden sm:inline">WhatsApp</span>
+                            </button>
+                            <button
+                                onClick={() => handleDownloadPDF(selectedOrder)}
+                                className="px-4 py-2 bg-blue-500/20 text-blue-500 border border-blue-500/30 rounded-lg hover:bg-blue-500/30 transition-colors flex items-center gap-2 mr-2"
+                            >
+                                <Download size={18} />
+                                <span className="hidden sm:inline">Descargar PDF</span>
+                            </button>
                             <button
                                 onClick={() => setSelectedOrder(null)}
                                 className="px-6 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg font-bold hover:bg-[var(--color-surface)] transition-colors"

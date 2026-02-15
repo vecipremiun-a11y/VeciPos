@@ -2,9 +2,11 @@ import React, { useState, useMemo } from 'react';
 import { Plus, Trash2, User, Pencil, Search, Users as UsersIcon, ShoppingCart, Package, ClipboardList, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
+import { usePermissions } from '../hooks/usePermissions';
 
 const Users = () => {
     const { users, currentUser, addUser, deleteUser, updateUser, activeCompanyId } = useStore();
+    const { can } = usePermissions();
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
@@ -19,9 +21,9 @@ const Users = () => {
     const [sortField, setSortField] = useState('id');
     const [sortDirection, setSortDirection] = useState('asc');
 
-    // Simple protection: only Admin allows editing users
-    if (currentUser?.role !== 'Administrador') {
-        return <div className="text-center p-10 text-red-500">Acceso Denegado. Se requieren permisos de Administrador.</div>;
+    // Permission check
+    if (!can('users.view')) {
+        return <div className="text-center p-10 text-red-500">Acceso Denegado. Se requieren permisos de Administrador o Gestión de Usuarios.</div>;
     }
 
     // Stats calculations
@@ -195,10 +197,12 @@ const Users = () => {
                         }}
                     />
                 </div>
-                <button onClick={() => handleOpenModal()} className="btn-primary flex items-center gap-2 w-full lg:w-auto justify-center">
-                    <Plus size={20} />
-                    Nuevo Usuario
-                </button>
+                {can('users.create') && (
+                    <button onClick={() => handleOpenModal()} className="btn-primary flex items-center gap-2 w-full lg:w-auto justify-center">
+                        <Plus size={20} />
+                        Nuevo Usuario
+                    </button>
+                )}
             </div>
 
             {/* Users Table */}
@@ -289,14 +293,16 @@ const Users = () => {
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="flex justify-end gap-2">
-                                                <button
-                                                    onClick={() => handleOpenModal(user)}
-                                                    className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-blue-400 hover:bg-blue-500/10 transition-all"
-                                                    title="Editar"
-                                                >
-                                                    <Pencil size={18} />
-                                                </button>
-                                                {user.username !== 'admin' && (
+                                                {can('users.edit') && (
+                                                    <button
+                                                        onClick={() => handleOpenModal(user)}
+                                                        className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+                                                        title="Editar"
+                                                    >
+                                                        <Pencil size={18} />
+                                                    </button>
+                                                )}
+                                                {user.username !== 'admin' && can('users.delete') && (
                                                     <button
                                                         onClick={async () => {
                                                             if (window.confirm(`¿Eliminar usuario ${user.name}?`)) {

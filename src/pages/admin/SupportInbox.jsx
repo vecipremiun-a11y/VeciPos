@@ -3,7 +3,7 @@ import {
     Search, Send,
     CheckCircle, User, Building2,
     Phone, Mail, TrendingUp, ExternalLink,
-    MessageSquare
+    MessageSquare, X
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { turso } from '../../lib/turso';
@@ -31,7 +31,8 @@ const SupportInbox = () => {
     const [messages, setMessages] = useState([]);
     const [companyContext, setCompanyContext] = useState(null);
     const [inputMessage, setInputMessage] = useState('');
-    const [isInternalNote, setIsInternalNote] = useState(false);
+    const [selectedImage, setSelectedImage] = useState(null);
+
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('open');
     const [isLoading, setIsLoading] = useState(false);
@@ -131,7 +132,7 @@ const SupportInbox = () => {
         const messageText = inputMessage;
         setInputMessage('');
 
-        const result = await replyToTicket(selectedTicket.id, messageText, isInternalNote);
+        const result = await replyToTicket(selectedTicket.id, messageText);
 
         if (result.success) {
             loadMessages();
@@ -202,8 +203,8 @@ const SupportInbox = () => {
                                 key={status}
                                 onClick={() => setStatusFilter(status)}
                                 className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${statusFilter === status
-                                        ? 'bg-[var(--color-primary)] text-white'
-                                        : 'bg-white/5 text-[var(--color-text-muted)] hover:bg-white/10'
+                                    ? 'bg-[var(--color-primary)] text-white'
+                                    : 'bg-white/5 text-[var(--color-text-muted)] hover:bg-white/10'
                                     }`}
                             >
                                 {status === 'all' ? 'Todos' : TICKET_STATUS[status]?.label || status}
@@ -358,8 +359,8 @@ const SupportInbox = () => {
                                                     >
                                                         <div
                                                             className={`max-w-[70%] rounded-2xl px-4 py-2 ${msg.sender_type === 'admin'
-                                                                    ? 'bg-[var(--color-primary)] text-white'
-                                                                    : 'bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)]'
+                                                                ? 'bg-[var(--color-primary)] text-white'
+                                                                : 'bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)]'
                                                                 }`}
                                                         >
                                                             <div className="text-[10px] font-semibold mb-1 opacity-70">
@@ -368,6 +369,39 @@ const SupportInbox = () => {
                                                             <div className="text-sm whitespace-pre-wrap break-words">
                                                                 {msg.message}
                                                             </div>
+
+                                                            {/* Adjuntos */}
+                                                            {msg.attachments && msg.attachments.length > 0 && (
+                                                                <div className="mt-2 space-y-2">
+                                                                    {msg.attachments.map(att => (
+                                                                        <div key={att.id} className="max-w-xs">
+                                                                            {att.file_type?.startsWith('image/') ? (
+                                                                                <div
+                                                                                    className="cursor-pointer"
+                                                                                    onClick={() => setSelectedImage(att.file_url)}
+                                                                                >
+                                                                                    <img
+                                                                                        src={att.file_url}
+                                                                                        alt="Adjunto"
+                                                                                        className="rounded-lg w-full object-cover border border-white/10 hover:opacity-90 transition-opacity"
+                                                                                    />
+                                                                                </div>
+                                                                            ) : (
+                                                                                <a
+                                                                                    href={att.file_url}
+                                                                                    target="_blank"
+                                                                                    rel="noopener noreferrer"
+                                                                                    className="flex items-center gap-2 p-2 bg-black/20 rounded text-xs hover:bg-black/30 transition-colors"
+                                                                                >
+                                                                                    <ExternalLink size={12} />
+                                                                                    {att.filename || 'Archivo adjunto'}
+                                                                                </a>
+                                                                            )}
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+
                                                             <div className="text-[10px] mt-1 opacity-70">
                                                                 {formatMessageTime(msg.created_at)}
                                                             </div>
@@ -401,16 +435,8 @@ const SupportInbox = () => {
                                     </button>
                                 </div>
 
-                                <label className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={isInternalNote}
-                                        onChange={(e) => setIsInternalNote(e.target.checked)}
-                                        className="w-4 h-4"
-                                    />
-                                    Enviar como nota interna (solo visible para admins)
-                                </label>
                             </div>
+
                         </>
                     )}
                 </div>
@@ -539,6 +565,27 @@ const SupportInbox = () => {
                     </div>
                 )}
             </div>
+
+            {/* Lightbox para imágenes */}
+            {selectedImage && (
+                <div
+                    className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4 animate-in fade-in duration-200"
+                    onClick={() => setSelectedImage(null)}
+                >
+                    <button
+                        onClick={() => setSelectedImage(null)}
+                        className="absolute top-4 right-4 text-white hover:text-gray-300 p-2"
+                    >
+                        <X size={32} />
+                    </button>
+                    <img
+                        src={selectedImage}
+                        alt="Vista previa"
+                        className="max-w-full max-h-[90vh] object-contain rounded-lg"
+                        onClick={(e) => e.stopPropagation()}
+                    />
+                </div>
+            )}
         </div>
     );
 };

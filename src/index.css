@@ -240,6 +240,12 @@
   }
 }
 
+/* Fix for select options contrast in dark mode */
+select option {
+  background-color: var(--color-background);
+  color: var(--color-text);
+}
+
 body {
   @apply bg-[var(--color-background)] text-[var(--color-text)] font-sans overflow-x-hidden min-h-screen selection:bg-[var(--color-primary)] selection:text-white;
   /* Reduced gradient opacity for cleaner look in light mode, or use variables if needed */

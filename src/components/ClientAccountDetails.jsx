@@ -6,8 +6,18 @@ import ClientReceiptModal from './ClientReceiptModal';
 import ClientPaymentModal from './ClientPaymentModal';
 import { formatCurrency } from '../utils/formatCurrency';
 
+import { usePermissions } from '../hooks/usePermissions';
+import AccessDenied from './auth/AccessDenied';
+
 const ClientAccountDetails = ({ client, onBack }) => {
     const { sales, users, registerClientPayment, fetchSales, currentCurrency } = useStore();
+    const { can } = usePermissions();
+
+    // Permission Check
+    if (!can('clients.view_account')) {
+        return <AccessDenied />;
+    }
+
     const [rawClientSales, setRawClientSales] = useState([]); // All sales for this client
     const [viewMode, setViewMode] = useState('pending'); // 'pending' | 'history'
     const [selectedSale, setSelectedSale] = useState(null);
@@ -171,14 +181,16 @@ const ClientAccountDetails = ({ client, onBack }) => {
                         </button>
                     </div>
 
-                    <button
-                        onClick={() => setIsPaymentModalOpen(true)}
-                        disabled={pendingSales.length === 0}
-                        className="btn-primary px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] disabled:opacity-50 disabled:shadow-none"
-                    >
-                        <Banknote size={20} />
-                        Abonar / Pagar
-                    </button>
+                    {can('clients.manage_payments') && (
+                        <button
+                            onClick={() => setIsPaymentModalOpen(true)}
+                            disabled={pendingSales.length === 0}
+                            className="btn-primary px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] disabled:opacity-50 disabled:shadow-none"
+                        >
+                            <Banknote size={20} />
+                            Abonar / Pagar
+                        </button>
+                    )}
                 </div>
             </div>
 

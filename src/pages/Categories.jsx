@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Plus, Edit, Trash2, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { usePermissions } from '../hooks/usePermissions';
 
 const Categories = () => {
     const { categories, addCategory, updateCategory, deleteCategory } = useStore();
+    const { can } = usePermissions();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCategory, setEditingCategory] = useState(null);
 
@@ -40,9 +42,11 @@ const Categories = () => {
                     <h1 className="text-xl lg:text-3xl font-bold text-[var(--color-text)] neon-text">Categorías</h1>
                     <p className="text-xs lg:text-base text-[var(--color-text-muted)]">Gestiona las categorías de tus productos</p>
                 </div>
-                <button onClick={handleNewCategory} className="btn-primary flex items-center gap-2 text-sm lg:text-base px-3 lg:px-4 py-2">
-                    <Plus size={18} /> Nueva Categoría
-                </button>
+                {can('categories.create') && (
+                    <button onClick={handleNewCategory} className="btn-primary flex items-center gap-2 text-sm lg:text-base px-3 lg:px-4 py-2">
+                        <Plus size={18} /> Nueva Categoría
+                    </button>
+                )}
             </div>
 
             {/* Categories List - Compact rows on Mobile, Table on Desktop */}
@@ -86,8 +90,8 @@ const Categories = () => {
                                         {/* Status */}
                                         <div className="w-16 flex justify-center">
                                             <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${category.status === 'active'
-                                                    ? 'bg-green-500/20 text-green-400'
-                                                    : 'bg-red-500/20 text-red-400'
+                                                ? 'bg-green-500/20 text-green-400'
+                                                : 'bg-red-500/20 text-red-400'
                                                 }`}>
                                                 {category.status === 'active' ? 'ACTIVA' : 'INACTIVA'}
                                             </span>
@@ -96,23 +100,25 @@ const Categories = () => {
                                         {/* POS */}
                                         <div className="w-12 flex justify-center">
                                             <div className={`w-2.5 h-2.5 rounded-full ${category.showInPos !== false
-                                                    ? 'bg-blue-400 shadow-[0_0_6px_rgba(59,130,246,0.6)]'
-                                                    : 'bg-gray-600'
+                                                ? 'bg-blue-400 shadow-[0_0_6px_rgba(59,130,246,0.6)]'
+                                                : 'bg-gray-600'
                                                 }`}></div>
                                         </div>
 
                                         {/* Actions */}
                                         <div className="w-12 flex justify-center">
-                                            <button
-                                                onClick={() => handleEdit(category)}
-                                                className="p-1.5 hover:bg-[var(--color-surface-hover)] rounded text-[var(--color-text-muted)] transition-colors"
-                                            >
-                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                    <circle cx="12" cy="12" r="1" />
-                                                    <circle cx="12" cy="5" r="1" />
-                                                    <circle cx="12" cy="19" r="1" />
-                                                </svg>
-                                            </button>
+                                            {can('categories.edit') && (
+                                                <button
+                                                    onClick={() => handleEdit(category)}
+                                                    className="p-1.5 hover:bg-[var(--color-surface-hover)] rounded text-[var(--color-text-muted)] transition-colors"
+                                                >
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <circle cx="12" cy="12" r="1" />
+                                                        <circle cx="12" cy="5" r="1" />
+                                                        <circle cx="12" cy="19" r="1" />
+                                                    </svg>
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -164,18 +170,22 @@ const Categories = () => {
                                         </td>
                                         <td className="px-6 py-5 text-right">
                                             <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={() => handleEdit(category)}
-                                                    className="p-3 hover:bg-[var(--color-surface-hover)] rounded-lg text-blue-400 transition-colors"
-                                                >
-                                                    <Edit size={20} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDelete(category.id)}
-                                                    className="p-3 hover:bg-[var(--color-surface-hover)] rounded-lg text-red-400 transition-colors"
-                                                >
-                                                    <Trash2 size={20} />
-                                                </button>
+                                                {can('categories.edit') && (
+                                                    <button
+                                                        onClick={() => handleEdit(category)}
+                                                        className="p-3 hover:bg-[var(--color-surface-hover)] rounded-lg text-blue-400 transition-colors"
+                                                    >
+                                                        <Edit size={20} />
+                                                    </button>
+                                                )}
+                                                {can('categories.delete') && (
+                                                    <button
+                                                        onClick={() => handleDelete(category.id)}
+                                                        className="p-3 hover:bg-[var(--color-surface-hover)] rounded-lg text-red-400 transition-colors"
+                                                    >
+                                                        <Trash2 size={20} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>

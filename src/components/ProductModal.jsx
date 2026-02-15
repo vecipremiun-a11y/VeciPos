@@ -6,7 +6,7 @@ import { compressImage, validateImage } from '../lib/imageCompression';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
-    const { categories, suppliers, currentCurrency } = useStore();
+    const { categories, suppliers, currentCurrency, taxRates } = useStore();
     const [formData, setFormData] = useState({
         name: '',
         price: '',
@@ -55,6 +55,20 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
     const handleChange = (e) => {
         const { name, value } = e.target;
+
+        // Auto-calculate Margin if Price changes (keeping Cost constant)
+        if (name === 'price') {
+            const price = parseFloat(value);
+            const cost = parseFloat(formData.cost); // Use current state cost
+            const taxRate = parseFloat(formData.tax_rate) || 0;
+
+            if (!isNaN(price) && !isNaN(cost) && cost > 0) {
+                const netPrice = price / (1 + taxRate / 100);
+                const margin = ((netPrice - cost) / cost) * 100;
+                setMarginPercentage(margin.toFixed(2));
+            }
+        }
+
         setFormData(prev => {
             const newData = { ...prev, [name]: value };
 
@@ -70,6 +84,25 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     // We don't set margin state here to avoid circular jumps, 
                     // or maybe we should? Let's just update it if valid.
                     // setMarginPercentage(margin.toFixed(2)); 
+                }
+            }
+
+            // Auto-calculate Price if Tax Rate Changes (keeping Cost and Margin constant)
+            if (name === 'tax_rate') {
+                const cost = parseFloat(prev.cost);
+                // We need the current margin. Since marginPercentage is state, we can use it.
+                // However, marginPercentage might be empty string.
+                // If we have cost and price, we can calculate current margin?
+                // Or just use the marginPercentage state if valid.
+
+                // Let's rely on cost and existing margin logic.
+                // If we have cost and a valid margin, we recalculate price.
+                if (cost > 0 && marginPercentage && !isNaN(parseFloat(marginPercentage))) {
+                    const margin = parseFloat(marginPercentage);
+                    const basicPrice = cost * (1 + margin / 100);
+                    const newTax = parseFloat(value) || 0;
+                    const finalPrice = basicPrice * (1 + newTax / 100);
+                    newData.price = finalPrice.toFixed(2);
                 }
             }
             return newData;
@@ -360,8 +393,20 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 onChange={handleChange}
                                 className="glass-input w-full"
                             >
-                                <option value="0">Exento (0%)</option>
-                                <option value="19">IVA (19%)</option>
+                                {taxRates && taxRates.length > 0 ? (
+                                    taxRates.map((tax, index) => {
+                                        if (!tax) return null;
+                                        const rate = tax.rate !== undefined && tax.rate !== null ? tax.rate : 0;
+                                        const name = tax.name || 'Impuesto';
+                                        return (
+                                            <option key={tax.id || index} value={rate} className="bg-gray-900">
+                                                {name} ({rate}%)
+                                            </option>
+                                        );
+                                    })
+                                ) : (
+                                    <option value={0} className="bg-gray-900">Sin impuestos configurados</option>
+                                )}
                             </select>
                         </div>
                     </div>

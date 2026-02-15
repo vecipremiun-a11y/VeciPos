@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Search, Plus, Edit, Trash2, User, Phone, Mail, MapPin, X, Check, CreditCard, FileText } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
+import { usePermissions } from '../hooks/usePermissions';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
@@ -153,6 +154,7 @@ import ClientAccountDetails from '../components/ClientAccountDetails';
 
 const Clients = () => {
     const { clients, addClient, updateClient, deleteClient } = useStore();
+    const { can } = usePermissions();
     const [searchTerm, setSearchTerm] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingClient, setEditingClient] = useState(null);
@@ -226,16 +228,18 @@ const Clients = () => {
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
-                <button
-                    onClick={() => {
-                        setEditingClient(null);
-                        setIsModalOpen(true);
-                    }}
-                    className="btn-primary flex items-center gap-2 px-3 lg:px-4 py-2 rounded-xl whitespace-nowrap text-sm lg:text-base"
-                >
-                    <Plus size={18} />
-                    <span className="hidden sm:inline">Nuevo Cliente</span>
-                </button>
+                {can('clients.create') && (
+                    <button
+                        onClick={() => {
+                            setEditingClient(null);
+                            setIsModalOpen(true);
+                        }}
+                        className="btn-primary flex items-center gap-2 px-3 lg:px-4 py-2 rounded-xl whitespace-nowrap text-sm lg:text-base"
+                    >
+                        <Plus size={18} />
+                        <span className="hidden sm:inline">Nuevo Cliente</span>
+                    </button>
+                )}
             </div>
 
             {/* Client List - Cards on Mobile, Table on Desktop */}
@@ -246,7 +250,11 @@ const Clients = () => {
                         <div
                             key={client.id}
                             className="glass-card p-4 space-y-3"
-                            onClick={() => handleViewAccount(client)}
+                            onClick={() => {
+                                if (can('clients.view_account')) {
+                                    handleViewAccount(client)
+                                }
+                            }}
                         >
                             {/* Header: Avatar + Name/RUT */}
                             <div className="flex items-center gap-3">
@@ -259,24 +267,28 @@ const Clients = () => {
                                 </div>
                                 {/* Quick Actions */}
                                 <div className="flex gap-1">
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleEdit(client);
-                                        }}
-                                        className="p-2 hover:bg-[var(--color-primary)]/20 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] rounded-lg transition-colors"
-                                    >
-                                        <Edit size={16} />
-                                    </button>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleDelete(client.id);
-                                        }}
-                                        className="p-2 hover:bg-red-500/20 text-[var(--color-text-muted)] hover:text-red-400 rounded-lg transition-colors"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
+                                    {can('clients.edit') && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleEdit(client);
+                                            }}
+                                            className="p-2 hover:bg-[var(--color-primary)]/20 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] rounded-lg transition-colors"
+                                        >
+                                            <Edit size={16} />
+                                        </button>
+                                    )}
+                                    {can('clients.delete') && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDelete(client.id);
+                                            }}
+                                            className="p-2 hover:bg-red-500/20 text-[var(--color-text-muted)] hover:text-red-400 rounded-lg transition-colors"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    )}
                                 </div>
                             </div>
 
@@ -362,28 +374,34 @@ const Clients = () => {
                                         </td>
                                         <td className="p-4 text-right">
                                             <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={() => handleViewAccount(client)}
-                                                    className="p-2 hover:bg-yellow-500/20 text-[var(--color-text-muted)] hover:text-yellow-400 rounded-lg transition-colors flex items-center gap-2"
-                                                    title="Ver Cuenta"
-                                                >
-                                                    <FileText size={18} />
-                                                    <span className="text-xs font-bold">Cuenta</span>
-                                                </button>
-                                                <button
-                                                    onClick={() => handleEdit(client)}
-                                                    className="p-2 hover:bg-[var(--color-primary)]/20 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] rounded-lg transition-colors"
-                                                    title="Editar"
-                                                >
-                                                    <Edit size={18} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDelete(client.id)}
-                                                    className="p-2 hover:bg-red-500/20 text-[var(--color-text-muted)] hover:text-red-400 rounded-lg transition-colors"
-                                                    title="Eliminar"
-                                                >
-                                                    <Trash2 size={18} />
-                                                </button>
+                                                {can('clients.view_account') && (
+                                                    <button
+                                                        onClick={() => handleViewAccount(client)}
+                                                        className="p-2 hover:bg-yellow-500/20 text-[var(--color-text-muted)] hover:text-yellow-400 rounded-lg transition-colors flex items-center gap-2"
+                                                        title="Ver Cuenta"
+                                                    >
+                                                        <FileText size={18} />
+                                                        <span className="text-xs font-bold">Cuenta</span>
+                                                    </button>
+                                                )}
+                                                {can('clients.edit') && (
+                                                    <button
+                                                        onClick={() => handleEdit(client)}
+                                                        className="p-2 hover:bg-[var(--color-primary)]/20 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] rounded-lg transition-colors"
+                                                        title="Editar"
+                                                    >
+                                                        <Edit size={18} />
+                                                    </button>
+                                                )}
+                                                {can('clients.delete') && (
+                                                    <button
+                                                        onClick={() => handleDelete(client.id)}
+                                                        className="p-2 hover:bg-red-500/20 text-[var(--color-text-muted)] hover:text-red-400 rounded-lg transition-colors"
+                                                        title="Eliminar"
+                                                    >
+                                                        <Trash2 size={18} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>

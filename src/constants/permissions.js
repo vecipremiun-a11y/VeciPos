@@ -1,0 +1,139 @@
+export const ALL_PERMISSIONS = [
+    {
+        id: 'dashboard',
+        label: 'Dashboard',
+        permissions: [
+            { id: 'dashboard.view', label: 'Ver Dashboard' },
+            { id: 'dashboard.view_sales', label: 'Ver Resumen de Ventas' },
+            { id: 'dashboard.view_profits', label: 'Ver Utilidades' },
+        ]
+    },
+    {
+        id: 'pos',
+        label: 'Punto de Venta (POS)',
+        permissions: [
+            { id: 'pos.access', label: 'Acceso al POS' },
+            { id: 'pos.sell', label: 'Realizar Ventas' },
+            { id: 'pos.discount', label: 'Aplicar Descuentos' },
+            { id: 'pos.open_register', label: 'Abrir Caja' },
+            { id: 'pos.close_register', label: 'Cerrar Caja' },
+            { id: 'pos.cash_in', label: 'Ingreso de Dinero' },
+            { id: 'pos.cash_out', label: 'Retiro de Dinero' },
+            { id: 'pos.suspend_sale', label: 'Suspender Venta' },
+            { id: 'pos.recover_sale', label: 'Recuperar Venta' },
+            { id: 'pos.manage_cart', label: 'Gestionar Carritos (Tickets)' },
+        ]
+    },
+    {
+        id: 'sales',
+        label: 'Historial de Ventas',
+        permissions: [
+            { id: 'sales.view', label: 'Ver Historial' },
+            { id: 'sales.view_details', label: 'Ver Detalles de Venta' },
+            { id: 'sales.cancel', label: 'Anular Venta' },
+        ]
+    },
+    {
+        id: 'products',
+        label: 'Inventario / Productos',
+        permissions: [
+            { id: 'products.view', label: 'Ver Productos' },
+            { id: 'products.create', label: 'Crear Productos' },
+            { id: 'products.edit', label: 'Editar Productos' },
+            { id: 'products.delete', label: 'Eliminar Productos' },
+            { id: 'products.adjust_stock', label: 'Ajustar Stock' },
+            { id: 'products.import', label: 'Importar Productos' },
+            { id: 'products.export', label: 'Exportar Productos' },
+        ]
+    },
+    {
+        id: 'categories',
+        label: 'Categorías',
+        permissions: [
+            { id: 'categories.view', label: 'Ver Categorías' },
+            { id: 'categories.create', label: 'Crear Categorías' },
+            { id: 'categories.edit', label: 'Editar Categorías' },
+            { id: 'categories.delete', label: 'Eliminar Categorías' },
+        ]
+    },
+    {
+        id: 'suppliers',
+        label: 'Proveedores',
+        permissions: [
+            { id: 'suppliers.view', label: 'Ver Proveedores' },
+            { id: 'suppliers.create', label: 'Crear Proveedores' },
+            { id: 'suppliers.edit', label: 'Editar Proveedores' },
+            { id: 'suppliers.delete', label: 'Eliminar Proveedores' },
+        ]
+    },
+    {
+        id: 'purchases',
+        label: 'Compras / Facturas',
+        permissions: [
+            { id: 'purchases.view', label: 'Ver Compras' },
+            { id: 'purchases.create', label: 'Registrar Compra' },
+            { id: 'purchases.edit', label: 'Editar Compra' }, // Not implemented yet but good to have
+            { id: 'purchases.delete', label: 'Eliminar Compra' }, // Not implemented yet
+        ]
+    },
+    {
+        id: 'taxes',
+        label: 'Impuestos',
+        permissions: [
+            { id: 'taxes.view', label: 'Ver Impuestos' },
+            { id: 'taxes.create', label: 'Crear Impuestos' },
+            { id: 'taxes.edit', label: 'Editar Impuestos' },
+            { id: 'taxes.delete', label: 'Eliminar Impuestos' },
+        ]
+    },
+    {
+        id: 'clients',
+        label: 'Clientes',
+        permissions: [
+            { id: 'clients.view', label: 'Ver Clientes' },
+            { id: 'clients.create', label: 'Crear Clientes' },
+            { id: 'clients.edit', label: 'Editar Clientes' },
+            { id: 'clients.delete', label: 'Eliminar Clientes' },
+            { id: 'clients.view_account', label: 'Ver Cuenta Corriente' },
+            { id: 'clients.manage_payments', label: 'Gestionar Pagos Cta Cte' },
+        ]
+    },
+    {
+        id: 'supplier_orders',
+        label: 'Pedidos a Proveedores',
+        permissions: [
+            { id: 'supplier_orders.view', label: 'Ver Pedidos' },
+            { id: 'supplier_orders.create', label: 'Crear Pedidos' },
+            { id: 'supplier_orders.delete', label: 'Eliminar Pedidos' },
+        ]
+    },
+    {
+        id: 'preorders',
+        label: 'Encargos',
+        permissions: [
+            { id: 'preorders.view', label: 'Ver Encargos' },
+            { id: 'preorders.create', label: 'Crear Encargos' },
+            { id: 'preorders.edit', label: 'Editar Encargos' },
+            { id: 'preorders.complete', label: 'Completar/Entregar Encargos' },
+        ]
+    },
+    {
+        id: 'users',
+        label: 'Usuarios',
+        permissions: [
+            { id: 'users.view', label: 'Ver Usuarios' },
+            { id: 'users.manage', label: 'Gestionar Usuarios (Crear/Editar/Eliminar)' },
+        ]
+    },
+    {
+        id: 'settings',
+        label: 'Configuración',
+        permissions: [
+            { id: 'settings.company', label: 'Configuración de Empresa' },
+            { id: 'settings.receipts', label: 'Configuración de Boletas' },
+            { id: 'settings.payments', label: 'Configuración de Medios de Pago' },
+            { id: 'settings.system', label: 'Configuración del Sistema' },
+            { id: 'settings.manage_permissions', label: 'Gestionar Permisos y Roles' },
+        ]
+    }
+];

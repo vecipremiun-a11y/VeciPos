@@ -10,8 +10,11 @@ import CashClosingModal from './CashClosingModal';
 import CashCloseSuccessModal from './CashCloseSuccessModal';
 import { formatCurrency } from '../utils/formatCurrency';
 
+import { usePermissions } from '../hooks/usePermissions';
+
 const CashStatusWidget = () => {
     const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency } = useStore();
+    const { can } = usePermissions();
     const navigate = useNavigate();
     const [isOpen, setIsOpen] = useState(false);
     const [txModalType, setTxModalType] = useState(null); // 'IN' or 'OUT'
@@ -149,18 +152,22 @@ const CashStatusWidget = () => {
 
                                     {/* Action Buttons */}
                                     <div className="grid grid-cols-2 gap-2 px-3 pb-3">
-                                        <button
-                                            onClick={() => setTxModalType('IN')}
-                                            className="p-2.5 rounded-xl border border-green-500/30 text-green-400 hover:bg-green-500/10 font-bold text-xs lg:text-sm flex items-center justify-center gap-1.5 transition-all"
-                                        >
-                                            <ArrowDownLeft size={14} /> Ingreso
-                                        </button>
-                                        <button
-                                            onClick={() => setTxModalType('OUT')}
-                                            className="p-2.5 rounded-xl border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 font-bold text-xs lg:text-sm flex items-center justify-center gap-1.5 transition-all"
-                                        >
-                                            <ArrowUpRight size={14} /> Retiro
-                                        </button>
+                                        {can('pos.cash_in') && (
+                                            <button
+                                                onClick={() => setTxModalType('IN')}
+                                                className="p-2.5 rounded-xl border border-green-500/30 text-green-400 hover:bg-green-500/10 font-bold text-xs lg:text-sm flex items-center justify-center gap-1.5 transition-all"
+                                            >
+                                                <ArrowDownLeft size={14} /> Ingreso
+                                            </button>
+                                        )}
+                                        {can('pos.cash_out') && (
+                                            <button
+                                                onClick={() => setTxModalType('OUT')}
+                                                className="p-2.5 rounded-xl border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 font-bold text-xs lg:text-sm flex items-center justify-center gap-1.5 transition-all"
+                                            >
+                                                <ArrowUpRight size={14} /> Retiro
+                                            </button>
+                                        )}
                                     </div>
 
                                     {/* Transaction List (Mini) */}
@@ -220,13 +227,15 @@ const CashStatusWidget = () => {
 
                                 {/* Footer */}
                                 <div className="p-3 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] shrink-0">
-                                    <button
-                                        onClick={handleInitialCloseClick}
-                                        className="w-full py-2.5 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 hover:border-red-500/50 font-bold text-sm transition-all flex items-center justify-center gap-2"
-                                    >
-                                        <LogOut size={16} />
-                                        Cerrar Caja
-                                    </button>
+                                    {can('pos.close_register') && (
+                                        <button
+                                            onClick={handleInitialCloseClick}
+                                            className="w-full py-2.5 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 hover:border-red-500/50 font-bold text-sm transition-all flex items-center justify-center gap-2"
+                                        >
+                                            <LogOut size={16} />
+                                            Cerrar Caja
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         </div>,

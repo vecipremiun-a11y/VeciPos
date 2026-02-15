@@ -1,9 +1,11 @@
+
 import React, { useState } from 'react';
 import { Search, Plus, Edit, Trash2, Filter, Loader } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import ProductModal from '../components/ProductModal';
 import OptimizedImage from '../components/OptimizedImage';
 import { formatCurrency } from '../utils/formatCurrency';
+import { usePermissions } from '../hooks/usePermissions';
 
 const Inventory = () => {
     const {
@@ -14,13 +16,16 @@ const Inventory = () => {
         categories,
         fetchInventoryProducts,
         activeCompanyId,
-        currentCurrency
+        currentCurrency,
+        taxRates
     } = useStore();
+    const { can } = usePermissions();
 
     // --- PRODUCTS STATE ---
     const [searchTerm, setSearchTerm] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState(null);
+
     const [view, setView] = useState('list'); // 'list' | 'form'
 
     // Server-Side Pagination State
@@ -78,8 +83,10 @@ const Inventory = () => {
         let matchesTax = true;
         if (filterTax !== 'Todos') {
             const tax = parseFloat(product.tax_rate) || 0;
-            if (filterTax === '19') matchesTax = tax === 19;
-            if (filterTax === '0') matchesTax = tax === 0;
+            const targetTax = parseFloat(filterTax);
+            // Handle floating point comparison loosely or exact? activeCompanyId is same.
+            // Using abs difference < 0.01 just in case
+            matchesTax = Math.abs(tax - targetTax) < 0.01;
         }
 
         let matchesStock = true;
@@ -156,13 +163,16 @@ const Inventory = () => {
                     <p className="text-xs lg:text-base text-[var(--color-text-muted)]">Gestión de productos y existencias</p>
                 </div>
 
-                <button onClick={handleNewProduct} className="btn-primary flex items-center gap-2 text-sm lg:text-base px-3 lg:px-4 py-2">
-                    <Plus size={18} /> Nuevo Producto
-                </button>
+                {can('products.create') && (
+                    <button onClick={handleNewProduct} className="btn-primary flex items-center gap-2 text-sm lg:text-base px-3 lg:px-4 py-2">
+                        <Plus size={18} /> Nuevo Producto
+                    </button>
+                )}
             </div>
 
             {/* Content Area */}
             <div className="flex-1 min-h-0 flex flex-col">
+
                 {/* Filters & Search - Compact on Mobile */}
                 <div className="glass-card p-3 lg:p-4 flex flex-col md:flex-row gap-3 lg:gap-4 items-center mb-3 lg:mb-4 shrink-0">
                     <div className="relative flex-1 w-full">
@@ -209,8 +219,18 @@ const Inventory = () => {
                                 className="glass-input w-full p-2 text-sm"
                             >
                                 <option value="Todos" className="bg-gray-900">Todos</option>
-                                <option value="19" className="bg-gray-900">IVA (19%)</option>
-                                <option value="0" className="bg-gray-900">Exento (0%)</option>
+                                {taxRates && taxRates.length > 0 ? (
+                                    taxRates.map(tax => (
+                                        <option key={tax.id} value={tax.rate} className="bg-gray-900">
+                                            {tax.name} ({tax.rate}%)
+                                        </option>
+                                    ))
+                                ) : (
+                                    <>
+                                        <option value="19" className="bg-gray-900">IVA (19%)</option>
+                                        <option value="0" className="bg-gray-900">Exento (0%)</option>
+                                    </>
+                                )}
                             </select>
                         </div>
 
@@ -297,18 +317,22 @@ const Inventory = () => {
 
                                 {/* Actions */}
                                 <div className="flex gap-1 shrink-0">
-                                    <button
-                                        onClick={() => handleEdit(product)}
-                                        className="p-2 hover:bg-[var(--color-surface-hover)] rounded-lg text-blue-400 transition-colors"
-                                    >
-                                        <Edit size={18} />
-                                    </button>
-                                    <button
-                                        onClick={() => handleDelete(product.id)}
-                                        className="p-2 hover:bg-[var(--color-surface-hover)] rounded-lg text-red-400 transition-colors"
-                                    >
-                                        <Trash2 size={18} />
-                                    </button>
+                                    {can('products.edit') && (
+                                        <button
+                                            onClick={() => handleEdit(product)}
+                                            className="p-2 hover:bg-[var(--color-surface-hover)] rounded-lg text-blue-400 transition-colors"
+                                        >
+                                            <Edit size={18} />
+                                        </button>
+                                    )}
+                                    {can('products.delete') && (
+                                        <button
+                                            onClick={() => handleDelete(product.id)}
+                                            className="p-2 hover:bg-[var(--color-surface-hover)] rounded-lg text-red-400 transition-colors"
+                                        >
+                                            <Trash2 size={18} />
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -375,7 +399,7 @@ const Inventory = () => {
                                         <td className="px-6 py-5 text-[var(--color-text)] font-bold text-xl">{formatCurrency(product.price, currentCurrency)}</td>
                                         <td className="px-6 py-5 text-[var(--color-text-muted)] text-lg">{formatCurrency(product.cost || 0, currentCurrency)}</td>
                                         <td className="px-6 py-5 text-[var(--color-text-muted)] text-sm">
-                                            {product.tax_rate > 0 ? `IVA (${product.tax_rate}%)` : 'Exento (0%)'}
+                                            {product.tax_rate > 0 ? `IVA(${product.tax_rate} %)` : 'Exento (0%)'}
                                         </td>
                                         <td className="px-6 py-5">
                                             {(() => {
@@ -409,18 +433,22 @@ const Inventory = () => {
                                         </td>
                                         <td className="px-6 py-5 text-right">
                                             <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={() => handleEdit(product)}
-                                                    className="p-3 hover:bg-[var(--color-surface-hover)] rounded-lg text-blue-400 transition-colors"
-                                                >
-                                                    <Edit size={24} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDelete(product.id)}
-                                                    className="p-3 hover:bg-[var(--color-surface-hover)] rounded-lg text-red-400 transition-colors"
-                                                >
-                                                    <Trash2 size={24} />
-                                                </button>
+                                                {can('products.edit') && (
+                                                    <button
+                                                        onClick={() => handleEdit(product)}
+                                                        className="p-3 hover:bg-[var(--color-surface-hover)] rounded-lg text-blue-400 transition-colors"
+                                                    >
+                                                        <Edit size={24} />
+                                                    </button>
+                                                )}
+                                                {can('products.delete') && (
+                                                    <button
+                                                        onClick={() => handleDelete(product.id)}
+                                                        className="p-3 hover:bg-[var(--color-surface-hover)] rounded-lg text-red-400 transition-colors"
+                                                    >
+                                                        <Trash2 size={24} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -434,6 +462,7 @@ const Inventory = () => {
                         )}
                     </div>
                 </div>
+
             </div>
         </div>
     );

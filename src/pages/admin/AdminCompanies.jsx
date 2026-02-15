@@ -4,13 +4,15 @@ import {
     Building2, CheckCircle, XCircle, Clock, DollarSign,
     Eye, Ban, AlertCircle, Calendar, CreditCard, Power
 } from 'lucide-react';
+import CompanyDetailsModal from './CompanyDetailsModal';
 import { cn } from '../../lib/utils';
 
 const AdminCompanies = () => {
-    const { fetchAllSubscriptions, toggleCompanyStatus } = useStore();
+    const { fetchAllSubscriptions, toggleCompanyStatus, deleteCompany, adminCreateSubscription } = useStore();
     const [companies, setCompanies] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all'); // all, active, trial, suspended, pending
+    const [selectedCompany, setSelectedCompany] = useState(null);
 
     useEffect(() => {
         loadCompanies();
@@ -41,6 +43,29 @@ const AdminCompanies = () => {
             const res = await toggleCompanyStatus(id, newStatus);
             if (res.success) {
                 loadCompanies();
+            } else {
+                alert("Error: " + res.error);
+            }
+        }
+    };
+
+    const handleDelete = async (company) => {
+        if (window.confirm(`PELIGRO: ¿Estás seguro de ELIMINAR la empresa "${company.company_name}"? \n\nEsta acción eliminará todos sus datos y NO se puede deshacer.`)) {
+            const res = await deleteCompany(company.company_id);
+            if (res.success) {
+                loadCompanies();
+            } else {
+                alert("Error al eliminar: " + res.error);
+            }
+        }
+    };
+
+    const handleActivateSubscription = async (company) => {
+        if (window.confirm(`¿Activar suscripción MANUAL para "${company.company_name}"? \n\nEsto le dará acceso completo con el plan Básico (Mensual).`)) {
+            const res = await adminCreateSubscription(company.company_id);
+            if (res.success) {
+                loadCompanies();
+                alert("✅ Suscripción activada correctamente.");
             } else {
                 alert("Error: " + res.error);
             }
@@ -292,7 +317,7 @@ const AdminCompanies = () => {
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-2">
                                                 <button
-                                                    onClick={() => alert('Ver detalles: ' + company.company_name)}
+                                                    onClick={() => setSelectedCompany(company)}
                                                     className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
                                                     title="Ver detalles"
                                                 >
@@ -300,14 +325,38 @@ const AdminCompanies = () => {
                                                 </button>
                                                 <button
                                                     onClick={() => handleToggleStatus(company.company_id, company.company_status)}
-                                                    className={`p-2 rounded-lg transition-colors ${company.company_status === 'active'
-                                                        ? 'text-red-400 hover:bg-red-500/10'
-                                                        : 'text-green-400 hover:bg-green-500/10'
-                                                        }`}
+                                                    className={cn(
+                                                        'p-2 rounded-lg transition-colors',
+                                                        company.company_status === 'active'
+                                                            ? 'text-yellow-400 hover:bg-yellow-500/10'
+                                                            : 'text-green-400 hover:bg-green-500/10'
+                                                    )}
                                                     title={company.company_status === 'active' ? "Suspender" : "Activar"}
                                                 >
                                                     {company.company_status === 'active' ? <Ban size={18} /> : <Power size={18} />}
                                                 </button>
+
+                                                {/* Activate Manual Sub */}
+                                                {!company.subscription_id && company.company_status === 'active' && (
+                                                    <button
+                                                        onClick={() => handleActivateSubscription(company)}
+                                                        className="p-2 rounded-lg transition-colors text-blue-400 hover:bg-blue-500/10"
+                                                        title="Activar Suscripción Manual (Básico)"
+                                                    >
+                                                        <CreditCard size={18} />
+                                                    </button>
+                                                )}
+
+                                                {/* Delete Button (Only for pending/suspended/cancelled) */}
+                                                {['pending_payment', 'suspended', 'cancelled'].includes(company.company_status) && (
+                                                    <button
+                                                        onClick={() => handleDelete(company)}
+                                                        className="p-2 rounded-lg transition-colors text-red-500 hover:bg-red-500/10"
+                                                        title="Eliminar Empresa"
+                                                    >
+                                                        <XCircle size={18} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -317,6 +366,14 @@ const AdminCompanies = () => {
                     </table>
                 </div>
             </div>
+
+            {/* Details Modal */}
+            {selectedCompany && (
+                <CompanyDetailsModal
+                    company={selectedCompany}
+                    onClose={() => setSelectedCompany(null)}
+                />
+            )}
         </div>
     );
 };

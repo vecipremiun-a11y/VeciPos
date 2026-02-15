@@ -10,6 +10,7 @@ import Dashboard from './pages/Dashboard';
 import POS from './pages/POS';
 import SalesHistory from './pages/SalesHistory';
 import Inventory from './pages/Inventory';
+import Taxes from './pages/Taxes';
 import Invoices from './pages/Invoices';
 import Categories from './pages/Categories';
 import Suppliers from './pages/Suppliers';
@@ -29,6 +30,7 @@ import Preorders from './pages/Preorders';
 import MainLayout from './layouts/MainLayout';
 import AdminLayout from './layouts/AdminLayout';
 import RequireAdmin from './components/RequireAdmin';
+import ProtectedPage from './components/auth/ProtectedPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminCompanies from './pages/admin/AdminCompanies';
 import SupportInbox from './pages/admin/SupportInbox';
@@ -173,27 +175,31 @@ function App() {
           </ProtectedRoute>
         }>
           <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="pos" element={<POS />} />
-          <Route path="sales-history" element={<SalesHistory />} />
-          <Route path="inventory" element={<Inventory />} />
-          <Route path="invoices" element={<Invoices />} />
-          <Route path="categories" element={<Categories />} />
-          <Route path="suppliers" element={<Suppliers />} />
-          <Route path="purchases" element={<Purchases />} />
-          <Route path="product-profile" element={<ProductProfile />} />
-          <Route path="users" element={<Users />} />
-          <Route path="clients" element={<Clients />} />
-          <Route path="orders" element={<Orders />} />
-          <Route path="orders/history" element={<SupplierOrders />} />
-          <Route path="preorders" element={<Preorders />} />
-          <Route path="reports" element={<Reports />} />
-          <Route path="reports/expiring" element={<ExpiringProductsReport />} />
-          <Route path="reports/closures" element={<CashClosuresReport />} />
-          <Route path="reports/movements" element={<CashMovementsReport />} />
-          <Route path="reports/invoice-payments" element={<InvoicePaymentsReport />} />
-          <Route path="reports/profit" element={<ProfitReport />} />
-          <Route path="settings" element={<Settings />} />
+          <Route path="dashboard" element={<ProtectedPage permission="dashboard.view"><Dashboard /></ProtectedPage>} />
+          <Route path="pos" element={<ProtectedPage permission="pos.access"><POS /></ProtectedPage>} />
+          <Route path="sales-history" element={<ProtectedPage permission="sales.view"><SalesHistory /></ProtectedPage>} />
+          <Route path="inventory" element={<ProtectedPage permission="products.view"><Inventory /></ProtectedPage>} />
+          <Route path="taxes" element={<ProtectedPage permission="taxes.view"><Taxes /></ProtectedPage>} />
+          <Route path="invoices" element={<ProtectedPage permission="invoices.view"><Invoices /></ProtectedPage>} />
+          <Route path="categories" element={<ProtectedPage permission="categories.view"><Categories /></ProtectedPage>} />
+          <Route path="suppliers" element={<ProtectedPage permission="suppliers.view"><Suppliers /></ProtectedPage>} />
+          <Route path="purchases" element={<ProtectedPage permission="purchases.view"><Purchases /></ProtectedPage>} />
+          <Route path="product-profile" element={<ProtectedPage permission="product_profile.view"><ProductProfile /></ProtectedPage>} />
+          <Route path="users" element={<ProtectedPage permission="users.view"><Users /></ProtectedPage>} />
+          <Route path="clients" element={<ProtectedPage permission="clients.view"><Clients /></ProtectedPage>} />
+          <Route path="orders" element={<ProtectedPage permission="supplier_orders.create"><Orders /></ProtectedPage>} />
+          <Route path="orders/history" element={<ProtectedPage permission="supplier_orders.view"><SupplierOrders /></ProtectedPage>} />
+          <Route path="preorders" element={<ProtectedPage permission="preorders.view"><Preorders /></ProtectedPage>} />
+
+          {/* Reports */}
+          <Route path="reports" element={<ProtectedPage permission="reports.sales"><Reports /></ProtectedPage>} />
+          <Route path="reports/expiring" element={<ProtectedPage permission="reports.expiring"><ExpiringProductsReport /></ProtectedPage>} />
+          <Route path="reports/closures" element={<ProtectedPage permission="reports.closures"><CashClosuresReport /></ProtectedPage>} />
+          <Route path="reports/movements" element={<ProtectedPage permission="reports.movements"><CashMovementsReport /></ProtectedPage>} />
+          <Route path="reports/invoice-payments" element={<ProtectedPage permission="reports.invoice_payments"><InvoicePaymentsReport /></ProtectedPage>} />
+          <Route path="reports/profit" element={<ProtectedPage permission="reports.profit"><ProfitReport /></ProtectedPage>} />
+
+          <Route path="settings" element={<ProtectedPage permission="settings.view"><Settings /></ProtectedPage>} />
         </Route>
 
         {/* Super Admin Routes */}

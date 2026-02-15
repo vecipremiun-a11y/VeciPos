@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Plus, Edit, Trash2, X, Phone, Mail } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { usePermissions } from '../hooks/usePermissions';
 
 const Suppliers = () => {
     const { suppliers, addSupplier, updateSupplier, deleteSupplier } = useStore();
+    const { can } = usePermissions();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingSupplier, setEditingSupplier] = useState(null);
 
@@ -50,9 +52,11 @@ const Suppliers = () => {
                     <h1 className="text-xl lg:text-3xl font-bold text-[var(--color-text)] neon-text">Proveedores</h1>
                     <p className="text-xs lg:text-base text-[var(--color-text-muted)]">Gestiona tus proveedores y contactos</p>
                 </div>
-                <button onClick={handleNewSupplier} className="btn-primary flex items-center gap-2 text-sm lg:text-base px-3 lg:px-4 py-2">
-                    <Plus size={18} /> Nuevo Proveedor
-                </button>
+                {can('suppliers.create') && (
+                    <button onClick={handleNewSupplier} className="btn-primary flex items-center gap-2 text-sm lg:text-base px-3 lg:px-4 py-2">
+                        <Plus size={18} /> Nuevo Proveedor
+                    </button>
+                )}
             </div>
 
             {/* Suppliers List - Compact rows on Mobile, Table on Desktop */}
@@ -101,16 +105,18 @@ const Suppliers = () => {
 
                                         {/* Actions */}
                                         <div className="w-12 flex justify-center">
-                                            <button
-                                                onClick={() => handleEdit(supplier)}
-                                                className="p-1.5 hover:bg-[var(--color-surface-hover)] rounded text-[var(--color-text-muted)] transition-colors"
-                                            >
-                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                    <circle cx="12" cy="12" r="1" />
-                                                    <circle cx="12" cy="5" r="1" />
-                                                    <circle cx="12" cy="19" r="1" />
-                                                </svg>
-                                            </button>
+                                            {can('suppliers.edit') && (
+                                                <button
+                                                    onClick={() => handleEdit(supplier)}
+                                                    className="p-1.5 hover:bg-[var(--color-surface-hover)] rounded text-[var(--color-text-muted)] transition-colors"
+                                                >
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <circle cx="12" cy="12" r="1" />
+                                                        <circle cx="12" cy="5" r="1" />
+                                                        <circle cx="12" cy="19" r="1" />
+                                                    </svg>
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -154,18 +160,22 @@ const Suppliers = () => {
                                         </td>
                                         <td className="px-6 py-5 text-right">
                                             <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={() => handleEdit(supplier)}
-                                                    className="p-3 hover:bg-[var(--glass-bg)] rounded-lg text-blue-400 transition-colors"
-                                                >
-                                                    <Edit size={20} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDelete(supplier.id)}
-                                                    className="p-3 hover:bg-[var(--glass-bg)] rounded-lg text-red-400 transition-colors"
-                                                >
-                                                    <Trash2 size={20} />
-                                                </button>
+                                                {can('suppliers.edit') && (
+                                                    <button
+                                                        onClick={() => handleEdit(supplier)}
+                                                        className="p-3 hover:bg-[var(--glass-bg)] rounded-lg text-blue-400 transition-colors"
+                                                    >
+                                                        <Edit size={20} />
+                                                    </button>
+                                                )}
+                                                {can('suppliers.delete') && (
+                                                    <button
+                                                        onClick={() => handleDelete(supplier.id)}
+                                                        className="p-3 hover:bg-[var(--glass-bg)] rounded-lg text-red-400 transition-colors"
+                                                    >
+                                                        <Trash2 size={20} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>

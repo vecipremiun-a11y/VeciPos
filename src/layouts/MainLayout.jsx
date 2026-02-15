@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
 import SupportWidget from '../components/SupportWidget';
+import { usePermissions } from '../hooks/usePermissions';
 
 const MainLayout = () => {
     // Helper to check window width strictly for initial state (avoid hydration mismatch if SSR, but this is SPA)
@@ -30,59 +31,67 @@ const MainLayout = () => {
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
+    const { can } = usePermissions();
+
     // Static Navigation Items
     const allNavItems = [
-        { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', roles: ['Administrador', 'Vendedor', 'Bodeguero', 'Supervisor', 'super_admin', 'owner'] },
-        { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', roles: ['Administrador', 'Vendedor', 'super_admin', 'owner'] },
-        { icon: Users, label: 'Clientes', path: '/clients', roles: ['Administrador', 'Vendedor', 'super_admin', 'owner'] },
-        { icon: CakeSlice, label: 'Encargos', path: '/preorders', roles: ['Administrador', 'Vendedor', 'super_admin', 'owner'] },
-        { icon: History, label: 'Historial', path: '/sales-history', roles: ['Administrador', 'Vendedor', 'Supervisor', 'super_admin', 'owner'] },
+        { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: 'dashboard.view' },
+        { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', permission: 'pos.access' },
+        { icon: Users, label: 'Clientes', path: '/clients', permission: 'clients.view' },
+        { icon: CakeSlice, label: 'Encargos', path: '/preorders', permission: 'preorders.view' },
+        { icon: History, label: 'Historial', path: '/sales-history', permission: 'sales.view' },
         {
             icon: ShoppingBag,
             label: 'Pedidos',
-            roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'],
+            permission: 'supplier_orders.view',
             subItems: [
-                { icon: ClipboardList, label: 'Pedido', path: '/orders', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
-                { icon: ClipboardList, label: 'Pedidos Realizados', path: '/orders/history', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] }
+                { icon: ClipboardList, label: 'Pedido', path: '/orders', permission: 'supplier_orders.create' },
+                { icon: ClipboardList, label: 'Pedidos Realizados', path: '/orders/history', permission: 'supplier_orders.view' }
             ]
         },
         {
             icon: Package,
             label: 'Inventario',
-            // Removed path to make it a parent
-            roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'],
+            // Group visible if any child is visible
             subItems: [
-                { icon: Box, label: 'Productos', path: '/inventory', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
-                { icon: Tag, label: 'Categorías', path: '/categories', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
-                { icon: Truck, label: 'Proveedores', path: '/suppliers', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
-                { icon: FileText, label: 'Facturas', path: '/invoices', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
-                { icon: ClipboardList, label: 'Compras', path: '/purchases', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] },
-                { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', roles: ['Administrador', 'Bodeguero', 'super_admin', 'owner'] }
+                { icon: Box, label: 'Productos', path: '/inventory', permission: 'products.view' },
+                { icon: Tag, label: 'Categorías', path: '/categories', permission: 'categories.view' },
+                { icon: Truck, label: 'Proveedores', path: '/suppliers', permission: 'suppliers.view' },
+                { icon: FileText, label: 'Facturas', path: '/invoices', permission: 'invoices.view' },
+                { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view' },
+                { icon: Percent, label: 'Impuestos', path: '/taxes', permission: 'products.create' },
+                { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', permission: 'product_profile.view' }
             ]
         },
         {
             icon: FileText,
             label: 'Reportes',
-            // path removed
-            roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'],
             subItems: [
-                { icon: FileText, label: 'Ventas', path: '/reports', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
-                { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
-                { icon: DollarSign, label: 'Cierre de Caja', path: '/reports/closures', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
-                { icon: ArrowLeftRight, label: 'Movimientos de Caja', path: '/reports/movements', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
-                { icon: Receipt, label: 'Pagos Facturas', path: '/reports/invoice-payments', roles: ['Administrador', 'Supervisor', 'super_admin', 'owner'] },
-                { icon: TrendingUp, label: 'Utilidad', path: '/reports/profit', roles: ['Administrador', 'super_admin', 'owner'] }
+                { icon: FileText, label: 'Ventas', path: '/reports', permission: 'reports.sales' },
+                { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', permission: 'reports.expiring' },
+                { icon: DollarSign, label: 'Cierre de Caja', path: '/reports/closures', permission: 'reports.closures' },
+                { icon: ArrowLeftRight, label: 'Movimientos de Caja', path: '/reports/movements', permission: 'reports.movements' },
+                { icon: Receipt, label: 'Pagos Facturas', path: '/reports/invoice-payments', permission: 'reports.invoice_payments' },
+                { icon: TrendingUp, label: 'Utilidad', path: '/reports/profit', permission: 'reports.profit' }
             ]
         },
-        { icon: Users, label: 'Usuarios', path: '/users', roles: ['Administrador', 'super_admin', 'owner'] },
-        { icon: Settings, label: 'Configuración', path: '/settings', roles: ['Administrador', 'super_admin', 'owner'] },
+        { icon: Users, label: 'Usuarios', path: '/users', permission: 'users.view' },
+        { icon: Settings, label: 'Configuración', path: '/settings', permission: 'settings.view' },
     ];
 
-    // If no user is logged in, show all (dev mode) or minimal? 
-    // For proper auth flow, we should redirect in useEffect if no user, but lets keep it simple for now and just show allowed if user exists
-    const navItems = allNavItems.filter(item =>
-        !currentUser || !item.roles || item.roles.includes(currentUser.role)
-    );
+    const navItems = allNavItems.filter(item => {
+        // If item has subItems, check if AT LEAST ONE subItem is allowed
+        if (item.subItems) {
+            const visibleSubItems = item.subItems.filter(sub => can(sub.permission));
+            if (visibleSubItems.length > 0) {
+                item.subItems = visibleSubItems; // Only show allowed subitems
+                return true;
+            }
+            return false;
+        }
+        // Normal item checking
+        return can(item.permission);
+    });
 
     const toggleSubmenu = (label) => {
         if (!isSidebarOpen) setIsSidebarOpen(true);

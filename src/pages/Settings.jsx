@@ -6,10 +6,14 @@ import { Moon, Sun, Settings as SettingsIcon, FileText, Smartphone, Wrench, Buil
 import { recompressAllImages } from '../scripts/recompressImages';
 import ReceiptSettings from '../components/settings/ReceiptSettings';
 import PaymentMethodsSettings from '../components/settings/PaymentMethodsSettings';
+import PermissionsSettings from '../components/settings/PermissionsSettings';
+import { Shield } from 'lucide-react';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
+import { usePermissions } from '../hooks/usePermissions';
 
 const Settings = () => {
     const { darkMode, toggleDarkMode, inventoryAdjustmentMode, toggleInventoryAdjustmentMode, activeCompanyId, currentCompanyTimezone, fetchInitialData, updateCurrency } = useStore();
+    const { can } = usePermissions();
     const [selectedTimezone, setSelectedTimezone] = useState(currentCompanyTimezone);
 
     // Estados para información de la empresa
@@ -158,12 +162,13 @@ const Settings = () => {
                 <div className="w-full md:w-64 flex-shrink-0">
                     <div className="glass-card p-2 space-y-1">
                         {[
-                            { id: 'general', label: 'General', icon: SettingsIcon },
-                            { id: 'company', label: 'Empresa', icon: Building2 },
-                            { id: 'receipts', label: 'Boletas', icon: FileText },
-                            { id: 'payments', label: 'Medios de Pago', icon: CreditCard },
-                            { id: 'system', label: 'Sistema', icon: Wrench },
-                        ].map((item) => {
+                            { id: 'general', label: 'General', icon: SettingsIcon, permission: null },
+                            { id: 'company', label: 'Empresa', icon: Building2, permission: 'settings.company' },
+                            { id: 'receipts', label: 'Boletas', icon: FileText, permission: 'settings.receipts' },
+                            { id: 'payments', label: 'Medios de Pago', icon: CreditCard, permission: 'settings.payments' },
+                            { id: 'permissions', label: 'Permisos', icon: Shield, permission: 'settings.permissions' },
+                            { id: 'system', label: 'Sistema', icon: Wrench, permission: 'settings.system' },
+                        ].filter(item => !item.permission || can(item.permission)).map((item) => {
                             const Icon = item.icon;
                             return (
                                 <button
@@ -191,7 +196,7 @@ const Settings = () => {
                                 <div className="space-y-4">
                                     <div className="flex justify-between border-b border-[var(--glass-border)] pb-2">
                                         <span className="text-[var(--color-text-muted)]">Versión</span>
-                                        <span className="text-[var(--color-text)] font-mono">1.0.0 (Futuristic Build)</span>
+                                        <span className="text-[var(--color-text)] font-mono">1.1.0 (Futuristic Build)</span>
                                     </div>
                                     <div className="flex justify-between border-b border-[var(--glass-border)] pb-2">
                                         <span className="text-[var(--color-text-muted)]">Desarrollador</span>
@@ -471,6 +476,10 @@ const Settings = () => {
 
                     {activeTab === 'payments' && (
                         <PaymentMethodsSettings />
+                    )}
+
+                    {activeTab === 'permissions' && (
+                        <PermissionsSettings />
                     )}
 
                     {activeTab === 'system' && (

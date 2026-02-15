@@ -5,11 +5,13 @@ import { Search, Calendar, CreditCard, User, Download, Send, Trash2, Printer, Al
 import { generateReceiptPDF, generateWhatsAppLink } from '../utils/receipt';
 import { formatCurrency } from '../utils/formatCurrency';
 import { formatInCompanyTime } from '../lib/dateHelpers';
+import { usePermissions } from '../hooks/usePermissions';
 
 const SalesHistory = () => {
     const { sales, users, cancelSale, currentUser, currentCompanyTimezone, fetchSales, fetchSaleDetails, activeCompanyId, currentCurrency } = useStore();
     const [selectedSale, setSelectedSale] = useState(null);
     const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+    const { can } = usePermissions();
 
     // Default to today (YYYY-MM-DD)
     const todayStr = new Date().toLocaleDateString('en-CA');
@@ -389,7 +391,7 @@ const SalesHistory = () => {
                                         Compartir WhatsApp
                                     </button>
                                     <div className="flex-1"></div>
-                                    {selectedSale.status !== 'cancelled' && (
+                                    {selectedSale.status !== 'cancelled' && can('sales.cancel') && (
                                         <button onClick={handleCancelSale} className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm transition-colors border border-red-500/20">
                                             <Trash2 size={16} />
                                             Anular Venta
@@ -643,7 +645,7 @@ const SalesHistory = () => {
                             <Send size={14} />
                             Compartir WhatsApp
                         </button>
-                        {selectedSale.status !== 'cancelled' && (
+                        {selectedSale.status !== 'cancelled' && can('sales.cancel') && (
                             <button onClick={handleCancelSale} className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 text-red-400 rounded-lg text-xs border border-red-500/20 whitespace-nowrap">
                                 <Trash2 size={14} />
                                 Anular Venta

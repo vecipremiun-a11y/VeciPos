@@ -142,9 +142,27 @@ const ExpiringProductsReport = () => {
         });
 
         // Search Filter
-        return Object.values(productMap).filter(p => {
+        const products = Object.values(productMap).filter(p => {
             return p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 p.sku?.toLowerCase().includes(searchTerm.toLowerCase());
+        });
+
+        // Ensure sorting by earliest expiry date (handling nulls as last)
+        return products.sort((a, b) => {
+            const getMinExpiry = (lots) => {
+                const dates = lots
+                    .map(l => l.expiry_date)
+                    .filter(d => d); // Filter out null/undefined
+                if (dates.length === 0) return '9999-99-99'; // Max date if all are null
+                return dates.sort()[0]; // Min date
+            };
+
+            const minA = getMinExpiry(a.lots);
+            const minB = getMinExpiry(b.lots);
+
+            if (minA < minB) return -1;
+            if (minA > minB) return 1;
+            return 0;
         });
     }, [reportData, startDate, endDate, searchTerm]);
 

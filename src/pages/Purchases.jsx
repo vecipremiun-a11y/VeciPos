@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus, Edit, X, ArrowLeft, Paperclip } from 'lucide-react';
 import ProductModal from '../components/ProductModal';
+import { usePermissions } from '../hooks/usePermissions';
 
 const Purchases = () => {
     const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown } = useStore();
+    const { can } = usePermissions();
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
     const [isMobileDetailsOpen, setIsMobileDetailsOpen] = useState(false);
 
@@ -315,12 +317,14 @@ const Purchases = () => {
                                 </div>
                             )}
                         </div>
-                        <button
-                            onClick={() => setIsProductModalOpen(true)}
-                            className="glass p-3 rounded-xl text-[var(--color-primary)] border border-[var(--glass-border)]"
-                        >
-                            <PackagePlus size={20} />
-                        </button>
+                        {can('products.create') && (
+                            <button
+                                onClick={() => setIsProductModalOpen(true)}
+                                className="glass p-3 rounded-xl text-[var(--color-primary)] border border-[var(--glass-border)]"
+                            >
+                                <PackagePlus size={20} />
+                            </button>
+                        )}
                     </div>
 
                     {selectedProduct ? (
@@ -522,9 +526,11 @@ const Purchases = () => {
                             <div className="text-xs text-[var(--color-text-muted)]">Total Factura:</div>
                             <div className="text-2xl font-bold text-[var(--color-primary)]">${totalAmount.toLocaleString()}</div>
                         </div>
-                        <button onClick={handleSavePurchase} className="w-full py-4 btn-primary flex items-center justify-center gap-2 text-base font-bold">
-                            <Save size={20} /> Guardar Compra
-                        </button>
+                        {can('purchases.create') && (
+                            <button onClick={handleSavePurchase} className="w-full py-4 btn-primary flex items-center justify-center gap-2 text-base font-bold">
+                                <Save size={20} /> Guardar Compra
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
@@ -566,13 +572,15 @@ const Purchases = () => {
                                 </div>
                             )}
                         </div>
-                        <button
-                            onClick={() => setIsProductModalOpen(true)}
-                            className="glass p-3 rounded-xl hover:bg-[var(--color-surface-hover)] text-[var(--color-primary)] border border-[var(--glass-border)]"
-                            title="Crear Nuevo Producto"
-                        >
-                            <PackagePlus size={24} />
-                        </button>
+                        {can('products.create') && (
+                            <button
+                                onClick={() => setIsProductModalOpen(true)}
+                                className="glass p-3 rounded-xl hover:bg-[var(--color-surface-hover)] text-[var(--color-primary)] border border-[var(--glass-border)]"
+                                title="Crear Nuevo Producto"
+                            >
+                                <PackagePlus size={24} />
+                            </button>
+                        )}
                     </div>
 
                     {/* Form */}
@@ -952,12 +960,14 @@ const Purchases = () => {
                                             ${totalAmount.toLocaleString()}
                                         </div>
                                     </div>
-                                    <button
-                                        onClick={handleSavePurchase}
-                                        className="btn-primary py-3 px-8 flex items-center gap-2 shadow-lg hover:shadow-[0_0_20px_rgba(0,240,255,0.4)] transition-all"
-                                    >
-                                        <Save size={20} /> Guardar Compra
-                                    </button>
+                                    {can('purchases.create') && (
+                                        <button
+                                            onClick={handleSavePurchase}
+                                            className="btn-primary py-3 px-8 flex items-center gap-2 shadow-lg hover:shadow-[0_0_20px_rgba(0,240,255,0.4)] transition-all"
+                                        >
+                                            <Save size={20} /> Guardar Compra
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         </div>

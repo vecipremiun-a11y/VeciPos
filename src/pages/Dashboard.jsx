@@ -3,6 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { AlertTriangle, TrendingDown, Clock } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { format, subDays, parseISO } from 'date-fns';
+import { usePermissions } from '../hooks/usePermissions';
 import { es } from 'date-fns/locale';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -11,11 +12,13 @@ import { formatCurrency } from '../utils/formatCurrency';
 const Dashboard = () => {
     const {
         fetchDashboardData,
-        currentCompanyTimezone,
-        activeCompanyId,
         activeRegisters,
-        currentCurrency
+        currentCurrency,
+        activeCompanyId,
+        currentCompanyTimezone
     } = useStore();
+
+    const { can } = usePermissions();
 
     // Separate state for different data needs
     const [todayUtility, setTodayUtility] = React.useState(0);        // ← NUEVO
@@ -132,124 +135,136 @@ const Dashboard = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
                 {/* Ventas Hoy */}
-                <div className="glass-card p-4">
-                    <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Ventas Hoy</h3>
-                    <p className="text-lg sm:text-2xl font-bold text-[var(--color-text)] neon-text truncate">
-                        {formatCurrency(stats.totalSalesToday, currentCurrency)}
-                    </p>
-                    <div className="mt-2 text-[10px] md:text-xs text-[var(--color-primary)]">
-                        {stats.ticketsToday} tickets procesados
+                {can('dashboard.view_sales') && (
+                    <div className="glass-card p-4">
+                        <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Ventas Hoy</h3>
+                        <p className="text-lg sm:text-2xl font-bold text-[var(--color-text)] neon-text truncate">
+                            {formatCurrency(stats.totalSalesToday, currentCurrency)}
+                        </p>
+                        <div className="mt-2 text-[10px] md:text-xs text-[var(--color-primary)]">
+                            {stats.ticketsToday} tickets procesados
+                        </div>
                     </div>
-                </div>
+                )}
 
                 {/* Ventas Mes */}
-                <div className="glass-card p-4">
-                    <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Ventas del Mes</h3>
-                    <p className="text-lg sm:text-2xl font-bold text-[var(--color-text)] neon-text truncate">
-                        {formatCurrency(stats.totalSalesMonth, currentCurrency)}
-                    </p>
-                    <div className="mt-2 text-[10px] md:text-xs text-[var(--color-text-muted)]">Acumulado mensual</div>
-                </div>
+                {can('dashboard.view_sales') && (
+                    <div className="glass-card p-4">
+                        <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Ventas del Mes</h3>
+                        <p className="text-lg sm:text-2xl font-bold text-[var(--color-text)] neon-text truncate">
+                            {formatCurrency(stats.totalSalesMonth, currentCurrency)}
+                        </p>
+                        <div className="mt-2 text-[10px] md:text-xs text-[var(--color-text-muted)]">Acumulado mensual</div>
+                    </div>
+                )}
 
                 {/* Utilidad Hoy */}
-                <div className="glass-card p-4">
-                    <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Utilidad Hoy (Neta)</h3>
-                    <p className="text-lg sm:text-2xl font-bold text-green-400 neon-text truncate">
-                        {formatCurrency(stats.utilityToday, currentCurrency)}
-                    </p>
-                    <div className="mt-2 text-[10px] md:text-xs text-[var(--color-text-muted)]">Post-impuestos y costo</div>
-                </div>
+                {can('dashboard.view_profits') && (
+                    <div className="glass-card p-4">
+                        <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Utilidad Hoy (Neta)</h3>
+                        <p className="text-lg sm:text-2xl font-bold text-green-400 neon-text truncate">
+                            {formatCurrency(stats.utilityToday, currentCurrency)}
+                        </p>
+                        <div className="mt-2 text-[10px] md:text-xs text-[var(--color-text-muted)]">Post-impuestos y costo</div>
+                    </div>
+                )}
 
                 {/* Tickets Hoy (4th Card as requested) */}
-                <div className="glass-card p-4">
-                    <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Tickets de Hoy</h3>
-                    <p className="text-lg sm:text-2xl font-bold text-blue-400 neon-text truncate">{stats.ticketsToday}</p>
-                    <div className="mt-2 text-[10px] md:text-xs text-[var(--color-text-muted)]">Transacciones completadas</div>
-                </div>
+                {can('dashboard.view_sales') && (
+                    <div className="glass-card p-4">
+                        <h3 className="text-[var(--color-text-muted)] text-xs md:text-sm mb-1">Tickets de Hoy</h3>
+                        <p className="text-lg sm:text-2xl font-bold text-blue-400 neon-text truncate">{stats.ticketsToday}</p>
+                        <div className="mt-2 text-[10px] md:text-xs text-[var(--color-text-muted)]">Transacciones completadas</div>
+                    </div>
+                )}
             </div>
 
             {/* Charts Section (Moved to Middle) */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="glass-card lg:col-span-2 h-[400px] flex flex-col">
-                    <h3 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Resumen de Ventas (Mes Actual)</h3>
-                    <div className="flex-1 w-full min-h-0">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart
-                                data={stats.chartData}
-                                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                            >
-                                <defs>
-                                    <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.8} />
-                                        <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
-                                <XAxis dataKey="name" stroke="#888" tick={{ fill: '#888', fontSize: 12 }} />
-                                <YAxis stroke="#888" tick={{ fill: '#888', fontSize: 12 }} />
-                                <Tooltip
-                                    contentStyle={{ backgroundColor: 'rgba(0,0,0,0.9)', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }}
-                                    itemStyle={{ color: 'var(--color-primary)' }}
-                                    formatter={(value) => [formatCurrency(value, currentCurrency), 'Ventas']}
-                                />
-                                <Area type="monotone" dataKey="sales" stroke="var(--color-primary)" fillOpacity={1} fill="url(#colorSales)" />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                {can('dashboard.view_sales') && (
+                    <div className="glass-card lg:col-span-2 h-[400px] flex flex-col">
+                        <h3 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Resumen de Ventas (Mes Actual)</h3>
+                        <div className="flex-1 w-full min-h-0">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart
+                                    data={stats.chartData}
+                                    margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                                >
+                                    <defs>
+                                        <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.8} />
+                                            <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
+                                    <XAxis dataKey="name" stroke="#888" tick={{ fill: '#888', fontSize: 12 }} />
+                                    <YAxis stroke="#888" tick={{ fill: '#888', fontSize: 12 }} />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: 'rgba(0,0,0,0.9)', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }}
+                                        itemStyle={{ color: 'var(--color-primary)' }}
+                                        formatter={(value) => [formatCurrency(value, currentCurrency), 'Ventas']}
+                                    />
+                                    <Area type="monotone" dataKey="sales" stroke="var(--color-primary)" fillOpacity={1} fill="url(#colorSales)" />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </div>
                     </div>
-                </div>
+                )}
 
-                <div className="glass-card h-[400px] overflow-hidden flex flex-col">
-                    <h3 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Actividad Reciente</h3>
-                    <div className="space-y-4 overflow-y-auto flex-1 pr-2 custom-scrollbar">
-                        {recentSales.map((sale) => {
-                            const getPaymentMethodStyle = (method) => {
-                                const styles = {
-                                    'Efectivo': 'bg-green-500/20 text-green-400 border-green-500/30',
-                                    'Tarjeta': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-                                    'Transferencia': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-                                    'Mixto': 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-                                    'Fiado': 'bg-red-500/20 text-red-400 border-red-500/30',
-                                    'default': 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                {can('dashboard.view_sales') && (
+                    <div className="glass-card h-[400px] overflow-hidden flex flex-col">
+                        <h3 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Actividad Reciente</h3>
+                        <div className="space-y-4 overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                            {recentSales.map((sale) => {
+                                const getPaymentMethodStyle = (method) => {
+                                    const styles = {
+                                        'Efectivo': 'bg-green-500/20 text-green-400 border-green-500/30',
+                                        'Tarjeta': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+                                        'Transferencia': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+                                        'Mixto': 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+                                        'Fiado': 'bg-red-500/20 text-red-400 border-red-500/30',
+                                        'default': 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                                    };
+                                    return styles[method] || styles['default'];
                                 };
-                                return styles[method] || styles['default'];
-                            };
 
-                            const paymentMethodRaw = sale.paymentMethod || sale.payment_method || 'Efectivo';
-                            // Normalize in case it's 'Mixto' or others
-                            const paymentMethod = paymentMethodRaw === 'Mixto' ? 'Mixto' : paymentMethodRaw;
-                            const style = getPaymentMethodStyle(paymentMethod);
+                                const paymentMethodRaw = sale.paymentMethod || sale.payment_method || 'Efectivo';
+                                // Normalize in case it's 'Mixto' or others
+                                const paymentMethod = paymentMethodRaw === 'Mixto' ? 'Mixto' : paymentMethodRaw;
+                                const style = getPaymentMethodStyle(paymentMethod);
 
-                            return (
-                                <div key={sale.id} className="flex items-center gap-3 p-3 hover:bg-[var(--glass-bg)] rounded-lg transition-colors border border-transparent hover:border-[var(--glass-border)]">
-                                    <div className="w-10 h-10 rounded-full bg-[var(--color-primary)]/20 flex flex-col items-center justify-center text-[var(--color-primary)] text-xs font-bold">
-                                        <span>#{String(sale.id).slice(-4)}</span>
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className={`text-[10px] px-2 py-0.5 rounded border font-bold uppercase tracking-wider ${style}`}>
-                                                {paymentMethod}
-                                            </span>
+                                return (
+                                    <div key={sale.id} className="flex items-center gap-3 p-3 hover:bg-[var(--glass-bg)] rounded-lg transition-colors border border-transparent hover:border-[var(--glass-border)]">
+                                        <div className="w-10 h-10 rounded-full bg-[var(--color-primary)]/20 flex flex-col items-center justify-center text-[var(--color-primary)] text-xs font-bold">
+                                            <span>#{String(sale.id).slice(-4)}</span>
                                         </div>
-                                        <p className="text-xs text-[var(--color-text-muted)]">
-                                            {format(new Date(sale.date), "d MMM, HH:mm", { locale: es })}
-                                        </p>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <span className={`text-[10px] px-2 py-0.5 rounded border font-bold uppercase tracking-wider ${style}`}>
+                                                    {paymentMethod}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-[var(--color-text-muted)]">
+                                                {format(new Date(sale.date), "d MMM, HH:mm", { locale: es })}
+                                            </p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-sm font-bold text-[var(--color-text)]">
+                                                {formatCurrency(parseFloat(sale.total), currentCurrency)}
+                                            </p>
+                                            <p className="text-[10px] text-[var(--color-text-muted)]">
+                                                {(sale.items && sale.items.length) || 0} prod.
+                                            </p>
+                                        </div>
                                     </div>
-                                    <div className="text-right">
-                                        <p className="text-sm font-bold text-[var(--color-text)]">
-                                            {formatCurrency(parseFloat(sale.total), currentCurrency)}
-                                        </p>
-                                        <p className="text-[10px] text-[var(--color-text-muted)]">
-                                            {(sale.items && sale.items.length) || 0} prod.
-                                        </p>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                        {recentSales.length === 0 && (
-                            <p className="text-[var(--color-text-muted)] text-center py-10">No hay ventas recientes.</p>
-                        )}
+                                );
+                            })}
+                            {recentSales.length === 0 && (
+                                <p className="text-[var(--color-text-muted)] text-center py-10">No hay ventas recientes.</p>
+                            )}
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
 
             {/* Widgets Section (Bottom) */}
@@ -261,37 +276,39 @@ const Dashboard = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
                     {/* 1. Más Vendidos Hoy */}
-                    <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-[var(--color-primary)] p-0 overflow-hidden">
-                        <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)]">
-                            <h4 className="text-[var(--color-primary)] font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
-                                <TrendingDown size={16} className="rotate-180" /> Más Vendidos (Hoy)
-                            </h4>
-                        </div>
-                        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-                            {topProducts.length === 0 ? (
-                                <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">
-                                    No hay ventas hoy
-                                </div>
-                            ) : (
-                                topProducts.map((p, idx) => (
-                                    <div key={idx} className="flex items-center justify-between p-2 rounded bg-black/20 border border-[var(--glass-border)]">
-                                        <div className="flex items-center gap-3 overflow-hidden">
-                                            <span className="text-[var(--color-primary)] font-bold text-sm w-4">{idx + 1}</span>
-                                            <div className="min-w-0">
-                                                <p className="text-[var(--color-text)] text-xs font-bold truncate">{p.name}</p>
-                                                <p className="text-[var(--color-text-muted)] text-[10px]">{p.category || 'General'}</p>
+                    {can('dashboard.view_sales') && (
+                        <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-[var(--color-primary)] p-0 overflow-hidden">
+                            <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)]">
+                                <h4 className="text-[var(--color-primary)] font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
+                                    <TrendingDown size={16} className="rotate-180" /> Más Vendidos (Hoy)
+                                </h4>
+                            </div>
+                            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+                                {topProducts.length === 0 ? (
+                                    <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">
+                                        No hay ventas hoy
+                                    </div>
+                                ) : (
+                                    topProducts.map((p, idx) => (
+                                        <div key={idx} className="flex items-center justify-between p-2 rounded bg-black/20 border border-[var(--glass-border)]">
+                                            <div className="flex items-center gap-3 overflow-hidden">
+                                                <span className="text-[var(--color-primary)] font-bold text-sm w-4">{idx + 1}</span>
+                                                <div className="min-w-0">
+                                                    <p className="text-[var(--color-text)] text-xs font-bold truncate">{p.name}</p>
+                                                    <p className="text-[var(--color-text-muted)] text-[10px]">{p.category || 'General'}</p>
+                                                </div>
+                                            </div>
+                                            <div className="text-right shrink-0">
+                                                <span className="block text-[var(--color-text)] font-bold text-xs">
+                                                    {p.total_quantity} {p.unit === 'Kg' ? 'kg' : 'und'}
+                                                </span>
                                             </div>
                                         </div>
-                                        <div className="text-right shrink-0">
-                                            <span className="block text-[var(--color-text)] font-bold text-xs">
-                                                {p.total_quantity} {p.unit === 'Kg' ? 'kg' : 'und'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
+                                    ))
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     {/* 2. Sin Stock (Stock 0) */}
                     <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-red-500 p-0 overflow-hidden">

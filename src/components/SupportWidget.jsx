@@ -22,6 +22,9 @@ const SupportWidget = () => {
         uploadSupportAttachment
     } = useStore();
 
+    // Si no es administrador, no mostrar el widget
+    if (currentUser?.role !== 'Administrador') return null;
+
     const [isOpen, setIsOpen] = useState(false);
     const [currentTicket, setCurrentTicket] = useState(null);
     const [messages, setMessages] = useState([]);
@@ -29,13 +32,28 @@ const SupportWidget = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState(null);
 
+    const [selectedImage, setSelectedImage] = useState(null);
+
     const messagesEndRef = useRef(null);
     const pollingIntervalRef = useRef(null);
     const fileInputRef = useRef(null);
 
     // Cargar tickets al montar
+    // ... (rest of effects)
+
+    const handleCloseLightbox = () => setSelectedImage(null);
+
+    // Cargar tickets al montar
+    // Cargar tickets al montar y polling global
     useEffect(() => {
         fetchSupportTickets();
+
+        // Polling para notificaciones (cada 30 seg)
+        const globalPolling = setInterval(() => {
+            fetchSupportTickets();
+        }, 30000);
+
+        return () => clearInterval(globalPolling);
     }, []);
 
     // Polling: revisar mensajes nuevos cada 3 segundos cuando el panel está abierto
@@ -235,17 +253,46 @@ const SupportWidget = () => {
                             >
                                 <div
                                     className={`max-w-[75%] rounded-2xl px-4 py-2 ${msg.sender_type === 'client'
-                                            ? 'bg-[var(--color-primary)] text-white'
-                                            : 'bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)]'
+                                        ? 'bg-[var(--color-primary)] text-white'
+                                        : 'bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)]'
                                         }`}
                                 >
                                     <div className="text-sm whitespace-pre-wrap break-words">
                                         {msg.message}
                                     </div>
+
+                                    {/* Adjuntos */}
+                                    {msg.attachments && msg.attachments.length > 0 && (
+                                        <div className="mt-2 space-y-2">
+                                            {msg.attachments.map(att => (
+                                                <div key={att.id}>
+                                                    {att.file_type?.startsWith('image/') ? (
+                                                        <img
+                                                            src={att.file_url}
+                                                            alt="Adjunto"
+                                                            className="rounded-lg max-w-full max-h-48 object-cover border border-white/10 cursor-pointer hover:opacity-90 transition-opacity"
+                                                            onClick={() => setSelectedImage(att.file_url)}
+                                                        />
+                                                    ) : (
+                                                        <a
+                                                            href={att.file_url}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="flex items-center gap-2 p-2 bg-black/20 rounded text-xs hover:bg-black/30 transition-colors"
+                                                        >
+                                                            <Paperclip size={12} />
+                                                            {att.filename || 'Archivo adjunto'}
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
                                     <div
                                         className={`text-[10px] mt-1 ${msg.sender_type === 'client'
-                                                ? 'text-white/70'
-                                                : 'text-[var(--color-text-muted)]'
+                                            ? 'text-white/70'
+                                            : 'text-[var(--color-text-muted)]'
                                             }`}
                                     >
                                         {formatMessageTime(msg.created_at)}
@@ -397,6 +444,27 @@ const SupportWidget = () => {
                     </>
                 )}
             </div>
+
+            {/* Lightbox para imágenes */}
+            {selectedImage && (
+                <div
+                    className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4 animate-in fade-in duration-200"
+                    onClick={handleCloseLightbox}
+                >
+                    <button
+                        onClick={handleCloseLightbox}
+                        className="absolute top-4 right-4 text-white hover:text-gray-300 p-2"
+                    >
+                        <X size={32} />
+                    </button>
+                    <img
+                        src={selectedImage}
+                        alt="Vista previa"
+                        className="max-w-full max-h-[90vh] object-contain rounded-lg"
+                        onClick={(e) => e.stopPropagation()}
+                    />
+                </div>
+            )}
         </>
     );
 };
