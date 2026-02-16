@@ -122,13 +122,46 @@ export const ALL_PERMISSIONS = [
         label: 'Usuarios',
         permissions: [
             { id: 'users.view', label: 'Ver Usuarios' },
-            { id: 'users.manage', label: 'Gestionar Usuarios (Crear/Editar/Eliminar)' },
+            { id: 'users.create', label: 'Crear Usuarios' },
+            { id: 'users.edit', label: 'Editar Usuarios' },
+            { id: 'users.delete', label: 'Eliminar Usuarios' },
+            { id: 'users.manage', label: 'Gestionar Usuarios (General)' },
+        ]
+    },
+    {
+        id: 'invoices',
+        label: 'Facturas',
+        permissions: [
+            { id: 'invoices.view', label: 'Ver Facturas' },
+            { id: 'invoices.create', label: 'Crear Facturas' },
+            { id: 'invoices.edit', label: 'Editar Facturas' },
+            { id: 'invoices.delete', label: 'Eliminar Facturas' },
+        ]
+    },
+    {
+        id: 'product_profile',
+        label: 'Perfil de Producto',
+        permissions: [
+            { id: 'product_profile.view', label: 'Ver Perfil de Producto' },
+        ]
+    },
+    {
+        id: 'reports',
+        label: 'Reportes',
+        permissions: [
+            { id: 'reports.sales', label: 'Ver Reporte de Ventas' },
+            { id: 'reports.expiring', label: 'Ver Productos por Vencer' },
+            { id: 'reports.closures', label: 'Ver Cierres de Caja' },
+            { id: 'reports.movements', label: 'Ver Movimientos de Caja' },
+            { id: 'reports.invoice_payments', label: 'Ver Pagos de Facturas' },
+            { id: 'reports.profit', label: 'Ver Reporte de Utilidades' },
         ]
     },
     {
         id: 'settings',
         label: 'Configuración',
         permissions: [
+            { id: 'settings.view', label: 'Acceso a Configuración' },
             { id: 'settings.company', label: 'Configuración de Empresa' },
             { id: 'settings.receipts', label: 'Configuración de Boletas' },
             { id: 'settings.payments', label: 'Configuración de Medios de Pago' },

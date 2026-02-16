@@ -166,7 +166,7 @@ const Settings = () => {
                             { id: 'company', label: 'Empresa', icon: Building2, permission: 'settings.company' },
                             { id: 'receipts', label: 'Boletas', icon: FileText, permission: 'settings.receipts' },
                             { id: 'payments', label: 'Medios de Pago', icon: CreditCard, permission: 'settings.payments' },
-                            { id: 'permissions', label: 'Permisos', icon: Shield, permission: 'settings.permissions' },
+                            { id: 'permissions', label: 'Permisos', icon: Shield, permission: 'settings.manage_permissions' },
                             { id: 'system', label: 'Sistema', icon: Wrench, permission: 'settings.system' },
                         ].filter(item => !item.permission || can(item.permission)).map((item) => {
                             const Icon = item.icon;

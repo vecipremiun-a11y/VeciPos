@@ -558,7 +558,7 @@ export const useStore = create(persist((set, get) => ({
     // Clients State & Actions
     clients: [],
     posSelectedClient: null,
-    setPosSelectedClient: (client) => set({ posSelectedClient: client }),
+    // setPosSelectedClient is defined below in the multi-cart section (L3641+)
 
     addClient: async (client) => {
         try {
@@ -1345,7 +1345,6 @@ export const useStore = create(persist((set, get) => ({
     },
 
     // Optimized for Chart (Lightweight: No JSON blobs)
-    // Optimized for Chart (Lightweight: No JSON blobs)
     fetchMonthlyStats: async (fromDate, toDate) => {
         try {
             const { activeCompanyId, currentCompanyTimezone } = get();
@@ -1369,75 +1368,6 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    // --- TAX RATES ACTIONS ---
-
-    fetchTaxRates: async () => {
-        const { activeCompanyId } = get();
-        try {
-            const res = await turso.execute({
-                sql: "SELECT * FROM tax_rates WHERE company_id = ?",
-                args: [activeCompanyId]
-            });
-            set({ taxRates: res.rows });
-        } catch (e) {
-            console.error("Fetch tax rates error", e);
-        }
-    },
-
-    addTaxRate: async (tax) => {
-        const { activeCompanyId } = get();
-        try {
-            const res = await turso.execute({
-                sql: "INSERT INTO tax_rates (company_id, name, rate, is_default, status) VALUES (?, ?, ?, ?, ?) RETURNING *",
-                args: [activeCompanyId, tax.name, tax.rate, tax.is_default ? 1 : 0, 'active']
-            });
-
-            const newTax = res.rows[0];
-            set(state => ({
-                taxRates: [...state.taxRates, newTax]
-            }));
-            return { success: true, tax: newTax };
-        } catch (e) {
-            console.error("Add tax rate error", e);
-            return { success: false, error: e.message };
-        }
-    },
-
-    updateTaxRate: async (id, tax) => {
-        const { activeCompanyId } = get();
-        try {
-            await turso.execute({
-                sql: "UPDATE tax_rates SET name = ?, rate = ?, is_default = ? WHERE id = ? AND company_id = ?",
-                args: [tax.name, tax.rate, tax.is_default ? 1 : 0, id, activeCompanyId]
-            });
-
-            set(state => ({
-                taxRates: state.taxRates.map(t => t.id === id ? { ...t, ...tax, is_default: tax.is_default ? 1 : 0 } : t)
-            }));
-            return { success: true };
-        } catch (e) {
-            console.error("Update tax rate error", e);
-            return { success: false, error: e.message };
-        }
-    },
-
-    deleteTaxRate: async (id) => {
-        const { activeCompanyId } = get();
-        try {
-            await turso.execute({
-                sql: "DELETE FROM tax_rates WHERE id = ? AND company_id = ?",
-                args: [id, activeCompanyId]
-            });
-
-            set(state => ({
-                taxRates: state.taxRates.filter(t => t.id !== id)
-            }));
-            return { success: true };
-        } catch (e) {
-            console.error("Delete tax rate error", e);
-            return { success: false, error: e.message };
-        }
-    },
     fetchInventoryProducts: async (offset = 0, searchTerm = '', category = 'Todos') => {
         const { activeCompanyId, products: currentProducts } = get();
         try {
@@ -3296,66 +3226,8 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    toggleCompanyStatus: async (companyId, newStatus) => {
-        try {
-            const { turso, currentUser } = get(); // Ensure currentUser is available
-            // If checking permissions:
-            // if (currentUser?.role !== 'super_admin') ... 
-            // Reuse existing logic but ensure fetchAllSubscriptions is added next.
-
-            await turso.execute({
-                sql: "UPDATE companies SET status = ?, updated_at = ? WHERE id = ?",
-                args: [newStatus, new Date().toISOString(), companyId]
-            });
-            return { success: true };
-        } catch (error) {
-            console.error('Error toggling company status:', error);
-            return { success: false, error: 'Database error' };
-        }
-    },
-
-    checkSubscriptionStatus: async (companyId) => {
-        try {
-            const { turso } = get();
-            const res = await turso.execute({
-                sql: "SELECT status, trial_ends_at, subscription_id FROM companies WHERE id = ?",
-                args: [companyId]
-            });
-            return res.rows[0];
-        } catch (e) {
-            console.error(e);
-            return null;
-        }
-    },
-
-    fetchAllSubscriptions: async () => {
-        try {
-            const { turso } = get();
-            const result = await turso.execute({
-                sql: `SELECT 
-                        c.id as company_id,
-                        c.name as company_name,
-                        c.status as company_status,
-                        c.trial_ends_at,
-                        c.created_at,
-                        s.id as subscription_id,
-                        s.plan_id,
-                        s.status as subscription_status,
-                        s.amount,
-                        s.current_period_start,
-                        s.current_period_end,
-                        sp.name as plan_name
-                      FROM companies c
-                      LEFT JOIN subscriptions s ON c.subscription_id = s.id
-                      LEFT JOIN subscription_plans sp ON s.plan_id = sp.id
-                      ORDER BY c.created_at DESC`
-            });
-            return result.rows;
-        } catch (error) {
-            console.error('Error fetching subscriptions:', error);
-            return [];
-        }
-    },
+    // toggleCompanyStatus, checkSubscriptionStatus, fetchAllSubscriptions
+    // are defined in the ADMIN & SAAS ACTIONS section below
 
 
     // Purchases
@@ -5038,168 +4910,6 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    // Traer lista de ventas suspendidas (ligera, sin items completos)
-    fetchSuspendedSales: async () => {
-        try {
-            const { activeCompanyId } = get();
-
-            console.time('⏱️ fetchSuspendedSales');
-
-            // Query optimizado: solo campos necesarios para la lista
-            const result = await turso.execute({
-                sql: `SELECT 
-                        s.id,
-                        s.total,
-                        s.items_count,
-                        s.suspended_at,
-                        u.name as user_name
-                      FROM suspended_sales s
-                      LEFT JOIN users u ON s.user_id = u.id
-                      WHERE s.company_id = ? 
-                      AND s.status = 'suspended'
-                      ORDER BY s.suspended_at DESC
-                      LIMIT 50`,
-                args: [activeCompanyId]
-            });
-
-            console.timeEnd('⏱️ fetchSuspendedSales');
-            console.log('✅ Fetched suspended sales:', result.rows.length);
-
-            return result.rows;
-        } catch (e) {
-            console.error('❌ Fetch suspended sales error:', e);
-            return [];
-        }
-    },
-
-    // Recuperar venta (trae items completos y restaura carrito)
-    recoverSale: async (saleId) => {
-        try {
-            const { activeCompanyId, currentUser } = get();
-
-            console.log('🔄 Recovering sale:', saleId);
-            console.time('⏱️ recoverSale');
-
-            // Traer solo items y client_data
-            const result = await turso.execute({
-                sql: `SELECT items, client_data 
-                      FROM suspended_sales 
-                      WHERE id = ? 
-                      AND company_id = ? 
-                      AND status = 'suspended'`,
-                args: [saleId, activeCompanyId]
-            });
-
-            if (result.rows.length === 0) {
-                alert('Esta venta ya fue recuperada o no existe');
-                return false;
-            }
-
-            const sale = result.rows[0];
-            const items = JSON.parse(sale.items);
-            const clientData = sale.client_data ? JSON.parse(sale.client_data) : null;
-
-            console.log('✅ Sale data recovered:', { itemsCount: items.length });
-
-            // Marcar como recuperada (no eliminar, para auditoría)
-            await turso.execute({
-                sql: `UPDATE suspended_sales 
-                      SET status = 'recovered', 
-                      recovered_at = ?, 
-                      recovered_by = ?
-                  WHERE id = ?`,
-                args: [new Date().toISOString(), currentUser.id, saleId]
-            });
-
-            // Limpiar carrito actual
-            get().clearCart();
-
-            // Restaurar items en carrito
-            items.forEach(item => {
-                get().addToCart({
-                    id: item.id,
-                    name: item.name,
-                    price: item.price,
-                    cost: item.cost || 0,
-                    quantity: item.quantity,
-                    tax_rate: item.tax_rate || 0,
-                    image: item.image || null,
-                    sku: item.sku || '',
-                    stock: item.stock || 0
-                });
-            });
-
-            // Restaurar cliente
-            if (clientData) {
-                get().setPosSelectedClient(clientData);
-            }
-
-            // Actualizar contador
-            await get().updateSuspendedCount();
-
-            console.timeEnd('⏱️ recoverSale');
-            console.log('✅ Sale recovered successfully');
-
-            return true;
-        } catch (e) {
-            console.error('❌ Recover sale error:', e);
-            alert('Error al recuperar la venta');
-            return false;
-        }
-    },
-
-    // Eliminar venta suspendida
-    deleteSuspendedSale: async (saleId) => {
-        try {
-            const { activeCompanyId } = get();
-
-            console.log('🗑️ Deleting suspended sale:', saleId);
-
-            // Marcar como eliminada (no borrar, para auditoría)
-            await turso.execute({
-                sql: `UPDATE suspended_sales 
-                      SET status = 'deleted' 
-                      WHERE id = ? 
-                      AND company_id = ?`,
-                args: [saleId, activeCompanyId]
-            });
-
-            console.log('✅ Sale deleted successfully');
-
-            // Actualizar contador
-            await get().updateSuspendedCount();
-
-            return true;
-        } catch (e) {
-            console.error('❌ Delete suspended sale error:', e);
-            return false;
-        }
-    },
-
-    // ============================================
-    // SUSPENDED SALES (Suspender/Recuperar Ventas)
-    // ============================================
-
-    // Actualizar contador de ventas suspendidas (rápido, solo COUNT)
-    updateSuspendedCount: async () => {
-        try {
-            const { activeCompanyId } = get();
-            const result = await turso.execute({
-                sql: `SELECT COUNT(*) as count 
-                      FROM suspended_sales 
-                      WHERE company_id = ? 
-                      AND status = 'suspended'`,
-                args: [activeCompanyId]
-            });
-
-            const count = result.rows[0]?.count || 0;
-            set({ suspendedSalesCount: count });
-            console.log('✅ Suspended sales count:', count);
-        } catch (e) {
-            console.error('❌ Update suspended count error:', e);
-        }
-    },
-
     // Suspender venta actual (guardar y limpiar carrito)
     suspendSale: async () => {
         try {
@@ -5503,34 +5213,6 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    // Obtener todas las suscripciones (Admin)
-    fetchAllSubscriptions: async () => {
-        try {
-            const { turso } = get();
-            const result = await turso.execute({
-                sql: `SELECT 
-                        c.id as company_id,
-                        c.name as company_name,
-                        c.status as company_status,
-                        s.id as subscription_id,
-                        s.plan_id,
-                        s.status as subscription_status,
-                        s.amount,
-                        s.current_period_start,
-                        s.current_period_end,
-                        sp.name as plan_name
-                      FROM companies c
-                      LEFT JOIN subscriptions s ON c.subscription_id = s.id
-                      LEFT JOIN subscription_plans sp ON s.plan_id = sp.id
-                      ORDER BY c.created_at DESC`
-            });
-
-            return result.rows;
-        } catch (error) {
-            console.error('Error fetching subscriptions:', error);
-            return [];
-        }
-    },
 
     // ═══════════════════════════════════════════════════════════════
     // SISTEMA DE SOPORTE
