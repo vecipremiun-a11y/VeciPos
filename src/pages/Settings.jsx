@@ -196,7 +196,7 @@ const Settings = () => {
                                 <div className="space-y-4">
                                     <div className="flex justify-between border-b border-[var(--glass-border)] pb-2">
                                         <span className="text-[var(--color-text-muted)]">Versión</span>
-                                        <span className="text-[var(--color-text)] font-mono">1.1.0 (Futuristic Build)</span>
+                                        <span className="text-[var(--color-text)] font-mono">1.2.1 (Futuristic Build)</span>
                                     </div>
                                     <div className="flex justify-between border-b border-[var(--glass-border)] pb-2">
                                         <span className="text-[var(--color-text-muted)]">Desarrollador</span>
