@@ -118,6 +118,14 @@ export const ALL_PERMISSIONS = [
         ]
     },
     {
+        id: 'production',
+        label: 'Producción',
+        permissions: [
+            { id: 'production.view', label: 'Ver Pantalla de Producción' },
+            { id: 'production.manage', label: 'Gestionar Estados de Producción' },
+        ]
+    },
+    {
         id: 'users',
         label: 'Usuarios',
         permissions: [

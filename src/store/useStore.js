@@ -127,14 +127,8 @@ export const useStore = create(persist((set, get) => ({
 
             // Check Schema Version
             const versionRes = await turso.execute("SELECT value FROM system_settings WHERE key = 'schema_version'");
-            // ... (rest of migration logic kept same, but I need to make sure I don't delete it)
-            // Actually, I can leave _runMigrations as is. I only need to change fetchInitialData.
-            // But wait, I am replacing a chunk. Let's look at where I am.
-            // I requested view up to 450.
-            // I will target fetchInitialData specifically.
-
             const currentVersion = versionRes.rows.length > 0 ? parseInt(versionRes.rows[0].value) : 0;
-            const TARGET_VERSION = 4; // Incremented to trigger wholesale columns migration
+            const TARGET_VERSION = 7; // Incremented for Category Visibility in Preorders
 
             if (currentVersion >= TARGET_VERSION) {
                 console.log("Schema is up to date (v" + currentVersion + ")");
@@ -142,6 +136,13 @@ export const useStore = create(persist((set, get) => ({
             }
 
             console.log(`Migrating Schema from v${currentVersion} to v${TARGET_VERSION}...`);
+
+            // Migration 1: Base Tables (v1)
+            if (currentVersion < 1) {
+                // This block is implicitly handled by the subsequent CREATE TABLE IF NOT EXISTS statements
+                // and the initial setup of company_id.
+                // For explicit versioning, one might wrap existing table creations here.
+            }
 
             // 1. Create Companies Table
             await turso.execute(`
@@ -484,10 +485,72 @@ export const useStore = create(persist((set, get) => ({
 
             console.log('✅ Subscription tables created successfully');
 
+            // Migration 5: Preorder Bakery Columns (v5)
+            if (currentVersion < 5) {
+                console.log("Applying v5 (Preorder Bakery)...");
+                try {
+                    // Products: new preorder config columns
+                    const prodInfo = await turso.execute(`PRAGMA table_info(products)`);
+                    const prodCols = prodInfo.rows.map(r => r.name);
+                    if (!prodCols.includes('preorder_billing_unit')) {
+                        console.log('Adding preorder bakery columns to products...');
+                        await turso.execute(`ALTER TABLE products ADD COLUMN preorder_billing_unit TEXT DEFAULT 'unit'`);
+                        await turso.execute(`ALTER TABLE products ADD COLUMN preorder_price_per_kg REAL DEFAULT 0`);
+                        await turso.execute(`ALTER TABLE products ADD COLUMN preorder_gram_per_unit REAL DEFAULT 0`);
+                    }
+
+                    // preorder_items: billing details + weight tracking
+                    const piInfo = await turso.execute(`PRAGMA table_info(preorder_items)`);
+                    const piCols = piInfo.rows.map(r => r.name);
+                    if (!piCols.includes('billing_unit')) {
+                        console.log('Adding bakery columns to preorder_items...');
+                        await turso.execute(`ALTER TABLE preorder_items ADD COLUMN billing_unit TEXT DEFAULT 'unit'`);
+                        await turso.execute(`ALTER TABLE preorder_items ADD COLUMN price_per_kg REAL DEFAULT 0`);
+                        await turso.execute(`ALTER TABLE preorder_items ADD COLUMN gram_per_unit REAL DEFAULT 0`);
+                        await turso.execute(`ALTER TABLE preorder_items ADD COLUMN estimated_total REAL DEFAULT 0`);
+                        await turso.execute(`ALTER TABLE preorder_items ADD COLUMN real_weight_kg REAL`);
+                        await turso.execute(`ALTER TABLE preorder_items ADD COLUMN real_total REAL`);
+                    }
+
+                    // preorders: estimated vs real totals
+                    const poInfo = await turso.execute(`PRAGMA table_info(preorders)`);
+                    const poCols = poInfo.rows.map(r => r.name);
+                    if (!poCols.includes('estimated_total')) {
+                        console.log('Adding estimated/real total to preorders...');
+                        await turso.execute(`ALTER TABLE preorders ADD COLUMN estimated_total REAL DEFAULT 0`);
+                        await turso.execute(`ALTER TABLE preorders ADD COLUMN real_total REAL`);
+                    }
+
+                    console.log('✅ Preorder bakery columns added');
+                } catch (e) {
+                    console.warn('Migration error for preorder bakery columns:', e);
+                }
+            }
+
+            // Migration 6: Simplified Preorder Config (v6)
+            if (currentVersion < 6) {
+                console.log("Applying v6 (Preorder Base Price)...");
+                const tableInfo = await turso.execute("PRAGMA table_info(products)");
+                const columns = tableInfo.rows.map(r => r.name);
+                if (!columns.includes('preorder_use_base_price')) {
+                    await turso.execute("ALTER TABLE products ADD COLUMN preorder_use_base_price BOOLEAN DEFAULT 1");
+                }
+            }
+
+            // Migration 7: Category Visibility (v7)
+            if (currentVersion < 7) {
+                console.log("Applying v7 (Category Visibility)...");
+                const catInfo = await turso.execute("PRAGMA table_info(categories)");
+                const catCols = catInfo.rows.map(r => r.name);
+                if (!catCols.includes('show_in_preorders')) {
+                    await turso.execute("ALTER TABLE categories ADD COLUMN show_in_preorders BOOLEAN DEFAULT 1");
+                }
+            }
+
             // UPDATE VERSION
             await turso.execute({
-                sql: "INSERT INTO system_settings (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = ?",
-                args: [TARGET_VERSION, TARGET_VERSION]
+                sql: "INSERT OR REPLACE INTO system_settings (key, value) VALUES ('schema_version', ?)",
+                args: [TARGET_VERSION.toString()]
             });
 
 
@@ -2509,7 +2572,8 @@ export const useStore = create(persist((set, get) => ({
                     'pos.access', 'pos.sell', 'pos.discount', 'pos.open_register', 'pos.close_register', 'pos.cash_in', 'pos.cash_out', 'pos.suspend_sale', 'pos.recover_sale',
                     'sales.view', 'sales.view_details',
                     'clients.view', 'clients.create', 'clients.view_account',
-                    'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.complete'
+                    'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.complete',
+                    'production.view', 'production.manage'
                 ],
                 'Bodeguero': [
                     'dashboard.view',
@@ -2622,6 +2686,7 @@ export const useStore = create(persist((set, get) => ({
                 'product_profile.view',
                 'clients.view', 'clients.create', 'clients.edit', 'clients.delete', 'clients.view_account', 'clients.register_payment',
                 'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.delete', 'preorders.complete',
+                'production.view', 'production.manage',
                 'orders.view', 'orders.create', 'orders.edit', 'orders.receive',
                 'orders_history.view',
                 'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.export',
@@ -2672,7 +2737,7 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             const result = await turso.execute({
-                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes, preorder_unit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes, preorder_unit, preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit, preorder_use_base_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     product.name,
                     product.price,
@@ -2691,7 +2756,11 @@ export const useStore = create(persist((set, get) => ({
                     activeCompanyId,
                     product.sale_mode || 'sale_only',
                     product.allow_item_notes ? 1 : 0,
-                    product.preorder_unit || null
+                    product.preorder_unit || null,
+                    product.preorder_billing_unit || 'unit',
+                    product.preorder_price_per_kg || 0,
+                    product.preorder_gram_per_unit || 0,
+                    product.preorder_use_base_price !== undefined ? (product.preorder_use_base_price ? 1 : 0) : 1
                 ]
             });
             // Safely handle price_ranges for the local state update
@@ -2733,7 +2802,7 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             await turso.execute({
-                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=?, sale_mode=?, allow_item_notes=?, preorder_unit=? WHERE id = ? AND company_id = ?",
+                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=?, sale_mode=?, allow_item_notes=?, preorder_unit=?, preorder_billing_unit=?, preorder_price_per_kg=?, preorder_gram_per_unit=?, preorder_use_base_price=? WHERE id = ? AND company_id = ?",
                 args: [
                     updatedProduct.name,
                     updatedProduct.price,
@@ -2752,6 +2821,10 @@ export const useStore = create(persist((set, get) => ({
                     updatedProduct.sale_mode || 'sale_only',
                     updatedProduct.allow_item_notes ? 1 : 0,
                     updatedProduct.preorder_unit || null,
+                    updatedProduct.preorder_billing_unit || 'unit',
+                    updatedProduct.preorder_price_per_kg || 0,
+                    updatedProduct.preorder_gram_per_unit || 0,
+                    updatedProduct.preorder_use_base_price !== undefined ? (updatedProduct.preorder_use_base_price ? 1 : 0) : 1,
                     id,
                     activeCompanyId
                 ]
@@ -2806,8 +2879,15 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             const result = await turso.execute({
-                sql: "INSERT INTO categories (name, color, status, show_in_pos, company_id) VALUES (?, ?, ?, ?, ?) RETURNING *",
-                args: [category.name, category.color, category.status || 'active', category.showInPos !== false ? 1 : 0, activeCompanyId]
+                sql: "INSERT INTO categories (name, color, status, show_in_pos, show_in_preorders, company_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
+                args: [
+                    category.name,
+                    category.color,
+                    category.status || 'active',
+                    category.showInPos !== false ? 1 : 0,
+                    category.showInPreorders !== false ? 1 : 0,
+                    activeCompanyId
+                ]
             });
             const newCategory = result.rows[0];
 
@@ -2841,12 +2921,13 @@ export const useStore = create(persist((set, get) => ({
             // 2. Transaction: Update Category + (Optional) Update Products
             const queries = [
                 {
-                    sql: "UPDATE categories SET name = ?, color = ?, status = ?, show_in_pos = ? WHERE id = ? AND company_id = ?",
+                    sql: "UPDATE categories SET name = ?, color = ?, status = ?, show_in_pos = ?, show_in_preorders = ? WHERE id = ? AND company_id = ?",
                     args: [
                         updatedCategory.name,
                         updatedCategory.color,
                         updatedCategory.status,
                         updatedCategory.showInPos !== false ? 1 : 0,
+                        updatedCategory.showInPreorders !== false ? 1 : 0,
                         id,
                         activeCompanyId
                     ]
@@ -6393,18 +6474,40 @@ export const useStore = create(persist((set, get) => ({
 
     addToPreorderCart: (product) => {
         set(state => {
+            const billingUnit = product.preorder_billing_unit || 'unit';
+            const useBasePrice = product.preorder_use_base_price !== 0; // default true (1)
+            const effectivePrice = (product.is_offer && product.offer_price > 0)
+                ? product.offer_price : product.price;
+
+            // Resolve actual price for preorder
+            const resolvedPrice = useBasePrice ? effectivePrice : (parseFloat(product.preorder_price_per_kg) || 0);
+
+            // If billing by kg, resolvedPrice is per_kg. If unit, it's unit_price.
+            const pricePerKg = billingUnit === 'kg' ? resolvedPrice : 0;
+            const gramPerUnit = parseFloat(product.preorder_gram_per_unit) || 0;
+
+            // Helper to calculate estimated line total
+            const calcEstimated = (qty) => {
+                if (billingUnit === 'kg') {
+                    if (pricePerKg > 0 && gramPerUnit > 0) {
+                        return qty * (gramPerUnit / 1000) * pricePerKg;
+                    }
+                    return null; // Pending calculation
+                }
+                return qty * (billingUnit === 'kg' ? 0 : resolvedPrice);
+            };
+
             const existing = state.preorderCart.find(i => i.id === product.id);
             if (existing) {
+                const newQty = existing.qty + 1;
                 return {
                     preorderCart: state.preorderCart.map(i =>
                         i.id === product.id
-                            ? { ...i, qty: i.qty + 1, line_total: (i.qty + 1) * i.unit_price }
+                            ? { ...i, qty: newQty, line_total: calcEstimated(newQty) }
                             : i
                     )
                 };
             }
-            const effectivePrice = (product.is_offer && product.offer_price > 0)
-                ? product.offer_price : product.price;
             return {
                 preorderCart: [...state.preorderCart, {
                     id: product.id,
@@ -6412,8 +6515,11 @@ export const useStore = create(persist((set, get) => ({
                     product_name: product.name,
                     qty: 1,
                     unit: product.preorder_unit || product.unit || 'Und',
-                    unit_price: effectivePrice,
-                    line_total: effectivePrice,
+                    unit_price: billingUnit === 'unit' ? resolvedPrice : effectivePrice, // display base price if billing by kg?
+                    billing_unit: billingUnit,
+                    price_per_kg: pricePerKg,
+                    gram_per_unit: gramPerUnit,
+                    line_total: calcEstimated(1),
                     note: '',
                     allow_item_notes: product.allow_item_notes
                 }]
@@ -6426,7 +6532,16 @@ export const useStore = create(persist((set, get) => ({
             preorderCart: state.preorderCart.map(i => {
                 if (i.id !== productId) return i;
                 const updated = { ...i, ...updates };
-                updated.line_total = updated.qty * updated.unit_price;
+                // Recalculate estimated total based on billing mode
+                if (updated.billing_unit === 'kg') {
+                    if (parseFloat(updated.price_per_kg) > 0 && parseFloat(updated.gram_per_unit) > 0) {
+                        updated.line_total = updated.qty * (parseFloat(updated.gram_per_unit) / 1000) * parseFloat(updated.price_per_kg);
+                    } else {
+                        updated.line_total = null; // Pending
+                    }
+                } else {
+                    updated.line_total = updated.qty * updated.unit_price;
+                }
                 return updated;
             })
         }));
@@ -6443,12 +6558,13 @@ export const useStore = create(persist((set, get) => ({
     createPreorder: async (preorderData) => {
         const { activeCompanyId, currentUser } = get();
         try {
+            const estimatedTotal = preorderData.total_amount;
             const result = await turso.execute({
                 sql: `INSERT INTO preorders
                       (company_id, client_id, client_name, client_phone, due_date, due_time,
-                       status, total_amount, deposit_amount, remaining_amount,
-                       delivery_type, delivery_address, notes, created_by)
-                      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
+                       status, total_amount, estimated_total, deposit_amount, remaining_amount,
+                       delivery_type, delivery_address, notes, created_by, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 args: [
                     activeCompanyId,
                     preorderData.client_id || null,
@@ -6456,24 +6572,28 @@ export const useStore = create(persist((set, get) => ({
                     preorderData.client_phone || '',
                     preorderData.due_date,
                     preorderData.due_time,
-                    preorderData.total_amount,
+                    estimatedTotal,
+                    estimatedTotal,
                     preorderData.deposit_amount || 0,
-                    preorderData.total_amount - (preorderData.deposit_amount || 0),
+                    estimatedTotal - (preorderData.deposit_amount || 0),
                     preorderData.delivery_type || 'pickup',
                     preorderData.delivery_address || '',
                     preorderData.notes || '',
-                    currentUser?.name || ''
+                    currentUser?.name || '',
+                    new Date().toISOString()
                 ]
             });
 
             const preorderId = Number(result.lastInsertRowid);
 
-            // Insert items
+            // Insert items with bakery fields
             for (const item of preorderData.items) {
+                const itemEstimated = item.line_total;
                 await turso.execute({
                     sql: `INSERT INTO preorder_items
-                          (preorder_id, product_id, product_name, qty, unit, unit_price, line_total, note)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                          (preorder_id, product_id, product_name, qty, unit, unit_price, line_total, note,
+                           billing_unit, price_per_kg, gram_per_unit, estimated_total)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     args: [
                         preorderId,
                         item.product_id,
@@ -6482,7 +6602,11 @@ export const useStore = create(persist((set, get) => ({
                         item.unit || 'Und',
                         item.unit_price,
                         item.line_total,
-                        item.note || ''
+                        item.note || '',
+                        item.billing_unit || 'unit',
+                        item.price_per_kg || 0,
+                        item.gram_per_unit || 0,
+                        itemEstimated
                     ]
                 });
             }
@@ -6651,6 +6775,162 @@ export const useStore = create(persist((set, get) => ({
             return { success: true, products };
         } catch (e) {
             console.error('Error fetching preorderable products:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getPreorderReports: async (startDate, endDate) => {
+        const { activeCompanyId } = get();
+        try {
+            console.log("Generando reporte de encargos:", startDate, endDate);
+
+            // Ensure we cover the full day range in UTC/ISO string comparison
+            // If startDate is '2023-10-27', we want '2023-10-27 00:00:00' to '2023-10-27 23:59:59'
+            const startDateTime = `${startDate} 00:00:00`;
+            const endDateTime = `${endDate} 23:59:59`;
+
+            // 1. Resumen General
+            const summaryRes = await turso.execute({
+                sql: `SELECT
+                    COUNT(*) as total_orders,
+                    SUM(CASE WHEN status != 'canceled' THEN total_amount ELSE 0 END) as total_revenue,
+                    SUM(deposit_amount) as total_deposits,
+                    SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered_count,
+                    SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END) as canceled_count,
+                    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_count
+                  FROM preorders
+                  WHERE created_at >= ? AND created_at <= ? AND company_id = ?`,
+                args: [startDateTime, endDateTime, activeCompanyId]
+            });
+            const summary = summaryRes.rows[0];
+
+            // 2. Por Estado
+            const byStatusRes = await turso.execute({
+                sql: `SELECT status, COUNT(*) as count, SUM(total_amount) as total
+                  FROM preorders
+                  WHERE created_at >= ? AND created_at <= ? AND company_id = ?
+                  GROUP BY status`,
+                args: [startDateTime, endDateTime, activeCompanyId]
+            });
+            const byStatus = byStatusRes.rows;
+
+            // 3. Por Producto (Top Productos) - Excluye cancelados
+            const byProductRes = await turso.execute({
+                sql: `SELECT
+                    p.name,
+                    p.sku,
+                    SUM(pi.qty) as quantity,
+                    pi.billing_unit,
+                    SUM(pi.line_total) as revenue,
+                    SUM(pi.qty * COALESCE(p.original_price, 0)) as approximate_cost
+                  FROM preorder_items pi
+                  JOIN preorders po ON pi.preorder_id = po.id
+                  JOIN products p ON pi.product_id = p.id
+                  WHERE po.created_at >= ? AND po.created_at <= ?
+                    AND po.company_id = ?
+                    AND po.status != 'canceled'
+                  GROUP BY pi.product_id
+                  ORDER BY revenue DESC`,
+                args: [startDateTime, endDateTime, activeCompanyId]
+            });
+            const byProduct = byProductRes.rows.map(p => ({
+                ...p,
+                profit: (p.revenue || 0) - (p.approximate_cost || 0)
+            }));
+
+            // 4. Por Cliente (Top Clientes) - Excluye cancelados
+            const byClientRes = await turso.execute({
+                sql: `SELECT
+                    po.client_id,
+                    po.client_name,
+                    MAX(po.client_phone) as phone,
+                    COUNT(*) as orders_count,
+                    SUM(po.total_amount) as total_spend,
+                    MAX(po.created_at) as last_order_date
+                  FROM preorders po
+                  WHERE po.created_at >= ? AND po.created_at <= ?
+                    AND po.company_id = ?
+                    AND po.status != 'canceled'
+                  GROUP BY COALESCE(po.client_id, po.client_name)
+                  ORDER BY total_spend DESC
+                  LIMIT 100`,
+                args: [startDateTime, endDateTime, activeCompanyId]
+            });
+            const byClient = byClientRes.rows;
+
+            // 5. Detalles (Para exportar o ver lista completa)
+            // Podríamos limitarlo o paginarlo si es mucho, pero para reportes suele pedirse todo
+            const detailsRes = await turso.execute({
+                sql: `SELECT
+                    po.id, po.created_at, po.due_date, po.status,
+                    po.client_name, po.total_amount, po.deposit_amount,
+                    (SELECT GROUP_CONCAT(p.name || ' (' || pi.qty || ')', ', ')
+                     FROM preorder_items pi JOIN products p ON pi.product_id = p.id
+                     WHERE pi.preorder_id = po.id) as items_summary
+                  FROM preorders po
+                  WHERE po.created_at >= ? AND po.created_at <= ? AND po.company_id = ?
+                  ORDER BY po.created_at DESC`,
+                args: [startDateTime, endDateTime, activeCompanyId]
+            });
+            const details = detailsRes.rows;
+
+            return {
+                success: true,
+                summary,
+                byStatus,
+                byProduct,
+                byClient,
+                details
+            };
+
+        } catch (e) {
+            console.error("Error generating preorder reports:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deliverPreorder: async (preorderId, itemWeights, paymentMethod = 'Efectivo') => {
+        try {
+            // 1. Update each item with real weight and real total
+            let realTotal = 0;
+            for (const iw of itemWeights) {
+                const realItemTotal = iw.billing_unit === 'kg'
+                    ? (iw.real_weight_kg || 0) * (iw.price_per_kg || 0)
+                    : iw.line_total;
+                realTotal += realItemTotal;
+
+                await turso.execute({
+                    sql: `UPDATE preorder_items SET real_weight_kg = ?, real_total = ? WHERE id = ?`,
+                    args: [iw.real_weight_kg || null, realItemTotal, iw.id]
+                });
+            }
+
+            // 2. Get total already paid (deposits)
+            const paymentsRes = await turso.execute({
+                sql: 'SELECT SUM(amount) as total_paid FROM preorder_payments WHERE preorder_id = ?',
+                args: [preorderId]
+            });
+            const totalPaid = paymentsRes.rows[0]?.total_paid || 0;
+            const balanceDue = Math.max(0, realTotal - totalPaid);
+
+            // 3. Register final payment if there's balance due
+            if (balanceDue > 0) {
+                await turso.execute({
+                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type) VALUES (?, ?, ?, 'final')`,
+                    args: [preorderId, balanceDue, paymentMethod]
+                });
+            }
+
+            // 4. Update preorder with real total, mark as delivered
+            await turso.execute({
+                sql: `UPDATE preorders SET real_total = ?, total_amount = ?, remaining_amount = 0, deposit_amount = ?, status = 'delivered', updated_at = datetime('now') WHERE id = ?`,
+                args: [realTotal, realTotal, totalPaid, preorderId]
+            });
+
+            await get().fetchPreorders();
+            return { success: true, realTotal, balanceDue };
+        } catch (e) {
+            console.error('Error delivering preorder:', e);
             return { success: false, error: e.message };
         }
     },

@@ -23,7 +23,11 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         price_ranges: [],
         sale_mode: 'sale_only',
         allow_item_notes: false,
-        preorder_unit: ''
+        preorder_unit: '',
+        preorder_billing_unit: 'unit',
+        preorder_price_per_kg: '',
+        preorder_gram_per_unit: '',
+        preorder_use_base_price: true
     });
     const [marginPercentage, setMarginPercentage] = useState('');
 
@@ -32,8 +36,13 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
             setFormData({
                 ...productToEdit,
                 unit: productToEdit.unit || 'Und',
-                price_ranges: productToEdit.price_ranges || []
+                price_ranges: productToEdit.price_ranges || [],
+                preorder_billing_unit: productToEdit.preorder_billing_unit || 'unit',
+                preorder_price_per_kg: productToEdit.preorder_billing_unit === 'kg' ? (productToEdit.preorder_price_per_kg || '') : '',
+                preorder_gram_per_unit: productToEdit.preorder_gram_per_unit || '',
+                preorder_use_base_price: productToEdit.preorder_use_base_price !== undefined ? (productToEdit.preorder_use_base_price === 1) : true
             });
+
             // Calculate initial margin %
             if (productToEdit.price && productToEdit.cost) {
                 const taxRate = parseFloat(productToEdit.tax_rate) || 0;
@@ -44,11 +53,12 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     setMarginPercentage(margin.toFixed(2));
                 }
             }
+            // Handle is_offer boolean/integer conversion
             if (productToEdit.is_offer !== undefined) {
                 setFormData(prev => ({ ...prev, is_offer: productToEdit.is_offer === 1 || productToEdit.is_offer === true, offer_price: productToEdit.offer_price || '' }));
             }
         } else {
-            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0, is_offer: false, offer_price: '', sale_mode: 'sale_only', allow_item_notes: false, preorder_unit: '' });
+            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0, is_offer: false, offer_price: '', sale_mode: 'sale_only', allow_item_notes: false, preorder_unit: '', preorder_billing_unit: 'unit', preorder_price_per_kg: '', preorder_gram_per_unit: '', preorder_use_base_price: true });
             setMarginPercentage('');
         }
     }, [productToEdit, isOpen]);
@@ -505,6 +515,111 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             </h3>
 
                             <div className="space-y-4">
+                                {/* Se solicita en */}
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">Se solicita en (producción)</label>
+                                    <select
+                                        name="preorder_unit"
+                                        value={formData.preorder_unit || ''}
+                                        onChange={handleChange}
+                                        className="glass-input w-full"
+                                    >
+                                        <option value="" className="bg-gray-900">Usar unidad normal ({formData.unit || 'Und'})</option>
+                                        <option value="Und" className="bg-gray-900">Unidades</option>
+                                        <option value="Kg" className="bg-gray-900">Kg</option>
+                                        <option value="Docena" className="bg-gray-900">Docena</option>
+                                        <option value="Bandeja" className="bg-gray-900">Bandeja</option>
+                                        <option value="Porción" className="bg-gray-900">Porción</option>
+                                    </select>
+                                    <p className="text-[10px] text-gray-500 mt-1">Cómo el cliente pide el producto (ej: "10 unidades").</p>
+                                </div>
+
+                                {/* Se cobra en */}
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-1">Se cobra en (al entregar)</label>
+                                    <div className="flex gap-2 mb-2">
+                                        {[{ value: 'unit', label: 'Por unidad' }, { value: 'kg', label: 'Por kilo' }].map(opt => (
+                                            <button
+                                                key={opt.value}
+                                                type="button"
+                                                onClick={() => setFormData(prev => ({ ...prev, preorder_billing_unit: opt.value }))}
+                                                className={cn("flex-1 py-2 rounded-xl text-sm font-bold transition-all border",
+                                                    formData.preorder_billing_unit === opt.value
+                                                        ? "bg-orange-400/20 text-orange-300 border-orange-400/50"
+                                                        : "bg-black/20 text-gray-400 border-white/10 hover:border-orange-400/30"
+                                                )}
+                                            >
+                                                {opt.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <p className="text-[10px] text-gray-500">
+                                        {formData.preorder_billing_unit === 'kg'
+                                            ? "Se pesará el producto al momento de la entrega para cobrar el valor exacto."
+                                            : "Se cobrará según la cantidad solicitada."}
+                                    </p>
+                                </div>
+
+                                {/* Precio Base vs Especial */}
+                                <div className="bg-black/20 p-3 rounded-xl border border-white/10 space-y-3">
+                                    <div className="flex justify-between items-center">
+                                        <div>
+                                            <label className="text-white font-bold text-sm">Usar precio de venta</label>
+                                            <p className="text-[10px] text-gray-500">
+                                                Reutilizar el precio normal ({formatCurrency(
+                                                    (formData.is_offer && formData.offer_price > 0) ? parseFloat(formData.offer_price) : parseFloat(formData.price || 0),
+                                                    currentCurrency
+                                                )})
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setFormData(prev => ({ ...prev, preorder_use_base_price: !prev.preorder_use_base_price }))}
+                                            className={`w-12 h-6 rounded-full flex items-center p-1 transition-all duration-300 ${formData.preorder_use_base_price ? 'bg-green-500' : 'bg-gray-600'}`}
+                                        >
+                                            <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-all duration-300 ${formData.preorder_use_base_price ? 'translate-x-6' : 'translate-x-0'}`} />
+                                        </button>
+                                    </div>
+
+                                    {!formData.preorder_use_base_price && (
+                                        <div className="animate-in slide-in-from-top-2 pt-2 border-t border-white/10">
+                                            <label className="block text-sm text-gray-400 mb-1">
+                                                Precio especial para encargo ({formData.preorder_billing_unit === 'kg' ? '$/kg' : '$/unidad'})
+                                            </label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                                <input
+                                                    type="number"
+                                                    name="preorder_price_per_kg"
+                                                    value={formData.preorder_price_per_kg}
+                                                    onChange={handleChange}
+                                                    placeholder="0"
+                                                    className="glass-input w-full pl-8"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Peso aproximado (Only if Request=Unit AND Billing=Kg) */}
+                                {(formData.preorder_billing_unit === 'kg' && (!formData.preorder_unit || formData.preorder_unit === 'Und')) && (
+                                    <div className="animate-in slide-in-from-top-2">
+                                        <label className="block text-sm text-gray-400 mb-1">⚖️ Peso aproximado por unidad (gramos)</label>
+                                        <div className="relative">
+                                            <input
+                                                type="number"
+                                                name="preorder_gram_per_unit"
+                                                value={formData.preorder_gram_per_unit}
+                                                onChange={handleChange}
+                                                placeholder="Ej: 110"
+                                                className="glass-input w-full pr-8"
+                                            />
+                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">g</span>
+                                        </div>
+                                        <p className="text-[10px] text-orange-400 mt-1">Necesario para calcular el total aproximado (unidades × peso).</p>
+                                    </div>
+                                )}
+
                                 {/* Allow Item Notes */}
                                 <div className="flex justify-between items-center bg-black/20 p-3 rounded-xl border border-white/10">
                                     <div>
@@ -518,26 +633,6 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                     >
                                         <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-all duration-300 ${formData.allow_item_notes ? 'translate-x-6' : 'translate-x-0'}`} />
                                     </button>
-                                </div>
-
-                                {/* Preorder Unit */}
-                                <div>
-                                    <label className="block text-sm text-gray-400 mb-1">Unidad de encargo (opcional)</label>
-                                    <select
-                                        name="preorder_unit"
-                                        value={formData.preorder_unit || ''}
-                                        onChange={handleChange}
-                                        className="glass-input w-full"
-                                    >
-                                        <option value="" className="bg-gray-900">Usar unidad normal ({formData.unit || 'Und'})</option>
-                                        <option value="Kg" className="bg-gray-900">Kg</option>
-                                        <option value="Und" className="bg-gray-900">Unidad</option>
-                                        <option value="Docena" className="bg-gray-900">Docena</option>
-                                        <option value="Bandeja" className="bg-gray-900">Bandeja</option>
-                                        <option value="Porción" className="bg-gray-900">Porción</option>
-                                        <option value="Litro" className="bg-gray-900">Litro</option>
-                                    </select>
-                                    <p className="text-[10px] text-gray-500 mt-1">Unidad específica para encargos (ej: Torta se vende por unidad pero se encarga por Kg).</p>
                                 </div>
                             </div>
                         </div>

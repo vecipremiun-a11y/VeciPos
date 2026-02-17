@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
@@ -38,12 +38,18 @@ const MainLayout = () => {
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: 'dashboard.view' },
         { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', permission: 'pos.access' },
         { icon: Users, label: 'Clientes', path: '/clients', permission: 'clients.view' },
-        { icon: CakeSlice, label: 'Encargos', path: '/preorders', permission: 'preorders.view' },
         { icon: History, label: 'Historial', path: '/sales-history', permission: 'sales.view' },
         {
-            icon: ShoppingBag,
+            icon: ClipboardList,
             label: 'Pedidos',
-            permission: 'supplier_orders.view',
+            subItems: [
+                { icon: CakeSlice, label: 'Encargos (Caja)', path: '/preorders', permission: 'preorders.view' },
+                { icon: ChefHat, label: 'Producción', path: '/production', permission: 'production.view' }
+            ]
+        },
+        {
+            icon: ShoppingBag,
+            label: 'Órdenes de Compra',
             subItems: [
                 { icon: ClipboardList, label: 'Pedido', path: '/orders', permission: 'supplier_orders.create' },
                 { icon: ClipboardList, label: 'Pedidos Realizados', path: '/orders/history', permission: 'supplier_orders.view' }

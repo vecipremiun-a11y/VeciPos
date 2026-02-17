@@ -3,13 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import {
     Search, ShoppingCart, Trash2, Plus, Minus, X, Clock, Phone, User,
     MapPin, FileText, Calendar, ChevronDown, Check, DollarSign, Package,
-    ClipboardList, Truck, AlertCircle, CreditCard, Banknote, ArrowRight, CakeSlice
+    ClipboardList, Truck, AlertCircle, CreditCard, Banknote, ArrowRight, CakeSlice, Printer
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
 import OptimizedImage from '../components/OptimizedImage';
 import ClientSearchWidget from '../components/ClientSearchWidget';
+import DeliveryCheckoutModal from '../components/DeliveryCheckoutModal';
+import QuickPreorderProductModal from '../components/QuickPreorderProductModal';
+import { printPreorder } from '../utils/printPreorder';
 
 const STATUS_CONFIG = {
     pending: { label: 'Pendiente', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30', icon: Clock, next: 'preparing' },
@@ -61,7 +64,9 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
     };
 
     const deposit = parseFloat(depositAmount) || 0;
-    const remaining = total - deposit;
+    const remaining = total ? (total - deposit) : null; // If total is pending (null), remaining is pending
+
+    const isPendingTotal = total === null;
 
     const handleSubmit = async () => {
         if (isSubmitting) return;
@@ -73,7 +78,7 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
             client_phone: selectedClient?.phone || clientPhone,
             due_date: getActualDate(),
             due_time: dueTime,
-            total_amount: total,
+            total_amount: total || 0, // 0 if pending
             deposit_amount: deposit,
             deposit_method: depositMethod,
             delivery_type: deliveryType,
@@ -181,19 +186,64 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
 
                     {/* Deposit */}
                     <div className="space-y-2">
-                        <label className="text-sm font-bold text-[var(--color-text)] flex items-center gap-2">
-                            <DollarSign size={16} className="text-green-400" />
-                            Abono
-                        </label>
-                        <div className="bg-black/20 p-3 rounded-xl border border-white/10 space-y-3">
-                            <div className="flex justify-between text-sm">
-                                <span className="text-[var(--color-text-muted)]">Total del encargo</span>
-                                <span className="text-[var(--color-text)] font-bold">{formatCurrency(total, currentCurrency)}</span>
+                        <h3 className="text-[var(--color-text)] font-bold text-lg mb-4 flex items-center gap-2">
+                            <DollarSign size={20} className="text-green-400" />
+                            Total y Abono
+                        </h3>
+
+                        <div className="bg-[var(--glass-bg)] p-4 rounded-xl border border-[var(--glass-border)] mb-4 space-y-2">
+                            <div className="flex justify-between items-center text-sm">
+                                <span className="text-[var(--color-text-muted)]">Total Estimado:</span>
+                                <span className="text-[var(--color-text)] font-bold text-lg">
+                                    {isPendingTotal ? (
+                                        <span className="text-orange-400">PENDIENTE</span>
+                                    ) : (
+                                        formatCurrency(total, currentCurrency)
+                                    )}
+                                </span>
                             </div>
-                            <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
-                                <input type="number" placeholder="0" className="glass-input w-full pl-8 text-lg font-bold"
-                                    value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
+
+                            {/* Quick Deposit % Buttons (Disabled if pending) */}
+                            <div className="flex gap-2 pt-2">
+                                {[10, 20, 30, 50].map(pct => (
+                                    <button
+                                        key={pct}
+                                        type="button"
+                                        disabled={isPendingTotal}
+                                        onClick={() => setDepositAmount(Math.round(total * (pct / 100)))}
+                                        className="flex-1 py-1 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-xs font-bold text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-black disabled:opacity-30 disabled:cursor-not-allowed"
+                                    >
+                                        {pct}%
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-[var(--color-text)] mb-1">Monto del Abono</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] font-bold">$</span>
+                                    <input
+                                        type="number"
+                                        className="glass-input w-full pl-7 text-lg font-bold text-green-400"
+                                        placeholder="0"
+                                        value={depositAmount}
+                                        onChange={e => setDepositAmount(e.target.value)}
+                                    />
+                                </div>
+                                {isPendingTotal && (
+                                    <p className="text-[10px] text-orange-400 mt-1">
+                                        * Total estimado pendiente. Puedes ingresar un abono manual referencial.
+                                    </p>
+                                )}
+                            </div>
+
+                            <div className="flex bg-[var(--glass-bg)] p-3 rounded-xl justify-between items-center">
+                                <span className="text-sm font-bold text-[var(--color-text-muted)]">Saldo Pendiente:</span>
+                                <span className="text-xl font-bold text-orange-400">
+                                    {isPendingTotal ? 'PENDIENTE' : formatCurrency(remaining, currentCurrency)}
+                                </span>
                             </div>
                             <div className="flex gap-2">
                                 {['Efectivo', 'Tarjeta', 'Transferencia'].map(m => (
@@ -207,12 +257,6 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
                                     </button>
                                 ))}
                             </div>
-                            {deposit > 0 && (
-                                <div className="flex justify-between text-sm pt-2 border-t border-white/10">
-                                    <span className="text-[var(--color-text-muted)]">Saldo pendiente</span>
-                                    <span className="text-orange-400 font-bold">{formatCurrency(remaining, currentCurrency)}</span>
-                                </div>
-                            )}
                         </div>
                     </div>
 
@@ -318,9 +362,35 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
                         <ClipboardList className="text-[var(--color-primary)]" size={20} />
                         Encargo #{preorder.id}
                     </h2>
-                    <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
-                        <X size={20} />
-                    </button>
+                    <div className="flex gap-2">
+                        <button onClick={() => {
+                            // Construct print object from details
+                            const printData = {
+                                id: preorder.id,
+                                clientName: details.preorder.client_name,
+                                clientPhone: details.preorder.client_phone,
+                                dueDate: details.preorder.due_date,
+                                dueTime: details.preorder.due_time,
+                                deliveryType: details.preorder.delivery_type,
+                                totalAmount: details.preorder.total_amount,
+                                depositAmount: details.preorder.deposit_amount,
+                                paymentMethod: details.payments[0]?.method, // Approximate
+                                notes: details.preorder.notes
+                            };
+                            printPreorder(printData, details.items.map(i => ({
+                                qty: i.qty,
+                                unit: i.unit,
+                                name: i.product_name,
+                                total: i.line_total,
+                                note: i.note
+                            })));
+                        }} className="text-[var(--color-text-muted)] hover:text-[var(--color-primary)] mr-2">
+                            <Printer size={20} />
+                        </button>
+                        <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                            <X size={20} />
+                        </button>
+                    </div>
                 </div>
 
                 {isLoading ? (
@@ -499,7 +569,8 @@ const Preorders = () => {
         preorders, preorderCart, categories: storedCategories,
         addToPreorderCart, updatePreorderCartItem, removeFromPreorderCart,
         clearPreorderCart, createPreorder, fetchPreorders,
-        updatePreorderStatus, getPreorderableProducts, currentCurrency, clients
+        updatePreorderStatus, getPreorderableProducts, currentCurrency, clients,
+        deliverPreorder, getPreorderDetails
     } = useStore();
 
     const navigate = useNavigate();
@@ -511,16 +582,32 @@ const Preorders = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [selectedPreorder, setSelectedPreorder] = useState(null);
+    const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+
+    const [deliveryPreorder, setDeliveryPreorder] = useState(null);
+    const [showQuickProductModal, setShowQuickProductModal] = useState(false);
 
     // List filters
     const [dateFilter, setDateFilter] = useState('today');
     const [statusFilter, setStatusFilter] = useState('all');
 
     const categoryList = ['Todos', ...storedCategories
-        .filter(c => c.status === 'active')
+        .filter(c => {
+            // Check visibility (handle both optimistic UI state and DB state)
+            // Default to visible if undefined (e.g. migration hasn't run or new record)
+            const isVisible = c.showInPreorders ?? (c.show_in_preorders !== 0);
+            return c.status === 'active' && isVisible;
+        })
         .map(c => c.name)];
 
-    const cartTotal = preorderCart.reduce((sum, item) => sum + item.line_total, 0);
+    const cartTotal = useMemo(() => {
+        // If any item has null total (pending), the overall total is null (pending)
+        const hasPending = preorderCart.some(item => item.line_total === null);
+        if (hasPending) return null;
+        return preorderCart.reduce((sum, item) => sum + (item.line_total || 0), 0);
+    }, [preorderCart]);
+
+    const hasKgItems = preorderCart.some(item => item.billing_unit === 'kg');
 
     // Load preorderable products
     const loadProducts = async (search = '', cat = 'Todos') => {
@@ -565,14 +652,66 @@ const Preorders = () => {
         if (result.success) {
             setShowConfirmModal(false);
             setActiveTab('list');
+
+            // Auto-print receipt
+            const printData = {
+                id: result.preorderId,
+                clientName: data.client_name,
+                clientPhone: data.client_phone,
+                dueDate: data.due_date,
+                dueTime: data.due_time,
+                deliveryType: data.delivery_type,
+                totalAmount: data.total_amount,
+                depositAmount: data.deposit_amount,
+                paymentMethod: data.deposit_method,
+                notes: data.notes
+            };
+
+            // Map items for printer
+            const printItems = data.items.map(item => ({
+                qty: item.qty,
+                unit: item.unit || 'Und',
+                name: item.product_name,
+                total: item.line_total, // might be null if pending
+                note: item.note
+            }));
+
+            printPreorder(printData, printItems);
+
         } else {
             alert('Error al crear encargo: ' + result.error);
         }
     };
 
     const handleStatusChange = async (preorderId, newStatus) => {
+        if (newStatus === 'delivered') {
+            // Intercept delivery to show checkout modal
+            setIsLoading(true);
+            const details = await getPreorderDetails(preorderId);
+            setIsLoading(false);
+            if (details.success) {
+                setDeliveryPreorder(details);
+                setShowDeliveryModal(true);
+            }
+            return;
+        }
         await updatePreorderStatus(preorderId, newStatus);
+        fetchPreorders(getListFilters());
+        // If we are in detail view, close it or refetch?
+        // Existing behavior was setSelectedPreorder(null) which closes it
         setSelectedPreorder(null);
+    };
+
+    const handleDeliverSuccess = async (preorderId, weights, method) => {
+        const result = await deliverPreorder(preorderId, weights, method);
+        if (result.success) {
+            setShowDeliveryModal(false);
+            setDeliveryPreorder(null);
+            setSelectedPreorder(null); // Close detail modal if open
+            fetchPreorders(getListFilters());
+        } else {
+            alert('Error al entregar: ' + result.error);
+        }
     };
 
     return (
@@ -635,11 +774,21 @@ const Preorders = () => {
                     {/* Product Catalog */}
                     <div className="flex-1 flex flex-col gap-3 overflow-hidden min-h-0">
                         <div className="glass-card p-3 space-y-3 shrink-0">
-                            <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
-                                <input type="text" placeholder="Buscar productos encargables..."
-                                    className="glass-input !pl-10 w-full text-sm"
-                                    value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                            <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
+                                    <input type="text" placeholder="Buscar productos encargables..."
+                                        className="glass-input !pl-10 w-full text-sm"
+                                        value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                                </div>
+                                <button
+                                    onClick={() => setShowQuickProductModal(true)}
+                                    className="bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 border border-orange-500/30 px-3 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                                    title="Crear producto rápido solo para encargo"
+                                >
+                                    <span className="text-lg leading-none">⚡</span>
+                                    <span className="hidden sm:inline">Rápido</span>
+                                </button>
                             </div>
                             <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
                                 {categoryList.map(cat => (
@@ -655,7 +804,7 @@ const Preorders = () => {
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-3 content-start pr-1 pb-28 lg:pb-2">
+                        <div className="pos-product-grid flex-1 overflow-y-auto pr-2 grid gap-2 lg:gap-4 content-start pb-28 lg:pb-4 custom-scrollbar grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] lg:grid-cols-2">
                             {isLoading ? (
                                 <div className="col-span-full flex items-center justify-center py-12">
                                     <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-500" />
@@ -724,9 +873,19 @@ const Preorders = () => {
                                             </button>
                                         </div>
                                         <div className="flex justify-between items-center text-xs text-[var(--color-text-muted)]">
-                                            <span>{item.unit}: {formatCurrency(item.unit_price, currentCurrency)}</span>
+                                            <span>
+                                                {item.billing_unit === 'kg'
+                                                    ? `${formatCurrency(item.price_per_kg, currentCurrency)}/kg · ${item.gram_per_unit}g/un`
+                                                    : `${item.unit}: ${formatCurrency(item.unit_price, currentCurrency)}`
+                                                }
+                                            </span>
                                             <span className="text-[var(--color-primary)] font-bold text-base">
-                                                {formatCurrency(item.line_total, currentCurrency)}
+                                                {item.billing_unit === 'kg' && <span className="text-xs font-normal text-orange-400 mr-1">≈</span>}
+                                                {item.line_total === null ? (
+                                                    <span className="text-xs text-orange-400 tracking-wider">PENDIENTE</span>
+                                                ) : (
+                                                    formatCurrency(item.line_total, currentCurrency)
+                                                )}
                                             </span>
                                         </div>
                                         <div className="flex items-center justify-between gap-2">
@@ -744,7 +903,17 @@ const Preorders = () => {
                                                     onClick={() => item.qty > 1 && updatePreorderCartItem(item.id, { qty: item.qty - 1 })}>
                                                     <Minus size={14} />
                                                 </button>
-                                                <span className="text-[var(--color-text)] font-bold w-6 text-center text-sm">{item.qty}</span>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    className="w-12 bg-transparent text-[var(--color-text)] font-bold text-center text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none px-0"
+                                                    value={item.qty}
+                                                    onChange={(e) => {
+                                                        const val = parseInt(e.target.value);
+                                                        if (!isNaN(val) && val > 0) updatePreorderCartItem(item.id, { qty: val });
+                                                    }}
+                                                    onClick={(e) => e.target.select()}
+                                                />
                                                 <button className="w-7 h-7 rounded-lg bg-[var(--color-primary)]/20 flex items-center justify-center text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-black"
                                                     onClick={() => updatePreorderCartItem(item.id, { qty: item.qty + 1 })}>
                                                     <Plus size={14} />
@@ -758,9 +927,15 @@ const Preorders = () => {
 
                         <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] space-y-3">
                             <div className="flex justify-between items-center text-[var(--color-text)] text-2xl font-bold">
-                                <span>Total</span>
-                                <span className="neon-text">{formatCurrency(cartTotal, currentCurrency)}</span>
+                                <span>{hasKgItems ? 'Total Aprox.' : 'Total'}</span>
+                                <span className="neon-text">
+                                    {hasKgItems && <span className="text-sm text-orange-400 mr-1">≈</span>}
+                                    {cartTotal === null ? 'PENDIENTE' : formatCurrency(cartTotal, currentCurrency)}
+                                </span>
                             </div>
+                            {hasKgItems && (
+                                <p className="text-xs text-orange-400/70 text-center">El total exacto se calculará al pesar los productos</p>
+                            )}
                             <button disabled={preorderCart.length === 0}
                                 onClick={() => setShowConfirmModal(true)}
                                 className="btn-primary w-full flex items-center justify-center gap-2 py-3 rounded-xl disabled:opacity-50">
@@ -933,6 +1108,20 @@ const Preorders = () => {
                     currentCurrency={currentCurrency}
                 />
             )}
+
+            <QuickPreorderProductModal
+                isOpen={showQuickProductModal}
+                onClose={() => setShowQuickProductModal(false)}
+            />
+
+            {/* Delivery Checkout Modal */}
+            <DeliveryCheckoutModal
+                isOpen={showDeliveryModal}
+                onClose={() => setShowDeliveryModal(false)}
+                preorderDetails={deliveryPreorder}
+                onDeliver={handleDeliverSuccess}
+                currentCurrency={currentCurrency}
+            />
         </div>
     );
 };

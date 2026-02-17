@@ -27,6 +27,7 @@ import Clients from './pages/Clients';
 import Orders from './pages/Orders';
 import SupplierOrders from './pages/SupplierOrders';
 import Preorders from './pages/Preorders';
+import Production from './pages/Production';
 import MainLayout from './layouts/MainLayout';
 import AdminLayout from './layouts/AdminLayout';
 import RequireAdmin from './components/RequireAdmin';
@@ -190,6 +191,7 @@ function App() {
           <Route path="orders" element={<ProtectedPage permission="supplier_orders.create"><Orders /></ProtectedPage>} />
           <Route path="orders/history" element={<ProtectedPage permission="supplier_orders.view"><SupplierOrders /></ProtectedPage>} />
           <Route path="preorders" element={<ProtectedPage permission="preorders.view"><Preorders /></ProtectedPage>} />
+          <Route path="production" element={<ProtectedPage permission="production.view"><Production /></ProtectedPage>} />
 
           {/* Reports */}
           <Route path="reports" element={<ProtectedPage permission="reports.sales"><Reports /></ProtectedPage>} />
