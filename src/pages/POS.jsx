@@ -12,6 +12,7 @@ import ClientSearchWidget from '../components/ClientSearchWidget';
 import OptimizedImage from '../components/OptimizedImage';
 import SuspendedSalesModal from '../components/SuspendedSalesModal';
 import { usePermissions } from '../hooks/usePermissions';
+import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 
 // Component for Kg quantity input that allows typing decimals with comma
 const KgQuantityInput = ({ value, onChange, onCommit }) => {
@@ -148,39 +149,31 @@ const POS = () => {
         });
     }, []); // Array vacío = solo una vez al montar
 
-    // Barcode Scanner Listener
-    React.useEffect(() => {
-        let buffer = '';
-        let lastKeyTime = Date.now();
+    // Barcode Scanner Logic using custom hook
+    // This hook is stable and won't detach on simple prop changes
+    const handleBarcodeScan = React.useCallback(async (scannedCode) => {
+        if (!scannedCode) return;
 
-        const handleKeyDown = (e) => {
-            const currentTime = Date.now();
+        console.log("🔍 Escaneado:", scannedCode);
 
-            if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+        // Direct Server-Side Lookup (User Request: "search from server not local")
+        try {
+            const product = await getProductByBarcode(scannedCode);
+            if (product) {
+                addToCart(product);
+            } else {
+                // If not found by exact barcode, try search
+                searchProducts(scannedCode);
 
-            if (currentTime - lastKeyTime > 100) buffer = '';
-            lastKeyTime = currentTime;
-
-            if (e.key === 'Enter') {
-                if (buffer.length > 0) {
-                    // Direct Server-Side Lookup (User Request: "search from server not local")
-                    getProductByBarcode(buffer).then(p => {
-                        if (p) {
-                            addToCart(p);
-                        } else {
-                            searchProducts(buffer);
-                        }
-                    });
-                    buffer = '';
-                }
-            } else if (e.key.length === 1) {
-                buffer += e.key;
+                // Also set search term to show user what was scanned
+                setSearchTerm(scannedCode);
             }
-        };
+        } catch (error) {
+            console.error("Error scanning:", error);
+        }
+    }, [addToCart, searchProducts, getProductByBarcode]);
 
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [products, addToCart, searchProducts]);
+    useBarcodeScanner(handleBarcodeScan);
 
     // Use stored categories for the filter list. 
     const categoryList = ['Todos', ...storedCategories
