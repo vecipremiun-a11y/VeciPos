@@ -29,7 +29,7 @@ export const printPreorder = (preorder, items, companyName = 'POSKEM') => {
             .info-row { display: flex; justify-content: space-between; margin-bottom: 2px; font-size: 12px; }
             .client-box { border: 2px solid #000; padding: 5px; margin: 5px 0; text-align: center; }
             .client-name { font-size: 18px; font-weight: bold; display: block; }
-            .due-date { font-size: 16px; font-weight: bold; text-align: center; margin: 5px 0; background: #000; color: #fff; padding: 4px; }
+            .due-date { font-size: 16px; font-weight: bold; text-align: center; margin: 5px 0; }
             .section-title { font-weight: bold; border-bottom: 2px solid #000; margin-top: 10px; margin-bottom: 4px; font-size: 14px; text-transform: uppercase; }
             .item-row { margin-bottom: 5px; border-bottom: 1px dotted #000; padding-bottom: 2px; }
             .item-header { display: flex; justify-content: space-between; align-items: flex-start; font-weight: bold; font-size: 14px; }

@@ -873,12 +873,29 @@ const Preorders = () => {
                                             </button>
                                         </div>
                                         <div className="flex justify-between items-center text-xs text-[var(--color-text-muted)]">
-                                            <span>
-                                                {item.billing_unit === 'kg'
-                                                    ? `${formatCurrency(item.price_per_kg, currentCurrency)}/kg · ${item.gram_per_unit}g/un`
-                                                    : `${item.unit}: ${formatCurrency(item.unit_price, currentCurrency)}`
-                                                }
-                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <div className="relative w-24">
+                                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                                                    <input
+                                                        type="number"
+                                                        className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded px-1 pl-4 py-0.5 text-right text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+                                                        value={item.billing_unit === 'kg' ? item.price_per_kg : item.unit_price}
+                                                        onChange={(e) => {
+                                                            const val = parseFloat(e.target.value);
+                                                            if (!isNaN(val) && val >= 0) {
+                                                                if (item.billing_unit === 'kg') {
+                                                                    updatePreorderCartItem(item.id, { price_per_kg: val });
+                                                                } else {
+                                                                    updatePreorderCartItem(item.id, { unit_price: val });
+                                                                }
+                                                            }
+                                                        }}
+                                                        onClick={(e) => e.target.select()}
+                                                    />
+                                                </div>
+                                                {item.billing_unit === 'kg' && <span>/kg · {item.gram_per_unit}g/un</span>}
+                                            </div>
+
                                             <span className="text-[var(--color-primary)] font-bold text-base">
                                                 {item.billing_unit === 'kg' && <span className="text-xs font-normal text-orange-400 mr-1">≈</span>}
                                                 {item.line_total === null ? (
