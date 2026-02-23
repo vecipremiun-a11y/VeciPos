@@ -875,7 +875,7 @@ const Preorders = () => {
                                         <div className="flex justify-between items-center text-xs text-[var(--color-text-muted)]">
                                             <div className="flex items-center gap-2">
                                                 <div className="relative w-24">
-                                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none">$</span>
                                                     <input
                                                         type="number"
                                                         className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded px-1 pl-4 py-0.5 text-right text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"

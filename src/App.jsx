@@ -17,6 +17,7 @@ import Suppliers from './pages/Suppliers';
 import Purchases from './pages/Purchases';
 import ProductProfile from './pages/ProductProfile';
 import Users from './pages/Users';
+import Personal from './pages/Personal';
 import Reports from './pages/Reports';
 import ExpiringProductsReport from './pages/ExpiringProductsReport';
 import CashClosuresReport from './pages/CashClosuresReport';
@@ -187,6 +188,7 @@ function App() {
           <Route path="purchases" element={<ProtectedPage permission="purchases.view"><Purchases /></ProtectedPage>} />
           <Route path="product-profile" element={<ProtectedPage permission="product_profile.view"><ProductProfile /></ProtectedPage>} />
           <Route path="users" element={<ProtectedPage permission="users.view"><Users /></ProtectedPage>} />
+          <Route path="personal" element={<ProtectedPage permission="personal.view"><Personal /></ProtectedPage>} />
           <Route path="clients" element={<ProtectedPage permission="clients.view"><Clients /></ProtectedPage>} />
           <Route path="orders" element={<ProtectedPage permission="supplier_orders.create"><Orders /></ProtectedPage>} />
           <Route path="orders/history" element={<ProtectedPage permission="supplier_orders.view"><SupplierOrders /></ProtectedPage>} />

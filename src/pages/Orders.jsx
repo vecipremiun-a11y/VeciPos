@@ -40,6 +40,7 @@ const Orders = () => {
     // Order cart states
     const [orderItems, setOrderItems] = useState([]);
     const [showOrderModal, setShowOrderModal] = useState(false);
+    const [orderItemQuantityDrafts, setOrderItemQuantityDrafts] = useState({});
 
     // Add product to order cart
     const addToOrder = () => {
@@ -98,6 +99,60 @@ const Orders = () => {
     // Remove item from order
     const removeFromOrder = (productId) => {
         setOrderItems(orderItems.filter(item => item.id !== productId));
+    };
+
+    const updateOrderItemQuantity = (productId, quantityValue) => {
+        if (quantityValue === '') {
+            setOrderItemQuantityDrafts(prev => ({ ...prev, [productId]: '' }));
+            return;
+        }
+
+        if (!/^\d+$/.test(quantityValue)) return;
+
+        setOrderItemQuantityDrafts(prev => ({ ...prev, [productId]: quantityValue }));
+
+        const parsedQuantity = Number(quantityValue);
+        if (!Number.isFinite(parsedQuantity) || parsedQuantity < 1) return;
+
+        const safeQuantity = Math.floor(parsedQuantity);
+        setOrderItems(prevItems => prevItems.map(item =>
+            item.id === productId
+                ? {
+                    ...item,
+                    quantity: safeQuantity,
+                    total: item.costWithTax * safeQuantity
+                }
+                : item
+        ));
+    };
+
+    const commitOrderItemQuantity = (productId) => {
+        const draftValue = orderItemQuantityDrafts[productId];
+        if (draftValue === undefined) return;
+
+        if (draftValue === '' || Number(draftValue) < 1) {
+            setOrderItemQuantityDrafts(prev => {
+                const { [productId]: _, ...rest } = prev;
+                return rest;
+            });
+            return;
+        }
+
+        const safeQuantity = Math.floor(Number(draftValue));
+        setOrderItems(prevItems => prevItems.map(item =>
+            item.id === productId
+                ? {
+                    ...item,
+                    quantity: safeQuantity,
+                    total: item.costWithTax * safeQuantity
+                }
+                : item
+        ));
+
+        setOrderItemQuantityDrafts(prev => {
+            const { [productId]: _, ...rest } = prev;
+            return rest;
+        });
     };
 
     const handleConfirmOrder = async () => {
@@ -1297,9 +1352,17 @@ const Orders = () => {
                                                     {item.taxRate > 0 && <span>+IVA: {formatCurrency(item.costWithTax, currentCurrency)}</span>}
                                                 </div>
                                             </div>
-                                            <div className="text-center px-4">
-                                                <p className="text-lg font-bold text-[var(--color-text)]">{item.quantity}</p>
-                                                <p className="text-xs text-[var(--color-text-muted)]">uds</p>
+                                            <div className="text-center px-4 min-w-[90px]">
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    step="1"
+                                                    value={orderItemQuantityDrafts[item.id] ?? String(item.quantity)}
+                                                    onChange={(e) => updateOrderItemQuantity(item.id, e.target.value)}
+                                                    onBlur={() => commitOrderItemQuantity(item.id)}
+                                                    className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-1 px-2 text-center text-lg font-bold text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                                />
+                                                <p className="text-xs text-[var(--color-text-muted)] mt-1">uds</p>
                                             </div>
                                             <div className="text-right">
                                                 <p className="text-lg font-bold text-[var(--color-primary)]">{formatCurrency(item.total, currentCurrency)}</p>

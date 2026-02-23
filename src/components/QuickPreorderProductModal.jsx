@@ -119,7 +119,7 @@ const QuickPreorderProductModal = ({ isOpen, onClose, onSuccess }) => {
                         <div>
                             <label className="block text-sm font-medium text-gray-400 mb-1">Precio por Kilo *</label>
                             <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold pointer-events-none">$</span>
                                 <input
                                     type="number"
                                     value={formData.price_per_kg}
@@ -144,7 +144,7 @@ const QuickPreorderProductModal = ({ isOpen, onClose, onSuccess }) => {
                                     className="glass-input w-full pr-8"
                                     placeholder="Ej: 110"
                                 />
-                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">g</span>
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">g</span>
                             </div>
                         </div>
                     </div>

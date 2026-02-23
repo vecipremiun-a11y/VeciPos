@@ -118,7 +118,7 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
                                 <div className="space-y-1.5">
                                     <div className="flex items-center gap-2">
                                         <div className="relative flex-1">
-                                            <Scale size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                                            <Scale size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
                                             <input
                                                 type="number"
                                                 step="0.01"
@@ -129,7 +129,7 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
                                                 onChange={e => handleWeightChange(iw.id, e.target.value)}
                                                 onClick={e => e.target.select()}
                                             />
-                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-bold">kg</span>
+                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-bold pointer-events-none">kg</span>
                                         </div>
                                         <div className="text-right min-w-[80px]">
                                             <p className="text-[var(--color-primary)] font-bold">

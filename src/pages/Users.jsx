@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Trash2, User, Pencil, Search, Users as UsersIcon, ShoppingCart, Package, ClipboardList, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Plus, Trash2, User, Pencil, Search, Users as UsersIcon, ShoppingCart, Package, ClipboardList, ChevronLeft, ChevronRight, X, Briefcase, CreditCard, Calendar } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { usePermissions } from '../hooks/usePermissions';
@@ -10,7 +10,28 @@ const Users = () => {
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
-    const [formData, setFormData] = useState({ name: '', username: '', role: 'Vendedor', password: '', email: '' });
+    const [activeTab, setActiveTab] = useState('general'); // 'general' | 'labor'
+    const [formData, setFormData] = useState({
+        name: '', username: '', role: 'Vendedor', password: '', email: '',
+        // Labor Profile
+        has_labor_profile: false,
+        labor_position: '',
+        labor_branch: '',
+        labor_start_date: '',
+        labor_status: 'active',
+        labor_pin: '',
+        // Payment
+        pay_type: 'monthly',
+        pay_method: 'transfer',
+        pay_day: '',
+        pay_base_amount: 0,
+        pay_fixed_bonus: 0,
+        pay_fixed_discount: 0,
+        pay_bank_name: '',
+        pay_bank_account: '',
+        pay_bank_account_type: '',
+        pay_bank_owner: ''
+    });
 
     // Search and pagination
     const [searchTerm, setSearchTerm] = useState('');
@@ -25,6 +46,9 @@ const Users = () => {
     if (!can('users.view')) {
         return <div className="text-center p-10 text-red-500">Acceso Denegado. Se requieren permisos de Administrador o Gestión de Usuarios.</div>;
     }
+
+    // DEBUG (Removed - Moved down)
+
 
     // Stats calculations
     const stats = useMemo(() => {
@@ -79,12 +103,45 @@ const Users = () => {
     };
 
     const handleOpenModal = (user = null) => {
+        setActiveTab('general');
         if (user) {
             setEditingUser(user);
-            setFormData({ name: user.name, username: user.username, role: user.role, password: '', email: user.email || '' });
+            setFormData({
+                name: user.name,
+                username: user.username,
+                role: user.role,
+                password: '',
+                email: user.email || '',
+                // Labor
+                has_labor_profile: !!user.has_labor_profile,
+                labor_position: user.labor_position || '',
+                labor_branch: user.labor_branch || '',
+                labor_start_date: user.labor_start_date || '',
+                labor_status: user.labor_status || 'active',
+                labor_pin: user.labor_pin || '',
+                // Payment
+                pay_type: user.pay_type || 'monthly',
+                pay_method: user.pay_method || 'transfer',
+                pay_day: user.pay_day || '',
+                pay_base_amount: user.pay_base_amount || 0,
+                pay_fixed_bonus: user.pay_fixed_bonus || 0,
+                pay_fixed_discount: user.pay_fixed_discount || 0,
+                pay_bank_name: user.pay_bank_name || '',
+                pay_bank_account: user.pay_bank_account || '',
+                pay_bank_account_type: user.pay_bank_account_type || '',
+                pay_bank_owner: user.pay_bank_owner || ''
+            });
         } else {
             setEditingUser(null);
-            setFormData({ name: '', username: '', role: 'Vendedor', password: '', email: '' });
+            setFormData({
+                name: '', username: '', role: 'Vendedor', password: '', email: '',
+                has_labor_profile: false,
+                labor_position: '', labor_branch: '', labor_start_date: '',
+                labor_status: 'active', labor_pin: '',
+                pay_type: 'monthly', pay_method: 'transfer', pay_day: '',
+                pay_base_amount: 0, pay_fixed_bonus: 0, pay_fixed_discount: 0,
+                pay_bank_name: '', pay_bank_account: '', pay_bank_account_type: '', pay_bank_owner: ''
+            });
         }
         setIsModalOpen(true);
     };
@@ -401,8 +458,8 @@ const Users = () => {
 
             {/* Modal */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                    <div className="glass-card w-full max-w-md p-6 relative animate-in fade-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+                    <div className="glass-card w-full max-w-2xl p-6 relative animate-in fade-in zoom-in-95 duration-200 my-8">
                         <button
                             onClick={() => setIsModalOpen(false)}
                             className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
@@ -415,86 +472,264 @@ const Users = () => {
                             {editingUser ? 'Editar Usuario' : 'Nuevo Usuario'}
                         </h2>
 
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
-                                    Nombre Completo
-                                </label>
-                                <input
-                                    className="glass-input w-full"
-                                    value={formData.name}
-                                    onChange={e => setFormData({ ...formData, name: e.target.value })}
-                                    placeholder="Juan Pérez"
-                                    required
-                                />
-                            </div>
+                        {/* Tabs */}
+                        <div className="flex border-b border-[var(--glass-border)] mb-6">
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('general')}
+                                className={cn(
+                                    "px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2",
+                                    activeTab === 'general'
+                                        ? "border-[var(--color-primary)] text-[var(--color-primary)]"
+                                        : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                                )}
+                            >
+                                <User size={16} />
+                                General
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('labor')}
+                                className={cn(
+                                    "px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2",
+                                    activeTab === 'labor'
+                                        ? "border-[var(--color-primary)] text-[var(--color-primary)]"
+                                        : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                                )}
+                            >
+                                <Briefcase size={16} />
+                                Ficha Laboral
+                            </button>
+                        </div>
 
-                            <div className="grid grid-cols-2 gap-4">
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            {/* General Tab */}
+                            <div className={cn("space-y-4", activeTab !== 'general' && "hidden")}>
                                 <div>
                                     <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
-                                        Usuario
+                                        Nombre Completo
                                     </label>
                                     <input
                                         className="glass-input w-full"
-                                        value={formData.username}
-                                        onChange={e => setFormData({ ...formData, username: e.target.value })}
-                                        placeholder="jperez"
+                                        value={formData.name}
+                                        onChange={e => setFormData({ ...formData, name: e.target.value })}
+                                        placeholder="Juan Pérez"
                                         required
                                     />
                                 </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
+                                            Usuario
+                                        </label>
+                                        <input
+                                            className="glass-input w-full"
+                                            value={formData.username}
+                                            onChange={e => setFormData({ ...formData, username: e.target.value })}
+                                            placeholder="jperez"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
+                                            {editingUser ? 'Nueva Contraseña' : 'Contraseña'}
+                                        </label>
+                                        <input
+                                            className="glass-input w-full"
+                                            type="password"
+                                            value={formData.password}
+                                            onChange={e => setFormData({ ...formData, password: e.target.value })}
+                                            placeholder={editingUser ? "••••••••" : "123456"}
+                                        />
+                                    </div>
+                                </div>
+
                                 <div>
                                     <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
-                                        {editingUser ? 'Nueva Contraseña' : 'Contraseña'}
+                                        Email (Opcional)
                                     </label>
                                     <input
                                         className="glass-input w-full"
-                                        type="password"
-                                        value={formData.password}
-                                        onChange={e => setFormData({ ...formData, password: e.target.value })}
-                                        placeholder={editingUser ? "••••••••" : "123456"}
+                                        type="email"
+                                        value={formData.email}
+                                        onChange={e => setFormData({ ...formData, email: e.target.value })}
+                                        placeholder="usuario@email.com"
                                     />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
+                                        Rol
+                                    </label>
+                                    <select
+                                        className="glass-input w-full bg-[var(--color-surface)] text-[var(--color-text)]"
+                                        value={formData.role}
+                                        onChange={e => setFormData({ ...formData, role: e.target.value })}
+                                    >
+                                        <option value="Vendedor">Vendedor</option>
+                                        <option value="Bodeguero">Bodeguero</option>
+                                        <option value="Administrador">Administrador</option>
+                                    </select>
                                 </div>
                             </div>
 
-                            <div>
-                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
-                                    Email (Opcional)
-                                </label>
-                                <input
-                                    className="glass-input w-full"
-                                    type="email"
-                                    value={formData.email}
-                                    onChange={e => setFormData({ ...formData, email: e.target.value })}
-                                    placeholder="usuario@email.com"
-                                />
+                            {/* Labor Profile Tab */}
+                            <div className={cn("space-y-6", activeTab !== 'labor' && "hidden")}>
+
+                                <div className="flex items-center justify-between bg-[var(--glass-bg)] p-4 rounded-xl border border-[var(--glass-border)]">
+                                    <div>
+                                        <h3 className="text-sm font-bold text-[var(--color-text)]">Activar Ficha Laboral</h3>
+                                        <p className="text-xs text-[var(--color-text-muted)]">Habilita funciones de asistencia y pago para este usuario.</p>
+                                    </div>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            className="sr-only peer"
+                                            checked={formData.has_labor_profile}
+                                            onChange={e => setFormData({ ...formData, has_labor_profile: e.target.checked })}
+                                        />
+                                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--color-primary)]"></div>
+                                    </label>
+                                </div>
+
+                                {formData.has_labor_profile && (
+                                    <>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
+                                                    Cargo / Área
+                                                </label>
+                                                <input
+                                                    className="glass-input w-full"
+                                                    value={formData.labor_position}
+                                                    onChange={e => setFormData({ ...formData, labor_position: e.target.value })}
+                                                    placeholder="Ej: Cajero Principal"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
+                                                    Sucursal
+                                                </label>
+                                                <input
+                                                    className="glass-input w-full"
+                                                    value={formData.labor_branch}
+                                                    onChange={e => setFormData({ ...formData, labor_branch: e.target.value })}
+                                                    placeholder="Ej: Central"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
+                                                    Fecha Ingreso
+                                                </label>
+                                                <input
+                                                    type="date"
+                                                    className="glass-input w-full"
+                                                    value={formData.labor_start_date}
+                                                    onChange={e => setFormData({ ...formData, labor_start_date: e.target.value })}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
+                                                    Estado Laboral
+                                                </label>
+                                                <select
+                                                    className="glass-input w-full bg-[var(--color-surface)] text-[var(--color-text)]"
+                                                    value={formData.labor_status}
+                                                    onChange={e => setFormData({ ...formData, labor_status: e.target.value })}
+                                                >
+                                                    <option value="active">Activo</option>
+                                                    <option value="inactive">Inactivo</option>
+                                                    <option value="suspended">Suspendido</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
+                                                PIN de Asistencia (4-6 dígitos)
+                                            </label>
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="text"
+                                                    maxLength="6"
+                                                    className="glass-input flex-1"
+                                                    value={formData.labor_pin}
+                                                    onChange={e => setFormData({ ...formData, labor_pin: e.target.value.replace(/\D/g, '') })}
+                                                    placeholder="1234"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const pin = Math.floor(1000 + Math.random() * 9000).toString();
+                                                        setFormData({ ...formData, labor_pin: pin });
+                                                    }}
+                                                    className="px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-xs hover:bg-[var(--color-surface-hover)] transition-colors"
+                                                >
+                                                    Generar
+                                                </button>
+                                            </div>
+                                            <p className="text-[10px] text-[var(--color-text-muted)] mt-1">Este PIN se usará en el Kiosco.</p>
+                                        </div>
+
+                                        <div className="border-t border-[var(--glass-border)] my-4"></div>
+                                        <h4 className="text-sm font-bold text-[var(--color-text)] flex items-center gap-2 mb-4">
+                                            <CreditCard size={16} /> Configuración de Pago
+                                        </h4>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">Tipo Pago</label>
+                                                <select className="glass-input w-full bg-[var(--color-surface)]" value={formData.pay_type} onChange={e => setFormData({ ...formData, pay_type: e.target.value })}>
+                                                    <option value="monthly">Mensual</option>
+                                                    <option value="weekly">Semanal</option>
+                                                    <option value="daily">Diario</option>
+                                                    <option value="hourly">Por Hora</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">Forma Pago</label>
+                                                <select className="glass-input w-full bg-[var(--color-surface)]" value={formData.pay_method} onChange={e => setFormData({ ...formData, pay_method: e.target.value })}>
+                                                    <option value="transfer">Transferencia</option>
+                                                    <option value="cash">Efectivo</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">Día de Pago</label>
+                                                <input className="glass-input w-full" value={formData.pay_day} onChange={e => setFormData({ ...formData, pay_day: e.target.value })} placeholder="Ej: 05" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">Sueldo Base</label>
+                                                <input type="number" className="glass-input w-full" value={formData.pay_base_amount} onChange={e => setFormData({ ...formData, pay_base_amount: Number(e.target.value) })} />
+                                            </div>
+                                        </div>
+
+                                        {formData.pay_method === 'transfer' && (
+                                            <div className="bg-[var(--glass-bg)] p-4 rounded-xl space-y-3">
+                                                <p className="text-xs font-bold uppercase text-[var(--color-text-muted)]">Datos Bancarios</p>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <input className="glass-input w-full" placeholder="Banco" value={formData.pay_bank_name} onChange={e => setFormData({ ...formData, pay_bank_name: e.target.value })} />
+                                                    <input className="glass-input w-full" placeholder="Tipo Cuenta" value={formData.pay_bank_account_type} onChange={e => setFormData({ ...formData, pay_bank_account_type: e.target.value })} />
+                                                    <input className="glass-input w-full col-span-2" placeholder="N° Cuenta" value={formData.pay_bank_account} onChange={e => setFormData({ ...formData, pay_bank_account: e.target.value })} />
+                                                    <input className="glass-input w-full col-span-2" placeholder="Titular" value={formData.pay_bank_owner} onChange={e => setFormData({ ...formData, pay_bank_owner: e.target.value })} />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
                             </div>
 
-                            <div>
-                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
-                                    Rol
-                                </label>
-                                <select
-                                    className="glass-input w-full bg-[var(--color-surface)] text-[var(--color-text)]"
-                                    value={formData.role}
-                                    onChange={e => setFormData({ ...formData, role: e.target.value })}
-                                >
-                                    <option value="Vendedor">Vendedor</option>
-                                    <option value="Bodeguero">Bodeguero</option>
-                                    <option value="Administrador">Administrador</option>
-                                </select>
-                            </div>
-
-                            <div className="flex gap-3 pt-4">
+                            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-[var(--glass-border)]">
                                 <button
                                     type="button"
                                     onClick={() => setIsModalOpen(false)}
-                                    className="flex-1 px-4 py-3 rounded-xl text-[var(--color-text)] bg-[var(--glass-bg)] hover:bg-[var(--color-surface-hover)] border border-[var(--glass-border)] transition-colors font-medium"
+                                    className="px-4 py-2 text-sm font-medium text-[var(--color-text)] hover:bg-[var(--glass-bg)] rounded-lg transition-colors"
                                 >
                                     Cancelar
                                 </button>
                                 <button
                                     type="submit"
-                                    className="flex-1 btn-primary py-3"
+                                    className="btn-primary"
                                 >
                                     {editingUser ? 'Guardar Cambios' : 'Crear Usuario'}
                                 </button>

@@ -8,14 +8,17 @@ import { formatCurrency } from '../utils/formatCurrency';
 
 const Invoices = () => {
     const { fetchPurchases, fetchPurchaseDetails, deletePurchase, activeCompanyId, suppliers, currentCurrency } = useStore();
+    const INVOICES_PAGE_SIZE = 15;
 
     const [invoices, setInvoices] = useState([]);
+    const [allInvoicesForMetrics, setAllInvoicesForMetrics] = useState([]);
     const [invoiceView, setInvoiceView] = useState('list');
     const [activeTab, setActiveTab] = useState('invoices'); // 'invoices' | 'payables'
     const [selectedInvoice, setSelectedInvoice] = useState(null);
     const [isLoadingInvoices, setIsLoadingInvoices] = useState(false);
     const [isLoadingDetails, setIsLoadingDetails] = useState(false);
     const [offset, setOffset] = useState(0);
+    const [hasMoreInvoices, setHasMoreInvoices] = useState(true);
 
     // Filtros
     const [dateFrom, setDateFrom] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -36,24 +39,60 @@ const Invoices = () => {
 
     useEffect(() => {
         loadInvoices(0, true);
+        loadInvoicesForMetrics();
     }, [activeCompanyId]);
 
+    const loadInvoicesForMetrics = async () => {
+        try {
+            const result = await turso.execute({
+                sql: `SELECT id, supplier_id, supplier_name, invoice_number, date, total, is_credit, status, amount_paid
+                      FROM purchases
+                      WHERE company_id = ?
+                      ORDER BY date DESC`,
+                args: [activeCompanyId]
+            });
+            setAllInvoicesForMetrics(result.rows || []);
+        } catch (error) {
+            console.error('Error loading invoices for metrics:', error);
+            setAllInvoicesForMetrics([]);
+        }
+    };
+
     const loadInvoices = async (currentOffset, reset = false) => {
+        if (isLoadingInvoices) return;
+        if (!reset && !hasMoreInvoices) return;
+
         setIsLoadingInvoices(true);
-        const fetched = await fetchPurchases(currentOffset);
+        const fetched = await fetchPurchases(currentOffset, INVOICES_PAGE_SIZE);
+
         if (reset) {
             setInvoices(fetched);
-            setOffset(currentOffset + 50);
+            setOffset(currentOffset + fetched.length);
+            setHasMoreInvoices(fetched.length === INVOICES_PAGE_SIZE);
         } else {
             setInvoices(prev => [...prev, ...fetched]);
-            setOffset(currentOffset + 50);
+            setOffset(currentOffset + fetched.length);
+            if (fetched.length < INVOICES_PAGE_SIZE) {
+                setHasMoreInvoices(false);
+            }
         }
         setIsLoadingInvoices(false);
     };
 
-    // Filtrar facturas
-    const filteredInvoices = useMemo(() => {
-        return invoices.filter(inv => {
+    const handleInvoicesScroll = (e) => {
+        if (invoiceView !== 'list') return;
+        if (isLoadingInvoices || !hasMoreInvoices) return;
+
+        const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+        const reachedBottom = scrollTop + clientHeight >= scrollHeight - 80;
+
+        if (reachedBottom) {
+            loadInvoices(offset);
+        }
+    };
+
+    const applyInvoiceFilters = (sourceInvoices) => {
+        return sourceInvoices.filter(inv => {
             if (dateFrom && inv.date < dateFrom) return false;
             if (dateTo && inv.date > dateTo) return false;
             if (supplierFilter && inv.supplier_id !== parseInt(supplierFilter)) return false;
@@ -65,6 +104,16 @@ const Invoices = () => {
             }
             return true;
         });
+    };
+
+    // Filtrar facturas para métricas (dataset completo)
+    const filteredInvoices = useMemo(() => {
+        return applyInvoiceFilters(allInvoicesForMetrics);
+    }, [allInvoicesForMetrics, dateFrom, dateTo, supplierFilter, paymentTypeFilter, searchQuery]);
+
+    // Filtrar facturas visibles en tabla (dataset paginado)
+    const visibleInvoices = useMemo(() => {
+        return applyInvoiceFilters(invoices);
     }, [invoices, dateFrom, dateTo, supplierFilter, paymentTypeFilter, searchQuery]);
 
     // Calcular estadísticas
@@ -83,7 +132,7 @@ const Invoices = () => {
             const monthStart = format(startOfMonth(monthDate), 'yyyy-MM-dd');
             const monthEnd = format(endOfMonth(monthDate), 'yyyy-MM-dd');
             const monthName = format(monthDate, 'MMM yyyy', { locale: es });
-            const monthInvoices = invoices.filter(inv => inv.date >= monthStart && inv.date <= monthEnd);
+            const monthInvoices = allInvoicesForMetrics.filter(inv => inv.date >= monthStart && inv.date <= monthEnd);
             months.push({
                 month: monthName,
                 total: monthInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0),
@@ -92,11 +141,11 @@ const Invoices = () => {
             });
         }
         return months.reverse();
-    }, [invoices]);
+    }, [allInvoicesForMetrics]);
 
     // Facturas pendientes por proveedor
     const pendingBySupplier = useMemo(() => {
-        const pending = invoices.filter(inv => inv.is_credit && inv.status !== 'paid');
+        const pending = allInvoicesForMetrics.filter(inv => inv.is_credit && inv.status !== 'paid');
         const grouped = {};
         pending.forEach(inv => {
             const key = inv.supplier_id || 'unknown';
@@ -109,7 +158,7 @@ const Invoices = () => {
             grouped[key].paid += inv.amount_paid || 0;
         });
         return Object.values(grouped).filter(s => s.total - s.paid > 0);
-    }, [invoices]);
+    }, [allInvoicesForMetrics]);
 
     const totalPendingAmount = useMemo(() => {
         return pendingBySupplier.reduce((sum, s) => sum + (s.total - s.paid), 0);
@@ -135,6 +184,7 @@ const Invoices = () => {
         if (window.confirm('¿Estás seguro de eliminar esta factura?')) {
             await deletePurchase(id);
             loadInvoices(0, true);
+            loadInvoicesForMetrics();
             if (selectedInvoice?.id === id) handleBackToInvoices();
         }
     };
@@ -190,6 +240,7 @@ const Invoices = () => {
             }
 
             await loadInvoices(0, true);
+            await loadInvoicesForMetrics();
             closePaymentModal();
         } catch (error) {
             console.error('Error processing payment:', error);
@@ -386,7 +437,7 @@ const Invoices = () => {
     );
 
     return (
-        <div className="space-y-6 h-[calc(100vh-6rem)] flex flex-col">
+        <div className="space-y-6 min-h-[calc(100vh-6rem)] flex flex-col">
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0">
                 <div>
@@ -409,44 +460,59 @@ const Invoices = () => {
 
             {/* Invoice Table */}
             {activeTab === 'invoices' && (
-                <div className="glass-card overflow-hidden p-0 flex-1 flex flex-col relative">
+                <div className="glass-card overflow-hidden p-0 flex flex-col relative h-[60vh] min-h-[360px] max-h-[70vh]">
                     {invoiceView === 'list' && (
-                        <div className="flex-1 overflow-auto">
+                        <div className="flex-1 overflow-y-auto" onScroll={handleInvoicesScroll}>
                             {isLoadingInvoices && invoices.length === 0 ? (
                                 <div className="flex items-center justify-center h-full"><Loader className="animate-spin text-[var(--color-primary)]" size={32} /></div>
                             ) : (
-                                <table className="w-full text-left">
-                                    <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] uppercase text-sm font-semibold sticky top-0 z-10">
-                                        <tr>
-                                            <th className="px-6 py-4">N° Factura</th>
-                                            <th className="px-6 py-4">Proveedor</th>
-                                            <th className="px-6 py-4">Fecha</th>
-                                            <th className="px-6 py-4">Estado</th>
-                                            <th className="px-6 py-4 text-right">Total</th>
-                                            <th className="px-6 py-4 text-right">Acciones</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-[var(--glass-border)]">
-                                        {filteredInvoices.map(inv => (
-                                            <tr key={inv.id} onClick={() => handleInvoiceClick(inv.id)} className="hover:bg-[var(--glass-bg)] cursor-pointer group">
-                                                <td className="px-6 py-4 text-[var(--color-text)] font-medium"><FileText size={16} className="inline mr-2 text-[var(--color-primary)]" />{inv.invoice_number || 'S/N'}</td>
-                                                <td className="px-6 py-4 text-[var(--color-text-muted)]">{inv.supplier_name || 'Desconocido'}</td>
-                                                <td className="px-6 py-4 text-[var(--color-text-muted)]">{inv.date ? format(new Date(inv.date + 'T00:00:00'), 'dd/MM/yyyy') : '-'}</td>
-                                                <td className="px-6 py-4">
-                                                    <span className={`px-2 py-1 rounded text-xs font-bold ${inv.is_credit ? 'bg-orange-500/20 text-orange-400' : 'bg-green-500/20 text-green-400'}`}>
-                                                        {inv.is_credit ? 'CRÉDITO' : 'PAGADO'}
-                                                    </span>
-                                                </td>
-                                                <td className="px-6 py-4 text-right text-[var(--color-text)] font-bold">{formatCurrency(inv.total, currentCurrency)}</td>
-                                                <td className="px-6 py-4 text-right">
-                                                    <button onClick={(e) => handleDeleteInvoice(e, inv.id)} className="p-2 hover:bg-[var(--color-surface-hover)] rounded text-red-400 opacity-0 group-hover:opacity-100"><Trash2 size={20} /></button>
-                                                </td>
+                                <>
+                                    <table className="w-full text-left">
+                                        <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] uppercase text-sm font-semibold sticky top-0 z-10">
+                                            <tr>
+                                                <th className="px-6 py-4">N° Factura</th>
+                                                <th className="px-6 py-4">Proveedor</th>
+                                                <th className="px-6 py-4">Fecha</th>
+                                                <th className="px-6 py-4">Estado</th>
+                                                <th className="px-6 py-4 text-right">Total</th>
+                                                <th className="px-6 py-4 text-right">Acciones</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody className="divide-y divide-[var(--glass-border)]">
+                                            {visibleInvoices.map(inv => (
+                                                <tr key={inv.id} onClick={() => handleInvoiceClick(inv.id)} className="hover:bg-[var(--glass-bg)] cursor-pointer group">
+                                                    <td className="px-6 py-4 text-[var(--color-text)] font-medium"><FileText size={16} className="inline mr-2 text-[var(--color-primary)]" />{inv.invoice_number || 'S/N'}</td>
+                                                    <td className="px-6 py-4 text-[var(--color-text-muted)]">{inv.supplier_name || 'Desconocido'}</td>
+                                                    <td className="px-6 py-4 text-[var(--color-text-muted)]">{inv.date ? format(new Date(inv.date + 'T00:00:00'), 'dd/MM/yyyy') : '-'}</td>
+                                                    <td className="px-6 py-4">
+                                                        <span className={`px-2 py-1 rounded text-xs font-bold ${inv.is_credit ? 'bg-orange-500/20 text-orange-400' : 'bg-green-500/20 text-green-400'}`}>
+                                                            {inv.is_credit ? 'CRÉDITO' : 'PAGADO'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right text-[var(--color-text)] font-bold">{formatCurrency(inv.total, currentCurrency)}</td>
+                                                    <td className="px-6 py-4 text-right">
+                                                        <button onClick={(e) => handleDeleteInvoice(e, inv.id)} className="p-2 hover:bg-[var(--color-surface-hover)] rounded text-red-400 opacity-0 group-hover:opacity-100"><Trash2 size={20} /></button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+
+                                    {isLoadingInvoices && invoices.length > 0 && (
+                                        <div className="py-4 flex items-center justify-center text-[var(--color-text-muted)] text-sm gap-2">
+                                            <Loader size={16} className="animate-spin" />
+                                            Cargando más facturas...
+                                        </div>
+                                    )}
+
+                                    {!isLoadingInvoices && !hasMoreInvoices && filteredInvoices.length > 0 && (
+                                        <div className="py-4 text-center text-[var(--color-text-muted)] text-sm border-t border-[var(--glass-border)]">
+                                            No hay más facturas para mostrar
+                                        </div>
+                                    )}
+                                </>
                             )}
-                            {filteredInvoices.length === 0 && !isLoadingInvoices && <div className="p-10 text-center text-[var(--color-text-muted)]">No se encontraron facturas.</div>}
+                            {visibleInvoices.length === 0 && !isLoadingInvoices && <div className="p-10 text-center text-[var(--color-text-muted)]">No se encontraron facturas.</div>}
                         </div>
                     )}
                 </div>

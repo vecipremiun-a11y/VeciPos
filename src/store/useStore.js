@@ -41,6 +41,19 @@ export const useStore = create(persist((set, get) => ({
     bankAccounts: [],
     taxRates: [], // 🆕 Tax Rates State
 
+    // 👷 GESTIÓN LABORAL - Estado Inicial
+    staffMembers: [],
+    attendanceToday: [],
+    pendingCorrections: [],
+    workShifts: [],
+    laborAbsences: [],
+    personalConfig: null,
+    salaryAdvances: [],
+    payrollPeriods: [],
+    payrollPayments: [],
+    vacationRequests: [],
+    vacationBalances: [],
+
     // Computed getters (derivados automáticamente, sin duplicación)
     get cart() {
         const { carts, activeCartId } = get();
@@ -128,7 +141,7 @@ export const useStore = create(persist((set, get) => ({
             // Check Schema Version
             const versionRes = await turso.execute("SELECT value FROM system_settings WHERE key = 'schema_version'");
             const currentVersion = versionRes.rows.length > 0 ? parseInt(versionRes.rows[0].value) : 0;
-            const TARGET_VERSION = 7; // Incremented for Category Visibility in Preorders
+            const TARGET_VERSION = 8; // Incremented for Labor Management Phase 1
 
             if (currentVersion >= TARGET_VERSION) {
                 console.log("Schema is up to date (v" + currentVersion + ")");
@@ -544,6 +557,236 @@ export const useStore = create(persist((set, get) => ({
                 const catCols = catInfo.rows.map(r => r.name);
                 if (!catCols.includes('show_in_preorders')) {
                     await turso.execute("ALTER TABLE categories ADD COLUMN show_in_preorders BOOLEAN DEFAULT 1");
+                }
+            }
+
+
+            // Migration 8: Labor Management Phase 1 (v8)
+            if (currentVersion < 8) {
+                console.log("Applying v8 (Labor Management Phase 1)...");
+                try {
+                    // 1. Add columns to users table
+                    const userInfo = await turso.execute("PRAGMA table_info(users)");
+                    const userCols = userInfo.rows.map(r => r.name);
+
+                    if (!userCols.includes('has_labor_profile')) {
+                        console.log('Adding labor columns to users...');
+                        // Ficha laboral básica
+                        await turso.execute("ALTER TABLE users ADD COLUMN has_labor_profile INTEGER DEFAULT 0");
+                        await turso.execute("ALTER TABLE users ADD COLUMN labor_position TEXT");
+                        await turso.execute("ALTER TABLE users ADD COLUMN labor_branch TEXT");
+                        await turso.execute("ALTER TABLE users ADD COLUMN labor_start_date TEXT");
+                        await turso.execute("ALTER TABLE users ADD COLUMN labor_status TEXT DEFAULT 'active'");
+                        await turso.execute("ALTER TABLE users ADD COLUMN labor_pin TEXT");
+
+                        // Configuración de pago
+                        await turso.execute("ALTER TABLE users ADD COLUMN pay_type TEXT DEFAULT 'monthly'");
+                        await turso.execute("ALTER TABLE users ADD COLUMN pay_method TEXT DEFAULT 'cash'");
+                        await turso.execute("ALTER TABLE users ADD COLUMN pay_day TEXT");
+                        await turso.execute("ALTER TABLE users ADD COLUMN pay_base_amount REAL DEFAULT 0");
+                        await turso.execute("ALTER TABLE users ADD COLUMN pay_fixed_bonus REAL DEFAULT 0");
+                        await turso.execute("ALTER TABLE users ADD COLUMN pay_fixed_discount REAL DEFAULT 0");
+                        await turso.execute("ALTER TABLE users ADD COLUMN pay_bank_name TEXT");
+                        await turso.execute("ALTER TABLE users ADD COLUMN pay_bank_account TEXT");
+                        await turso.execute("ALTER TABLE users ADD COLUMN pay_bank_account_type TEXT");
+                        await turso.execute("ALTER TABLE users ADD COLUMN pay_bank_owner TEXT");
+                    }
+
+                    // 2. Create New Tables for Labor Management
+
+                    // Marcaciones de asistencia
+                    await turso.execute(`
+                        CREATE TABLE IF NOT EXISTS attendance_records (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            type TEXT NOT NULL,
+                            recorded_at TEXT NOT NULL,
+                            date TEXT NOT NULL,
+                            source TEXT DEFAULT 'kiosk',
+                            device_label TEXT,
+                            branch TEXT,
+                            recorded_by INTEGER,
+                            notes TEXT,
+                            is_corrected INTEGER DEFAULT 0,
+                            FOREIGN KEY (user_id) REFERENCES users(id)
+                        )
+                    `);
+                    await turso.execute("CREATE INDEX IF NOT EXISTS idx_attendance_company_date ON attendance_records(company_id, date)");
+                    await turso.execute("CREATE INDEX IF NOT EXISTS idx_attendance_user_date ON attendance_records(user_id, date)");
+
+                    // Solicitudes de corrección de asistencia
+                    await turso.execute(`
+                        CREATE TABLE IF NOT EXISTS attendance_corrections (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            original_record_id INTEGER,
+                            correction_type TEXT NOT NULL,
+                            original_at TEXT,
+                            requested_at TEXT,
+                            requested_date TEXT NOT NULL,
+                            reason TEXT NOT NULL,
+                            status TEXT DEFAULT 'pending',
+                            reviewed_by INTEGER,
+                            reviewed_at TEXT,
+                            reviewer_notes TEXT,
+                            created_at TEXT NOT NULL,
+                            FOREIGN KEY (user_id) REFERENCES users(id)
+                        )
+                    `);
+                    await turso.execute("CREATE INDEX IF NOT EXISTS idx_corrections_company_status ON attendance_corrections(company_id, status)");
+
+                    // Turnos planificados
+                    await turso.execute(`
+                        CREATE TABLE IF NOT EXISTS work_shifts (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            shift_date TEXT NOT NULL,
+                            start_time TEXT NOT NULL,
+                            end_time TEXT NOT NULL,
+                            branch TEXT,
+                            notes TEXT,
+                            created_by INTEGER,
+                            created_at TEXT NOT NULL,
+                            UNIQUE(user_id, shift_date)
+                        )
+                    `);
+                    await turso.execute("CREATE INDEX IF NOT EXISTS idx_shifts_company_date ON work_shifts(company_id, shift_date)");
+
+                    // Ausencias/permisos laborales
+                    await turso.execute(`
+                        CREATE TABLE IF NOT EXISTS labor_absences (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            absence_date TEXT NOT NULL,
+                            type TEXT NOT NULL,
+                            status TEXT DEFAULT 'approved',
+                            notes TEXT,
+                            approved_by INTEGER,
+                            created_at TEXT NOT NULL,
+                            FOREIGN KEY (user_id) REFERENCES users(id)
+                        )
+                    `);
+                    await turso.execute("CREATE INDEX IF NOT EXISTS idx_absences_company_date ON labor_absences(company_id, absence_date)");
+                    await turso.execute("CREATE INDEX IF NOT EXISTS idx_absences_user ON labor_absences(user_id, absence_date)");
+
+                    // Configuración de Personal por empresa
+                    await turso.execute(`
+                        CREATE TABLE IF NOT EXISTS personal_config (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL UNIQUE,
+                            late_tolerance_minutes INTEGER DEFAULT 10,
+                            kiosk_device_label TEXT DEFAULT 'Kiosco Principal',
+                            created_at TEXT,
+                            updated_at TEXT
+                        )
+                    `);
+
+                    // Adelantos/anticipos
+                    await turso.execute(`
+                        CREATE TABLE IF NOT EXISTS salary_advances (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            amount REAL NOT NULL,
+                            advance_date TEXT NOT NULL,
+                            reason TEXT,
+                            pay_method TEXT DEFAULT 'cash',
+                            status TEXT DEFAULT 'pending',
+                            period_id INTEGER,
+                            created_by INTEGER,
+                            created_at TEXT NOT NULL,
+                            FOREIGN KEY (user_id) REFERENCES users(id)
+                        )
+                    `);
+                    await turso.execute("CREATE INDEX IF NOT EXISTS idx_advances_company_user ON salary_advances(company_id, user_id)");
+
+                    // Liquidaciones de periodo
+                    await turso.execute(`
+                        CREATE TABLE IF NOT EXISTS payroll_periods (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            period_label TEXT NOT NULL,
+                            period_start TEXT NOT NULL,
+                            period_end TEXT NOT NULL,
+                            hours_worked REAL DEFAULT 0,
+                            days_absent INTEGER DEFAULT 0,
+                            late_count INTEGER DEFAULT 0,
+                            late_minutes INTEGER DEFAULT 0,
+                            extra_hours REAL DEFAULT 0,
+                            manual_bonus REAL DEFAULT 0,
+                            manual_discount REAL DEFAULT 0,
+                            advances_discounted REAL DEFAULT 0,
+                            base_amount REAL DEFAULT 0,
+                            total_to_pay REAL DEFAULT 0,
+                            is_closed INTEGER DEFAULT 0,
+                            notes TEXT,
+                            created_by INTEGER,
+                            created_at TEXT NOT NULL,
+                            closed_at TEXT,
+                            FOREIGN KEY (user_id) REFERENCES users(id)
+                        )
+                    `);
+                    await turso.execute("CREATE INDEX IF NOT EXISTS idx_payroll_company_user ON payroll_periods(company_id, user_id)");
+
+                    // Pagos realizados (registro de pago real)
+                    await turso.execute(`
+                        CREATE TABLE IF NOT EXISTS payroll_payments (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            period_id INTEGER,
+                            amount_paid REAL NOT NULL,
+                            payment_date TEXT NOT NULL,
+                            pay_method TEXT DEFAULT 'cash',
+                            status TEXT DEFAULT 'paid',
+                            notes TEXT,
+                            created_by INTEGER,
+                            created_at TEXT NOT NULL,
+                            FOREIGN KEY (user_id) REFERENCES users(id)
+                        )
+                    `);
+                    await turso.execute("CREATE INDEX IF NOT EXISTS idx_payments_company ON payroll_payments(company_id, payment_date)");
+
+                    // Vacaciones: saldos
+                    await turso.execute(`
+                        CREATE TABLE IF NOT EXISTS vacation_balances (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            user_id INTEGER NOT NULL UNIQUE,
+                            initial_balance REAL DEFAULT 0,
+                            accrued_days REAL DEFAULT 0,
+                            used_days REAL DEFAULT 0,
+                            FOREIGN KEY (user_id) REFERENCES users(id)
+                        )
+                    `);
+
+                    // Vacaciones: solicitudes
+                    await turso.execute(`
+                        CREATE TABLE IF NOT EXISTS vacation_requests (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            start_date TEXT NOT NULL,
+                            end_date TEXT NOT NULL,
+                            total_days INTEGER NOT NULL,
+                            status TEXT DEFAULT 'pending',
+                            notes TEXT,
+                            reviewed_by INTEGER,
+                            reviewed_at TEXT,
+                            created_at TEXT NOT NULL,
+                            FOREIGN KEY (user_id) REFERENCES users(id)
+                        )
+                    `);
+                    await turso.execute("CREATE INDEX IF NOT EXISTS idx_vacations_company ON vacation_requests(company_id, start_date)");
+
+                    console.log('✅ Labor Management Phase 1 tables created');
+                } catch (e) {
+                    console.warn('Migration error for Labor Management Phase 1:', e);
                 }
             }
 
@@ -1339,6 +1582,29 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error("Fetch sales error", e);
             return 0;
+        }
+    },
+
+    fetchClientSales: async (clientId) => {
+        try {
+            const { activeCompanyId } = get();
+
+            // Query for ALL sales for this client (newest first)
+            const result = await turso.execute({
+                sql: "SELECT * FROM sales WHERE client_id = ? AND company_id = ? ORDER BY date DESC LIMIT 500",
+                args: [clientId, activeCompanyId]
+            });
+
+            return result.rows.map(sale => ({
+                ...sale,
+                items: typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items,
+                paymentMethod: sale.payment_method, // Mapping for UI
+                clientId: sale.client_id, // Mapping for UI consistency
+                observation: sale.observation || ''
+            }));
+        } catch (e) {
+            console.error("Error fetching client sales:", e);
+            return [];
         }
     },
 
@@ -2173,8 +2439,18 @@ export const useStore = create(persist((set, get) => ({
         try {
             // 1. Create User
             const result = await turso.execute({
-                sql: "INSERT INTO users (name, username, password, role, company_id) VALUES (?, ?, ?, ?, ?) RETURNING *",
-                args: [user.name, user.username, user.password || '123456', user.role, activeCompanyId]
+                sql: `INSERT INTO users (
+                    name, username, password, role, company_id,
+                    has_labor_profile, labor_position, labor_branch, labor_start_date, labor_status, labor_pin,
+                    pay_type, pay_method, pay_day, pay_base_amount, pay_fixed_bonus, pay_fixed_discount,
+                    pay_bank_name, pay_bank_account, pay_bank_account_type, pay_bank_owner
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+                args: [
+                    user.name, user.username, user.password || '123456', user.role, activeCompanyId,
+                    user.has_labor_profile ? 1 : 0, user.labor_position, user.labor_branch, user.labor_start_date, user.labor_status, user.labor_pin,
+                    user.pay_type, user.pay_method, user.pay_day, user.pay_base_amount, user.pay_fixed_bonus, user.pay_fixed_discount,
+                    user.pay_bank_name, user.pay_bank_account, user.pay_bank_account_type, user.pay_bank_owner
+                ]
             });
             const newUser = result.rows[0];
 
@@ -2202,7 +2478,7 @@ export const useStore = create(persist((set, get) => ({
         const { activeCompanyId, currentUser } = get();
 
         // 🔒 VALIDACIÓN DE PERMISOS
-        if (!currentUser || currentUser.role !== 'Administrador') {
+        if (!currentUser || (currentUser.role !== 'Administrador' && currentUser.role !== 'super_admin' && currentUser.username !== 'Super_admin')) {
             console.error('❌ Permission denied: Only administrators can update users');
             return {
                 success: false,
@@ -2212,8 +2488,19 @@ export const useStore = create(persist((set, get) => ({
 
         try {
             await turso.execute({
-                sql: "UPDATE users SET name = ?, username = ?, role = ? WHERE id = ? AND company_id = ?",
-                args: [updatedUser.name, updatedUser.username, updatedUser.role, id, activeCompanyId]
+                sql: `UPDATE users SET 
+                    name = ?, username = ?, role = ?,
+                    has_labor_profile = ?, labor_position = ?, labor_branch = ?, labor_start_date = ?, labor_status = ?, labor_pin = ?,
+                    pay_type = ?, pay_method = ?, pay_day = ?, pay_base_amount = ?, pay_fixed_bonus = ?, pay_fixed_discount = ?,
+                    pay_bank_name = ?, pay_bank_account = ?, pay_bank_account_type = ?, pay_bank_owner = ?
+                    WHERE id = ? AND company_id = ?`,
+                args: [
+                    updatedUser.name, updatedUser.username, updatedUser.role,
+                    updatedUser.has_labor_profile ? 1 : 0, updatedUser.labor_position, updatedUser.labor_branch, updatedUser.labor_start_date, updatedUser.labor_status, updatedUser.labor_pin,
+                    updatedUser.pay_type, updatedUser.pay_method, updatedUser.pay_day, updatedUser.pay_base_amount, updatedUser.pay_fixed_bonus, updatedUser.pay_fixed_discount,
+                    updatedUser.pay_bank_name, updatedUser.pay_bank_account, updatedUser.pay_bank_account_type, updatedUser.pay_bank_owner,
+                    id, activeCompanyId
+                ]
             });
 
             // If a password is provided (and it's not empty), update it separately or include it.
@@ -2669,7 +2956,8 @@ export const useStore = create(persist((set, get) => ({
                     'clients.view', 'clients.view_account',
                     'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.export',
                     'products.view', 'products.view_cost',
-                    'taxes.view'
+                    'taxes.view',
+                    'personal.view', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.absences', 'personal.reports'
                 ]
             };
 
@@ -2692,7 +2980,8 @@ export const useStore = create(persist((set, get) => ({
                 'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.export',
                 'users.view', 'users.create', 'users.edit', 'users.delete',
                 'settings.view', 'settings.general', 'settings.company', 'settings.receipts', 'settings.payments', 'settings.system', 'settings.permissions',
-                'taxes.view', 'taxes.create', 'taxes.edit', 'taxes.delete'
+                'taxes.view', 'taxes.create', 'taxes.edit', 'taxes.delete',
+                'personal.view', 'personal.manage', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.absences', 'personal.payroll', 'personal.vacations', 'personal.reports'
             ];
 
             // Generate Inserts
@@ -3432,13 +3721,13 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    fetchPurchases: async (offset = 0) => {
+    fetchPurchases: async (offset = 0, limit = 50) => {
         try {
             const { activeCompanyId } = get();
             // Optimized query: Not selecting 'items' to keep list lightweight
             const result = await turso.execute({
-                sql: "SELECT * FROM purchases WHERE company_id = ? ORDER BY date DESC LIMIT 50 OFFSET ?",
-                args: [activeCompanyId, offset]
+                sql: "SELECT * FROM purchases WHERE company_id = ? ORDER BY date DESC LIMIT ? OFFSET ?",
+                args: [activeCompanyId, limit, offset]
             });
             return result.rows || [];
         } catch (e) {
@@ -7149,6 +7438,1221 @@ export const useStore = create(persist((set, get) => ({
             return { success: true };
         } catch (e) {
             console.error("Error deleting bank account:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+
+    // ==========================================
+    // 👷 GESTIÓN LABORAL: FUNCIONES
+    // ==========================================
+
+    // --- 1. Gestión de Personal (Ficha Laboral) ---
+
+    // Obtener lista de empleados (usuarios con perfil laboral activo)
+    fetchStaffMembers: async () => {
+        const { activeCompanyId } = get();
+        try {
+            const result = await turso.execute({
+                sql: `SELECT * FROM users 
+                      WHERE company_id = ? AND has_labor_profile = 1 
+                      ORDER BY labor_status ASC, username ASC`,
+                args: [activeCompanyId]
+            });
+            set({ staffMembers: result.rows });
+            return result.rows;
+        } catch (e) {
+            console.error("Error fetching staff:", e);
+            throw e;
+        }
+    },
+
+    // Actualizar datos de ficha laboral y configuración de pago
+    updateLaborProfile: async (userId, data) => {
+        try {
+            // Construir query dinámico
+            const fields = Object.keys(data).map(key => `${key} = ?`).join(', ');
+            const values = Object.values(data);
+
+            await turso.execute({
+                sql: `UPDATE users SET ${fields} WHERE id = ?`,
+                args: [...values, userId]
+            });
+
+            // Actualizar estado local si el usuario está en staffMembers
+            const { staffMembers } = get();
+            const updatedStaff = staffMembers.map(u =>
+                u.id === userId ? { ...u, ...data } : u
+            );
+            set({ staffMembers: updatedStaff });
+
+            return { success: true };
+        } catch (e) {
+            console.error("Error updating labor profile:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // Activar/Desactivar perfil laboral (convertir usuario en empleado)
+    toggleLaborProfile: async (userId, enable) => {
+        try {
+            await turso.execute({
+                sql: "UPDATE users SET has_labor_profile = ? WHERE id = ?",
+                args: [enable ? 1 : 0, userId]
+            });
+
+            // Recargar lista de empleados
+            get().fetchStaffMembers();
+            // Recargar lista de usuarios general
+            // get().fetchUsers(); // Si existe, recargarla también
+
+            return { success: true };
+        } catch (e) {
+            console.error("Error toggling labor profile:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // Buscar empleado por PIN (para Kiosco)
+    getLaborProfileByPin: async (pin, companyId = null) => {
+        const targetCompany = companyId || get().activeCompanyId;
+        try {
+            const result = await turso.execute({
+                sql: `SELECT * FROM users 
+                      WHERE (company_id = ? OR company_id = 'default') 
+                      AND has_labor_profile = 1 
+                      AND labor_pin = ? 
+                      AND labor_status = 'active'`,
+                args: [targetCompany, pin]
+            });
+
+            if (result.rows.length > 0) {
+                return result.rows[0];
+            }
+            return null;
+        } catch (e) {
+            console.error("Error finding user by PIN:", e);
+            return null;
+        }
+    },
+
+    // --- 2. Asistencia ---
+
+    fetchAttendanceToday: async () => {
+        const { activeCompanyId } = get();
+        const today = new Date().toISOString().split('T')[0];
+        try {
+            const result = await turso.execute({
+                sql: `SELECT ar.*, u.username, u.name 
+                      FROM attendance_records ar
+                      JOIN users u ON ar.user_id = u.id
+                      WHERE ar.company_id = ? AND ar.date = ?
+                      ORDER BY ar.recorded_at DESC`,
+                args: [activeCompanyId, today]
+            });
+            set({ attendanceToday: result.rows });
+        } catch (e) {
+            console.error("Error fetching attendance today:", e);
+        }
+    },
+
+    fetchAttendanceByRange: async (startDate, endDate, userId = null) => {
+        const { activeCompanyId } = get();
+        try {
+            let sql = `SELECT ar.*, u.username, u.name 
+                       FROM attendance_records ar
+                       JOIN users u ON ar.user_id = u.id
+                       WHERE ar.company_id = ? AND ar.date BETWEEN ? AND ?`;
+            const args = [activeCompanyId, startDate, endDate];
+
+            if (userId) {
+                sql += ` AND ar.user_id = ?`;
+                args.push(userId);
+            }
+
+            sql += ` ORDER BY ar.date DESC, ar.recorded_at DESC`;
+
+            const result = await turso.execute({ sql, args });
+            return result.rows;
+        } catch (e) {
+            console.error("Error fetching attendance range:", e);
+            throw e;
+        }
+    },
+
+    markAttendance: async (userId, type, deviceLabel, branch) => {
+        const { activeCompanyId } = get();
+        const now = new Date();
+        const recordedAt = now.toISOString();
+        const date = recordedAt.split('T')[0];
+
+        try {
+            // Lógica automática: verificar último estado
+            const lastRecordRes = await turso.execute({
+                sql: `SELECT * FROM attendance_records 
+                      WHERE company_id = ? AND user_id = ? AND date = ? 
+                      ORDER BY recorded_at DESC LIMIT 1`,
+                args: [activeCompanyId, userId, date]
+            });
+
+            const lastRecord = lastRecordRes.rows[0];
+            let finalType = type; // 'entry' o 'exit' o 'auto'
+
+            if (type === 'auto') {
+                if (!lastRecord) {
+                    finalType = 'entry';
+                } else if (lastRecord.type === 'entry') {
+                    finalType = 'exit';
+                } else {
+                    // Ya salió, ¿permitir reingreso? Por ahora asumimos jornada simple.
+                    // O podría ser turno partido. Permitamos reingreso.
+                    finalType = 'entry';
+                }
+            } else {
+                // Validación explícita
+                if (type === 'entry' && lastRecord?.type === 'entry') {
+                    throw new Error("Ya tienes una entrada registrada sin salida.");
+                }
+                if (type === 'exit' && (!lastRecord || lastRecord.type === 'exit')) {
+                    throw new Error("No tienes una entrada registrada para salir.");
+                }
+            }
+
+            await turso.execute({
+                sql: `INSERT INTO attendance_records 
+                      (company_id, user_id, type, recorded_at, date, source, device_label, branch) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                args: [activeCompanyId, userId, finalType, recordedAt, date, 'kiosk', deviceLabel, branch]
+            });
+
+            // Actualizar vista local si es hoy
+            get().fetchAttendanceToday();
+
+            return { success: true, type: finalType, recordedAt };
+        } catch (e) {
+            console.error("Error marking attendance:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    registerManualAttendance: async (userId, type, datetime, notes, recordedBy) => {
+        const { activeCompanyId } = get();
+        const date = datetime.split('T')[0];
+
+        try {
+            await turso.execute({
+                sql: `INSERT INTO attendance_records 
+                      (company_id, user_id, type, recorded_at, date, source, notes, recorded_by) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                args: [activeCompanyId, userId, type, datetime, date, 'manual', notes, recordedBy]
+            });
+
+            get().fetchAttendanceToday();
+            return { success: true };
+        } catch (e) {
+            console.error("Error registering manual attendance:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getAttendanceStatus: async (userId) => {
+        const { activeCompanyId } = get();
+        const today = new Date().toISOString().split('T')[0];
+        try {
+            const result = await turso.execute({
+                sql: `SELECT type FROM attendance_records 
+                      WHERE company_id = ? AND user_id = ? AND date = ? 
+                      ORDER BY recorded_at DESC LIMIT 1`,
+                args: [activeCompanyId, userId, today]
+            });
+
+            if (result.rows.length === 0) return 'not_marked';
+            return result.rows[0].type === 'entry' ? 'inside' : 'outside';
+        } catch (e) {
+            console.error("Error getting status:", e);
+            return 'unknown';
+        }
+    },
+
+    // --- 3. Correcciones de Asistencia ---
+
+    fetchPendingCorrections: async () => {
+        const { activeCompanyId } = get();
+        try {
+            const result = await turso.execute({
+                sql: `SELECT ac.*, u.username, u.name 
+                      FROM attendance_corrections ac
+                      JOIN users u ON ac.user_id = u.id
+                      WHERE ac.company_id = ? AND ac.status = 'pending'
+                      ORDER BY ac.created_at DESC`,
+                args: [activeCompanyId]
+            });
+            set({ pendingCorrections: result.rows });
+        } catch (e) {
+            console.error("Error fetching corrections:", e);
+        }
+    },
+
+    fetchCorrectionsByStatus: async (status) => {
+        const { activeCompanyId } = get();
+        try {
+            const result = await turso.execute({
+                sql: `SELECT ac.*, u.username, u.name, r.username as reviewer_name
+                      FROM attendance_corrections ac
+                      JOIN users u ON ac.user_id = u.id
+                      LEFT JOIN users r ON ac.reviewed_by = r.id
+                      WHERE ac.company_id = ? AND ac.status = ?
+                      ORDER BY ac.created_at DESC`,
+                args: [activeCompanyId, status]
+            });
+            return result.rows;
+        } catch (e) {
+            console.error("Error fetching corrections by status:", e);
+            return [];
+        }
+    },
+
+    requestCorrection: async (data) => {
+        const { activeCompanyId, currentUser } = get();
+        // data: { user_id, original_record_id, correction_type, original_at, requested_at, requested_date, reason }
+        try {
+            await turso.execute({
+                sql: `INSERT INTO attendance_corrections 
+                      (company_id, user_id, original_record_id, correction_type, original_at, requested_at, requested_date, reason, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                args: [
+                    activeCompanyId,
+                    data.user_id || currentUser.id,
+                    data.original_record_id,
+                    data.correction_type,
+                    data.original_at,
+                    data.requested_at,
+                    data.requested_date,
+                    data.reason,
+                    new Date().toISOString()
+                ]
+            });
+            // Si es admin quien pide, ¿se autoaprueba? Por ahora dejemos flujo normal.
+            return { success: true };
+        } catch (e) {
+            console.error("Error requesting correction:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    approveCorrection: async (correctionId, reviewerNotes, reviewedBy) => {
+        const { activeCompanyId } = get();
+        const now = new Date().toISOString();
+        try {
+            // 1. Obtener datos de la corrección
+            const corrRes = await turso.execute({
+                sql: "SELECT * FROM attendance_corrections WHERE id = ?",
+                args: [correctionId]
+            });
+            const correction = corrRes.rows[0];
+            if (!correction) throw new Error("Correction not found");
+
+            // 2. Aplicar cambios en attendance_records según tipo
+            if (correction.correction_type === 'edit_time') {
+                // Marcar original como corregido (soft delete o flag)
+                if (correction.original_record_id) {
+                    await turso.execute({
+                        sql: "UPDATE attendance_records SET is_corrected = 1 WHERE id = ?",
+                        args: [correction.original_record_id]
+                    });
+
+                    // Obtener datos del original para replicar resto de campos (type, source, device)
+                    // ... Simplificación: crear nuevo registro "manual" con la hora corregida
+                    const origRes = await turso.execute("SELECT * FROM attendance_records WHERE id = ?", [correction.original_record_id]);
+                    const orig = origRes.rows[0];
+
+                    await turso.execute({
+                        sql: `INSERT INTO attendance_records 
+                              (company_id, user_id, type, recorded_at, date, source, notes, is_corrected, recorded_by) 
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        args: [
+                            activeCompanyId,
+                            correction.user_id,
+                            orig.type,
+                            correction.requested_at, // La nueva hora 
+                            orig.date,
+                            'manual',
+                            `Corrección aprobada: ${correction.reason}`,
+                            0,
+                            reviewedBy
+                        ]
+                    });
+                }
+            } else if (correction.correction_type === 'add_entry' || correction.correction_type === 'add_exit') {
+                const type = correction.correction_type === 'add_entry' ? 'entry' : 'exit';
+                await turso.execute({
+                    sql: `INSERT INTO attendance_records 
+                          (company_id, user_id, type, recorded_at, date, source, notes, recorded_by) 
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    args: [
+                        activeCompanyId,
+                        correction.user_id,
+                        type,
+                        correction.requested_at,
+                        correction.requested_date,
+                        'manual',
+                        `Corrección (Agregar): ${correction.reason}`,
+                        reviewedBy
+                    ]
+                });
+            } else if (correction.correction_type === 'delete') {
+                if (correction.original_record_id) {
+                    await turso.execute({
+                        sql: "UPDATE attendance_records SET is_corrected = 1 WHERE id = ?",
+                        args: [correction.original_record_id]
+                    });
+                }
+            }
+
+            // 3. Actualizar estado de la solicitud
+            await turso.execute({
+                sql: `UPDATE attendance_corrections 
+                      SET status = 'approved', reviewed_by = ?, reviewed_at = ?, reviewer_notes = ? 
+                      WHERE id = ?`,
+                args: [reviewedBy, now, reviewerNotes, correctionId]
+            });
+
+            // Refrescar datos
+            get().fetchPendingCorrections();
+            get().fetchAttendanceToday(); // Por si afecta hoy
+
+            return { success: true };
+        } catch (e) {
+            console.error("Error approving correction:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    rejectCorrection: async (correctionId, reviewerNotes, reviewedBy) => {
+        const now = new Date().toISOString();
+        try {
+            await turso.execute({
+                sql: `UPDATE attendance_corrections 
+                      SET status = 'rejected', reviewed_by = ?, reviewed_at = ?, reviewer_notes = ? 
+                      WHERE id = ?`,
+                args: [reviewedBy, now, reviewerNotes, correctionId]
+            });
+            get().fetchPendingCorrections();
+            return { success: true };
+        } catch (e) {
+            console.error("Error rejecting correction:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // --- 4. Turnos Planificados ---
+
+    fetchShifts: async (weekStart, weekEnd, userId = null) => {
+        const { activeCompanyId } = get();
+        try {
+            let sql = `SELECT ws.*, u.username, u.name 
+                       FROM work_shifts ws
+                       JOIN users u ON ws.user_id = u.id
+                       WHERE ws.company_id = ? AND ws.shift_date BETWEEN ? AND ?`;
+            const args = [activeCompanyId, weekStart, weekEnd];
+
+            if (userId) {
+                sql += ` AND ws.user_id = ?`;
+                args.push(userId);
+            }
+
+            const result = await turso.execute({ sql, args });
+            set({ workShifts: result.rows });
+            return result.rows;
+        } catch (e) {
+            console.error("Error fetching shifts:", e);
+            return [];
+        }
+    },
+
+    createShift: async (data) => {
+        const { activeCompanyId, currentUser } = get();
+        try {
+            const shiftDate = data.shift_date || data.start_time.split('T')[0];
+            const notes = data.notes || '';
+            const branch = data.branch || 'Principal'; // Default branch?
+            const createdByUser = currentUser ? currentUser.username : 'System';
+
+            // INSERT OR REPLACE para manejar restricción UNIQUE(user_id, shift_date)
+            await turso.execute({
+                sql: `INSERT OR REPLACE INTO work_shifts 
+                      (company_id, user_id, shift_date, start_time, end_time, branch, notes, created_by, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                args: [
+                    activeCompanyId,
+                    data.user_id,
+                    shiftDate,
+                    data.start_time,
+                    data.end_time,
+                    branch,
+                    notes,
+                    createdByUser,
+                    new Date().toISOString()
+                ]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error("Error creating shift:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deleteShift: async (id) => {
+        try {
+            await turso.execute({
+                sql: "DELETE FROM work_shifts WHERE id = ?",
+                args: [id]
+            });
+            // Actualizar localmente
+            const { workShifts } = get();
+            set({ workShifts: workShifts.filter(s => s.id !== id) });
+            return { success: true };
+        } catch (e) {
+            console.error("Error deleting shift:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    copyPreviousWeek: async (currentWeekStart, previousWeekStart, userId = null) => {
+        const { activeCompanyId, currentUser } = get();
+        // currentWeekStart: fecha inicio de la semana destino (Lunes)
+        // previousWeekStart: fecha inicio de semana origen
+        // Esto es complejo en SQL puro si las fechas cambian (obvio).
+        // Lógica JS: Fetch previous -> Calculate new dates -> Insert batch
+        try {
+            // 1. Fetch previous week shifts
+            // Calcular end dates (assuming 7 days)
+            const prevEnd = new Date(new Date(previousWeekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+            let sql = `SELECT * FROM work_shifts WHERE company_id = ? AND shift_date BETWEEN ? AND ?`;
+            const args = [activeCompanyId, previousWeekStart, prevEnd];
+            if (userId) {
+                sql += ` AND user_id = ?`;
+                args.push(userId);
+            }
+            const prevShiftsRes = await turso.execute({ sql, args });
+            const prevShifts = prevShiftsRes.rows;
+
+            if (prevShifts.length === 0) return { success: true, count: 0 };
+
+            // 2. Map to new dates
+            // Diff en días entre semanas suele ser 7
+            const dayDiff = (new Date(currentWeekStart) - new Date(previousWeekStart)) / (1000 * 60 * 60 * 24);
+
+            const newShifts = prevShifts.map(s => {
+                const oldDate = new Date(s.shift_date);
+                const newDate = new Date(oldDate.getTime() + dayDiff * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+                // Update start_time and end_time
+                const oldStart = new Date(s.start_time);
+                const newStart = new Date(oldStart.getTime() + dayDiff * 24 * 60 * 60 * 1000).toISOString();
+
+                const oldEnd = new Date(s.end_time);
+                const newEnd = new Date(oldEnd.getTime() + dayDiff * 24 * 60 * 60 * 1000).toISOString();
+
+                return {
+                    ...s,
+                    shift_date: newDate,
+                    start_time: newStart,
+                    end_time: newEnd
+                };
+            });
+
+            // 3. Batch insert
+            for (const s of newShifts) {
+                await get().createShift(s, currentUser.id);
+            }
+
+            return { success: true, count: newShifts.length };
+
+        } catch (e) {
+            console.error("Error copying week:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // --- 5. Ausencias ---
+
+    fetchAbsences: async (startDate, endDate, userId = null) => {
+        const { activeCompanyId } = get();
+        try {
+            // Alias absence_date as start_date/end_date for UI compatibility (schema is single day currently)
+            let sql = `SELECT la.*, la.absence_date as start_date, la.absence_date as end_date, u.username, u.name 
+                       FROM labor_absences la
+                       JOIN users u ON la.user_id = u.id
+                       WHERE la.company_id = ? AND la.absence_date BETWEEN ? AND ?`;
+            const args = [activeCompanyId, startDate, endDate];
+
+            if (userId) {
+                sql += ` AND la.user_id = ?`;
+                args.push(userId);
+            }
+
+            const result = await turso.execute({ sql, args });
+            set({ laborAbsences: result.rows });
+            return result.rows;
+        } catch (e) {
+            console.error("Error fetching absences:", e);
+            return [];
+        }
+    },
+
+    createAbsence: async (data, createdBy) => {
+        const { activeCompanyId, currentUser } = get();
+        try {
+            const createdByUser = currentUser ? currentUser.username : 'System';
+            // Handle schema mismatch: Table has absence_date, UI sends start/end range. Use start_date.
+            const absenceDate = data.absence_date || data.start_date || new Date().toISOString().split('T')[0];
+            const notes = data.notes || data.reason || '';
+
+            // If range is different, maybe append to notes?
+            let finalNotes = notes;
+            if (data.start_date && data.end_date && data.start_date !== data.end_date) {
+                finalNotes = `${notes} (Rango: ${data.start_date} al ${data.end_date})`;
+            }
+
+            await turso.execute({
+                sql: `INSERT INTO labor_absences 
+                      (company_id, user_id, absence_date, type, status, notes, approved_by, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                args: [
+                    activeCompanyId,
+                    data.user_id,
+                    absenceDate,
+                    data.type,
+                    'approved',
+                    finalNotes,
+                    createdByUser, // Using variable directly, createdBy arg might be undefined if called with 1 arg
+                    new Date().toISOString()
+                ]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error("Error creating absence:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deleteAbsence: async (id) => {
+        try {
+            await turso.execute({
+                sql: "DELETE FROM labor_absences WHERE id = ?",
+                args: [id]
+            });
+            // Actualizar local
+            const { laborAbsences } = get();
+            set({ laborAbsences: laborAbsences.filter(a => a.id !== id) });
+            return { success: true };
+        } catch (e) {
+            console.error("Error deleting absence:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // --- 6. Configuración de Personal ---
+
+    fetchPersonalConfig: async () => {
+        const { activeCompanyId } = get();
+        try {
+            let result = await turso.execute({
+                sql: "SELECT * FROM personal_config WHERE company_id = ?",
+                args: [activeCompanyId]
+            });
+
+            if (result.rows.length === 0) {
+                // Crear default si no existe
+                await turso.execute({
+                    sql: "INSERT INTO personal_config (company_id, late_tolerance_minutes, created_at) VALUES (?, ?, ?)",
+                    args: [activeCompanyId, 10, new Date().toISOString()]
+                });
+                result = await turso.execute({
+                    sql: "SELECT * FROM personal_config WHERE company_id = ?",
+                    args: [activeCompanyId]
+                });
+            }
+
+            set({ personalConfig: result.rows[0] });
+            return result.rows[0];
+        } catch (e) {
+            console.error("Error fetching personal config:", e);
+            return null;
+        }
+    },
+
+    updatePersonalConfig: async (data) => {
+        const { activeCompanyId } = get();
+        try {
+            await turso.execute({
+                sql: `UPDATE personal_config 
+                      SET late_tolerance_minutes = ?, kiosk_device_label = ?, updated_at = ? 
+                      WHERE company_id = ?`,
+                args: [data.late_tolerance_minutes, data.kiosk_device_label, new Date().toISOString(), activeCompanyId]
+            });
+
+            // Actualizar local
+            set({ personalConfig: { ...get().personalConfig, ...data } });
+            return { success: true };
+        } catch (e) {
+            console.error("Error updating personal config:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // --- 7. Adelantos ---
+
+    fetchAdvances: async (userId = null, startDate = null, endDate = null) => {
+        const { activeCompanyId } = get();
+        try {
+            let sql = `SELECT sa.*, u.username, u.name 
+                       FROM salary_advances sa
+                       JOIN users u ON sa.user_id = u.id
+                       WHERE sa.company_id = ?`;
+            const args = [activeCompanyId];
+
+            if (userId) {
+                sql += ` AND sa.user_id = ?`;
+                args.push(userId);
+            }
+            if (startDate && endDate) {
+                sql += ` AND sa.advance_date BETWEEN ? AND ?`;
+                args.push(startDate, endDate);
+            }
+
+            sql += ` ORDER BY sa.advance_date DESC`;
+
+            const result = await turso.execute({ sql, args });
+            set({ salaryAdvances: result.rows });
+            return result.rows;
+        } catch (e) {
+            console.error("Error fetching advances:", e);
+            return [];
+        }
+    },
+
+    createAdvance: async (data) => {
+        const { activeCompanyId, currentUser } = get();
+        try {
+            const createdByUser = currentUser ? currentUser.username : 'System';
+            const payMethod = data.pay_method || 'transfer';
+            const reason = data.reason || data.notes || '';
+            const advanceDate = data.advance_date || data.date || new Date().toISOString().split('T')[0];
+
+            await turso.execute({
+                sql: `INSERT INTO salary_advances 
+                      (company_id, user_id, amount, advance_date, reason, pay_method, status, created_by, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                args: [
+                    activeCompanyId,
+                    data.user_id,
+                    data.amount,
+                    advanceDate,
+                    reason,
+                    payMethod,
+                    'pending',
+                    createdByUser,
+                    new Date().toISOString()
+                ]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error("Error creating advance:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    markAdvanceDiscounted: async (id, periodId) => {
+        try {
+            await turso.execute({
+                sql: "UPDATE salary_advances SET status = 'discounted', period_id = ? WHERE id = ?",
+                args: [periodId, id]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error("Error marking advance:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deleteAdvance: async (id) => {
+        try {
+            await turso.execute({
+                sql: "DELETE FROM salary_advances WHERE id = ?",
+                args: [id]
+            });
+            const { salaryAdvances } = get();
+            set({ salaryAdvances: salaryAdvances.filter(a => a.id !== id) });
+            return { success: true };
+        } catch (e) {
+            console.error("Error deleting advance:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // --- 8. Liquidaciones (Cálculo y Gestión) ---
+
+    fetchPayrollPeriods: async (userId = null) => {
+        const { activeCompanyId } = get();
+        try {
+            let sql = `SELECT pp.*, u.username, u.name 
+                        FROM payroll_periods pp
+                        JOIN users u ON pp.user_id = u.id
+                        WHERE pp.company_id = ?`;
+            const args = [activeCompanyId];
+
+            if (userId) {
+                sql += ` AND pp.user_id = ?`;
+                args.push(userId);
+            }
+
+            sql += ` ORDER BY pp.period_end DESC, pp.created_at DESC`;
+
+            const result = await turso.execute({ sql, args });
+            set({ payrollPeriods: result.rows });
+            return result.rows;
+        } catch (e) {
+            console.error("Error fetching periods:", e);
+            return [];
+        }
+    },
+
+    calculatePeriod: async (userId, periodStart, periodEnd) => {
+        // Esta función NO guarda en DB, solo retorna el objeto calculado para previsualización
+        const { activeCompanyId } = get();
+        try {
+            // 1. Obtener User + Config
+            const userRes = await turso.execute("SELECT * FROM users WHERE id = ?", [userId]);
+            const user = userRes.rows[0];
+            const config = await get().fetchPersonalConfig(); // ensure config loaded
+            const tolerance = config?.late_tolerance_minutes || 10;
+
+            // 2. Obtener Asistencia en rango
+            const attendance = await get().fetchAttendanceByRange(periodStart, periodEnd, userId);
+
+            // 3. Procesar Asistencia (Cálculo simple por ahora)
+            // Agrupar por fecha
+            const daysMap = {};
+            attendance.forEach(r => {
+                if (!daysMap[r.date]) daysMap[r.date] = [];
+                daysMap[r.date].push(r);
+            });
+
+            let hoursWorked = 0;
+            let lateCount = 0;
+            let lateMinutes = 0;
+            let daysWorked = 0;
+
+            // Iterar días en rango? no, solo iterar donde hubo asistencia
+            // Para "Días Ausente" necesitaríamos saber el horario esperado (turnos).
+            // Por simplicidad en Fase 1: usar días con asistencia como trabajados.
+
+            // Si hay turnos, comparamos.
+            const shifts = await get().fetchShifts(periodStart, periodEnd, userId);
+            const shiftsMap = {};
+            shifts.forEach(s => shiftsMap[s.shift_date] = s);
+
+            // Calcular días trabajados y horas
+            for (const dateStr of Object.keys(daysMap)) {
+                // Ordenar asc
+                const records = daysMap[dateStr].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+
+                // Buscar pares Entrada/Salida
+                let entryTime = null;
+
+                records.forEach(r => {
+                    if (r.type === 'entry') {
+                        entryTime = new Date(r.recorded_at);
+
+                        // Check atraso si hay turno
+                        if (shiftsMap[dateStr]) {
+                            const shiftStart = new Date(`${dateStr}T${shiftsMap[dateStr].start_time}`);
+                            const diffMins = (entryTime - shiftStart) / (1000 * 60); // min
+                            if (diffMins > tolerance) {
+                                lateCount++;
+                                lateMinutes += Math.floor(diffMins);
+                            }
+                        }
+
+                    } else if (r.type === 'exit' && entryTime) {
+                        const exitTime = new Date(r.recorded_at);
+                        const diffHrs = (exitTime - entryTime) / (1000 * 60 * 60);
+                        hoursWorked += diffHrs;
+                        entryTime = null; // reset for next pair (lunch?)
+                    }
+                });
+                daysWorked++;
+            }
+
+            // Calcular monto (Base Proporcional o Fijo)
+            let baseAmount = 0;
+            if (user.pay_type === 'monthly') {
+                baseAmount = user.pay_base_amount || 0; // Se asume mensual completo
+                // Podría ajustarse por días trabajados si es ingreso reciente
+            } else if (user.pay_type === 'hourly') {
+                baseAmount = (user.pay_base_amount || 0) * hoursWorked;
+            } else if (user.pay_type === 'daily') {
+                baseAmount = (user.pay_base_amount || 0) * daysWorked;
+            }
+
+            // Buscar Adelantos pendientes
+            // Solo aquellos con status 'pending' y fecha <= periodEnd
+            const advRes = await turso.execute({
+                sql: `SELECT SUM(amount) as total FROM salary_advances 
+                      WHERE company_id = ? AND user_id = ? AND status = 'pending' AND advance_date <= ?`,
+                args: [activeCompanyId, userId, periodEnd]
+            });
+            const advancesTotal = advRes.rows[0].total || 0;
+
+            // Calcular Total
+            const totalToPay = baseAmount
+                + (user.pay_fixed_bonus || 0)
+                - (user.pay_fixed_discount || 0)
+                - advancesTotal;
+
+            // Retornar estructura
+            return {
+                user_id: userId,
+                period_start: periodStart,
+                period_end: periodEnd,
+                hours_worked: hoursWorked.toFixed(2),
+                days_absent: 0, // TODO: comparar con turnos totales
+                late_count: lateCount,
+                late_minutes: lateMinutes,
+                extra_hours: 0,
+                manual_bonus: user.pay_fixed_bonus || 0,
+                manual_discount: user.pay_fixed_discount || 0,
+                advances_discounted: advancesTotal,
+                base_amount: baseAmount,
+                total_to_pay: totalToPay
+            };
+
+        } catch (e) {
+            console.error("Error calculating period:", e);
+            throw e;
+        }
+    },
+
+    createPayrollPeriod: async (data, createdBy) => {
+        const { activeCompanyId } = get();
+        try {
+            const res = await turso.execute({
+                sql: `INSERT INTO payroll_periods 
+                      (company_id, user_id, period_label, period_start, period_end, 
+                       hours_worked, days_absent, late_count, late_minutes, extra_hours, 
+                       manual_bonus, manual_discount, advances_discounted, base_amount, 
+                       total_to_pay, created_by, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+                args: [
+                    activeCompanyId, data.user_id, data.period_label, data.period_start, data.period_end,
+                    data.hours_worked, data.days_absent, data.late_count, data.late_minutes, data.extra_hours,
+                    data.manual_bonus, data.manual_discount, data.advances_discounted, data.base_amount,
+                    data.total_to_pay, createdBy, new Date().toISOString()
+                ]
+            });
+
+            const newId = res.rows[0].id;
+
+            // Si se descontaron anticipos, actualizarlos
+            if (data.advances_discounted > 0) {
+                await turso.execute({
+                    sql: `UPDATE salary_advances 
+                           SET status = 'discounted', period_id = ? 
+                           WHERE company_id = ? AND user_id = ? AND status = 'pending' AND advance_date <= ?`,
+                    args: [newId, activeCompanyId, data.user_id, data.period_end]
+                });
+            }
+
+            return { success: true, id: newId };
+        } catch (e) {
+            console.error("Error creating payroll period:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    closePeriod: async (periodId) => {
+        try {
+            await turso.execute({
+                sql: "UPDATE payroll_periods SET is_closed = 1, closed_at = ? WHERE id = ?",
+                args: [new Date().toISOString(), periodId]
+            });
+            // Recargar
+            get().fetchPayrollPeriods();
+            return { success: true };
+        } catch (e) {
+            console.error("Error closing period:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updatePayrollPeriod: async (id, data) => {
+        // Solo permitir si no está cerrado
+        try {
+            // Check status
+            const current = await turso.execute("SELECT is_closed FROM payroll_periods WHERE id = ?", [id]);
+            if (current.rows[0]?.is_closed) throw new Error("Period is closed");
+
+            const fields = Object.keys(data).map(key => `${key} = ?`).join(', ');
+            const values = Object.values(data);
+
+            await turso.execute({
+                sql: `UPDATE payroll_periods SET ${fields} WHERE id = ?`,
+                args: [...values, id]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error("Error updating period:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // --- 9. Pagos de Nómina (Reales) ---
+
+    fetchPayrollPayments: async (userId = null, startDate = null, endDate = null) => {
+        const { activeCompanyId } = get();
+        try {
+            let sql = `SELECT pp.*, u.username, u.name, per.period_label
+                       FROM payroll_payments pp
+                       JOIN users u ON pp.user_id = u.id
+                       LEFT JOIN payroll_periods per ON pp.period_id = per.id
+                       WHERE pp.company_id = ?`;
+            const args = [activeCompanyId];
+
+            if (userId) {
+                sql += ` AND pp.user_id = ?`;
+                args.push(userId);
+            }
+            if (startDate && endDate) {
+                sql += ` AND pp.payment_date BETWEEN ? AND ?`;
+                args.push(startDate, endDate);
+            }
+
+            sql += ` ORDER BY pp.payment_date DESC`;
+
+            const result = await turso.execute({ sql, args });
+            set({ payrollPayments: result.rows });
+            return result.rows;
+        } catch (e) {
+            console.error("Error fetching payments:", e);
+            return [];
+        }
+    },
+
+    createPayrollPayment: async (data, createdBy) => {
+        const { activeCompanyId } = get();
+        try {
+            await turso.execute({
+                sql: `INSERT INTO payroll_payments 
+                      (company_id, user_id, period_id, amount_paid, payment_date, pay_method, status, notes, created_by, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                args: [
+                    activeCompanyId,
+                    data.user_id,
+                    data.period_id,
+                    data.amount_paid,
+                    data.payment_date,
+                    data.pay_method,
+                    'paid',
+                    data.notes,
+                    createdBy,
+                    new Date().toISOString()
+                ]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error("Error creating payment:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getPendingPayments: async () => {
+        // Retorna usuarios con deuda (Liquidaciones cerradas vs Pagos realizados)
+        const { activeCompanyId } = get();
+        try {
+            // Suma de Total a Pagar en Periodos Cerrados
+            // MENOS Suma de Pagos Realizados
+            // Agrupado por User
+
+            // Esta query compleja podría simplificarse en JS si hay pocos datos, 
+            // pero intentemos SQL
+
+            const sql = `
+                SELECT u.id, u.name, 
+                    (SELECT COALESCE(SUM(total_to_pay),0) FROM payroll_periods WHERE user_id = u.id AND is_closed = 1) as total_owed,
+                    (SELECT COALESCE(SUM(amount_paid),0) FROM payroll_payments WHERE user_id = u.id) as total_paid
+                FROM users u
+                WHERE u.company_id = ? AND u.has_labor_profile = 1
+             `;
+
+            const result = await turso.execute(sql, [activeCompanyId]);
+
+            return result.rows.map(r => ({
+                ...r,
+                balance: r.total_owed - r.total_paid
+            })).filter(r => Math.abs(r.balance) > 0.01); // Solo con saldo pendiente
+
+        } catch (e) {
+            console.error("Error getting pending payments:", e);
+            return [];
+        }
+    },
+
+    // --- 10. Vacaciones ---
+
+    fetchVacationRequests: async (status = null) => {
+        const { activeCompanyId } = get();
+        try {
+            let sql = `SELECT vr.*, u.username, u.name 
+                       FROM vacation_requests vr
+                       JOIN users u ON vr.user_id = u.id
+                       WHERE vr.company_id = ?`;
+            const args = [activeCompanyId];
+
+            if (status) {
+                sql += ` AND vr.status = ?`;
+                args.push(status);
+            }
+            sql += ` ORDER BY vr.start_date DESC`;
+
+            const result = await turso.execute({ sql, args });
+            set({ vacationRequests: result.rows });
+            return result.rows;
+        } catch (e) {
+            console.error("Error fetching vacation requests:", e);
+            return [];
+        }
+    },
+
+    fetchVacationBalances: async () => {
+        const { activeCompanyId } = get();
+        try {
+            const result = await turso.execute({
+                sql: `SELECT vb.*, u.username, u.name 
+                      FROM vacation_balances vb
+                      JOIN users u ON vb.user_id = u.id
+                      WHERE vb.company_id = ?`,
+                args: [activeCompanyId]
+            });
+            set({ vacationBalances: result.rows });
+            return result.rows;
+        } catch (e) {
+            console.error("Error fetching vacation balances:", e);
+            return [];
+        }
+    },
+
+    createVacationRequest: async (data) => {
+        const { activeCompanyId } = get();
+        try {
+            await turso.execute({
+                sql: `INSERT INTO vacation_requests 
+                      (company_id, user_id, start_date, end_date, total_days, notes, created_at) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                args: [activeCompanyId, data.user_id, data.start_date, data.end_date, data.total_days, data.notes, new Date().toISOString()]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error("Error requesting vacation:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    approveVacation: async (requestId, reviewedBy) => {
+        // Aprobar: 1. Update status 2. Create 'vacation' absence records 3. Deduct from balance
+        const { activeCompanyId } = get();
+        const now = new Date().toISOString();
+        try {
+            // Get Request
+            const reqRes = await turso.execute("SELECT * FROM vacation_requests WHERE id = ?", [requestId]);
+            const request = reqRes.rows[0];
+            if (!request) throw new Error("Request not found");
+
+            // 1. Update request status
+            await turso.execute({
+                sql: "UPDATE vacation_requests SET status = 'approved', reviewed_by = ?, reviewed_at = ? WHERE id = ?",
+                args: [reviewedBy, now, requestId]
+            });
+
+            // 2. Create absences (Range loop)
+            // Lógica simplificada: crear una ausencia por cada día o una por rango? 
+            // La tabla labor_absences tiene fecha única "absence_date". Debemos iterar.
+
+            const start = new Date(request.start_date);
+            const end = new Date(request.end_date);
+
+            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                await get().createAbsence({
+                    user_id: request.user_id,
+                    absence_date: d.toISOString().split('T')[0],
+                    type: 'vacation',
+                    notes: `Vacaciones aprobadas (Req #${requestId})`
+                }, reviewedBy);
+            }
+
+            // 3. Update Balance
+            // Check if balance row exists
+            const balCheck = await turso.execute("SELECT * FROM vacation_balances WHERE user_id = ?", [request.user_id]);
+            if (balCheck.rows.length === 0) {
+                await turso.execute("INSERT INTO vacation_balances (company_id, user_id, used_days) VALUES (?, ?, ?)",
+                    [activeCompanyId, request.user_id, request.total_days]);
+            } else {
+                await turso.execute("UPDATE vacation_balances SET used_days = used_days + ? WHERE user_id = ?",
+                    [request.total_days, request.user_id]);
+            }
+
+            // Reload
+            get().fetchVacationRequests();
+            get().fetchVacationBalances();
+            return { success: true };
+
+        } catch (e) {
+            console.error("Error approving vacation:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    rejectVacation: async (requestId, reviewedBy) => {
+        const now = new Date().toISOString();
+        try {
+            await turso.execute({
+                sql: "UPDATE vacation_requests SET status = 'rejected', reviewed_by = ?, reviewed_at = ? WHERE id = ?",
+                args: [reviewedBy, now, requestId]
+            });
+            get().fetchVacationRequests();
+            return { success: true };
+        } catch (e) {
+            console.error("Error rejecting vacation:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updateVacationBalance: async (userId, data) => {
+        // data: { initial_balance, accrued_days, used_days }
+        const { activeCompanyId } = get();
+        try {
+            // Check exist
+            const check = await turso.execute("SELECT id FROM vacation_balances WHERE user_id = ?", [userId]);
+
+            if (check.rows.length === 0) {
+                await turso.execute({
+                    sql: "INSERT INTO vacation_balances (company_id, user_id, initial_balance, accrued_days, used_days) VALUES (?, ?, ?, ?, ?)",
+                    args: [activeCompanyId, userId, data.initial_balance || 0, data.accrued_days || 0, data.used_days || 0]
+                });
+            } else {
+                const fields = Object.keys(data).map(k => `${k} = ?`).join(', ');
+                const values = Object.values(data);
+                await turso.execute({
+                    sql: `UPDATE vacation_balances SET ${fields} WHERE user_id = ?`,
+                    args: [...values, userId]
+                });
+            }
+            get().fetchVacationBalances();
+            return { success: true };
+        } catch (e) {
+            console.error("Error updating balance:", e);
             return { success: false, error: e.message };
         }
     },

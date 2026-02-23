@@ -10,7 +10,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import AccessDenied from './auth/AccessDenied';
 
 const ClientAccountDetails = ({ client, onBack }) => {
-    const { sales, users, registerClientPayment, fetchSales, currentCurrency } = useStore();
+    const { users, registerClientPayment, fetchClientSales, currentCurrency } = useStore();
     const { can } = usePermissions();
 
     // Permission Check
@@ -29,19 +29,22 @@ const ClientAccountDetails = ({ client, onBack }) => {
     const [minAmount, setMinAmount] = useState('');
     const [maxAmount, setMaxAmount] = useState('');
 
-    // Reload sales on mount to ensure we have real IDs (not optimistic ones)
     useEffect(() => {
-        fetchSales();
-    }, []);
+        let mounted = true;
 
-    useEffect(() => {
-        if (client) {
-            // Get ALL sales for this client
-            const allSales = sales.filter(s => s.client_id === client.id)
-                .sort((a, b) => new Date(b.date) - new Date(a.date));
-            setRawClientSales(allSales);
-        }
-    }, [client, sales]);
+        const loadClientData = async () => {
+            if (client) {
+                const clientSales = await fetchClientSales(client.id);
+                if (mounted) {
+                    setRawClientSales(clientSales);
+                }
+            }
+        };
+
+        loadClientData();
+
+        return () => { mounted = false; };
+    }, [client]);
 
     if (!client) return null;
 
@@ -397,7 +400,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
                 isOpen={isPaymentModalOpen}
                 onClose={() => setIsPaymentModalOpen(false)}
                 client={client}
-                sales={sales}
+                sales={rawClientSales}
                 onConfirm={handlePaymentConfirm}
             />
         </div>
