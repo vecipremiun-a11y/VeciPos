@@ -3237,11 +3237,15 @@ export const useStore = create(persist((set, get) => ({
                         category: updatedProduct.category,
                         stock: updatedProduct.stock,
                         price: updatedProduct.price,
-                        offer_price: updatedProduct.offer_price || 0,
-                        is_offer: Boolean(updatedProduct.is_offer),
                         unit: updatedProduct.unit || 'Und',
                         tax_rate: updatedProduct.tax_rate || 0,
                     };
+                    if (updatedProduct.is_offer) {
+                        syncPayload.is_offer = true;
+                        syncPayload.offer_price = updatedProduct.offer_price || 0;
+                    } else {
+                        syncPayload.is_offer = false;
+                    }
                     if (imageChanged && updatedProduct.image) {
                         syncPayload.image = updatedProduct.image;
                     }
@@ -3363,7 +3367,7 @@ export const useStore = create(persist((set, get) => ({
             const dbProducts = await turso.execute({
                 sql: `
                     SELECT id, name, sku, price, stock, category, image, cost, unit,
-                           is_offer, offer_price
+                           is_offer, offer_price, tax_rate
                     FROM products
                     WHERE company_id = ?
                       AND sku IS NOT NULL
@@ -3381,7 +3385,7 @@ export const useStore = create(persist((set, get) => ({
                     ? Math.round(clampedStock * 100) / 100
                     : Math.floor(clampedStock);
 
-                return {
+                const item = {
                     id: Number(product.id),
                     name: product.name || '',
                     sku: normalizeSku(product.sku),
@@ -3391,9 +3395,17 @@ export const useStore = create(persist((set, get) => ({
                     image: product.image || null,
                     cost: Number(product.cost || 0),
                     unit,
-                    is_offer: Boolean(product.is_offer),
-                    offer_price: Number(product.offer_price || 0),
+                    tax_rate: Number(product.tax_rate || 0),
                 };
+
+                if (product.is_offer) {
+                    item.is_offer = true;
+                    item.offer_price = Number(product.offer_price || 0);
+                } else {
+                    item.is_offer = false;
+                }
+
+                return item;
             }).filter(product => product.sku);
 
             const total = items.length;

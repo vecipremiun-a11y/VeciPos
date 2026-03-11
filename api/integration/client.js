@@ -113,8 +113,12 @@ export async function syncProductToStore({ companyId, product }) {
     if (product.category) payload.category = product.category;
     if (product.stock !== undefined) payload.stock = normalizeStockForStore(product.stock, product.unit);
     if (product.price) payload.price = Number(product.price);
-    if (product.offer_price !== undefined) payload.offerPrice = Number(product.offer_price);
-    if (product.is_offer !== undefined) payload.isOffer = Boolean(product.is_offer);
+    if (product.is_offer) {
+        payload.isOffer = true;
+        payload.offerPrice = Number(product.offer_price || 0);
+    } else if (product.is_offer === false) {
+        payload.isOffer = false;
+    }
     if (product.unit) payload.unit = product.unit;
     if (product.tax_rate !== undefined) payload.taxRate = Number(product.tax_rate);
 
