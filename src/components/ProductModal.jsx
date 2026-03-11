@@ -470,14 +470,14 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             <div className="mt-4 animate-in slide-in-from-top-2 fade-in duration-300">
                                 <label className="block text-sm text-[var(--color-primary)] font-bold mb-1">Precio Oferta</label>
                                 <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-primary)] font-bold text-lg">$</span>
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-primary)] font-bold text-lg pointer-events-none">$</span>
                                     <input
                                         type="number"
                                         step="0.01"
                                         name="offer_price"
                                         value={formData.offer_price}
                                         onChange={handleChange}
-                                        className="glass-input w-full pl-8 text-xl font-bold text-[var(--color-primary)] border-[var(--color-primary)]/50 focus:border-[var(--color-primary)]"
+                                        className="glass-input w-full pl-10 text-xl font-bold text-[var(--color-primary)] border-[var(--color-primary)]/50 focus:border-[var(--color-primary)]"
                                         placeholder="0.00"
                                     />
                                 </div>
