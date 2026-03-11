@@ -3310,83 +3310,31 @@ export const useStore = create(persist((set, get) => ({
                 return { success: false, error: 'No hay SKUs válidos para sincronizar' };
             }
 
-            const configResult = await turso.execute({
-                sql: `
-                    SELECT
-                        tienda_url,
-                        COALESCE(api_key, api_consumer_key) AS api_key,
-                        COALESCE(api_secret, api_consumer_secret) AS api_secret,
-                        COALESCE(is_active, 1) AS is_active
-                    FROM tienda_config
-                    WHERE company_id = ?
-                    LIMIT 1
-                `,
-                args: [activeCompanyId]
+            const response = await fetch(`/api/integration/sync-stock?company_id=${encodeURIComponent(activeCompanyId)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: safeJsonStringify({
+                    sale_id: saleId,
+                    sold_at: soldAt,
+                    items: normalizedItems,
+                }),
             });
 
-            const config = configResult.rows?.[0] || null;
-            if (!config || Number(config.is_active) === 0) {
-                return { success: false, error: 'Integración de tienda no configurada o inactiva' };
-            }
+            const data = await response.json().catch(() => ({}));
 
-            const storeBaseUrl = (config.tienda_url || '').replace(/\/$/, '');
-            if (!storeBaseUrl) {
-                return { success: false, error: 'tienda_url no configurada en la integración' };
-            }
-
-            const apiKey = config.api_key ? String(config.api_key) : '';
-            const apiSecret = config.api_secret ? String(config.api_secret) : '';
-
-            if (!apiKey || !apiSecret) {
-                return { success: false, error: 'Faltan credenciales API de tienda (api_key/api_secret)' };
-            }
-
-            const attempts = [];
-
-            for (const item of normalizedItems) {
-                console.log(`Enviando SKU: [${item.sku}]`);
-
-                const response = await fetch(`${storeBaseUrl}/api/pos/products/stock`, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': apiKey,
-                        'x-api-secret': apiSecret,
-                        'x-api-consumer-key': apiKey,
-                        'x-api-consumer-secret': apiSecret,
-                    },
-                    body: safeJsonStringify({
-                        sku: item.sku,
-                        stock: item.stock,
-                    })
-                });
-
-                const responseText = await response.text();
-                attempts.push({
-                    sku: item.sku,
-                    stock: item.stock,
-                    ok: response.ok,
-                    status: response.status,
-                    body: responseText.slice(0, 1000),
-                });
-            }
-
-            const allOk = attempts.every(attempt => attempt.ok);
-            const firstError = attempts.find(attempt => !attempt.ok);
-
-            if (!allOk) {
-                console.warn('Stock sync to store failed:', firstError || null);
+            if (!response.ok || !data.success) {
+                console.warn('Stock sync to store failed:', data);
                 return {
                     success: false,
-                    status: firstError?.status || 502,
-                    body: { attempts }
+                    status: response.status,
+                    body: data,
                 };
             }
 
             return {
                 success: true,
                 status: 200,
-                body: { attempts }
+                body: data,
             };
         } catch (error) {
             console.warn('Stock sync to store network error:', error);
@@ -3426,36 +3374,6 @@ export const useStore = create(persist((set, get) => ({
                 return { success: true, total: 0, updated: 0, failed: 0, failures: [] };
             }
 
-            const configResult = await turso.execute({
-                sql: `
-                    SELECT
-                        tienda_url,
-                        COALESCE(api_key, api_consumer_key) AS api_key,
-                        COALESCE(api_secret, api_consumer_secret) AS api_secret,
-                        COALESCE(is_active, 1) AS is_active
-                    FROM tienda_config
-                    WHERE company_id = ?
-                    LIMIT 1
-                `,
-                args: [activeCompanyId]
-            });
-
-            const config = configResult.rows?.[0] || null;
-            if (!config || Number(config.is_active) === 0) {
-                return { success: false, error: 'Integración de tienda no configurada o inactiva', total, updated: 0, failed: total, failures: [] };
-            }
-
-            const storeBaseUrl = (config.tienda_url || '').replace(/\/$/, '');
-            if (!storeBaseUrl) {
-                return { success: false, error: 'tienda_url no configurada en la integración', total, updated: 0, failed: total, failures: [] };
-            }
-
-            const apiKey = config.api_key ? String(config.api_key) : '';
-            const apiSecret = config.api_secret ? String(config.api_secret) : '';
-            if (!apiKey || !apiSecret) {
-                return { success: false, error: 'Faltan credenciales API de tienda (api_key/api_secret)', total, updated: 0, failed: total, failures: [] };
-            }
-
             const chunkSize = 25;
             let processed = 0;
             let updated = 0;
@@ -3464,34 +3382,31 @@ export const useStore = create(persist((set, get) => ({
 
             for (let index = 0; index < items.length; index += chunkSize) {
                 const chunk = items.slice(index, index + chunkSize);
-                for (const item of chunk) {
-                    console.log(`Enviando SKU: [${item.sku}]`);
 
-                    const response = await fetch(`${storeBaseUrl}/api/pos/products/stock`, {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-api-key': apiKey,
-                            'x-api-secret': apiSecret,
-                            'x-api-consumer-key': apiKey,
-                            'x-api-consumer-secret': apiSecret,
-                        },
-                        body: safeJsonStringify({
-                            sku: item.sku,
-                            stock: item.stock,
-                        })
-                    });
+                const response = await fetch(`/api/integration/sync-stock?company_id=${encodeURIComponent(activeCompanyId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: safeJsonStringify({
+                        items: chunk,
+                    }),
+                });
 
-                    const responseText = await response.text();
-                    if (response.ok) {
-                        updated += 1;
-                    } else {
-                        failed += 1;
-                        failures.push({
-                            sku: item.sku,
-                            status: response.status,
-                            body: responseText.slice(0, 1000),
-                        });
+                const data = await response.json().catch(() => ({}));
+
+                if (response.ok && data.success) {
+                    const attempts = data.attempts || [];
+                    for (const a of attempts) {
+                        if (a.ok) {
+                            updated += 1;
+                        } else {
+                            failed += 1;
+                            failures.push({ sku: a.sku, status: a.status, body: a.body });
+                        }
+                    }
+                } else {
+                    failed += chunk.length;
+                    for (const item of chunk) {
+                        failures.push({ sku: item.sku, status: response.status, body: JSON.stringify(data).slice(0, 500) });
                     }
                 }
 
