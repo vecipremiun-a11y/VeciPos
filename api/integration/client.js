@@ -24,6 +24,15 @@ function normalizeSku(value) {
     return String(value).trim().toUpperCase();
 }
 
+function normalizeStockForStore(stock, unit) {
+    const raw = Number(stock || 0);
+    const clamped = raw < 0 ? 0 : raw;
+    const u = (unit || 'un').toLowerCase();
+    return (u === 'kg' || u === 'lt')
+        ? Math.round(clamped * 100) / 100
+        : Math.floor(clamped);
+}
+
 export async function syncPriceToStore({ companyId, product }) {
     const config = await getTiendaConfig(companyId);
 
@@ -102,7 +111,7 @@ export async function syncProductToStore({ companyId, product }) {
 
     if (product.name) payload.name = product.name;
     if (product.category) payload.category = product.category;
-    if (product.stock !== undefined) payload.stock = Math.floor(Number(product.stock || 0));
+    if (product.stock !== undefined) payload.stock = normalizeStockForStore(product.stock, product.unit);
     if (product.price) payload.price = Number(product.price);
     if (product.offer_price !== undefined) payload.offerPrice = Number(product.offer_price);
     if (product.is_offer !== undefined) payload.isOffer = Boolean(product.is_offer);
@@ -174,9 +183,9 @@ export async function syncStockToStore({ companyId, sale }) {
         ? sale.items
             .map(item => ({
                 sku: normalizeSku(item?.sku),
-                stock: Number.parseInt(Number(item?.stock || 0), 10),
+                stock: normalizeStockForStore(item?.stock, item?.unit),
             }))
-            .filter(item => item.sku && Number.isInteger(item.stock))
+            .filter(item => item.sku && Number.isFinite(item.stock))
         : [];
 
     if (updates.length === 0) {

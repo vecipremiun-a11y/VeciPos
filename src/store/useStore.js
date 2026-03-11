@@ -3294,13 +3294,23 @@ export const useStore = create(persist((set, get) => ({
                 return { success: false, error: 'Payload de sincronización incompleto' };
             }
 
-            const normalizedItems = items.map(item => ({
-                sku: normalizeSku(item?.sku),
-                product_id: item?.product_id !== undefined && item?.product_id !== null
-                    ? Number(item.product_id)
-                    : null,
-                stock: Number.parseInt(Number(item?.stock ?? 0), 10),
-            })).filter(item => item.sku && Number.isInteger(item.stock));
+            const normalizedItems = items.map(item => {
+                const unit = (item?.unit || 'un').toLowerCase();
+                const rawStock = Number(item?.stock ?? 0);
+                const clampedStock = rawStock < 0 ? 0 : rawStock;
+                const stock = (unit === 'kg' || unit === 'lt')
+                    ? Math.round(clampedStock * 100) / 100
+                    : Math.floor(clampedStock);
+
+                return {
+                    sku: normalizeSku(item?.sku),
+                    product_id: item?.product_id !== undefined && item?.product_id !== null
+                        ? Number(item.product_id)
+                        : null,
+                    stock,
+                    unit,
+                };
+            }).filter(item => item.sku && Number.isFinite(item.stock));
 
             if (normalizedItems.length === 0) {
                 console.warn('Stock sync skipped: SKU inválido después de normalizar', {
@@ -3363,19 +3373,28 @@ export const useStore = create(persist((set, get) => ({
                 args: [activeCompanyId]
             });
 
-            const items = (dbProducts.rows || []).map(product => ({
-                id: Number(product.id),
-                name: product.name || '',
-                sku: normalizeSku(product.sku),
-                price: Number(product.price || 0),
-                stock: Number.parseInt(Number(product.stock || 0), 10),
-                category: product.category || 'General',
-                image: product.image || null,
-                cost: Number(product.cost || 0),
-                unit: product.unit || 'un',
-                is_offer: Boolean(product.is_offer),
-                offer_price: Number(product.offer_price || 0),
-            })).filter(product => product.sku);
+            const items = (dbProducts.rows || []).map(product => {
+                const unit = (product.unit || 'un').toLowerCase();
+                const rawStock = Number(product.stock || 0);
+                const clampedStock = rawStock < 0 ? 0 : rawStock;
+                const stock = (unit === 'kg' || unit === 'lt')
+                    ? Math.round(clampedStock * 100) / 100
+                    : Math.floor(clampedStock);
+
+                return {
+                    id: Number(product.id),
+                    name: product.name || '',
+                    sku: normalizeSku(product.sku),
+                    price: Number(product.price || 0),
+                    stock,
+                    category: product.category || 'General',
+                    image: product.image || null,
+                    cost: Number(product.cost || 0),
+                    unit,
+                    is_offer: Boolean(product.is_offer),
+                    offer_price: Number(product.offer_price || 0),
+                };
+            }).filter(product => product.sku);
 
             const total = items.length;
             if (total === 0) {
