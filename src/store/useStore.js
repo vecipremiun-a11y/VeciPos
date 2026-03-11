@@ -6,6 +6,22 @@ import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFrom
 
 let migrationsExecuted = false;
 
+const safeJsonStringify = (value) => JSON.stringify(value, (_key, currentValue) => {
+    if (typeof currentValue === 'bigint') {
+        const asNumber = Number(currentValue);
+        return Number.isFinite(asNumber) ? asNumber : currentValue.toString();
+    }
+    return currentValue;
+});
+
+const normalizeSku = (value) => {
+    if (value === undefined || value === null) {
+        return '';
+    }
+
+    return String(value).trim().toUpperCase();
+};
+
 export const useStore = create(persist((set, get) => ({
     // Initial State
     products: [],
@@ -14,6 +30,7 @@ export const useStore = create(persist((set, get) => ({
     suppliers: [],
     users: [],
     rolePermissions: [], // 🔒 Permissions State (Initialized)
+    companyModules: [], // 🏷️ Feature Flags per company
     purchases: [],
     sales: [],
     // Multi-cart system
@@ -854,6 +871,20 @@ export const useStore = create(persist((set, get) => ({
             // Seed Permissions if needed
             await get().setupDefaultPermissions();
 
+            // ============================================
+            // 🏷️ COMPANY MODULES TABLE (Feature Flags)
+            // ============================================
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS company_modules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id TEXT NOT NULL,
+                    module_key TEXT NOT NULL,
+                    enabled INTEGER DEFAULT 1,
+                    updated_at TEXT,
+                    UNIQUE(company_id, module_key)
+                )
+            `);
+
             console.log("SaaS Migrations Completed.");
 
         } catch (e) {
@@ -995,6 +1026,7 @@ export const useStore = create(persist((set, get) => ({
             suppliers: [],
             users: [],
             rolePermissions: [], // 🔒 Permissions State
+            companyModules: [], // 🏷️ Clear feature flags
             clients: [],
             purchases: [],
             sales: [],
@@ -1024,6 +1056,7 @@ export const useStore = create(persist((set, get) => ({
         // Reload data
         await fetchInitialData();
         await get().fetchRolePermissions(); // 🔒 Load permissions
+        await get().fetchCompanyModules(companyId); // 🏷️ Load feature flags
 
         // After data load, check if this user has an open register in the NEW company
         // We need to fetch this explicitly because fetchInitialData might not set cashRegister
@@ -1245,6 +1278,13 @@ export const useStore = create(persist((set, get) => ({
                 }
             }
 
+            // Migration: Add purchase_id column to product_lots if it doesn't exist
+            try {
+                await turso.execute('ALTER TABLE product_lots ADD COLUMN purchase_id INTEGER');
+            } catch (e) {
+                // Ignore error if column already exists
+            }
+
             // Load Payment Methods Settings
             await get().fetchPaymentMethodsSettings();
 
@@ -1266,8 +1306,8 @@ export const useStore = create(persist((set, get) => ({
                 { sql: "SELECT * FROM users WHERE company_id = ?", args: [activeCompanyId] },
                 { sql: "SELECT * FROM clients WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
                 { sql: "SELECT * FROM role_permissions WHERE company_id = ?", args: [activeCompanyId] },
-                { sql: "SELECT * FROM tax_rates WHERE company_id = ?", args: [activeCompanyId] }
-                // Removed sales LIMIT 0
+                { sql: "SELECT * FROM tax_rates WHERE company_id = ?", args: [activeCompanyId] },
+                { sql: "SELECT * FROM company_modules WHERE company_id = ?", args: [activeCompanyId] }
             ]);
             console.timeEnd('⏱️ BatchFetch');
 
@@ -1278,6 +1318,7 @@ export const useStore = create(persist((set, get) => ({
             const clientsRes = batchResults[4];
             const permissionsRes = batchResults[5];
             const taxesRes = batchResults[6];
+            const modulesRes = batchResults[7];
 
             console.log('👥 Loaded users:', usersRes.rows.length);
 
@@ -1295,7 +1336,7 @@ export const useStore = create(persist((set, get) => ({
 
             // const sales = ...
 
-            set({ productLots, categories, suppliers, users, clients, rolePermissions: permissionsRes.rows, taxRates: taxesRes.rows });
+            set({ productLots, categories, suppliers, users, clients, rolePermissions: permissionsRes.rows, taxRates: taxesRes.rows, companyModules: modulesRes.rows });
 
             console.timeEnd('⏱️ fetchInitialData');
             console.log(`✅ Initial Load: Metadata only.`);
@@ -1306,6 +1347,60 @@ export const useStore = create(persist((set, get) => ({
         } finally {
             set({ isLoading: false });
         }
+    },
+
+    // ==========================================
+    // 🏷️ COMPANY MODULES (Feature Flags)
+    // ==========================================
+    fetchCompanyModules: async (companyId) => {
+        try {
+            const targetCompanyId = companyId || get().activeCompanyId;
+            const res = await turso.execute({
+                sql: 'SELECT * FROM company_modules WHERE company_id = ?',
+                args: [targetCompanyId]
+            });
+            // Only update global state if fetching for the active company
+            if (!companyId || companyId === get().activeCompanyId) {
+                set({ companyModules: res.rows });
+            }
+            return res.rows;
+        } catch (e) {
+            console.error('fetchCompanyModules error:', e);
+            return [];
+        }
+    },
+
+    updateCompanyModule: async (companyId, moduleKey, enabled) => {
+        try {
+            await turso.execute({
+                sql: `INSERT INTO company_modules (company_id, module_key, enabled, updated_at)
+                      VALUES (?, ?, ?, ?)
+                      ON CONFLICT(company_id, module_key)
+                      DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at`,
+                args: [companyId, moduleKey, enabled ? 1 : 0, new Date().toISOString()]
+            });
+            // Refresh local state if editing active company
+            if (companyId === get().activeCompanyId) {
+                await get().fetchCompanyModules(companyId);
+            }
+            return { success: true };
+        } catch (e) {
+            console.error('updateCompanyModule error:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    hasModule: (moduleKey) => {
+        const { companyModules } = get();
+        const record = companyModules.find(m => m.module_key === moduleKey);
+        if (!record) {
+            // If no explicit record, check default from ALL_MODULES
+            // Import not available here so we use a simple lookup:
+            // Modules that default to disabled: 'personal'
+            const defaultDisabled = ['personal'];
+            return !defaultDisabled.includes(moduleKey);
+        }
+        return Number(record.enabled) === 1;
     },
 
     // NEW: Server-Side Search Actions
@@ -1915,12 +2010,14 @@ export const useStore = create(persist((set, get) => ({
     fetchProductLotsReport: async (limit = 30, offset = 0) => {
         const { activeCompanyId } = get();
         try {
-            // Fetch lots joined with products to get all details in one go
+            // Fetch lots joined with products AND purchases to get invoice details
             const sql = "SELECT pl.*, " +
                 "p.name as p_name, p.sku as p_sku, p.image as p_image, " +
-                "p.stock as p_stock, p.unit as p_unit, p.price as p_price " +
+                "p.stock as p_stock, p.unit as p_unit, p.price as p_price, " +
+                "pu.invoice_number as invoice_number, pu.date as purchase_date " +
                 "FROM product_lots pl " +
                 "JOIN products p ON pl.product_id = p.id " +
+                "LEFT JOIN purchases pu ON pl.purchase_id = pu.id " +
                 "WHERE pl.company_id = ? AND pl.quantity > 0 " +
                 "ORDER BY (pl.expiry_date IS NULL) ASC, pl.expiry_date ASC " +
                 "LIMIT ? OFFSET ?";
@@ -1936,6 +2033,10 @@ export const useStore = create(persist((set, get) => ({
                 cost: row.cost,
                 supplier_name: row.supplier_name,
                 created_at: row.created_at,
+                purchase_id: row.purchase_id,
+                // Purchase/Invoice info
+                invoice_number: row.invoice_number || null,
+                purchase_date: row.purchase_date || null,
                 // Product embedded info
                 product_name: row.p_name,
                 product_sku: row.p_sku,
@@ -2860,7 +2961,8 @@ export const useStore = create(persist((set, get) => ({
                     'sales.view', 'sales.view_details',
                     'clients.view', 'clients.create', 'clients.view_account',
                     'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.complete',
-                    'production.view', 'production.manage'
+                    'production.view', 'production.manage',
+                    'personal.view', 'personal.attendance', 'personal.corrections'
                 ],
                 'Bodeguero': [
                     'dashboard.view',
@@ -2934,7 +3036,8 @@ export const useStore = create(persist((set, get) => ({
                     'pos.access', 'pos.sell', 'pos.discount', 'pos.open_register', 'pos.close_register', 'pos.cash_in', 'pos.cash_out', 'pos.suspend_sale', 'pos.recover_sale',
                     'sales.view', 'sales.view_details',
                     'clients.view', 'clients.create', 'clients.view_account',
-                    'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.complete'
+                    'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.complete',
+                    'personal.view', 'personal.attendance', 'personal.corrections'
                 ],
                 // Bodeguero: Inventory, Orders
                 'Bodeguero': [
@@ -3119,6 +3222,49 @@ export const useStore = create(persist((set, get) => ({
                 ]
             });
 
+            // POS -> Tienda: sincronizar producto completo al editar
+            try {
+                if (updatedProduct.sku && normalizeSku(updatedProduct.sku)) {
+                    // Solo enviar imagen si realmente cambió (evitar enviar ~200KB base64 cada vez)
+                    const oldProduct = get().products.find(p => p.id === id);
+                    const imageChanged = updatedProduct.image !== (oldProduct?.image || null);
+                    console.log('🔄 Sync:', { sku: updatedProduct.sku, imageChanged, hasImage: !!updatedProduct.image });
+
+                    const syncPayload = {
+                        id,
+                        sku: updatedProduct.sku,
+                        name: updatedProduct.name,
+                        category: updatedProduct.category,
+                        stock: updatedProduct.stock,
+                        price: updatedProduct.price,
+                        offer_price: updatedProduct.offer_price || 0,
+                        is_offer: Boolean(updatedProduct.is_offer),
+                        unit: updatedProduct.unit || 'Und',
+                        tax_rate: updatedProduct.tax_rate || 0,
+                    };
+                    if (imageChanged && updatedProduct.image) {
+                        syncPayload.image = updatedProduct.image;
+                    }
+
+                    fetch(`/api/integration/sync-product?company_id=${encodeURIComponent(activeCompanyId)}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ product: syncPayload })
+                    }).then(async (res) => {
+                        const data = await res.json().catch(() => null);
+                        if (!res.ok || !data?.success) {
+                            console.warn('Product sync post-edit failed:', { id, status: res.status, data });
+                        } else {
+                            console.log('✅ Product sync post-edit success:', { id, sku: updatedProduct.sku });
+                        }
+                    }).catch(syncError => {
+                        console.warn('Product sync post-edit error:', syncError);
+                    });
+                }
+            } catch (syncError) {
+                console.warn('Product sync post-edit setup error:', syncError);
+            }
+
             // Audit
             await turso.execute({
                 sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -3132,6 +3278,244 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error("Update product error", e);
             return { success: false, error: e.message };
+        }
+    },
+
+    syncSaleStockToStore: async ({ saleId, soldAt, items }) => {
+        try {
+            const { activeCompanyId } = get();
+
+            if (!activeCompanyId || !Array.isArray(items) || items.length === 0) {
+                console.warn('Stock sync skipped: payload incompleto', {
+                    activeCompanyId,
+                    saleId,
+                    itemsCount: Array.isArray(items) ? items.length : 0,
+                });
+                return { success: false, error: 'Payload de sincronización incompleto' };
+            }
+
+            const normalizedItems = items.map(item => ({
+                sku: normalizeSku(item?.sku),
+                product_id: item?.product_id !== undefined && item?.product_id !== null
+                    ? Number(item.product_id)
+                    : null,
+                stock: Number.parseInt(Number(item?.stock ?? 0), 10),
+            })).filter(item => item.sku && Number.isInteger(item.stock));
+
+            if (normalizedItems.length === 0) {
+                console.warn('Stock sync skipped: SKU inválido después de normalizar', {
+                    saleId,
+                    itemsCount: Array.isArray(items) ? items.length : 0,
+                });
+                return { success: false, error: 'No hay SKUs válidos para sincronizar' };
+            }
+
+            const configResult = await turso.execute({
+                sql: `
+                    SELECT
+                        tienda_url,
+                        COALESCE(api_key, api_consumer_key) AS api_key,
+                        COALESCE(api_secret, api_consumer_secret) AS api_secret,
+                        COALESCE(is_active, 1) AS is_active
+                    FROM tienda_config
+                    WHERE company_id = ?
+                    LIMIT 1
+                `,
+                args: [activeCompanyId]
+            });
+
+            const config = configResult.rows?.[0] || null;
+            if (!config || Number(config.is_active) === 0) {
+                return { success: false, error: 'Integración de tienda no configurada o inactiva' };
+            }
+
+            const storeBaseUrl = (config.tienda_url || '').replace(/\/$/, '');
+            if (!storeBaseUrl) {
+                return { success: false, error: 'tienda_url no configurada en la integración' };
+            }
+
+            const apiKey = config.api_key ? String(config.api_key) : '';
+            const apiSecret = config.api_secret ? String(config.api_secret) : '';
+
+            if (!apiKey || !apiSecret) {
+                return { success: false, error: 'Faltan credenciales API de tienda (api_key/api_secret)' };
+            }
+
+            const attempts = [];
+
+            for (const item of normalizedItems) {
+                console.log(`Enviando SKU: [${item.sku}]`);
+
+                const response = await fetch(`${storeBaseUrl}/api/pos/products/stock`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': apiKey,
+                        'x-api-secret': apiSecret,
+                        'x-api-consumer-key': apiKey,
+                        'x-api-consumer-secret': apiSecret,
+                    },
+                    body: safeJsonStringify({
+                        sku: item.sku,
+                        stock: item.stock,
+                    })
+                });
+
+                const responseText = await response.text();
+                attempts.push({
+                    sku: item.sku,
+                    stock: item.stock,
+                    ok: response.ok,
+                    status: response.status,
+                    body: responseText.slice(0, 1000),
+                });
+            }
+
+            const allOk = attempts.every(attempt => attempt.ok);
+            const firstError = attempts.find(attempt => !attempt.ok);
+
+            if (!allOk) {
+                console.warn('Stock sync to store failed:', firstError || null);
+                return {
+                    success: false,
+                    status: firstError?.status || 502,
+                    body: { attempts }
+                };
+            }
+
+            return {
+                success: true,
+                status: 200,
+                body: { attempts }
+            };
+        } catch (error) {
+            console.warn('Stock sync to store network error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
+    syncAllStockWithStore: async (onProgress) => {
+        try {
+            const { activeCompanyId } = get();
+
+            if (!activeCompanyId) {
+                return { success: false, error: 'Empresa activa no disponible' };
+            }
+
+            const dbProducts = await turso.execute({
+                sql: `
+                    SELECT id, sku, stock
+                    FROM products
+                    WHERE company_id = ?
+                      AND sku IS NOT NULL
+                      AND TRIM(sku) <> ''
+                      AND COALESCE(is_active, 1) = 1
+                    ORDER BY id ASC
+                `,
+                args: [activeCompanyId]
+            });
+
+            const items = (dbProducts.rows || []).map(product => ({
+                product_id: Number(product.id),
+                sku: normalizeSku(product.sku),
+                stock: Number.parseInt(Number(product.stock || 0), 10),
+            })).filter(product => product.sku && Number.isInteger(product.stock));
+
+            const total = items.length;
+            if (total === 0) {
+                return { success: true, total: 0, updated: 0, failed: 0, failures: [] };
+            }
+
+            const configResult = await turso.execute({
+                sql: `
+                    SELECT
+                        tienda_url,
+                        COALESCE(api_key, api_consumer_key) AS api_key,
+                        COALESCE(api_secret, api_consumer_secret) AS api_secret,
+                        COALESCE(is_active, 1) AS is_active
+                    FROM tienda_config
+                    WHERE company_id = ?
+                    LIMIT 1
+                `,
+                args: [activeCompanyId]
+            });
+
+            const config = configResult.rows?.[0] || null;
+            if (!config || Number(config.is_active) === 0) {
+                return { success: false, error: 'Integración de tienda no configurada o inactiva', total, updated: 0, failed: total, failures: [] };
+            }
+
+            const storeBaseUrl = (config.tienda_url || '').replace(/\/$/, '');
+            if (!storeBaseUrl) {
+                return { success: false, error: 'tienda_url no configurada en la integración', total, updated: 0, failed: total, failures: [] };
+            }
+
+            const apiKey = config.api_key ? String(config.api_key) : '';
+            const apiSecret = config.api_secret ? String(config.api_secret) : '';
+            if (!apiKey || !apiSecret) {
+                return { success: false, error: 'Faltan credenciales API de tienda (api_key/api_secret)', total, updated: 0, failed: total, failures: [] };
+            }
+
+            const chunkSize = 25;
+            let processed = 0;
+            let updated = 0;
+            let failed = 0;
+            const failures = [];
+
+            for (let index = 0; index < items.length; index += chunkSize) {
+                const chunk = items.slice(index, index + chunkSize);
+                for (const item of chunk) {
+                    console.log(`Enviando SKU: [${item.sku}]`);
+
+                    const response = await fetch(`${storeBaseUrl}/api/pos/products/stock`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-api-key': apiKey,
+                            'x-api-secret': apiSecret,
+                            'x-api-consumer-key': apiKey,
+                            'x-api-consumer-secret': apiSecret,
+                        },
+                        body: safeJsonStringify({
+                            sku: item.sku,
+                            stock: item.stock,
+                        })
+                    });
+
+                    const responseText = await response.text();
+                    if (response.ok) {
+                        updated += 1;
+                    } else {
+                        failed += 1;
+                        failures.push({
+                            sku: item.sku,
+                            status: response.status,
+                            body: responseText.slice(0, 1000),
+                        });
+                    }
+                }
+
+                processed += chunk.length;
+
+                if (typeof onProgress === 'function') {
+                    onProgress({
+                        processed,
+                        total,
+                        message: `Sincronizando ${processed} productos...`,
+                    });
+                }
+            }
+
+            return {
+                success: failed === 0,
+                total,
+                updated,
+                failed,
+                failures,
+            };
+        } catch (error) {
+            console.error('syncAllStockWithStore error:', error);
+            return { success: false, error: error.message, total: 0, updated: 0, failed: 0, failures: [] };
         }
     },
 
@@ -3612,30 +3996,32 @@ export const useStore = create(persist((set, get) => ({
 
             const itemsJson = JSON.stringify(purchase.items);
 
-            // Transaction: Insert Purchase + Update Product Stock/Cost
-            const queries = [
-                {
-                    sql: "INSERT INTO purchases (supplier_id, supplier_name, invoice_number, date, total, items, status, user_id, is_credit, credit_days, expiry_date, deposit, payment_method, company_id, payment_observation, payment_document) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    args: [
-                        purchase.supplierId,
-                        purchase.supplierName,
-                        purchase.invoiceNumber || '',
-                        purchase.date,
-                        purchase.total,
-                        itemsJson,
-                        'completed',
-                        currentUser ? currentUser.id : null,
-                        purchase.isCredit ? 1 : 0,
-                        purchase.creditDays || null,
-                        purchase.expiryDate || null,
-                        purchase.deposit || 0,
-                        purchase.paymentMethod || 'Efectivo',
-                        activeCompanyId,
-                        purchase.observation || null,
-                        purchase.document || null
-                    ]
-                }
-            ];
+            // 1. Insert Purchase FIRST to get its ID (needed to link lots)
+            const purchaseResult = await turso.execute({
+                sql: "INSERT INTO purchases (supplier_id, supplier_name, invoice_number, date, total, items, status, user_id, is_credit, credit_days, expiry_date, deposit, payment_method, company_id, payment_observation, payment_document) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                args: [
+                    purchase.supplierId,
+                    purchase.supplierName,
+                    purchase.invoiceNumber || '',
+                    purchase.date,
+                    purchase.total,
+                    itemsJson,
+                    'completed',
+                    currentUser ? currentUser.id : null,
+                    purchase.isCredit ? 1 : 0,
+                    purchase.creditDays || null,
+                    purchase.expiryDate || null,
+                    purchase.deposit || 0,
+                    purchase.paymentMethod || 'Efectivo',
+                    activeCompanyId,
+                    purchase.observation || null,
+                    purchase.document || null
+                ]
+            });
+            const purchaseId = purchaseResult.rows[0]?.id || purchaseResult.lastInsertRowid;
+
+            // 2. Batch: Update products + Create lots (linked to purchase)
+            const queries = [];
 
             // For each item, update stock, cost AND supplier in products table
             purchase.items.forEach(item => {
@@ -3644,9 +4030,9 @@ export const useStore = create(persist((set, get) => ({
                     args: [item.quantity, item.cost, item.price, item.sku, item.tax || 0, purchase.supplierName, item.id, activeCompanyId]
                 });
 
-                // Create Lot
+                // Create Lot linked to purchase
                 queries.push({
-                    sql: "INSERT INTO product_lots (product_id, batch_number, expiry_date, quantity, cost, supplier_name, created_at, status, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)",
+                    sql: "INSERT INTO product_lots (product_id, batch_number, expiry_date, quantity, cost, supplier_name, created_at, status, company_id, purchase_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
                     args: [
                         item.id,
                         item.batchNumber || '',
@@ -3655,7 +4041,8 @@ export const useStore = create(persist((set, get) => ({
                         item.cost,
                         purchase.supplierName,
                         new Date().toISOString(),
-                        activeCompanyId
+                        activeCompanyId,
+                        purchaseId
                     ]
                 });
             });
@@ -3679,7 +4066,8 @@ export const useStore = create(persist((set, get) => ({
                 supplier_name: purchase.supplierName,
                 created_at: new Date().toISOString(),
                 status: 'active',
-                company_id: activeCompanyId
+                company_id: activeCompanyId,
+                purchase_id: purchaseId
             }));
 
             // We need newPurchase object primarily for state update
@@ -4322,7 +4710,8 @@ export const useStore = create(persist((set, get) => ({
                     ]
                 });
 
-                const saleId = saleResult.lastInsertRowid || Date.now();
+                const rawSaleId = saleResult.lastInsertRowid || Date.now();
+                const saleId = typeof rawSaleId === 'bigint' ? Number(rawSaleId) : rawSaleId;
 
                 // 2. BATCH UPDATE de productos (UN SOLO QUERY por producto)
                 // En lugar de hacer un UPDATE por cada item, los agrupamos
@@ -4373,6 +4762,64 @@ export const useStore = create(persist((set, get) => ({
                 await tx.commit();
 
                 console.log(`⚡ Transacción: ${(performance.now() - startTime).toFixed(2)}ms`);
+
+                const stockSyncByProduct = new Map();
+                itemsToProcess.forEach(item => {
+                    const key = String(item.id);
+                    const current = stockSyncByProduct.get(key) || {
+                        product_id: item.id,
+                        sku: null,
+                        quantity_sold: 0,
+                        stock: null,
+                    };
+
+                    current.quantity_sold += Number(item.quantity || 0);
+                    stockSyncByProduct.set(key, current);
+                });
+
+                const stockSyncItems = Array.from(stockSyncByProduct.values()).map(item => {
+                    const product = productsMap.get(String(item.product_id));
+                    const previousStock = Number(product?.stock || 0);
+                    const nextStock = Math.floor(previousStock - Number(item.quantity_sold || 0));
+                    return {
+                        product_id: item.product_id,
+                        sku: product?.sku || null,
+                        stock: nextStock,
+                    };
+                }).filter(item => item.sku && Number.isInteger(item.stock));
+
+                if (stockSyncItems.length === 0) {
+                    console.warn('Stock sync skipped: no hay items válidos con sku/stock', {
+                        saleId,
+                        rawItems: itemsToProcess.map(i => ({ id: i.id, name: i.name })),
+                    });
+                } else {
+                    get().syncSaleStockToStore({
+                        saleId,
+                        soldAt: now,
+                        items: stockSyncItems,
+                    }).then(syncResult => {
+                        if (!syncResult?.success) {
+                            console.warn('Stock sync post-sale failed:', {
+                                saleId,
+                                syncResult,
+                                items: stockSyncItems,
+                            });
+                        } else {
+                            console.log('✅ Stock sync post-sale success:', {
+                                saleId,
+                                status: syncResult.status,
+                                items: stockSyncItems,
+                            });
+                        }
+                    }).catch(syncError => {
+                        console.warn('Stock sync post-sale error:', {
+                            saleId,
+                            error: syncError?.message || String(syncError),
+                            items: stockSyncItems,
+                        });
+                    });
+                }
 
                 // ============================================
                 // FASE 4: ACTUALIZAR ESTADO LOCAL (OPTIMISTIC)
@@ -4510,27 +4957,6 @@ export const useStore = create(persist((set, get) => ({
                     args: [item.quantity, item.id, activeCompanyId]
                 });
 
-                // B. Revert Product Daily Profit (Reports)
-                // Calculate values to subtract
-                const revenue = item.price * item.quantity;
-                const cost = (item.cost || 0) * item.quantity;
-                const taxRate = item.tax_rate || 0;
-                // Net price logic should match addSale: price / (1 + tax/100)
-                const netPrice = item.price / (1 + (taxRate / 100));
-                const totalTax = revenue - (netPrice * item.quantity);
-                const totalProfit = (netPrice - (item.cost || 0)) * item.quantity;
-
-                queries.push({
-                    sql: `UPDATE product_daily_profit 
-                           SET total_quantity = total_quantity - ?,
-                               total_revenue = total_revenue - ?,
-                               total_cost = total_cost - ?,
-                               total_tax = total_tax - ?,
-                               total_profit = total_profit - ?
-                           WHERE product_id = ? AND day = ? AND company_id = ?`,
-                    args: [item.quantity, revenue, cost, totalTax, totalProfit, item.id, saleDay, activeCompanyId]
-                });
-
                 // C. Restore to Lot (Add to most recent lot)
                 // We use a subquery to find the most recent lot for this product to restore stock to.
                 queries.push({
@@ -4546,13 +4972,9 @@ export const useStore = create(persist((set, get) => ({
             }
 
             // 4. Refund from Cash Register (If open)
-            // This assumes cancellation implies returning money from the current drawer
+            // Cash register balance is calculated dynamically from sales, not stored as a column.
+            // We only need to log the refund audit entry.
             if (cashRegister && cashRegister.id) {
-                queries.push({
-                    sql: "UPDATE cash_registers SET current_balance = current_balance - ? WHERE id = ? AND company_id = ?",
-                    args: [sale.total, cashRegister.id, activeCompanyId]
-                });
-
                 // Audit Refund
                 queries.push({
                     sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -4591,11 +5013,58 @@ export const useStore = create(persist((set, get) => ({
                     : state.cashRegister
             }));
 
+            // 6. Sync restored stock to online store (WooCommerce)
+            try {
+                const { products: updatedProducts } = get();
+                const productIds = items.map(item => item.id).filter(Boolean);
+
+                // Query fresh stock + SKU from DB for cancelled items
+                let dbProducts = [];
+                if (productIds.length > 0) {
+                    const placeholders = productIds.map(() => '?').join(',');
+                    const dbResult = await turso.execute({
+                        sql: `SELECT id, sku, stock FROM products WHERE id IN (${placeholders}) AND company_id = ?`,
+                        args: [...productIds, activeCompanyId]
+                    });
+                    dbProducts = dbResult.rows || [];
+                }
+
+                const stockSyncItems = items.map(item => {
+                    const dbProd = dbProducts.find(p => String(p.id) === String(item.id));
+                    const stateProd = updatedProducts.find(p => String(p.id) === String(item.id));
+                    const sku = dbProd?.sku || stateProd?.sku || null;
+                    const stock = Math.floor(parseFloat(dbProd?.stock ?? stateProd?.stock ?? 0));
+                    return { product_id: item.id, sku, stock };
+                }).filter(item => item.sku && normalizeSku(item.sku) && Number.isInteger(item.stock));
+
+                console.log(`🔄 Cancel sync: ${stockSyncItems.length} items to sync`, stockSyncItems);
+
+                if (stockSyncItems.length > 0) {
+                    get().syncSaleStockToStore({
+                        saleId,
+                        soldAt: new Date().toISOString(),
+                        items: stockSyncItems,
+                    }).then(syncResult => {
+                        if (!syncResult?.success) {
+                            console.warn('Stock sync post-cancel failed:', { saleId, syncResult, items: stockSyncItems });
+                        } else {
+                            console.log('✅ Stock sync post-cancel success:', { saleId, status: syncResult.status, items: stockSyncItems });
+                        }
+                    }).catch(syncError => {
+                        console.warn('Stock sync post-cancel error:', { saleId, error: syncError?.message || String(syncError), items: stockSyncItems });
+                    });
+                } else {
+                    console.warn('⚠️ Cancel sync skipped: no items with valid SKU', { saleId, items, dbProducts });
+                }
+            } catch (syncErr) {
+                console.warn('Stock sync post-cancel setup error:', syncErr);
+            }
+
             return true;
 
         } catch (e) {
             console.error("Cancel sale error", e);
-            return false;
+            return { success: false, error: e?.message || String(e) };
         }
     },
 
@@ -6274,6 +6743,160 @@ export const useStore = create(persist((set, get) => ({
     },
 
     // ═══════════════════════════════════════════════════════════════
+    // REVERSO DE AGREGACIONES (Para anulaciones)
+    // ═══════════════════════════════════════════════════════════════
+
+    reverseSalesDailySummary: async (saleData, companyId, timezone) => {
+        try {
+            // Using ISO date to match exactly what update function did
+            const saleDate = new Date(saleData.date);
+            const dateStr = saleDate.toLocaleDateString('en-CA');
+
+            await turso.execute({
+                sql: `UPDATE sales_daily_summary SET
+                        total_sales = MAX(0, total_sales - ?),
+                        total_orders = MAX(0, total_orders - 1),
+                        updated_at = datetime('now')
+                      WHERE company_id = ? AND day = ?`,
+                args: [saleData.total, companyId, dateStr]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error('Error reversing daily summary:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    reverseVendorDailyPerformance: async (saleData, userId, companyId) => {
+        try {
+            const saleDate = new Date(saleData.date);
+            const dateStr = saleDate.toLocaleDateString('en-CA');
+            const performanceId = `perf_${companyId}_${userId}_${dateStr}`;
+
+            const itemsSold = saleData.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
+            const cost = saleData.items?.reduce((sum, item) => sum + (item.cost || 0) * item.quantity, 0) || 0;
+            const profit = saleData.total - cost;
+
+            await turso.execute({
+                sql: `UPDATE vendor_daily_performance SET
+                        total_sales = MAX(0, total_sales - 1),
+                        total_amount = MAX(0, total_amount - ?),
+                        total_profit = MAX(0, total_profit - ?),
+                        avg_ticket = CASE WHEN (total_sales - 1) > 0 THEN (total_amount - ?) / (total_sales - 1) ELSE 0 END,
+                        total_items_sold = MAX(0, total_items_sold - ?),
+                        updated_at = datetime('now')
+                      WHERE id = ?`,
+                args: [saleData.total, profit, saleData.total, itemsSold, performanceId]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error('Error reversing vendor performance:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    reverseProductDailyProfit: async (items, companyId, date) => {
+        try {
+            const dateStr = new Date(date).toLocaleDateString('en-CA');
+
+            for (const item of items) {
+                const revenue = item.price * item.quantity;
+                const cost = (item.cost || 0) * item.quantity;
+                const tax = (item.tax || 0) * item.quantity;
+                const profit = revenue - cost - tax;
+
+                await turso.execute({
+                    sql: `UPDATE product_daily_profit SET
+                            total_quantity = MAX(0, total_quantity - ?),
+                            total_revenue = MAX(0, total_revenue - ?),
+                            total_cost = MAX(0, total_cost - ?),
+                            total_tax = MAX(0, total_tax - ?),
+                            total_profit = MAX(0, total_profit - ?),
+                            updated_at = CURRENT_TIMESTAMP
+                          WHERE company_id = ? AND product_id = ? AND day = ?`,
+                    args: [item.quantity, revenue, cost, tax, profit, companyId, item.id, dateStr]
+                });
+            }
+            return { success: true };
+        } catch (e) {
+            console.error('Error reversing product profit:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    reverseProductMovementStats: async (items, companyId) => {
+        try {
+            const now = new Date().toISOString();
+
+            for (const item of items) {
+                const statsId = `stats_${companyId}_${item.id}`;
+                const revenue = item.price * item.quantity;
+
+                await turso.execute({
+                    sql: `UPDATE product_movement_stats SET
+                            total_sold_all_time = MAX(0, total_sold_all_time - ?),
+                            total_revenue_all_time = MAX(0, total_revenue_all_time - ?),
+                            sold_last_7_days = MAX(0, sold_last_7_days - ?),
+                            revenue_last_7_days = MAX(0, revenue_last_7_days - ?),
+                            sold_last_30_days = MAX(0, sold_last_30_days - ?),
+                            revenue_last_30_days = MAX(0, revenue_last_30_days - ?),
+                            updated_at = ?
+                          WHERE id = ?`,
+                    args: [item.quantity, revenue, item.quantity, revenue, item.quantity, revenue, now, statsId]
+                });
+            }
+            return { success: true };
+        } catch (e) {
+            console.error('Error reversing product stats:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    reverseHourlySalesStats: async (saleData, companyId) => {
+        try {
+            const saleDate = new Date(saleData.date);
+            const dateStr = saleDate.toLocaleDateString('en-CA');
+            const hour = saleDate.getHours();
+            const hourlyId = `hourly_${companyId}_${dateStr}_${hour}`;
+
+            await turso.execute({
+                sql: `UPDATE hourly_sales_stats SET
+                        total_sales = MAX(0, total_sales - 1),
+                        total_amount = MAX(0, total_amount - ?),
+                        updated_at = datetime('now')
+                      WHERE id = ?`,
+                args: [saleData.total, hourlyId]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error('Error reversing hourly stats:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    reverseAllAggregations: async (saleData, userId, companyId, timezone) => {
+        try {
+            if (!saleData || !saleData.items) return { success: false, error: 'Missing sale data' };
+
+            await Promise.all([
+                get().reverseSalesDailySummary(saleData, companyId, timezone),
+                get().reverseVendorDailyPerformance(saleData, userId, companyId),
+                get().reverseProductDailyProfit(saleData.items, companyId, saleData.date),
+                get().reverseProductMovementStats(saleData.items, companyId),
+                get().reverseHourlySalesStats(saleData, companyId)
+            ]);
+
+            console.log('✅ All aggregations reversed for cancelled sale');
+            return { success: true };
+        } catch (e) {
+            console.error('Error reversing aggregations:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+
+
+    // ═══════════════════════════════════════════════════════════════
     // REPORTES INSTANTÁNEOS (PRE-CALCULADOS)
     // ═══════════════════════════════════════════════════════════════
 
@@ -6632,6 +7255,69 @@ export const useStore = create(persist((set, get) => ({
     // ==========================================
     // 👑 ADMIN & SAAS ACTIONS
     // ==========================================
+
+    // ==========================================
+    // 🏷️ COMPANY MODULE MANAGEMENT (Feature Flags)
+    // ==========================================
+
+    fetchCompanyModules: async (companyId) => {
+        const targetCompanyId = companyId || get().activeCompanyId;
+        if (!targetCompanyId) return [];
+        try {
+            const res = await turso.execute({
+                sql: "SELECT * FROM company_modules WHERE company_id = ?",
+                args: [targetCompanyId]
+            });
+            if (!companyId) {
+                // Update local state only if fetching for current company
+                set({ companyModules: res.rows });
+            }
+            return res.rows;
+        } catch (e) {
+            console.error('Error fetching company modules:', e);
+            return [];
+        }
+    },
+
+    updateCompanyModule: async (companyId, moduleKey, enabled) => {
+        try {
+            await turso.execute({
+                sql: `INSERT INTO company_modules (company_id, module_key, enabled, updated_at)
+                      VALUES (?, ?, ?, ?)
+                      ON CONFLICT(company_id, module_key) DO UPDATE SET enabled = ?, updated_at = ?`,
+                args: [companyId, moduleKey, enabled ? 1 : 0, new Date().toISOString(), enabled ? 1 : 0, new Date().toISOString()]
+            });
+            // Refresh local state if it's the current company
+            if (companyId === get().activeCompanyId) {
+                await get().fetchCompanyModules();
+            }
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating company module:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    hasModule: (moduleKey) => {
+        const { companyModules, currentUser, currentUserCompanyRole } = get();
+
+        // Super admin / owner / Administrador always have access
+        if (currentUser?.role === 'super_admin' || currentUserCompanyRole === 'owner' || currentUserCompanyRole === 'super_admin') return true;
+
+        // If no records exist for this company, use defaults (all enabled except 'personal')
+        if (!companyModules || companyModules.length === 0) {
+            // Default: personal is disabled, everything else is enabled
+            return moduleKey !== 'personal';
+        }
+
+        const record = companyModules.find(m => m.module_key === moduleKey);
+        if (!record) {
+            // If module not in DB, default: personal disabled, rest enabled
+            return moduleKey !== 'personal';
+        }
+
+        return Number(record.enabled) === 1;
+    },
 
     fetchAllSubscriptions: async () => {
         try {

@@ -2,17 +2,19 @@ import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import {
     Building2, CheckCircle, XCircle, Clock, DollarSign,
-    Eye, Ban, AlertCircle, Calendar, CreditCard, Power
+    Eye, Ban, AlertCircle, Calendar, CreditCard, Power, Plus
 } from 'lucide-react';
 import CompanyDetailsModal from './CompanyDetailsModal';
+import CreateCompanyModal from './CreateCompanyModal';
 import { cn } from '../../lib/utils';
 
 const AdminCompanies = () => {
-    const { fetchAllSubscriptions, toggleCompanyStatus, deleteCompany, adminCreateSubscription } = useStore();
+    const { fetchAllSubscriptions, toggleCompanyStatus, deleteCompany, adminCreateSubscription, createCompany } = useStore();
     const [companies, setCompanies] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all'); // all, active, trial, suspended, pending
     const [selectedCompany, setSelectedCompany] = useState(null);
+    const [showCreateModal, setShowCreateModal] = useState(false);
 
     useEffect(() => {
         loadCompanies();
@@ -167,9 +169,18 @@ const AdminCompanies = () => {
     return (
         <div className="p-8 max-w-7xl mx-auto">
             {/* Header */}
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold text-white mb-2">Gestión de Empresas</h1>
-                <p className="text-gray-400">Administración de suscripciones y pagos</p>
+            <div className="mb-8 flex items-start justify-between">
+                <div>
+                    <h1 className="text-3xl font-bold text-white mb-2">Gestión de Empresas</h1>
+                    <p className="text-gray-400">Administración de suscripciones y pagos</p>
+                </div>
+                <button
+                    onClick={() => setShowCreateModal(true)}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-primary)] text-black font-bold rounded-xl hover:brightness-110 transition-all text-sm"
+                >
+                    <Plus size={18} />
+                    Nueva Empresa
+                </button>
             </div>
 
             {/* Stats Grid */}
@@ -372,6 +383,14 @@ const AdminCompanies = () => {
                 <CompanyDetailsModal
                     company={selectedCompany}
                     onClose={() => setSelectedCompany(null)}
+                />
+            )}
+
+            {/* Create Company Modal */}
+            {showCreateModal && (
+                <CreateCompanyModal
+                    onClose={() => setShowCreateModal(false)}
+                    onCreated={loadCompanies}
                 />
             )}
         </div>

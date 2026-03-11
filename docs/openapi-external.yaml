@@ -1,0 +1,986 @@
+openapi: 3.1.0
+info:
+  title: POSKEM External Integration API
+  version: 1.0.0
+  description: |
+    API externa para integración con tienda online.
+    Incluye lectura, escritura de catálogo/stock/precios/pedidos y webhooks salientes de catálogo/POS.
+servers:
+  - url: https://tu-dominio.com
+    description: Producción
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Health
+  - name: Products
+  - name: Inventory
+  - name: Orders
+
+paths:
+  /api/external/ping:
+    get:
+      tags: [Health]
+      summary: Probar conexión
+      operationId: externalPing
+      responses:
+        '200':
+          description: Servicio disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PingResponse'
+              example:
+                success: true
+                service: PosVeci
+                version: 1.0.0
+                timestamp: '2026-03-07T12:00:00.000Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+
+  /api/external/products:
+    get:
+      tags: [Products]
+      summary: Listar productos
+      operationId: listProducts
+      parameters:
+        - $ref: '#/components/parameters/category'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - $ref: '#/components/parameters/updated_since'
+      responses:
+        '200':
+          description: Catálogo obtenido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+        '400':
+          description: updated_since inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: Invalid updated_since. Use ISO date format.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Products]
+      summary: Crear producto
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+            example:
+              sku: '7791234567890'
+              name: Coca Cola 1.5L
+              sale_price: 2200
+              cost_price: 1600
+              stock: 18
+              category: Bebidas
+              unit: un
+              image_url: https://cdn.tienda.com/img/cc-15l.jpg
+      responses:
+        '201':
+          description: Producto creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductMutationResponse'
+        '400':
+          description: Payload inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: Missing required fields: name and sku/barcode
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags: [Products]
+      summary: Editar producto
+      operationId: updateProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProductRequest'
+            example:
+              pos_id: '154'
+              name: Coca Cola 1.5L Retornable
+              sale_price: 2100
+              category: Bebidas
+      responses:
+        '200':
+          description: Producto actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductMutationResponse'
+        '404':
+          description: Producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error: Product not found. Use pos_id or sku.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [Products]
+      summary: Desactivar o eliminar producto
+      operationId: deleteOrDeactivateProduct
+      parameters:
+        - name: pos_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sku
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: mode
+          in: query
+          required: false
+          description: deactivate (default) o hard
+          schema:
+            type: string
+            enum: [deactivate, hard]
+      responses:
+        '200':
+          description: Producto desactivado/eliminado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteProductResponse'
+        '404':
+          description: Producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/external/product-stock:
+    patch:
+      tags: [Inventory]
+      summary: Actualizar stock
+      operationId: updateProductStock
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStockRequest'
+            example:
+              pos_id: '154'
+              stock: 22
+              reason: sync_from_store
+      responses:
+        '200':
+          description: Stock actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockMutationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/external/product-price:
+    patch:
+      tags: [Inventory]
+      summary: Actualizar precio
+      operationId: updateProductPrice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePriceRequest'
+            example:
+              sku: '7791234567890'
+              sale_price: 2300
+              is_offer: false
+      responses:
+        '200':
+          description: Precio actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceMutationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/external/orders:
+    post:
+      tags: [Orders]
+      summary: Crear pedido/venta
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+            example:
+              external_order_id: WEB-100045
+              status: pending
+              client_name: Juan Pérez
+              payment_method: webpay
+              items:
+                - pos_id: '154'
+                  sku: '7791234567890'
+                  name: Coca Cola 1.5L
+                  quantity: 2
+                  price: 2200
+                - pos_id: '211'
+                  sku: '7802800001111'
+                  name: Pan Molde
+                  quantity: 1
+                  price: 1800
+      responses:
+        '201':
+          description: Pedido creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderMutationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    patch:
+      tags: [Orders]
+      summary: Actualizar estado de pedido
+      operationId: updateOrderStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrderStatusRequest'
+            example:
+              external_order_id: WEB-100045
+              status: paid
+              observation: Pago confirmado por tienda online
+      responses:
+        '200':
+          description: Estado actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderMutationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Pedido no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+webhooks:
+  productCreated:
+    post:
+      summary: Evento de producto creado
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWebhookEnvelope'
+            example:
+              event: product.created
+              timestamp: '2026-03-07T12:25:00.000Z'
+              source: poskem
+              company_id: default
+              product:
+                pos_id: '154'
+                sku: '7791234567890'
+                barcode: '7791234567890'
+                name: Coca Cola 1.5L
+                sale_price: 2200
+                cost_price: 1600
+                stock: 18
+                category: Bebidas
+                image_url: https://cdn.tienda.com/img/cc-15l.jpg
+                image_base64: null
+                image_format: public_url
+                unit: un
+                is_active: true
+                updated_at: '2026-03-07T12:10:00.000Z'
+                created_at: '2026-03-07T12:10:00.000Z'
+      responses:
+        '200':
+          description: Webhook recibido
+
+  productStockUpdated:
+    post:
+      summary: Evento de cambio de stock
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ProductWebhookEnvelope'
+                - type: object
+                  properties:
+                    stock_change:
+                      $ref: '#/components/schemas/StockChange'
+            example:
+              event: product.stock_updated
+              timestamp: '2026-03-07T12:25:00.000Z'
+              source: poskem
+              company_id: default
+              product:
+                pos_id: '154'
+                sku: '7791234567890'
+                barcode: '7791234567890'
+                name: Coca Cola 1.5L
+                sale_price: 2200
+                cost_price: 1600
+                stock: 22
+                category: Bebidas
+                image_url: https://cdn.tienda.com/img/cc-15l.jpg
+                image_base64: null
+                image_format: public_url
+                unit: un
+                is_active: true
+                updated_at: '2026-03-07T12:25:00.000Z'
+                created_at: '2026-03-07T12:10:00.000Z'
+              stock_change:
+                from: 18
+                to: 22
+                reason: sync_from_store
+      responses:
+        '200':
+          description: Webhook recibido
+
+  productPriceUpdated:
+    post:
+      summary: Evento de cambio de precio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ProductWebhookEnvelope'
+                - type: object
+                  properties:
+                    price_change:
+                      $ref: '#/components/schemas/PriceChange'
+      responses:
+        '200':
+          description: Webhook recibido
+
+  orderCreated:
+    post:
+      summary: Evento de pedido creado
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderWebhookEnvelope'
+      responses:
+        '200':
+          description: Webhook recibido
+
+  orderStatusUpdated:
+    post:
+      summary: Evento de estado de pedido actualizado
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderWebhookEnvelope'
+            example:
+              event: order.status_updated
+              timestamp: '2026-03-07T12:30:00.000Z'
+              source: poskem
+              company_id: default
+              order:
+                order_id: '9821'
+                external_order_id: WEB-100045
+                status: paid
+                previous_status: pending
+                total: 6200
+                company_id: default
+                updated_at: '2026-03-07T12:30:00.000Z'
+                items:
+                  - line: 1
+                    pos_id: '154'
+                    sku: '7791234567890'
+                    name: Coca Cola 1.5L
+                    quantity: 2
+                    price: 2200
+                    subtotal: 4400
+      responses:
+        '200':
+          description: Webhook recibido
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API Key
+
+  parameters:
+    category:
+      name: category
+      in: query
+      required: false
+      schema:
+        type: string
+    limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 10000
+    offset:
+      name: offset
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+    updated_since:
+      name: updated_since
+      in: query
+      required: false
+      description: Fecha ISO 8601 para sincronización incremental
+      schema:
+        type: string
+        format: date-time
+
+  responses:
+    BadRequest:
+      description: Request inválido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: No autorizado
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+            required: [error]
+          example:
+            error: Unauthorized
+    MethodNotAllowed:
+      description: Método no permitido
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+            required: [error]
+          example:
+            error: Method not allowed
+    InternalError:
+      description: Error interno
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    PingResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        service:
+          type: string
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+      required: [success, service, version, timestamp]
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        error:
+          type: string
+        message:
+          type: string
+      required: [error]
+
+    Product:
+      type: object
+      properties:
+        pos_id:
+          type: string
+          description: ID estable del POS (products.id)
+        sku:
+          type: string
+        barcode:
+          type: [string, 'null']
+        name:
+          type: string
+        sale_price:
+          type: number
+        cost_price:
+          type: [number, 'null']
+        stock:
+          type: integer
+        category:
+          type: [string, 'null']
+        image_url:
+          type: [string, 'null']
+          description: URL pública cuando image_format=public_url
+        image_base64:
+          type: [string, 'null']
+          description: Base64 cuando image_format=base64
+        image_format:
+          type: [string, 'null']
+          enum: [public_url, base64, null]
+        unit:
+          type: string
+        is_active:
+          type: boolean
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+        created_at:
+          type: [string, 'null']
+          format: date-time
+      required:
+        - pos_id
+        - sku
+        - name
+        - sale_price
+        - stock
+        - unit
+        - is_active
+
+    ProductListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        total:
+          type: integer
+        synced_at:
+          type: string
+          format: date-time
+        incremental_supported:
+          type: boolean
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+      required: [success, total, synced_at, incremental_supported, products]
+
+    CreateProductRequest:
+      type: object
+      properties:
+        sku:
+          type: string
+        barcode:
+          type: string
+        name:
+          type: string
+        sale_price:
+          type: number
+        price:
+          type: number
+        cost_price:
+          type: number
+        stock:
+          type: integer
+        category:
+          type: string
+        unit:
+          type: string
+        image_url:
+          type: string
+        image_base64:
+          type: string
+        is_offer:
+          type: boolean
+        offer_price:
+          type: number
+        is_active:
+          type: boolean
+      required: [name]
+
+    UpdateProductRequest:
+      type: object
+      properties:
+        pos_id:
+          type: string
+        sku:
+          type: string
+        new_sku:
+          type: string
+        name:
+          type: string
+        sale_price:
+          type: number
+        price:
+          type: number
+        cost_price:
+          type: number
+        stock:
+          type: integer
+        category:
+          type: string
+        unit:
+          type: string
+        image_url:
+          type: string
+        image_base64:
+          type: string
+        is_offer:
+          type: boolean
+        offer_price:
+          type: number
+        is_active:
+          type: boolean
+
+    ProductMutationResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        product:
+          $ref: '#/components/schemas/Product'
+        webhook:
+          $ref: '#/components/schemas/WebhookDispatchResult'
+      required: [success, product]
+
+    DeleteProductResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        operation:
+          type: string
+          enum: [deactivated, deleted]
+        product:
+          type: object
+          properties:
+            pos_id:
+              type: string
+            sku:
+              type: string
+          required: [pos_id, sku]
+        webhook:
+          $ref: '#/components/schemas/WebhookDispatchResult'
+      required: [success, operation, product]
+
+    UpdateStockRequest:
+      type: object
+      properties:
+        pos_id:
+          type: string
+        sku:
+          type: string
+        stock:
+          type: integer
+        reason:
+          type: string
+      required: [stock]
+
+    StockChange:
+      type: object
+      properties:
+        from:
+          type: integer
+        to:
+          type: integer
+        reason:
+          type: string
+      required: [from, to]
+
+    StockMutationResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        product:
+          $ref: '#/components/schemas/Product'
+        stock_change:
+          $ref: '#/components/schemas/StockChange'
+        webhook:
+          $ref: '#/components/schemas/WebhookDispatchResult'
+      required: [success, product, stock_change]
+
+    UpdatePriceRequest:
+      type: object
+      properties:
+        pos_id:
+          type: string
+        sku:
+          type: string
+        sale_price:
+          type: number
+        price:
+          type: number
+        is_offer:
+          type: boolean
+        offer_price:
+          type: number
+      required: [sale_price]
+
+    PriceChange:
+      type: object
+      properties:
+        from:
+          type: number
+        to:
+          type: number
+        is_offer:
+          type: boolean
+      required: [from, to]
+
+    PriceMutationResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        product:
+          $ref: '#/components/schemas/Product'
+        price_change:
+          $ref: '#/components/schemas/PriceChange'
+        webhook:
+          $ref: '#/components/schemas/WebhookDispatchResult'
+      required: [success, product, price_change]
+
+    OrderItem:
+      type: object
+      properties:
+        line:
+          type: integer
+        pos_id:
+          type: [string, 'null']
+        sku:
+          type: [string, 'null']
+        name:
+          type: [string, 'null']
+        quantity:
+          type: number
+        price:
+          type: number
+        subtotal:
+          type: number
+      required: [line, quantity, price, subtotal]
+
+    CreateOrderRequest:
+      type: object
+      properties:
+        external_order_id:
+          type: string
+        status:
+          type: string
+        client_id:
+          type: [string, 'null']
+        client_name:
+          type: [string, 'null']
+        payment_method:
+          type: string
+        payment_details:
+          type: object
+          additionalProperties: true
+        summary:
+          type: string
+        observation:
+          type: string
+        user_id:
+          type: [integer, string, 'null']
+        total:
+          type: number
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            properties:
+              pos_id:
+                type: [string, 'null']
+              sku:
+                type: [string, 'null']
+              name:
+                type: [string, 'null']
+              quantity:
+                type: number
+              price:
+                type: number
+            required: [quantity, price]
+      required: [items]
+
+    UpdateOrderStatusRequest:
+      type: object
+      properties:
+        order_id:
+          type: [string, integer]
+        external_order_id:
+          type: string
+        status:
+          type: string
+        observation:
+          type: string
+      required: [status]
+
+    Order:
+      type: object
+      properties:
+        order_id:
+          type: string
+        external_order_id:
+          type: [string, 'null']
+        status:
+          type: string
+        previous_status:
+          type: [string, 'null']
+        total:
+          type: number
+        company_id:
+          type: string
+        date:
+          type: [string, 'null']
+          format: date-time
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+        client_name:
+          type: [string, 'null']
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+      required: [order_id, status, total, company_id, items]
+
+    OrderMutationResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        order:
+          $ref: '#/components/schemas/Order'
+        webhook:
+          $ref: '#/components/schemas/WebhookDispatchResult'
+      required: [success, order]
+
+    WebhookDispatchResult:
+      type: object
+      properties:
+        sent:
+          type: boolean
+        status:
+          type: integer
+        ok:
+          type: boolean
+        response:
+          type: string
+        reason:
+          type: string
+        error:
+          type: string
+
+    ProductWebhookEnvelope:
+      type: object
+      properties:
+        event:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        source:
+          type: string
+          example: poskem
+        company_id:
+          type: string
+        product:
+          $ref: '#/components/schemas/Product'
+      required: [event, timestamp, source, company_id, product]
+
+    OrderWebhookEnvelope:
+      type: object
+      properties:
+        event:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        source:
+          type: string
+        company_id:
+          type: string
+        order:
+          $ref: '#/components/schemas/Order'
+      required: [event, timestamp, source, company_id, order]

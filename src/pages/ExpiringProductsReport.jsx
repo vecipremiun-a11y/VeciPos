@@ -11,7 +11,8 @@ import {
     Download,
     ChevronDown,
     ChevronUp,
-    ShoppingCart
+    ShoppingCart,
+    Copy
 } from 'lucide-react';
 
 const ExpiringProductsReport = () => {
@@ -306,7 +307,7 @@ const ExpiringProductsReport = () => {
                                         <p className="text-[10px] lg:text-sm text-[var(--color-text-muted)] truncate">
                                             SKU: {product.sku} - Stock: {product.stock} {product.unit}
                                         </p>
-                                        <div className="flex gap-1 mt-1">
+                                        <div className="flex gap-1 mt-1 flex-wrap">
                                             <span className="px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded text-[10px] lg:text-xs font-bold">
                                                 {product.lots.length} Lote{product.lots.length !== 1 ? 's' : ''}
                                             </span>
@@ -315,6 +316,21 @@ const ExpiringProductsReport = () => {
                                                     Vencido
                                                 </span>
                                             )}
+                                            {/* Duplicate lot indicator */}
+                                            {(() => {
+                                                const seen = new Set();
+                                                const hasDupes = product.lots.some(l => {
+                                                    const key = `${l.batch_number || ''}|${l.expiry_date || ''}`;
+                                                    if (seen.has(key)) return true;
+                                                    seen.add(key);
+                                                    return false;
+                                                });
+                                                return hasDupes ? (
+                                                    <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded text-[10px] lg:text-xs font-bold flex items-center gap-0.5">
+                                                        <Copy size={10} /> Posibles duplicados
+                                                    </span>
+                                                ) : null;
+                                            })()}
                                         </div>
                                     </div>
                                     <div className="text-right shrink-0">
@@ -336,6 +352,8 @@ const ExpiringProductsReport = () => {
                                                         </span>
                                                     </div>
                                                     <div className="text-[10px] space-y-1 text-[var(--color-text-muted)]">
+                                                        <div className="flex justify-between"><span>Ingreso:</span> <span className="text-[var(--color-text)]">{lot.created_at ? lot.created_at.split('T')[0] : 'N/A'}</span></div>
+                                                        <div className="flex justify-between"><span>Factura:</span> <span className="text-[var(--color-text)]">{lot.invoice_number || 'N/A'}</span></div>
                                                         <div className="flex justify-between"><span>Vence:</span> <span className="text-[var(--color-text)]">{lot.expiry_date || 'N/A'}</span></div>
                                                         <div className="flex justify-between"><span>Cant:</span> <span className="text-[var(--color-text)]">{lot.quantity}</span></div>
                                                         <div className="flex justify-between"><span>Costo:</span> <span className="text-[var(--color-text)]">{formatCurrency(lot.cost)}</span></div>
@@ -349,6 +367,8 @@ const ExpiringProductsReport = () => {
                                                 <thead className="text-xs text-[var(--color-text-muted)] uppercase bg-[var(--color-background)]">
                                                     <tr>
                                                         <th className="px-4 py-2">Lote</th>
+                                                        <th className="px-4 py-2">Fecha Ingreso</th>
+                                                        <th className="px-4 py-2">Factura #</th>
                                                         <th className="px-4 py-2">Vencimiento</th>
                                                         <th className="px-4 py-2">Cantidad</th>
                                                         <th className="px-4 py-2">Costo</th>
@@ -356,19 +376,41 @@ const ExpiringProductsReport = () => {
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    {product.lots.map(lot => (
-                                                        <tr key={lot.id} className="border-b border-[var(--glass-border)]">
-                                                            <td className="px-4 py-2 font-medium">{lot.batch_number || 'S/L'}</td>
-                                                            <td className="px-4 py-2">{lot.expiry_date || 'N/A'}</td>
-                                                            <td className="px-4 py-2">{lot.quantity}</td>
-                                                            <td className="px-4 py-2">{formatCurrency(lot.cost)}</td>
-                                                            <td className="px-4 py-2">
-                                                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${lot.status === 'expired' ? 'text-red-400' : lot.status === 'near_expiry' ? 'text-yellow-400' : 'text-green-400'}`}>
-                                                                    {lot.status === 'expired' ? 'Vencido' : lot.status === 'near_expiry' ? 'Por Vencer' : 'Vigente'}
-                                                                </span>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
+                                                    {product.lots.map(lot => {
+                                                        // Check if this lot is a potential duplicate
+                                                        const isDuplicate = product.lots.filter(l =>
+                                                            l.batch_number === lot.batch_number &&
+                                                            l.expiry_date === lot.expiry_date &&
+                                                            l.id !== lot.id
+                                                        ).length > 0;
+
+                                                        return (
+                                                            <tr key={lot.id} className={`border-b border-[var(--glass-border)] ${isDuplicate ? 'bg-yellow-500/5' : ''}`}>
+                                                                <td className="px-4 py-2 font-medium">
+                                                                    <span className="flex items-center gap-1">
+                                                                        {lot.batch_number || 'S/L'}
+                                                                        {isDuplicate && <AlertTriangle size={14} className="text-yellow-400" title="Posible lote duplicado" />}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-4 py-2 text-[var(--color-text-muted)]">{lot.created_at ? lot.created_at.split('T')[0] : 'N/A'}</td>
+                                                                <td className="px-4 py-2">
+                                                                    {lot.invoice_number ? (
+                                                                        <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded text-xs">{lot.invoice_number}</span>
+                                                                    ) : (
+                                                                        <span className="text-[var(--color-text-muted)]">N/A</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className="px-4 py-2">{lot.expiry_date || 'N/A'}</td>
+                                                                <td className="px-4 py-2">{lot.quantity}</td>
+                                                                <td className="px-4 py-2">{formatCurrency(lot.cost)}</td>
+                                                                <td className="px-4 py-2">
+                                                                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${lot.status === 'expired' ? 'text-red-400' : lot.status === 'near_expiry' ? 'text-yellow-400' : 'text-green-400'}`}>
+                                                                        {lot.status === 'expired' ? 'Vencido' : lot.status === 'near_expiry' ? 'Por Vencer' : 'Vigente'}
+                                                                    </span>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
                                                 </tbody>
                                             </table>
                                         </div>

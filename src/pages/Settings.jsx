@@ -7,6 +7,7 @@ import { recompressAllImages } from '../scripts/recompressImages';
 import ReceiptSettings from '../components/settings/ReceiptSettings';
 import PaymentMethodsSettings from '../components/settings/PaymentMethodsSettings';
 import PermissionsSettings from '../components/settings/PermissionsSettings';
+import StoreIntegrationSettings from '../components/settings/StoreIntegrationSettings';
 import { Shield } from 'lucide-react';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
@@ -166,6 +167,7 @@ const Settings = () => {
                             { id: 'company', label: 'Empresa', icon: Building2, permission: 'settings.company' },
                             { id: 'receipts', label: 'Boletas', icon: FileText, permission: 'settings.receipts' },
                             { id: 'payments', label: 'Medios de Pago', icon: CreditCard, permission: 'settings.payments' },
+                            { id: 'integrations', label: 'Integraciones', icon: Smartphone, permission: 'settings.system' },
                             { id: 'permissions', label: 'Permisos', icon: Shield, permission: 'settings.manage_permissions' },
                             { id: 'system', label: 'Sistema', icon: Wrench, permission: 'settings.system' },
                         ].filter(item => !item.permission || can(item.permission)).map((item) => {
@@ -476,6 +478,10 @@ const Settings = () => {
 
                     {activeTab === 'payments' && (
                         <PaymentMethodsSettings />
+                    )}
+
+                    {activeTab === 'integrations' && (
+                        <StoreIntegrationSettings />
                     )}
 
                     {activeTab === 'permissions' && (

@@ -1,8 +1,62 @@
-import React from 'react';
-import { X, Building2, Calendar, CreditCard, Mail, Phone, MapPin, User, CheckCircle, Ban, Clock } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, Building2, Calendar, CreditCard, Clock, Package, Check, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { useStore } from '../../store/useStore';
+import { ALL_MODULES } from '../../constants/modules';
+
+const ToggleSwitch = ({ enabled, onChange, disabled }) => (
+    <button
+        onClick={() => !disabled && onChange(!enabled)}
+        disabled={disabled}
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${enabled ? 'bg-emerald-500' : 'bg-gray-600'
+            } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+    >
+        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ${enabled ? 'translate-x-6' : 'translate-x-1'
+            }`} />
+    </button>
+);
 
 const CompanyDetailsModal = ({ company, onClose }) => {
+    const { fetchCompanyModules, updateCompanyModule } = useStore();
+    const [modules, setModules] = useState([]);
+    const [loadingModules, setLoadingModules] = useState(true);
+    const [updatingModule, setUpdatingModule] = useState(null);
+
+    useEffect(() => {
+        if (company) {
+            loadModules();
+        }
+    }, [company]);
+
+    const loadModules = async () => {
+        setLoadingModules(true);
+        const dbModules = await fetchCompanyModules(company.company_id);
+
+        // Merge DB records with ALL_MODULES definition
+        const merged = ALL_MODULES.map(mod => {
+            const dbRecord = dbModules.find(m => m.module_key === mod.key);
+            return {
+                ...mod,
+                enabled: dbRecord ? Number(dbRecord.enabled) === 1 : mod.defaultEnabled,
+            };
+        });
+        setModules(merged);
+        setLoadingModules(false);
+    };
+
+    const handleToggleModule = async (moduleKey, newValue) => {
+        setUpdatingModule(moduleKey);
+        const res = await updateCompanyModule(company.company_id, moduleKey, newValue);
+        if (res.success) {
+            setModules(prev => prev.map(m =>
+                m.key === moduleKey ? { ...m, enabled: newValue } : m
+            ));
+        } else {
+            alert('Error: ' + res.error);
+        }
+        setUpdatingModule(null);
+    };
+
     if (!company) return null;
 
     const formatDate = (dateString) => {
@@ -102,7 +156,57 @@ const CompanyDetailsModal = ({ company, onClose }) => {
                         </div>
                     </div>
 
-                    {/* Additional Info (Placeholder for now as we don't fetch users/contacts yet) */}
+                    {/* Modules Management */}
+                    <div>
+                        <h3 className="text-sm font-semibold text-gray-400 uppercase mb-4 flex items-center gap-2">
+                            <Package size={16} /> Módulos Habilitados
+                        </h3>
+                        <p className="text-xs text-gray-500 mb-4">
+                            Activa o desactiva módulos para esta empresa. Los módulos desactivados mostrarán un badge PRO en el menú.
+                        </p>
+
+                        {loadingModules ? (
+                            <div className="space-y-3">
+                                {[1, 2, 3].map(i => (
+                                    <div key={i} className="bg-white/5 rounded-xl h-16 animate-pulse" />
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 gap-3">
+                                {modules.map(mod => (
+                                    <div
+                                        key={mod.key}
+                                        className={cn(
+                                            "p-4 rounded-xl border transition-all duration-200 flex items-center justify-between",
+                                            mod.enabled
+                                                ? "bg-white/5 border-white/10"
+                                                : "bg-white/[0.02] border-white/5 opacity-60"
+                                        )}
+                                    >
+                                        <div className="flex-1 mr-4">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-white font-medium text-sm">{mod.label}</span>
+                                                {mod.plan === 'pro' && (
+                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/20">
+                                                        <Sparkles size={8} />
+                                                        PRO
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="text-gray-500 text-xs mt-0.5">{mod.description}</div>
+                                        </div>
+                                        <ToggleSwitch
+                                            enabled={mod.enabled}
+                                            onChange={(val) => handleToggleModule(mod.key, val)}
+                                            disabled={updatingModule === mod.key}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Dates Info */}
                     <div>
                         <h3 className="text-sm font-semibold text-gray-400 uppercase mb-4 flex items-center gap-2">
                             <Clock size={16} /> Fechas
@@ -111,7 +215,6 @@ const CompanyDetailsModal = ({ company, onClose }) => {
                             <div className="bg-white/5 p-3 rounded-lg">
                                 <div className="text-xs text-gray-500 mb-1">Fecha de Creación</div>
                                 <div className="text-sm text-white">{formatDate(company.created_at || new Date().toISOString())}</div>
-                                {/* Note: company.created_at might not be in the fetchAllSubscriptions query yet, added fallback */}
                             </div>
                             <div className="bg-white/5 p-3 rounded-lg">
                                 <div className="text-xs text-gray-500 mb-1">Inicio Periodo Actual</div>

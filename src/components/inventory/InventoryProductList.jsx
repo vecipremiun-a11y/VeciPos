@@ -10,10 +10,12 @@ const InventoryProductList = ({
     onEdit,
     onDelete,
     can,
-    handleScroll
+    handleScroll,
+    isLoading,
+    hasMore
 }) => {
     return (
-        <div className="glass-card overflow-hidden p-0 flex-1 flex flex-col">
+        <div className="glass-card overflow-hidden p-0 flex flex-col h-[clamp(640px,72vh,860px)]">
             {/* Mobile Card View */}
             <div className="lg:hidden flex-1 overflow-y-auto pb-20" onScroll={handleScroll}>
                 {products.map((product) => (
@@ -76,6 +78,16 @@ const InventoryProductList = ({
                 {products.length === 0 && (
                     <div className="p-10 text-center text-[var(--color-text-muted)]">
                         No se encontraron productos
+                    </div>
+                )}
+                {products.length > 0 && isLoading && (
+                    <div className="py-4 text-center text-[var(--color-text-muted)] text-sm border-t border-[var(--glass-border)]">
+                        Cargando más productos...
+                    </div>
+                )}
+                {products.length > 0 && !isLoading && !hasMore && (
+                    <div className="py-4 text-center text-[var(--color-text-muted)] text-sm border-t border-[var(--glass-border)]">
+                        No hay más productos para mostrar
                     </div>
                 )}
             </div>
@@ -195,6 +207,16 @@ const InventoryProductList = ({
                 {products.length === 0 && (
                     <div className="p-10 text-center text-[var(--color-text-muted)]">
                         No se encontraron productos
+                    </div>
+                )}
+                {products.length > 0 && isLoading && (
+                    <div className="py-4 text-center text-[var(--color-text-muted)] text-sm border-t border-[var(--glass-border)]">
+                        Cargando más productos...
+                    </div>
+                )}
+                {products.length > 0 && !isLoading && !hasMore && (
+                    <div className="py-4 text-center text-[var(--color-text-muted)] text-sm border-t border-[var(--glass-border)]">
+                        No hay más productos para mostrar
                     </div>
                 )}
             </div>

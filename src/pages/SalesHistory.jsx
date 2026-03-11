@@ -174,13 +174,14 @@ const SalesHistory = () => {
     const confirmCancellation = async () => {
         if (!selectedSale || !cancellationReason.trim()) return;
 
-        const success = await cancelSale(selectedSale.id, cancellationReason);
-        if (success) {
+        const result = await cancelSale(selectedSale.id, cancellationReason);
+        if (result === true || result?.success) {
             setSelectedSale(prev => ({ ...prev, status: 'cancelled', observation: cancellationReason }));
             setShowCancelModal(false);
             setCancellationReason('');
         } else {
-            alert('Error al anular la venta');
+            const errorMsg = result?.error || 'Error desconocido';
+            alert(`Error al anular la venta: ${errorMsg}`);
         }
     };
 

@@ -166,6 +166,21 @@ export const ALL_PERMISSIONS = [
         ]
     },
     {
+        id: 'personal',
+        label: 'Gestión de Personal',
+        permissions: [
+            { id: 'personal.view', label: 'Acceso al Módulo de Personal' },
+            { id: 'personal.manage', label: 'Gestionar Personal (Admin)' },
+            { id: 'personal.attendance', label: 'Ver/Gestionar Asistencia' },
+            { id: 'personal.corrections', label: 'Ver/Gestionar Correcciones' },
+            { id: 'personal.shifts', label: 'Ver/Gestionar Turnos' },
+            { id: 'personal.absences', label: 'Ver/Gestionar Ausencias' },
+            { id: 'personal.payroll', label: 'Ver/Gestionar Pagos y Nómina' },
+            { id: 'personal.vacations', label: 'Ver/Gestionar Vacaciones' },
+            { id: 'personal.reports', label: 'Ver Reportes de Personal' },
+        ]
+    },
+    {
         id: 'settings',
         label: 'Configuración',
         permissions: [

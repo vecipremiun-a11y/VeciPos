@@ -89,7 +89,7 @@ const Inventory = () => {
     };
 
     const visibleProducts = React.useMemo(() => {
-        return products.filter(product => {
+        const filtered = products.filter(product => {
             let matchesTax = true;
             if (filterTax !== 'Todos') {
                 const tax = parseFloat(product.tax_rate) || 0;
@@ -98,9 +98,9 @@ const Inventory = () => {
             }
 
             let matchesStock = true;
+            const stock = parseFloat(product.stock) || 0;
             if (filterStock !== 'Todos') {
-                const stock = parseFloat(product.stock) || 0;
-                if (filterStock === 'Bajo') matchesStock = stock < 10 && stock > 0;
+                if (filterStock === 'Bajo') matchesStock = stock <= 10;
                 if (filterStock === 'Sin') matchesStock = stock <= 0;
                 if (filterStock === 'Con') matchesStock = stock > 0;
             }
@@ -109,6 +109,22 @@ const Inventory = () => {
 
             return matchesTax && matchesStock && matchesGroup;
         });
+
+        if (filterStock === 'Con') {
+            return [...filtered].sort((a, b) => (parseFloat(b.stock) || 0) - (parseFloat(a.stock) || 0));
+        }
+
+        if (filterStock === 'Bajo') {
+            return [...filtered]
+                .filter(product => (parseFloat(product.stock) || 0) <= 10)
+                .sort((a, b) => (parseFloat(b.stock) || 0) - (parseFloat(a.stock) || 0));
+        }
+
+        if (filterStock === 'Sin') {
+            return [...filtered].sort((a, b) => (parseFloat(a.stock) || 0) - (parseFloat(b.stock) || 0));
+        }
+
+        return filtered;
     }, [products, filterTax, filterStock, filterGroup]);
 
     const handleEdit = (product) => {
@@ -164,7 +180,7 @@ const Inventory = () => {
     }
 
     return (
-        <div className="space-y-6 h-[calc(100vh-6rem)] flex flex-col">
+        <div className="space-y-6 min-h-[calc(100vh-6rem)] flex flex-col">
             {/* Header - Compact on Mobile */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4 shrink-0">
                 <div>
@@ -252,7 +268,7 @@ const Inventory = () => {
                             >
                                 <option value="Todos" className="bg-gray-900">Todos</option>
                                 <option value="Con" className="bg-gray-900">Con Stock</option>
-                                <option value="Bajo" className="bg-gray-900">Bajo Stock (&lt;10)</option>
+                                <option value="Bajo" className="bg-gray-900">Bajo Stock (&lt;=10)</option>
                                 <option value="Sin" className="bg-gray-900">Sin Stock</option>
                             </select>
                         </div>
@@ -293,6 +309,8 @@ const Inventory = () => {
                     onDelete={handleDelete}
                     can={can}
                     handleScroll={handleScroll}
+                    isLoading={isLoading}
+                    hasMore={hasMore}
                 />
 
             </div>

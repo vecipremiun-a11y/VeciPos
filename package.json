@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "node server.js",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -13,10 +14,12 @@
     "@libsql/client": "^0.17.0",
     "@tailwindcss/vite": "^4.1.18",
     "clsx": "^2.1.1",
+    "cors": "^2.8.6",
     "csv-parser": "^3.2.0",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
     "dotenv": "^17.2.3",
+    "express": "^5.2.1",
     "framer-motion": "^12.27.5",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.0.0",

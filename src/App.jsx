@@ -33,6 +33,7 @@ import MainLayout from './layouts/MainLayout';
 import AdminLayout from './layouts/AdminLayout';
 import RequireAdmin from './components/RequireAdmin';
 import ProtectedPage from './components/auth/ProtectedPage';
+import FeatureGatePage from './components/auth/FeatureGatePage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminCompanies from './pages/admin/AdminCompanies';
 import SupportInbox from './pages/admin/SupportInbox';
@@ -188,7 +189,7 @@ function App() {
           <Route path="purchases" element={<ProtectedPage permission="purchases.view"><Purchases /></ProtectedPage>} />
           <Route path="product-profile" element={<ProtectedPage permission="product_profile.view"><ProductProfile /></ProtectedPage>} />
           <Route path="users" element={<ProtectedPage permission="users.view"><Users /></ProtectedPage>} />
-          <Route path="personal" element={<ProtectedPage permission="personal.view"><Personal /></ProtectedPage>} />
+          <Route path="personal" element={<ProtectedPage permission="personal.view"><FeatureGatePage moduleKey="personal"><Personal /></FeatureGatePage></ProtectedPage>} />
           <Route path="clients" element={<ProtectedPage permission="clients.view"><Clients /></ProtectedPage>} />
           <Route path="orders" element={<ProtectedPage permission="supplier_orders.create"><Orders /></ProtectedPage>} />
           <Route path="orders/history" element={<ProtectedPage permission="supplier_orders.view"><SupplierOrders /></ProtectedPage>} />

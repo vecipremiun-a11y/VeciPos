@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
 import SupportWidget from '../components/SupportWidget';
 import { usePermissions } from '../hooks/usePermissions';
+import { useCompanyFeatures } from '../hooks/useCompanyFeatures';
 
 const MainLayout = () => {
     // Helper to check window width strictly for initial state (avoid hydration mismatch if SSR, but this is SPA)
@@ -32,16 +33,18 @@ const MainLayout = () => {
     }, []);
 
     const { can } = usePermissions();
+    const { isModuleLocked } = useCompanyFeatures();
 
     // Static Navigation Items
     const allNavItems = [
-        { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: 'dashboard.view' },
-        { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', permission: 'pos.access' },
-        { icon: Users, label: 'Clientes', path: '/clients', permission: 'clients.view' },
-        { icon: History, label: 'Historial', path: '/sales-history', permission: 'sales.view' },
+        { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: 'dashboard.view', moduleKey: 'dashboard' },
+        { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', permission: 'pos.access', moduleKey: 'pos' },
+        { icon: Users, label: 'Clientes', path: '/clients', permission: 'clients.view', moduleKey: 'clients' },
+        { icon: History, label: 'Historial', path: '/sales-history', permission: 'sales.view', moduleKey: 'sales_history' },
         {
             icon: ClipboardList,
             label: 'Pedidos',
+            moduleKey: 'preorders',
             subItems: [
                 { icon: CakeSlice, label: 'Encargos (Caja)', path: '/preorders', permission: 'preorders.view' },
                 { icon: ChefHat, label: 'Producción', path: '/production', permission: 'production.view' }
@@ -50,6 +53,7 @@ const MainLayout = () => {
         {
             icon: ShoppingBag,
             label: 'Órdenes de Compra',
+            moduleKey: 'orders',
             subItems: [
                 { icon: ClipboardList, label: 'Pedido', path: '/orders', permission: 'supplier_orders.create' },
                 { icon: ClipboardList, label: 'Pedidos Realizados', path: '/orders/history', permission: 'supplier_orders.view' }
@@ -58,7 +62,7 @@ const MainLayout = () => {
         {
             icon: Package,
             label: 'Inventario',
-            // Group visible if any child is visible
+            moduleKey: 'inventory',
             subItems: [
                 { icon: Box, label: 'Productos', path: '/inventory', permission: 'products.view' },
                 { icon: Tag, label: 'Categorías', path: '/categories', permission: 'categories.view' },
@@ -72,6 +76,7 @@ const MainLayout = () => {
         {
             icon: FileText,
             label: 'Reportes',
+            moduleKey: 'reports',
             subItems: [
                 { icon: FileText, label: 'Ventas', path: '/reports', permission: 'reports.sales' },
                 { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', permission: 'reports.expiring' },
@@ -81,9 +86,9 @@ const MainLayout = () => {
                 { icon: TrendingUp, label: 'Utilidad', path: '/reports/profit', permission: 'reports.profit' }
             ]
         },
-        { icon: Briefcase, label: 'Personal', path: '/personal', permission: 'personal.view' },
-        { icon: Users, label: 'Usuarios', path: '/users', permission: 'users.view' },
-        { icon: Settings, label: 'Configuración', path: '/settings', permission: 'settings.view' },
+        { icon: Briefcase, label: 'Personal', path: '/personal', permission: 'personal.view', moduleKey: 'personal' },
+        { icon: Users, label: 'Usuarios', path: '/users', permission: 'users.view', moduleKey: 'users' },
+        { icon: Settings, label: 'Configuración', path: '/settings', permission: 'settings.view', moduleKey: 'settings' },
     ];
 
     const navItems = allNavItems.filter(item => {
@@ -96,8 +101,18 @@ const MainLayout = () => {
             }
             return false;
         }
-        // Normal item checking
+        // Normal item: show if has permission (even if module is locked — we show PRO badge)
         return can(item.permission);
+    }).map(item => {
+        // Mark items as locked if their module is disabled
+        if (item.moduleKey && isModuleLocked(item.moduleKey)) {
+            return { ...item, isLocked: true };
+        }
+        // For submenu groups, check if the whole group module is locked
+        if (item.subItems && item.moduleKey && isModuleLocked(item.moduleKey)) {
+            return { ...item, isLocked: true };
+        }
+        return item;
     });
 
     const toggleSubmenu = (label) => {
@@ -146,6 +161,36 @@ const MainLayout = () => {
                 <nav className="flex-1 py-6 px-3 space-y-2">
                     {navItems.map((item) => {
                         if (item.subItems) {
+                            // If the entire submenu group is locked, render as a locked NavLink
+                            if (item.isLocked) {
+                                const firstSubPath = item.subItems[0]?.path || '/';
+                                return (
+                                    <NavLink
+                                        key={item.label}
+                                        to={firstSubPath}
+                                        onClick={() => isMobile && setIsSidebarOpen(false)}
+                                        className={() => cn(
+                                            "flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group relative overflow-hidden",
+                                            "text-[var(--color-text-muted)] opacity-70 hover:opacity-100 hover:bg-amber-500/5"
+                                        )}
+                                    >
+                                        <item.icon size={20} className={cn("min-w-[20px]", !isSidebarOpen && "mx-auto")} />
+                                        <span className={cn("whitespace-nowrap transition-all duration-300 flex-1", !isSidebarOpen && "opacity-0 w-0 overflow-hidden")}>
+                                            {item.label}
+                                        </span>
+                                        {isSidebarOpen && (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30 text-amber-400 text-[10px] font-bold tracking-wider uppercase">
+                                                <Sparkles size={10} />
+                                                PRO
+                                            </span>
+                                        )}
+                                        {!isSidebarOpen && (
+                                            <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 shadow-lg shadow-amber-400/50" />
+                                        )}
+                                    </NavLink>
+                                );
+                            }
+
                             const isExpanded = openSubmenu === item.label;
                             const isActiveParent = item.subItems.some(sub => location.pathname === sub.path);
 
@@ -208,15 +253,26 @@ const MainLayout = () => {
                                 onClick={() => isMobile && setIsSidebarOpen(false)}
                                 className={({ isActive }) => cn(
                                     "flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group relative overflow-hidden",
-                                    isActive
-                                        ? "bg-[var(--color-primary)] text-white font-bold shadow-[0_0_15px_rgba(0,240,255,0.4)]"
-                                        : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
+                                    item.isLocked
+                                        ? "text-[var(--color-text-muted)] opacity-70 hover:opacity-100 hover:bg-amber-500/5"
+                                        : isActive
+                                            ? "bg-[var(--color-primary)] text-white font-bold shadow-[0_0_15px_rgba(0,240,255,0.4)]"
+                                            : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
                                 )}
                             >
                                 <item.icon size={20} className={cn("min-w-[20px]", !isSidebarOpen && "mx-auto")} />
-                                <span className={cn("whitespace-nowrap transition-all duration-300", !isSidebarOpen && "opacity-0 w-0 overflow-hidden")}>
+                                <span className={cn("whitespace-nowrap transition-all duration-300 flex-1", !isSidebarOpen && "opacity-0 w-0 overflow-hidden")}>
                                     {item.label}
                                 </span>
+                                {item.isLocked && isSidebarOpen && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30 text-amber-400 text-[10px] font-bold tracking-wider uppercase">
+                                        <Sparkles size={10} />
+                                        PRO
+                                    </span>
+                                )}
+                                {item.isLocked && !isSidebarOpen && (
+                                    <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 shadow-lg shadow-amber-400/50" />
+                                )}
                             </NavLink>
                         );
                     })}

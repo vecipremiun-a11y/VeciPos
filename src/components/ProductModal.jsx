@@ -317,6 +317,8 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                         onChange={async (e) => {
                                             const file = e.target.files[0];
                                             if (!file) return;
+                                            // Reset para permitir re-seleccionar el mismo archivo
+                                            e.target.value = '';
 
                                             // Validar imagen
                                             const validation = validateImage(file);
@@ -326,7 +328,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                             }
 
                                             try {
-                                                console.log('📸 Comprimiendo imagen...');
+                                                console.log('📸 Comprimiendo imagen...', { name: file.name, type: file.type, size: file.size });
                                                 console.time('⏱️ Compresión');
 
                                                 // Comprimir imagen (max 200KB, 800x800px)
