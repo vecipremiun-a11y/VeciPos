@@ -3352,71 +3352,73 @@ export const useStore = create(persist((set, get) => ({
 
             const dbProducts = await turso.execute({
                 sql: `
-                    SELECT id, sku, stock
+                    SELECT id, name, sku, price, stock, category, image, cost, unit,
+                           is_offer, offer_price
                     FROM products
                     WHERE company_id = ?
                       AND sku IS NOT NULL
                       AND TRIM(sku) <> ''
-                      AND COALESCE(is_active, 1) = 1
                     ORDER BY id ASC
                 `,
                 args: [activeCompanyId]
             });
 
             const items = (dbProducts.rows || []).map(product => ({
-                product_id: Number(product.id),
+                id: Number(product.id),
+                name: product.name || '',
                 sku: normalizeSku(product.sku),
+                price: Number(product.price || 0),
                 stock: Number.parseInt(Number(product.stock || 0), 10),
-            })).filter(product => product.sku && Number.isInteger(product.stock));
+                category: product.category || 'General',
+                image: product.image || null,
+                cost: Number(product.cost || 0),
+                unit: product.unit || 'un',
+                is_offer: Boolean(product.is_offer),
+                offer_price: Number(product.offer_price || 0),
+            })).filter(product => product.sku);
 
             const total = items.length;
             if (total === 0) {
                 return { success: true, total: 0, updated: 0, failed: 0, failures: [] };
             }
 
-            const chunkSize = 25;
             let processed = 0;
             let updated = 0;
             let failed = 0;
             const failures = [];
 
-            for (let index = 0; index < items.length; index += chunkSize) {
-                const chunk = items.slice(index, index + chunkSize);
+            for (const item of items) {
+                try {
+                    const response = await fetch(`/api/integration/sync-product?company_id=${encodeURIComponent(activeCompanyId)}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: safeJsonStringify({ product: item }),
+                    });
 
-                const response = await fetch(`/api/integration/sync-stock?company_id=${encodeURIComponent(activeCompanyId)}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: safeJsonStringify({
-                        items: chunk,
-                    }),
-                });
+                    const data = await response.json().catch(() => ({}));
 
-                const data = await response.json().catch(() => ({}));
-
-                if (response.ok && data.success) {
-                    const attempts = data.attempts || [];
-                    for (const a of attempts) {
-                        if (a.ok) {
-                            updated += 1;
-                        } else {
-                            failed += 1;
-                            failures.push({ sku: a.sku, status: a.status, body: a.body });
-                        }
+                    if (response.ok && data.success) {
+                        updated += 1;
+                    } else {
+                        failed += 1;
+                        failures.push({
+                            sku: item.sku,
+                            status: response.status,
+                            body: JSON.stringify(data).slice(0, 500),
+                        });
                     }
-                } else {
-                    failed += chunk.length;
-                    for (const item of chunk) {
-                        failures.push({ sku: item.sku, status: response.status, body: JSON.stringify(data).slice(0, 500) });
-                    }
+                } catch (err) {
+                    failed += 1;
+                    failures.push({ sku: item.sku, status: 0, body: err.message });
                 }
 
-                processed += chunk.length;
+                processed += 1;
 
                 if (typeof onProgress === 'function') {
                     onProgress({
                         processed,
                         total,
-                        message: `Sincronizando ${processed} productos...`,
+                        message: `Sincronizando ${processed} de ${total} productos...`,
                     });
                 }
             }
