@@ -3377,9 +3377,8 @@ export const useStore = create(persist((set, get) => ({
                 const unit = (product.unit || 'un').toLowerCase();
                 const rawStock = Number(product.stock || 0);
                 const clampedStock = rawStock < 0 ? 0 : rawStock;
-                const stock = (unit === 'kg' || unit === 'lt')
-                    ? Math.round(clampedStock * 100) / 100
-                    : Math.floor(clampedStock);
+                // La tienda solo acepta stock entero
+                const stock = Math.round(clampedStock);
 
                 const item = {
                     id: Number(product.id),
