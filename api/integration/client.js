@@ -27,11 +27,8 @@ function normalizeSku(value) {
 function normalizeStockForStore(stock, unit) {
     const raw = Number(stock || 0);
     const clamped = raw < 0 ? 0 : raw;
-    const u = (unit || 'un').toLowerCase();
-    // Kg/Lt: hasta 3 decimales, Und: entero
-    return (u === 'kg' || u === 'lt')
-        ? Math.round(clamped * 1000) / 1000
-        : Math.round(clamped);
+    // La tienda solo acepta stock entero — redondear siempre
+    return Math.round(clamped);
 }
 
 export async function syncPriceToStore({ companyId, product }) {
