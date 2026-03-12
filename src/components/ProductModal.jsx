@@ -140,7 +140,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
             ...formData,
             price: parseFloat(formData.price) || 0,
             cost: parseFloat(formData.cost) || 0,
-            stock: parseInt(formData.stock) || 0,
+            stock: parseFloat(formData.stock) || 0,
             tax_rate: parseFloat(formData.tax_rate) || 0,
             offer_price: parseFloat(formData.offer_price) || 0,
             // Ensure price_ranges logic preserves numbers logic if needed, 
@@ -273,6 +273,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             <label className="block text-sm text-gray-400 mb-1">Stock Actual</label>
                             <input
                                 type="number"
+                                step="any"
                                 name="stock"
                                 value={formData.stock || ''}
                                 onChange={handleChange}
