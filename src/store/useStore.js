@@ -3388,17 +3388,13 @@ export const useStore = create(persist((set, get) => ({
                     price: Number(product.price || 0),
                     stock,
                     category: product.category || 'General',
+                    image: product.image || null,
                     cost: Number(product.cost || 0),
                     unit,
                     tax_rate: Number(product.tax_rate || 0),
                     is_offer: product.is_offer ? true : false,
                     offer_price: product.is_offer ? Number(product.offer_price || 0) : 0,
                 };
-
-                // Solo enviar imagen si es URL (http), las base64 son muy grandes para sync masivo
-                if (product.image && typeof product.image === 'string' && product.image.startsWith('http')) {
-                    item.image = product.image;
-                }
 
                 return item;
             }).filter(product => product.sku);

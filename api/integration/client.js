@@ -131,11 +131,23 @@ export async function syncProductToStore({ companyId, product }) {
     }
 
     try {
-        const response = await fetch(endpoint, {
+        let response = await fetch(endpoint, {
             method: 'PUT',
             headers: buildAuthHeaders(config),
             body: JSON.stringify(payload),
         });
+
+        // Si falla con 400 y tenía imagen, reintentar sin imagen
+        if (response.status === 400 && (payload.image_base64 || payload.image_url)) {
+            const retryPayload = { ...payload };
+            delete retryPayload.image_base64;
+            delete retryPayload.image_url;
+            response = await fetch(endpoint, {
+                method: 'PUT',
+                headers: buildAuthHeaders(config),
+                body: JSON.stringify(retryPayload),
+            });
+        }
 
         const text = await response.text();
         const result = {
@@ -150,7 +162,7 @@ export async function syncProductToStore({ companyId, product }) {
             event: 'product.synced',
             status: response.ok ? 'ok' : 'error',
             message: response.ok ? 'Producto sincronizado con tienda' : 'Falló sincronización de producto',
-            payload,
+            payload: { ...payload, image_base64: payload.image_base64 ? '(omitted)' : undefined },
             response: result,
         });
 
@@ -162,7 +174,7 @@ export async function syncProductToStore({ companyId, product }) {
             event: 'product.synced',
             status: 'error',
             message: 'Error de red al sincronizar producto',
-            payload,
+            payload: { ...payload, image_base64: payload.image_base64 ? '(omitted)' : undefined },
             error: error.message,
         });
 
