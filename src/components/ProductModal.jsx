@@ -134,15 +134,17 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         }
     };
 
+    const toNum = (v) => parseFloat(String(v).replace(',', '.')) || 0;
+
     const handleSubmit = (e) => {
         e.preventDefault();
         const dataToSave = {
             ...formData,
-            price: parseFloat(formData.price) || 0,
-            cost: parseFloat(formData.cost) || 0,
-            stock: parseFloat(formData.stock) || 0,
-            tax_rate: parseFloat(formData.tax_rate) || 0,
-            offer_price: parseFloat(formData.offer_price) || 0,
+            price: toNum(formData.price),
+            cost: toNum(formData.cost),
+            stock: toNum(formData.stock),
+            tax_rate: toNum(formData.tax_rate),
+            offer_price: toNum(formData.offer_price),
             // Ensure price_ranges logic preserves numbers logic if needed, 
             // but they are usually strings in inputs. 
             // The map logic in implementation handles them. 
