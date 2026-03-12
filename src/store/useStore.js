@@ -3362,7 +3362,7 @@ export const useStore = create(persist((set, get) => ({
 
             const dbProducts = await turso.execute({
                 sql: `
-                    SELECT id, name, sku, price, stock, category, cost, unit,
+                    SELECT id, name, sku, price, stock, category, image, cost, unit,
                            is_offer, offer_price, tax_rate
                     FROM products
                     WHERE company_id = ?
@@ -3394,6 +3394,11 @@ export const useStore = create(persist((set, get) => ({
                     is_offer: product.is_offer ? true : false,
                     offer_price: product.is_offer ? Number(product.offer_price || 0) : 0,
                 };
+
+                // Solo enviar imagen si es URL (http), las base64 son muy grandes para sync masivo
+                if (product.image && typeof product.image === 'string' && product.image.startsWith('http')) {
+                    item.image = product.image;
+                }
 
                 return item;
             }).filter(product => product.sku);
