@@ -106,7 +106,7 @@ async function handleCreateProduct(req, res) {
         args: [
             payload.name,
             parseNumber(price, 0),
-            Math.floor(parseNumber(payload.stock, 0)),
+            Math.round(parseNumber(payload.stock, 0) * 1000) / 1000,
             payload.category || 'General',
             sku,
             image.image,
@@ -158,7 +158,7 @@ async function handleUpdateProduct(req, res) {
     const updated = {
         name: payload.name ?? current.name,
         price: payload.sale_price !== undefined ? parseNumber(payload.sale_price, 0) : (payload.price !== undefined ? parseNumber(payload.price, 0) : current.price),
-        stock: payload.stock !== undefined ? Math.floor(parseNumber(payload.stock, 0)) : current.stock,
+        stock: payload.stock !== undefined ? Math.round(parseNumber(payload.stock, 0) * 1000) / 1000 : current.stock,
         category: payload.category ?? current.category,
         sku: payload.new_sku || payload.sku || current.sku,
         image: image.image !== null ? image.image : current.image,

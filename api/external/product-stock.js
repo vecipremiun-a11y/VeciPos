@@ -49,7 +49,7 @@ export default async function handler(req, res) {
             });
         }
 
-        const targetStock = Math.floor(Number(payload.stock));
+        const targetStock = Math.round(Number(payload.stock) * 1000) / 1000;
         if (!Number.isFinite(targetStock)) {
             return res.status(400).json({
                 success: false,

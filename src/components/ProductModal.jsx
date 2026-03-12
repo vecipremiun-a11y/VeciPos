@@ -142,7 +142,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
             ...formData,
             price: toNum(formData.price),
             cost: toNum(formData.cost),
-            stock: toNum(formData.stock),
+            stock: Math.round(toNum(formData.stock) * 1000) / 1000,
             tax_rate: toNum(formData.tax_rate),
             offer_price: toNum(formData.offer_price),
             // Ensure price_ranges logic preserves numbers logic if needed, 

@@ -127,7 +127,7 @@ export function mapProductRow(row) {
         name: row.name,
         sale_price: salePrice,
         cost_price: costPrice,
-        stock: typeof row.stock === 'number' ? Math.floor(row.stock) : 0,
+        stock: typeof row.stock === 'number' ? Math.round(row.stock * 1000) / 1000 : 0,
         category: row.category || null,
         image_url: imageType === 'public_url' ? imageValue : null,
         image_base64: imageType === 'base64' ? imageValue : null,

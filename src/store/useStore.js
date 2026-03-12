@@ -3129,7 +3129,7 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             const result = await turso.execute({
-                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes, preorder_unit, preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit, preorder_use_base_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes, preorder_unit, preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit, preorder_use_base_price) VALUES (?, ?, ROUND(?, 3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     product.name,
                     product.price,
@@ -3194,7 +3194,7 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             await turso.execute({
-                sql: "UPDATE products SET name=?, price=?, stock=?, category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=?, sale_mode=?, allow_item_notes=?, preorder_unit=?, preorder_billing_unit=?, preorder_price_per_kg=?, preorder_gram_per_unit=?, preorder_use_base_price=? WHERE id = ? AND company_id = ?",
+                sql: "UPDATE products SET name=?, price=?, stock=ROUND(?, 3), category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=?, sale_mode=?, allow_item_notes=?, preorder_unit=?, preorder_billing_unit=?, preorder_price_per_kg=?, preorder_gram_per_unit=?, preorder_use_base_price=? WHERE id = ? AND company_id = ?",
                 args: [
                     updatedProduct.name,
                     updatedProduct.price,
@@ -3965,7 +3965,7 @@ export const useStore = create(persist((set, get) => ({
             // For each item, update stock, cost AND supplier in products table
             purchase.items.forEach(item => {
                 queries.push({
-                    sql: "UPDATE products SET stock = stock + ?, cost = ?, price = ?, sku = ?, tax_rate = ?, supplier = ? WHERE id = ? AND company_id = ?",
+                    sql: "UPDATE products SET stock = ROUND(stock + ?, 3), cost = ?, price = ?, sku = ?, tax_rate = ?, supplier = ? WHERE id = ? AND company_id = ?",
                     args: [item.quantity, item.cost, item.price, item.sku, item.tax || 0, purchase.supplierName, item.id, activeCompanyId]
                 });
 
@@ -4026,7 +4026,7 @@ export const useStore = create(persist((set, get) => ({
                     if (purchasedItem) {
                         return {
                             ...p,
-                            stock: parseFloat(p.stock) + parseFloat(purchasedItem.quantity),
+                            stock: Math.round((parseFloat(p.stock) + parseFloat(purchasedItem.quantity)) * 1000) / 1000,
                             cost: parseFloat(purchasedItem.cost),
                             price: parseFloat(purchasedItem.price),
                             sku: purchasedItem.sku,
@@ -4657,7 +4657,7 @@ export const useStore = create(persist((set, get) => ({
                 const productUpdatePromises = productsToUpdate.map(p =>
                     tx.execute({
                         sql: `UPDATE products 
-                              SET stock = stock - ?, 
+                              SET stock = ROUND(stock - ?, 3), 
                                   pending_adjustment = CASE WHEN ? THEN 1 ELSE pending_adjustment END
                               WHERE id = ? AND company_id = ?`,
                         args: [p.quantityToDeduct, p.markPending ? 1 : 0, p.id, activeCompanyId]
@@ -4798,7 +4798,7 @@ export const useStore = create(persist((set, get) => ({
                         if (update) {
                             return {
                                 ...p,
-                                stock: p.stock - update.quantityToDeduct,
+                                stock: Math.round((p.stock - update.quantityToDeduct) * 1000) / 1000,
                                 pending_adjustment: update.markPending ? 1 : p.pending_adjustment
                             };
                         }
@@ -4896,7 +4896,7 @@ export const useStore = create(persist((set, get) => ({
             for (const item of items) {
                 // A. Restore Product Total Stock
                 queries.push({
-                    sql: "UPDATE products SET stock = stock + ? WHERE id = ? AND company_id = ?",
+                    sql: "UPDATE products SET stock = ROUND(stock + ?, 3) WHERE id = ? AND company_id = ?",
                     args: [item.quantity, item.id, activeCompanyId]
                 });
 
@@ -4945,7 +4945,7 @@ export const useStore = create(persist((set, get) => ({
                 products: state.products.map(p => {
                     const item = items.find(i => i.id === p.id);
                     if (item) {
-                        return { ...p, stock: (parseFloat(p.stock) || 0) + parseFloat(item.quantity) };
+                        return { ...p, stock: Math.round(((parseFloat(p.stock) || 0) + parseFloat(item.quantity)) * 1000) / 1000 };
                     }
                     return p;
                 }),
