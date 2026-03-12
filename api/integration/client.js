@@ -112,7 +112,7 @@ export async function syncProductToStore({ companyId, product }) {
     if (product.name) payload.name = product.name;
     if (product.category) payload.category = product.category;
     if (product.stock !== undefined) payload.stock = normalizeStockForStore(product.stock, product.unit);
-    if (product.price) payload.sale_price = Number(product.price);
+    if (product.price) payload.price = Number(product.price);
     if (product.unit) payload.unit = product.unit;
 
     // Oferta: siempre enviar ambos campos en snake_case
