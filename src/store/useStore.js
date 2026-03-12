@@ -3363,7 +3363,7 @@ export const useStore = create(persist((set, get) => ({
             const dbProducts = await turso.execute({
                 sql: `
                     SELECT id, name, sku, price, stock, category, cost, unit,
-                           is_offer, offer_price, tax_rate
+                           is_offer, offer_price, tax_rate, image
                     FROM products
                     WHERE company_id = ?
                       AND sku IS NOT NULL
@@ -3395,6 +3395,8 @@ export const useStore = create(persist((set, get) => ({
                     is_offer: product.is_offer ? true : false,
                     offer_price: product.is_offer ? Number(product.offer_price || 0) : 0,
                 };
+
+                if (product.image) item.image = product.image;
 
                 return item;
             }).filter(product => product.sku);
