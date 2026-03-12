@@ -3384,7 +3384,7 @@ export const useStore = create(persist((set, get) => ({
                 const item = {
                     id: Number(product.id),
                     name: product.name || '',
-                    sku: normalizeSku(product.sku),
+                    sku: String(product.sku).trim(),
                     price: Number(product.price || 0),
                     stock,
                     category: product.category || 'General',
