@@ -112,15 +112,15 @@ export async function syncProductToStore({ companyId, product }) {
     if (product.name) payload.name = product.name;
     if (product.category) payload.category = product.category;
     if (product.stock !== undefined) payload.stock = normalizeStockForStore(product.stock, product.unit);
-    if (product.price) payload.price = Number(product.price);
-    if (product.is_offer) {
-        payload.isOffer = true;
-        payload.offerPrice = Number(product.offer_price || 0);
-    } else if (product.is_offer === false) {
-        payload.isOffer = false;
-    }
+    if (product.price) payload.sale_price = Number(product.price);
     if (product.unit) payload.unit = product.unit;
-    if (product.tax_rate !== undefined) payload.taxRate = Number(product.tax_rate);
+
+    // Oferta: siempre enviar ambos campos en snake_case
+    payload.is_offer = product.is_offer ? true : false;
+    payload.offer_price = product.is_offer ? Number(product.offer_price || 0) : 0;
+
+    // Impuesto: siempre enviar en snake_case
+    payload.tax_rate = Number(product.tax_rate || 0);
 
     if (product.image && typeof product.image === 'string') {
         if (product.image.startsWith('http')) {

@@ -3238,14 +3238,10 @@ export const useStore = create(persist((set, get) => ({
                         stock: updatedProduct.stock,
                         price: updatedProduct.price,
                         unit: updatedProduct.unit || 'Und',
-                        tax_rate: updatedProduct.tax_rate || 0,
+                        tax_rate: Number(updatedProduct.tax_rate || 0),
+                        is_offer: updatedProduct.is_offer ? true : false,
+                        offer_price: updatedProduct.is_offer ? Number(updatedProduct.offer_price || 0) : 0,
                     };
-                    if (updatedProduct.is_offer) {
-                        syncPayload.is_offer = true;
-                        syncPayload.offer_price = updatedProduct.offer_price || 0;
-                    } else {
-                        syncPayload.is_offer = false;
-                    }
                     if (imageChanged && updatedProduct.image) {
                         syncPayload.image = updatedProduct.image;
                     }
@@ -3396,14 +3392,9 @@ export const useStore = create(persist((set, get) => ({
                     cost: Number(product.cost || 0),
                     unit,
                     tax_rate: Number(product.tax_rate || 0),
+                    is_offer: product.is_offer ? true : false,
+                    offer_price: product.is_offer ? Number(product.offer_price || 0) : 0,
                 };
-
-                if (product.is_offer) {
-                    item.is_offer = true;
-                    item.offer_price = Number(product.offer_price || 0);
-                } else {
-                    item.is_offer = false;
-                }
 
                 return item;
             }).filter(product => product.sku);
