@@ -3299,8 +3299,8 @@ export const useStore = create(persist((set, get) => ({
                 const rawStock = Number(item?.stock ?? 0);
                 const clampedStock = rawStock < 0 ? 0 : rawStock;
                 const stock = (unit === 'kg' || unit === 'lt')
-                    ? Math.round(clampedStock * 100) / 100
-                    : Math.floor(clampedStock);
+                    ? Math.round(clampedStock * 1000) / 1000
+                    : Math.round(clampedStock);
 
                 return {
                     sku: normalizeSku(item?.sku),
@@ -3377,8 +3377,10 @@ export const useStore = create(persist((set, get) => ({
                 const unit = (product.unit || 'un').toLowerCase();
                 const rawStock = Number(product.stock || 0);
                 const clampedStock = rawStock < 0 ? 0 : rawStock;
-                // La tienda solo acepta stock entero
-                const stock = Math.round(clampedStock);
+                // Kg/Lt: hasta 3 decimales, Und: entero
+                const stock = (unit === 'kg' || unit === 'lt')
+                    ? Math.round(clampedStock * 1000) / 1000
+                    : Math.round(clampedStock);
 
                 const item = {
                     id: Number(product.id),
@@ -4717,13 +4719,17 @@ export const useStore = create(persist((set, get) => ({
                 const stockSyncItems = Array.from(stockSyncByProduct.values()).map(item => {
                     const product = productsMap.get(String(item.product_id));
                     const previousStock = Number(product?.stock || 0);
-                    const nextStock = Math.floor(previousStock - Number(item.quantity_sold || 0));
+                    const unit = (product?.unit || 'un').toLowerCase();
+                    const raw = previousStock - Number(item.quantity_sold || 0);
+                    const nextStock = (unit === 'kg' || unit === 'lt')
+                        ? Math.round(raw * 1000) / 1000
+                        : Math.round(raw);
                     return {
                         product_id: item.product_id,
                         sku: product?.sku || null,
                         stock: nextStock,
                     };
-                }).filter(item => item.sku && Number.isInteger(item.stock));
+                }).filter(item => item.sku && Number.isFinite(item.stock));
 
                 if (stockSyncItems.length === 0) {
                     console.warn('Stock sync skipped: no hay items válidos con sku/stock', {
@@ -4960,7 +4966,7 @@ export const useStore = create(persist((set, get) => ({
                 if (productIds.length > 0) {
                     const placeholders = productIds.map(() => '?').join(',');
                     const dbResult = await turso.execute({
-                        sql: `SELECT id, sku, stock FROM products WHERE id IN (${placeholders}) AND company_id = ?`,
+                        sql: `SELECT id, sku, stock, unit FROM products WHERE id IN (${placeholders}) AND company_id = ?`,
                         args: [...productIds, activeCompanyId]
                     });
                     dbProducts = dbResult.rows || [];
@@ -4970,9 +4976,13 @@ export const useStore = create(persist((set, get) => ({
                     const dbProd = dbProducts.find(p => String(p.id) === String(item.id));
                     const stateProd = updatedProducts.find(p => String(p.id) === String(item.id));
                     const sku = dbProd?.sku || stateProd?.sku || null;
-                    const stock = Math.floor(parseFloat(dbProd?.stock ?? stateProd?.stock ?? 0));
+                    const unit = (dbProd?.unit || stateProd?.unit || 'un').toLowerCase();
+                    const raw = parseFloat(dbProd?.stock ?? stateProd?.stock ?? 0);
+                    const stock = (unit === 'kg' || unit === 'lt')
+                        ? Math.round(raw * 1000) / 1000
+                        : Math.round(raw);
                     return { product_id: item.id, sku, stock };
-                }).filter(item => item.sku && normalizeSku(item.sku) && Number.isInteger(item.stock));
+                }).filter(item => item.sku && normalizeSku(item.sku) && Number.isFinite(item.stock));
 
                 console.log(`🔄 Cancel sync: ${stockSyncItems.length} items to sync`, stockSyncItems);
 
