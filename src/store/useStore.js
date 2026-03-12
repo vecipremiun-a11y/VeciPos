@@ -3362,7 +3362,7 @@ export const useStore = create(persist((set, get) => ({
 
             const dbProducts = await turso.execute({
                 sql: `
-                    SELECT id, name, sku, price, stock, category, image, cost, unit,
+                    SELECT id, name, sku, price, stock, category, cost, unit,
                            is_offer, offer_price, tax_rate
                     FROM products
                     WHERE company_id = ?
@@ -3388,7 +3388,6 @@ export const useStore = create(persist((set, get) => ({
                     price: Number(product.price || 0),
                     stock,
                     category: product.category || 'General',
-                    image: product.image || null,
                     cost: Number(product.cost || 0),
                     unit,
                     tax_rate: Number(product.tax_rate || 0),
