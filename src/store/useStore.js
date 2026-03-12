@@ -4730,6 +4730,7 @@ export const useStore = create(persist((set, get) => ({
                         product_id: item.product_id,
                         sku: product?.sku || null,
                         stock: nextStock,
+                        unit: product?.unit || 'Und',
                     };
                 }).filter(item => item.sku && Number.isFinite(item.stock));
 
@@ -4983,7 +4984,7 @@ export const useStore = create(persist((set, get) => ({
                     const stock = (unit === 'kg' || unit === 'lt')
                         ? Math.round(raw * 1000) / 1000
                         : Math.round(raw);
-                    return { product_id: item.id, sku, stock };
+                    return { product_id: item.id, sku, stock, unit: dbProd?.unit || stateProd?.unit || 'Und' };
                 }).filter(item => item.sku && normalizeSku(item.sku) && Number.isFinite(item.stock));
 
                 console.log(`🔄 Cancel sync: ${stockSyncItems.length} items to sync`, stockSyncItems);
