@@ -30,6 +30,7 @@ const ProfitReport = () => {
     const [metrics, setMetrics] = useState({
         totalRevenue: 0,
         totalCost: 0,
+        totalTax: 0,
         totalProfit: 0,
         profitMargin: 0,
         previousProfit: 0,
@@ -100,7 +101,8 @@ const ProfitReport = () => {
 
                 setMetrics({
                     totalRevenue: totals.totalAmount,
-                    totalCost: totals.totalAmount - totals.totalProfit,
+                    totalCost: totals.totalCost || 0,
+                    totalTax: totals.totalTax || 0,
                     totalProfit: totals.totalProfit,
                     profitMargin: margin,
                     previousProfit: comparisonResult.success ? comparisonResult.comparison.previous.totalProfit : 0,
@@ -242,7 +244,7 @@ const ProfitReport = () => {
             ) : (
                 <>
                     {/* Métricas Principales */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                         {/* Ventas Totales */}
                         <div className="glass-card p-6">
                             <div className="flex items-center justify-between mb-2">
@@ -268,6 +270,20 @@ const ProfitReport = () => {
                             </div>
                             <div className="text-xs text-[var(--color-text-muted)]">
                                 Costo de productos vendidos
+                            </div>
+                        </div>
+
+                        {/* Impuestos */}
+                        <div className="glass-card p-6">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-sm text-[var(--color-text-muted)]">Impuestos</span>
+                                <DollarSign className="text-yellow-400" size={20} />
+                            </div>
+                            <div className="text-2xl font-bold text-yellow-400 mb-1">
+                                {formatCurrency(metrics.totalTax, currentCurrency)}
+                            </div>
+                            <div className="text-xs text-[var(--color-text-muted)]">
+                                Total impuestos del periodo
                             </div>
                         </div>
 

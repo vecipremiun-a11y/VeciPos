@@ -6504,10 +6504,16 @@ export const useStore = create(persist((set, get) => ({
                     args: [companyId, item.id, dateStr]
                 });
 
-                const revenue = item.price * item.quantity;
-                const cost = (item.cost || 0) * item.quantity;
-                const tax = (item.tax || 0) * item.quantity;
-                const profit = revenue - cost - tax;
+                const price = parseFloat(item.price) || 0;
+                const qty = parseFloat(item.quantity) || 0;
+                const costUnit = parseFloat(item.cost) || 0;
+                const taxRate = parseFloat(item.tax_rate) || 0;
+                const netPrice = taxRate > 0 ? price / (1 + taxRate / 100) : price;
+
+                const revenue = price * qty;
+                const cost = costUnit * qty;
+                const tax = revenue - (netPrice * qty);
+                const profit = (netPrice - costUnit) * qty;
 
                 if (existing.rows.length === 0) {
                     await turso.execute({
@@ -6750,10 +6756,16 @@ export const useStore = create(persist((set, get) => ({
             const dateStr = new Date(date).toLocaleDateString('en-CA');
 
             for (const item of items) {
-                const revenue = item.price * item.quantity;
-                const cost = (item.cost || 0) * item.quantity;
-                const tax = (item.tax || 0) * item.quantity;
-                const profit = revenue - cost - tax;
+                const price = parseFloat(item.price) || 0;
+                const qty = parseFloat(item.quantity) || 0;
+                const costUnit = parseFloat(item.cost) || 0;
+                const taxRate = parseFloat(item.tax_rate) || 0;
+                const netPrice = taxRate > 0 ? price / (1 + taxRate / 100) : price;
+
+                const revenue = price * qty;
+                const cost = costUnit * qty;
+                const tax = revenue - (netPrice * qty);
+                const profit = (netPrice - costUnit) * qty;
 
                 await turso.execute({
                     sql: `UPDATE product_daily_profit SET
@@ -6886,7 +6898,7 @@ export const useStore = create(persist((set, get) => ({
 
             // Get profit data from product_daily_profit
             const profitResult = await turso.execute({
-                sql: `SELECT day, SUM(total_revenue) as total_revenue, SUM(total_cost) as total_cost, SUM(total_profit) as total_profit
+                sql: `SELECT day, SUM(total_revenue) as total_revenue, SUM(total_cost) as total_cost, SUM(total_profit) as total_profit, SUM(total_tax) as total_tax
                       FROM product_daily_profit
                       WHERE company_id = ? AND day BETWEEN ? AND ?
                       GROUP BY day
@@ -6909,6 +6921,7 @@ export const useStore = create(persist((set, get) => ({
                     total_amount: row.total_sales || 0,
                     total_profit: profitData.total_profit || 0,
                     total_cost: profitData.total_cost || 0,
+                    total_tax: profitData.total_tax || 0,
                     cash_amount: 0,
                     card_amount: 0,
                     transfer_amount: 0
@@ -6918,11 +6931,13 @@ export const useStore = create(persist((set, get) => ({
             const totals = daily.reduce((acc, day) => ({
                 totalSales: acc.totalSales + day.total_sales,
                 totalAmount: acc.totalAmount + day.total_amount,
+                totalCost: acc.totalCost + day.total_cost,
                 totalProfit: acc.totalProfit + day.total_profit,
+                totalTax: acc.totalTax + day.total_tax,
                 cashAmount: 0,
                 cardAmount: 0,
                 transferAmount: 0
-            }), { totalSales: 0, totalAmount: 0, totalProfit: 0, cashAmount: 0, cardAmount: 0, transferAmount: 0 });
+            }), { totalSales: 0, totalAmount: 0, totalCost: 0, totalProfit: 0, totalTax: 0, cashAmount: 0, cardAmount: 0, transferAmount: 0 });
 
             return { success: true, daily, totals };
         } catch (e) {
