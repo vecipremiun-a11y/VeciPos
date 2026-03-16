@@ -137,6 +137,9 @@ export async function syncProductToStore({ companyId, product }) {
     if (product.price) payload.price = Number(product.price);
     if (product.unit) payload.unit = product.unit;
 
+    // Costo del producto
+    if (product.cost !== undefined) payload.cost_price = Number(product.cost || 0);
+
     // Oferta: siempre enviar ambos campos en snake_case
     payload.is_offer = product.is_offer ? true : false;
     payload.offer_price = product.is_offer ? Number(product.offer_price || 0) : 0;
