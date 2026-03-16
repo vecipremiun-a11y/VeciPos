@@ -34,6 +34,24 @@ function normalizeStockForStore(stock, unit) {
         : Math.round(clamped);
 }
 
+/**
+ * Convierte price_ranges del POS [{min, max, margin, price}]
+ * al formato de la tienda [{minQty, maxQty, price}].
+ * - Si es undefined → devuelve undefined (no tocar las escalas existentes en tienda).
+ * - Si es [] → devuelve [] (eliminar escalas en tienda).
+ */
+function normalizePriceTiers(priceRanges) {
+    if (priceRanges === undefined || priceRanges === null) return undefined;
+    if (!Array.isArray(priceRanges)) {
+        try { priceRanges = JSON.parse(priceRanges); } catch { return undefined; }
+    }
+    return priceRanges.map(tier => ({
+        minQty: Number(tier.min || 0),
+        maxQty: tier.max === '' || tier.max === null || tier.max === undefined ? null : Number(tier.max),
+        price: Number(tier.price || 0),
+    }));
+}
+
 export async function syncPriceToStore({ companyId, product }) {
     const config = await getTiendaConfig(companyId);
 
@@ -54,6 +72,9 @@ export async function syncPriceToStore({ companyId, product }) {
         offer_price: Number(product.offer_price || 0),
         is_offer: Boolean(product.is_offer),
     };
+
+    const tiers = normalizePriceTiers(product.price_ranges);
+    if (tiers !== undefined) payload.priceTiers = tiers;
 
     try {
         const response = await fetch(endpoint, {
@@ -122,6 +143,10 @@ export async function syncProductToStore({ companyId, product }) {
 
     // Impuesto: siempre enviar en snake_case
     payload.tax_rate = Number(product.tax_rate || 0);
+
+    // Escalas de precio (mayoreo)
+    const tiers = normalizePriceTiers(product.price_ranges);
+    if (tiers !== undefined) payload.priceTiers = tiers;
 
     if (product.image && typeof product.image === 'string') {
         if (product.image.startsWith('http')) {

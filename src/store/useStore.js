@@ -3181,6 +3181,43 @@ export const useStore = create(persist((set, get) => ({
             });
 
             set((state) => ({ products: [...state.products, newProduct].sort((a, b) => a.name.localeCompare(b.name)) }));
+
+            // POS -> Tienda: sincronizar producto nuevo si tiene SKU
+            try {
+                if (newProduct.sku && String(newProduct.sku).trim()) {
+                    const syncPayload = {
+                        id: newProduct.id,
+                        sku: newProduct.sku,
+                        name: newProduct.name,
+                        category: newProduct.category,
+                        stock: newProduct.stock,
+                        price: newProduct.price,
+                        unit: newProduct.unit || 'Und',
+                        tax_rate: Number(newProduct.tax_rate || 0),
+                        is_offer: newProduct.is_offer ? true : false,
+                        offer_price: newProduct.is_offer ? Number(newProduct.offer_price || 0) : 0,
+                        image: newProduct.image || null,
+                        price_ranges: parsedPriceRanges || [],
+                    };
+                    fetch(`/api/integration/sync-product?company_id=${encodeURIComponent(activeCompanyId)}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ product: syncPayload })
+                    }).then(async (res) => {
+                        const data = await res.json().catch(() => null);
+                        if (!res.ok || !data?.success) {
+                            console.warn('Product sync post-create failed:', { id: newProduct.id, status: res.status, data });
+                        } else {
+                            console.log('✅ Product sync post-create success:', { id: newProduct.id, sku: newProduct.sku });
+                        }
+                    }).catch(syncError => {
+                        console.warn('Product sync post-create error:', syncError);
+                    });
+                }
+            } catch (syncError) {
+                console.warn('Product sync post-create setup error:', syncError);
+            }
+
             return { success: true, product: newProduct };
         } catch (e) {
             console.error("Add product error", e);
@@ -3241,6 +3278,7 @@ export const useStore = create(persist((set, get) => ({
                         tax_rate: Number(updatedProduct.tax_rate || 0),
                         is_offer: updatedProduct.is_offer ? true : false,
                         offer_price: updatedProduct.is_offer ? Number(updatedProduct.offer_price || 0) : 0,
+                        price_ranges: updatedProduct.price_ranges || [],
                     };
                     if (imageChanged && updatedProduct.image) {
                         syncPayload.image = updatedProduct.image;
@@ -3363,7 +3401,7 @@ export const useStore = create(persist((set, get) => ({
             const dbProducts = await turso.execute({
                 sql: `
                     SELECT id, name, sku, price, stock, category, cost, unit,
-                           is_offer, offer_price, tax_rate, image
+                           is_offer, offer_price, tax_rate, image, price_ranges
                     FROM products
                     WHERE company_id = ?
                       AND sku IS NOT NULL
@@ -3382,6 +3420,15 @@ export const useStore = create(persist((set, get) => ({
                     ? Math.round(clampedStock * 1000) / 1000
                     : Math.round(clampedStock);
 
+                let priceRanges = [];
+                try {
+                    if (product.price_ranges) {
+                        priceRanges = typeof product.price_ranges === 'string'
+                            ? JSON.parse(product.price_ranges)
+                            : product.price_ranges;
+                    }
+                } catch { /* ignore */ }
+
                 const item = {
                     id: Number(product.id),
                     name: product.name || '',
@@ -3394,6 +3441,7 @@ export const useStore = create(persist((set, get) => ({
                     tax_rate: Number(product.tax_rate || 0),
                     is_offer: product.is_offer ? true : false,
                     offer_price: product.is_offer ? Number(product.offer_price || 0) : 0,
+                    price_ranges: priceRanges,
                 };
 
                 if (product.image) item.image = product.image;
@@ -3465,6 +3513,9 @@ export const useStore = create(persist((set, get) => ({
             const { activeCompanyId, currentUser, validateCompanyAccess } = get();
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
+            // Obtener SKU antes de borrar para sincronizar con tienda
+            const productToDelete = get().products.find(p => p.id === id);
+
             await turso.execute({
                 sql: "DELETE FROM products WHERE id = ? AND company_id = ?",
                 args: [id, activeCompanyId]
@@ -3475,6 +3526,36 @@ export const useStore = create(persist((set, get) => ({
                 sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 args: [activeCompanyId, currentUser?.id, 'DELETE', 'PRODUCT', JSON.stringify({ id }), new Date().toISOString()]
             });
+
+            // POS -> Tienda: sincronizar eliminación (stock 0, sin escalas)
+            try {
+                const sku = productToDelete?.sku;
+                if (sku && String(sku).trim()) {
+                    fetch(`/api/integration/sync-product?company_id=${encodeURIComponent(activeCompanyId)}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            product: {
+                                id,
+                                sku,
+                                stock: 0,
+                                price_ranges: [],
+                            }
+                        })
+                    }).then(async (res) => {
+                        const data = await res.json().catch(() => null);
+                        if (!res.ok || !data?.success) {
+                            console.warn('Product sync post-delete failed:', { id, status: res.status, data });
+                        } else {
+                            console.log('✅ Product sync post-delete success:', { id, sku });
+                        }
+                    }).catch(syncError => {
+                        console.warn('Product sync post-delete error:', syncError);
+                    });
+                }
+            } catch (syncError) {
+                console.warn('Product sync post-delete setup error:', syncError);
+            }
 
             set((state) => ({
                 products: state.products.filter((p) => p.id !== id)
