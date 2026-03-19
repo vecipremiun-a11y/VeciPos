@@ -18,6 +18,7 @@ import Purchases from './pages/Purchases';
 import ProductProfile from './pages/ProductProfile';
 import Users from './pages/Users';
 import Personal from './pages/Personal';
+import PersonalKiosk from './pages/PersonalKiosk';
 import Reports from './pages/Reports';
 import ExpiringProductsReport from './pages/ExpiringProductsReport';
 import CashClosuresReport from './pages/CashClosuresReport';
@@ -29,6 +30,7 @@ import Orders from './pages/Orders';
 import SupplierOrders from './pages/SupplierOrders';
 import Preorders from './pages/Preorders';
 import Production from './pages/Production';
+import InventoryReconciliation from './pages/InventoryReconciliation';
 import MainLayout from './layouts/MainLayout';
 import AdminLayout from './layouts/AdminLayout';
 import RequireAdmin from './components/RequireAdmin';
@@ -133,20 +135,21 @@ const ProtectedRoute = ({ children }) => {
 
 function App() {
   const { fetchInitialData, darkMode } = useStore();
+  const currentUser = useStore(state => state.currentUser);
 
   // 1. Cargar datos SOLO una vez al montar, o cuando currentUser aparece (recarga)
   useEffect(() => {
-    const { currentUser, categories } = useStore.getState();
-    const hasCategories = categories.length > 0;
+    if (!currentUser) return;
+    const { categories, isLoading } = useStore.getState();
 
-    console.log('🚀 App.jsx effect', { hasUser: !!currentUser, hasCategories });
+    console.log('🚀 App.jsx effect', { hasUser: true, hasCategories: categories.length > 0 });
 
-    // Solo cargar si hay usuario Y no se ha cargado antes
-    if (currentUser && !hasCategories) {
+    // Solo cargar si hay usuario Y no se ha cargado antes Y no está ya cargando
+    if (categories.length === 0 && !isLoading) {
       console.log('📊 Loading initial data...');
       fetchInitialData();
     }
-  }, [useStore.getState().currentUser]); // Listen to user appearance
+  }, [currentUser]); // Proper reactive dependency
 
   useEffect(() => {
     console.log('🎨 Theme changed to:', darkMode ? 'dark' : 'light');
@@ -170,6 +173,16 @@ function App() {
         <Route path="/payment-pending" element={<PaymentPending />} />
         <Route path="/payment-failure" element={<PaymentFailure />} />
         <Route path="/renew-subscription" element={<RenewSubscription />} />
+
+        <Route path="/kiosk/asistencia" element={
+          <ProtectedRoute>
+            <ProtectedPage permission="personal.attendance">
+              <FeatureGatePage moduleKey="personal">
+                <PersonalKiosk />
+              </FeatureGatePage>
+            </ProtectedPage>
+          </ProtectedRoute>
+        } />
 
         {/* Protected Routes */}
         <Route path="/" element={
@@ -195,6 +208,7 @@ function App() {
           <Route path="orders/history" element={<ProtectedPage permission="supplier_orders.view"><SupplierOrders /></ProtectedPage>} />
           <Route path="preorders" element={<ProtectedPage permission="preorders.view"><Preorders /></ProtectedPage>} />
           <Route path="production" element={<ProtectedPage permission="production.view"><Production /></ProtectedPage>} />
+          <Route path="inventory/reconciliation" element={<ProtectedPage permission="products.adjust_stock"><InventoryReconciliation /></ProtectedPage>} />
 
           {/* Reports */}
           <Route path="reports" element={<ProtectedPage permission="reports.sales"><Reports /></ProtectedPage>} />

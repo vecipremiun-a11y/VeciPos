@@ -5,6 +5,9 @@ import { subDays } from 'date-fns';
 import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFromDateString, getEndFromDateString, formatInCompanyTime } from '../lib/dateHelpers';
 
 let migrationsExecuted = false;
+let fetchInProgress = false;
+const DDL_CACHE_KEY = 'poskem_ddl_v';
+const DDL_TARGET = 9; // Increment when adding new migrations/DDL
 
 const safeJsonStringify = (value) => JSON.stringify(value, (_key, currentValue) => {
     if (typeof currentValue === 'bigint') {
@@ -158,7 +161,7 @@ export const useStore = create(persist((set, get) => ({
             // Check Schema Version
             const versionRes = await turso.execute("SELECT value FROM system_settings WHERE key = 'schema_version'");
             const currentVersion = versionRes.rows.length > 0 ? parseInt(versionRes.rows[0].value) : 0;
-            const TARGET_VERSION = 8; // Incremented for Labor Management Phase 1
+            const TARGET_VERSION = 8;
 
             if (currentVersion >= TARGET_VERSION) {
                 console.log("Schema is up to date (v" + currentVersion + ")");
@@ -1053,10 +1056,8 @@ export const useStore = create(persist((set, get) => ({
             localStorage.setItem(`activeCompanyId:${currentUser.id}`, companyId);
         }
 
-        // Reload data
+        // Reload data (incluye permisos y módulos en el batch)
         await fetchInitialData();
-        await get().fetchRolePermissions(); // 🔒 Load permissions
-        await get().fetchCompanyModules(companyId); // 🏷️ Load feature flags
 
         // After data load, check if this user has an open register in the NEW company
         // We need to fetch this explicitly because fetchInitialData might not set cashRegister
@@ -1070,20 +1071,178 @@ export const useStore = create(persist((set, get) => ({
     },
 
     fetchInitialData: async () => {
+        if (fetchInProgress) {
+            console.log('⚠️ fetchInitialData already in progress, skipping duplicate call');
+            return;
+        }
+        fetchInProgress = true;
         console.time('⏱️ fetchInitialData');
         set({ isLoading: true, error: null });
         try {
             console.log('📊 fetchInitialData START');
 
-            // RUN MIGRATIONS & BACKFILL
+            // RUN MIGRATIONS & BACKFILL — skip if already done this session or cached in localStorage
             if (!migrationsExecuted) {
-                console.time('⏱️ _runMigrations');
-                await get()._runMigrations();
-                console.timeEnd('⏱️ _runMigrations');
-                migrationsExecuted = true;
-                console.log('✅ Migrations executed and cached for session');
+                const cachedDDL = localStorage.getItem(DDL_CACHE_KEY);
+                if (cachedDDL === String(DDL_TARGET)) {
+                    // DDL/migrations already ran in a previous session, skip
+                    migrationsExecuted = true;
+                    console.log('✅ DDL cached in localStorage (v' + DDL_TARGET + '), skipping migrations');
+                } else {
+                    // Quick check: is schema already up to date? (single SELECT, no DDL)
+                    let schemaOk = false;
+                    try {
+                        const vRes = await turso.execute("SELECT value FROM system_settings WHERE key = 'schema_version'");
+                        const dbVersion = vRes.rows.length > 0 ? parseInt(vRes.rows[0].value) : 0;
+                        if (dbVersion >= 8) {
+                            schemaOk = true;
+                            console.log('✅ Schema already at v' + dbVersion + ', skipping heavy DDL');
+                        }
+                    } catch (e) {
+                        // system_settings table might not exist yet → need full migration
+                        console.log('⚠️ Schema check failed, will run full migrations:', e.message);
+                    }
+
+                    if (schemaOk) {
+                        // Schema is up to date — all tables exist, skip ALL DDL
+                        console.log('✅ All tables exist (v8+), going straight to data fetch');
+                    } else {
+                        // Full migration path — only runs on brand new databases
+                        console.time('⏱️ _runMigrations');
+                        await get()._runMigrations();
+                        console.timeEnd('⏱️ _runMigrations');
+
+                        // Heavy DDL for extra tables
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS product_lots (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            product_id INTEGER, batch_number TEXT, expiry_date TEXT,
+                            quantity REAL, cost REAL, supplier_name TEXT, created_at TEXT,
+                            status TEXT DEFAULT 'active', company_id TEXT DEFAULT 'default'
+                        )`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS clients (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT NOT NULL, rut TEXT, phone TEXT, email TEXT,
+                            address TEXT, created_at TEXT
+                        )`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS supplier_orders (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT, user_id TEXT, supplier_id INTEGER,
+                            supplier_name TEXT, seller_name TEXT, total_amount REAL,
+                            items TEXT, status TEXT DEFAULT 'pending', created_at TEXT,
+                            expected_delivery_date TEXT,
+                            FOREIGN KEY(company_id) REFERENCES companies(id)
+                        )`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS payment_methods_config (
+                            company_id TEXT PRIMARY KEY,
+                            cash_enabled INTEGER DEFAULT 1, card_enabled INTEGER DEFAULT 1,
+                            transfer_enabled INTEGER DEFAULT 1, credit_enabled INTEGER DEFAULT 1,
+                            mixed_enabled INTEGER DEFAULT 1,
+                            FOREIGN KEY(company_id) REFERENCES companies(id)
+                        )`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS payment_terminals (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT, name TEXT, color TEXT DEFAULT '#3B82F6',
+                            is_active INTEGER DEFAULT 1, created_at TEXT,
+                            FOREIGN KEY(company_id) REFERENCES companies(id)
+                        )`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS bank_accounts (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT, bank_name TEXT, account_number TEXT,
+                            account_type TEXT, owner_name TEXT, rut TEXT, email TEXT,
+                            is_active INTEGER DEFAULT 1, created_at TEXT,
+                            FOREIGN KEY(company_id) REFERENCES companies(id)
+                        )`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS inventory_losses (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT, lot_id INTEGER, product_id INTEGER,
+                            product_name TEXT, product_sku TEXT, batch_number TEXT,
+                            expiry_date TEXT, quantity REAL, cost_per_unit REAL,
+                            total_loss REAL, reason TEXT DEFAULT 'expired',
+                            notes TEXT, user_id TEXT, created_at TEXT
+                        )`);
+
+                        // Column checks
+                        const plInfo = await turso.execute("PRAGMA table_info(product_lots)");
+                        const suppInfo = await turso.execute("PRAGMA table_info(suppliers)");
+                        const plCols = plInfo.rows.map(r => r.name);
+                        const suppCols = suppInfo.rows.map(r => r.name);
+
+                        if (!plCols.includes('purchase_id')) {
+                            try { await turso.execute('ALTER TABLE product_lots ADD COLUMN purchase_id INTEGER'); } catch(e) {}
+                        }
+                        if (!plCols.includes('initial_quantity')) {
+                            try { await turso.execute('ALTER TABLE product_lots ADD COLUMN initial_quantity REAL'); } catch(e) {}
+                        }
+                        if (!suppCols.includes('seller_name')) {
+                            try {
+                                await turso.execute('ALTER TABLE suppliers ADD COLUMN seller_name TEXT');
+                                await turso.execute('ALTER TABLE suppliers ADD COLUMN order_days TEXT');
+                                await turso.execute('ALTER TABLE suppliers ADD COLUMN delivery_days TEXT');
+                            } catch(e) {}
+                        }
+
+                        // Backfills
+                        if (!plCols.includes('purchase_id')) {
+                            try {
+                                await turso.execute(`
+                                    UPDATE product_lots SET purchase_id = (
+                                        SELECT pu.id FROM purchases pu
+                                        WHERE pu.company_id = product_lots.company_id
+                                          AND pu.supplier_name = product_lots.supplier_name
+                                          AND DATE(pu.date) = DATE(product_lots.created_at)
+                                        ORDER BY pu.id DESC LIMIT 1
+                                    ) WHERE purchase_id IS NULL
+                                `);
+                            } catch (e) { console.warn('Backfill purchase_id skipped:', e.message); }
+                        }
+                        if (!plCols.includes('initial_quantity')) {
+                            try {
+                                await turso.execute('UPDATE product_lots SET initial_quantity = quantity WHERE initial_quantity IS NULL');
+                            } catch (e) { console.warn('Backfill initial_quantity skipped:', e.message); }
+                        }
+
+                        // One-time migration: fix initial_quantity from purchase JSON
+                        try {
+                            const marker = await turso.execute("SELECT COUNT(*) as c FROM audit_logs WHERE action = 'MIGRATION_FIX_INITIAL_QTY'");
+                            if ((marker.rows[0]?.c || 0) === 0) {
+                                const lotsWithPurchase = await turso.execute(
+                                    `SELECT pl.id as lot_id, pl.product_id, pl.purchase_id, pu.items as items_json
+                                     FROM product_lots pl
+                                     JOIN purchases pu ON pl.purchase_id = pu.id
+                                     WHERE pl.purchase_id IS NOT NULL`
+                                );
+                                let fixed = 0;
+                                for (const row of lotsWithPurchase.rows) {
+                                    try {
+                                        const items = JSON.parse(row.items_json || '[]');
+                                        const matchItem = items.find(i => String(i.id) === String(row.product_id));
+                                        if (matchItem && matchItem.quantity) {
+                                            await turso.execute({
+                                                sql: 'UPDATE product_lots SET initial_quantity = ? WHERE id = ?',
+                                                args: [matchItem.quantity, row.lot_id]
+                                            });
+                                            fixed++;
+                                        }
+                                    } catch (_) { /* skip malformed JSON */ }
+                                }
+                                await turso.execute({
+                                    sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, NULL, 'MIGRATION_FIX_INITIAL_QTY', 'SYSTEM', ?, ?)",
+                                    args: ['system', JSON.stringify({ fixed }), new Date().toISOString()]
+                                });
+                                console.log(`Migration: Fixed initial_quantity for ${fixed} lots`);
+                            }
+                        } catch (e) {
+                            console.warn('Fix initial_quantity migration skipped:', e.message);
+                        }
+                    }
+
+                    // Cache successful DDL in localStorage
+                    localStorage.setItem(DDL_CACHE_KEY, String(DDL_TARGET));
+                    migrationsExecuted = true;
+                    console.log('✅ Migrations & schema checked and cached');
+                }
             } else {
-                console.log('✅ Migrations already executed, using cache');
+                console.log('✅ Migrations already executed, using memory cache');
             }
 
             const { currentUser } = get();
@@ -1149,178 +1308,51 @@ export const useStore = create(persist((set, get) => ({
                 localStorage.setItem(`activeCompanyId:${currentUser.id}`, activeCompanyId);
             }
 
-            // SIEMPRE cargar inventory_adjustment_mode fresco desde la DB
-            // (en caso de que availableCompanies venga de localStorage con valor desactualizado)
-            if (currentUser && activeCompanyId) {
-                try {
-                    const companyRes = await turso.execute({
-                        sql: 'SELECT inventory_adjustment_mode, currency FROM companies WHERE id = ?',
-                        args: [activeCompanyId]
-                    });
-                    if (companyRes.rows.length > 0) {
-                        const freshMode = companyRes.rows[0].inventory_adjustment_mode === 1;
-                        const freshCurrency = companyRes.rows[0].currency || 'CLP';
-                        set({
-                            inventoryAdjustmentMode: freshMode,
-                            currentCurrency: freshCurrency
-                        });
-                        console.log('🔧 Inventory/Currency loaded from DB:', freshMode, freshCurrency);
-                    }
-                } catch (e) {
-                    console.warn('Could not load inventory_adjustment_mode:', e);
-                }
-            }
-
             console.log('🏢 Loading data for company:', activeCompanyId);
 
-            // ==========================================
-            // 1. ENSURE SCHEMA (DDL & Column Checks)
-            // ==========================================
-            await turso.execute(`
-                CREATE TABLE IF NOT EXISTS product_lots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    product_id INTEGER,
-                    batch_number TEXT,
-                    expiry_date TEXT,
-                    quantity REAL,
-                    cost REAL,
-                    supplier_name TEXT,
-                    created_at TEXT,
-                    status TEXT DEFAULT 'active',
-                    company_id TEXT DEFAULT 'default'
-                )
-            `);
-
-            await turso.execute(`
-                CREATE TABLE IF NOT EXISTS clients (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    rut TEXT,
-                    phone TEXT,
-                    email TEXT,
-                    address TEXT,
-                    created_at TEXT
-                )
-            `);
-
-            await turso.execute(`
-                CREATE TABLE IF NOT EXISTS supplier_orders (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    company_id TEXT,
-                    user_id TEXT,
-                    supplier_id INTEGER,
-                    supplier_name TEXT,
-                    seller_name TEXT,
-                    total_amount REAL,
-                    items TEXT,
-                    status TEXT DEFAULT 'pending',
-                    created_at TEXT,
-                    expected_delivery_date TEXT,
-                    FOREIGN KEY(company_id) REFERENCES companies(id)
-                )
-            `);
-
-            // ==========================================
-            // PAYMENT METHODS TABLES
-            // ==========================================
-            await turso.execute(`
-                CREATE TABLE IF NOT EXISTS payment_methods_config (
-                    company_id TEXT PRIMARY KEY,
-                    cash_enabled INTEGER DEFAULT 1,
-                    card_enabled INTEGER DEFAULT 1,
-                    transfer_enabled INTEGER DEFAULT 1,
-                    credit_enabled INTEGER DEFAULT 1,
-                    mixed_enabled INTEGER DEFAULT 1,
-                    FOREIGN KEY(company_id) REFERENCES companies(id)
-                )
-            `);
-
-            await turso.execute(`
-                CREATE TABLE IF NOT EXISTS payment_terminals (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    company_id TEXT,
-                    name TEXT,
-                    color TEXT DEFAULT '#3B82F6',
-                    is_active INTEGER DEFAULT 1,
-                    created_at TEXT,
-                    FOREIGN KEY(company_id) REFERENCES companies(id)
-                )
-            `);
-
-            await turso.execute(`
-                CREATE TABLE IF NOT EXISTS bank_accounts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    company_id TEXT,
-                    bank_name TEXT,
-                    account_number TEXT,
-                    account_type TEXT,
-                    owner_name TEXT,
-                    rut TEXT,
-                    email TEXT,
-                    is_active INTEGER DEFAULT 1,
-                    created_at TEXT,
-                    FOREIGN KEY(company_id) REFERENCES companies(id)
-                )
-            `);
-
-            // Migration: Add new columns to suppliers if they don't exist
-            const newColumns = [
-                'ALTER TABLE suppliers ADD COLUMN seller_name TEXT',
-                'ALTER TABLE suppliers ADD COLUMN order_days TEXT',
-                'ALTER TABLE suppliers ADD COLUMN delivery_days TEXT'
-            ];
-
-            for (const query of newColumns) {
-                try {
-                    await turso.execute(query);
-                } catch (e) {
-                    // Ignore error if column already exists
-                }
-            }
-
-            // Migration: Add purchase_id column to product_lots if it doesn't exist
-            try {
-                await turso.execute('ALTER TABLE product_lots ADD COLUMN purchase_id INTEGER');
-            } catch (e) {
-                // Ignore error if column already exists
-            }
-
-            // Load Payment Methods Settings
-            await get().fetchPaymentMethodsSettings();
-
-            // 2. BATCH DATA FETCHING
+            // CHUNKED PARALLEL FETCH: 4 at a time to avoid saturating connection pool
             // ==========================================
             console.time('⏱️ BatchFetch');
-            const batchResults = await turso.batch([
-                // Optimized product_lots query
-                {
-                    sql: `SELECT id, product_id, batch_number, expiry_date, quantity, cost, supplier_name, created_at, status, company_id 
+            const [productLotsRes, categoriesRes, suppliersRes, usersRes] = await Promise.all([
+                turso.execute({ sql: `SELECT id, product_id, batch_number, expiry_date, quantity, cost, supplier_name, created_at, status, company_id 
                           FROM product_lots 
                           WHERE company_id = ? AND quantity > 0 
                           ORDER BY expiry_date ASC 
-                          LIMIT 200`,
-                    args: [activeCompanyId]
-                },
-                { sql: "SELECT * FROM categories WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
-                { sql: "SELECT * FROM suppliers WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
-                { sql: "SELECT * FROM users WHERE company_id = ?", args: [activeCompanyId] },
-                { sql: "SELECT * FROM clients WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
-                { sql: "SELECT * FROM role_permissions WHERE company_id = ?", args: [activeCompanyId] },
-                { sql: "SELECT * FROM tax_rates WHERE company_id = ?", args: [activeCompanyId] },
-                { sql: "SELECT * FROM company_modules WHERE company_id = ?", args: [activeCompanyId] }
+                          LIMIT 200`, args: [activeCompanyId] }),
+                turso.execute({ sql: "SELECT * FROM categories WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] }),
+                turso.execute({ sql: "SELECT * FROM suppliers WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] }),
+                turso.execute({ sql: "SELECT * FROM users WHERE company_id = ?", args: [activeCompanyId] })
+            ]);
+            const [clientsRes, permissionsRes, taxesRes, modulesRes] = await Promise.all([
+                turso.execute({ sql: "SELECT * FROM clients WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] }),
+                turso.execute({ sql: "SELECT * FROM role_permissions WHERE company_id = ?", args: [activeCompanyId] }),
+                turso.execute({ sql: "SELECT * FROM tax_rates WHERE company_id = ?", args: [activeCompanyId] }),
+                turso.execute({ sql: "SELECT * FROM company_modules WHERE company_id = ?", args: [activeCompanyId] })
+            ]);
+            const [payConfigRes, payTerminalsRes, bankAccountsRes, companyConfigRes] = await Promise.all([
+                turso.execute({ sql: "SELECT * FROM payment_methods_config WHERE company_id = ?", args: [activeCompanyId] }),
+                turso.execute({ sql: "SELECT * FROM payment_terminals WHERE company_id = ? AND is_active = 1", args: [activeCompanyId] }),
+                turso.execute({ sql: "SELECT * FROM bank_accounts WHERE company_id = ? AND is_active = 1", args: [activeCompanyId] }),
+                turso.execute({ sql: "SELECT inventory_adjustment_mode, currency FROM companies WHERE id = ?", args: [activeCompanyId] })
             ]);
             console.timeEnd('⏱️ BatchFetch');
 
-            const productLotsRes = batchResults[0];
-            const categoriesRes = batchResults[1];
-            const suppliersRes = batchResults[2];
-            const usersRes = batchResults[3];
-            const clientsRes = batchResults[4];
-            const permissionsRes = batchResults[5];
-            const taxesRes = batchResults[6];
-            const modulesRes = batchResults[7];
-
             console.log('👥 Loaded users:', usersRes.rows.length);
+
+            // Process payment methods config
+            let payConfig = payConfigRes.rows[0];
+            if (!payConfig) {
+                // Initialize default config if not exists
+                await turso.execute({ sql: "INSERT INTO payment_methods_config (company_id) VALUES (?)", args: [activeCompanyId] });
+                payConfig = { company_id: activeCompanyId, cash_enabled: 1, card_enabled: 1, transfer_enabled: 1, credit_enabled: 1, mixed_enabled: 1 };
+            }
+
+            // Process company config
+            if (companyConfigRes.rows.length > 0) {
+                const freshMode = companyConfigRes.rows[0].inventory_adjustment_mode === 1;
+                const freshCurrency = companyConfigRes.rows[0].currency || 'CLP';
+                set({ inventoryAdjustmentMode: freshMode, currentCurrency: freshCurrency });
+            }
 
             // Removed products mapping
             const productLots = productLotsRes.rows;
@@ -1331,12 +1363,16 @@ export const useStore = create(persist((set, get) => ({
             const suppliers = suppliersRes.rows;
             const users = usersRes.rows;
             const clients = clientsRes.rows;
-            // Sales processing not needed for empty set but kept for structure if limit changes
-            // const sales = ...
 
-            // const sales = ...
-
-            set({ productLots, categories, suppliers, users, clients, rolePermissions: permissionsRes.rows, taxRates: taxesRes.rows, companyModules: modulesRes.rows });
+            set({
+                productLots, categories, suppliers, users, clients,
+                rolePermissions: permissionsRes.rows,
+                taxRates: taxesRes.rows,
+                companyModules: modulesRes.rows,
+                paymentMethodsConfig: payConfig,
+                paymentTerminals: payTerminalsRes.rows,
+                bankAccounts: bankAccountsRes.rows
+            });
 
             console.timeEnd('⏱️ fetchInitialData');
             console.log(`✅ Initial Load: Metadata only.`);
@@ -1345,6 +1381,7 @@ export const useStore = create(persist((set, get) => ({
             console.error("Failed to fetch data:", error);
             set({ error: error.message });
         } finally {
+            fetchInProgress = false;
             set({ isLoading: false });
         }
     },
@@ -1898,25 +1935,16 @@ export const useStore = create(persist((set, get) => ({
 
             // 2. QUERIES OPTIMIZADOS usando sales_daily_summary
             // 2. QUERIES OPTIMIZADOS usando sales_daily_summary
-            const [
-                todayStatsRes,
-                monthStatsRes,
-                todayUtilityRes,        // ← NUEVA: Utilidad precalculada
-                recentSalesRes,
-                lowStockRes,
-                topProductsRes          // ← NUEVA: Más vendidos precalculado
-            ] = await turso.batch([
-                // 1. Stats del día desde tabla agregada (SUPER RÁPIDO)
-                {
+            const [todayStatsRes, monthStatsRes, todayUtilityRes] = await Promise.all([
+                turso.execute({
                     sql: `SELECT 
                             COALESCE(SUM(total_sales), 0) as total_sales,
                             COALESCE(SUM(total_orders), 0) as total_orders
                           FROM sales_daily_summary
                           WHERE company_id = ? AND day = ?`,
                     args: [activeCompanyId, todayStr]
-                },
-                // 2. Stats del mes desde tabla agregada (RÁPIDO - solo ~30 registros)
-                {
+                }),
+                turso.execute({
                     sql: `SELECT 
                             day,
                             total_sales,
@@ -1927,16 +1955,16 @@ export const useStore = create(persist((set, get) => ({
                           AND day <= ?
                           ORDER BY day ASC`,
                     args: [activeCompanyId, monthStartStr, todayStr]
-                },
-                // 3. Utilidad de HOY (desde tabla precalculada - SUPER RÁPIDO)
-                {
+                }),
+                turso.execute({
                     sql: `SELECT COALESCE(SUM(total_profit), 0) as total_profit
                           FROM product_daily_profit
                           WHERE company_id = ? AND day = ?`,
                     args: [activeCompanyId, todayStr]
-                },
-                // 4. Ventas recientes (para lista de actividad)
-                {
+                })
+            ]);
+            const [recentSalesRes, lowStockRes, topProductsRes] = await Promise.all([
+                turso.execute({
                     sql: `SELECT s.*, u.name as user_name
                           FROM sales s
                           LEFT JOIN users u ON s.user_id = u.id
@@ -1944,14 +1972,12 @@ export const useStore = create(persist((set, get) => ({
                           ORDER BY s.date DESC
                           LIMIT 20`,
                     args: [activeCompanyId]
-                },
-                // 5. Productos con bajo stock
-                {
+                }),
+                turso.execute({
                     sql: "SELECT * FROM products WHERE company_id = ? AND stock <= 0 LIMIT 20",
                     args: [activeCompanyId]
-                },
-                // 6. Productos más vendidos HOY (desde tabla precalculada)
-                {
+                }),
+                turso.execute({
                     sql: `SELECT 
                             p.id,
                             p.name,
@@ -1966,7 +1992,7 @@ export const useStore = create(persist((set, get) => ({
                           ORDER BY pdp.total_quantity DESC
                           LIMIT 10`,
                     args: [activeCompanyId, todayStr]
-                }
+                })
             ]);
 
             // 3. Procesar resultados
@@ -2007,37 +2033,51 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    fetchProductLotsReport: async (limit = 30, offset = 0) => {
+    fetchProductLotsReport: async (productLimit = 20, productOffset = 0) => {
         const { activeCompanyId } = get();
         try {
-            // Fetch lots joined with products AND purchases to get invoice details
-            const sql = "SELECT pl.*, " +
-                "p.name as p_name, p.sku as p_sku, p.image as p_image, " +
-                "p.stock as p_stock, p.unit as p_unit, p.price as p_price, " +
-                "pu.invoice_number as invoice_number, pu.date as purchase_date " +
-                "FROM product_lots pl " +
-                "JOIN products p ON pl.product_id = p.id " +
-                "LEFT JOIN purchases pu ON pl.purchase_id = pu.id " +
-                "WHERE pl.company_id = ? AND pl.quantity > 0 " +
-                "ORDER BY (pl.expiry_date IS NULL) ASC, pl.expiry_date ASC " +
-                "LIMIT ? OFFSET ?";
+            // Step 1: Get paginated product IDs that have active lots, ordered by earliest expiry
+            const prodRes = await turso.execute({
+                sql: `SELECT product_id, MIN(expiry_date) as min_expiry
+                      FROM product_lots
+                      WHERE company_id = ? AND quantity > 0 AND expiry_date IS NOT NULL
+                      GROUP BY product_id
+                      ORDER BY min_expiry ASC
+                      LIMIT ? OFFSET ?`,
+                args: [activeCompanyId, productLimit, productOffset]
+            });
 
-            const res = await turso.execute({ sql, args: [activeCompanyId, limit, offset] });
+            const productIds = prodRes.rows.map(r => r.product_id);
+            if (productIds.length === 0) return { products: [], hasMore: false };
 
-            return res.rows.map(row => ({
+            // Step 2: Fetch ALL lots for those products
+            const placeholders = productIds.map(() => '?').join(',');
+            const sql = `SELECT pl.*, 
+                p.name as p_name, p.sku as p_sku, p.image as p_image, 
+                p.stock as p_stock, p.unit as p_unit, p.price as p_price, 
+                pu.invoice_number as invoice_number, pu.date as purchase_date 
+                FROM product_lots pl 
+                JOIN products p ON pl.product_id = p.id 
+                LEFT JOIN purchases pu ON pl.purchase_id = pu.id 
+                WHERE pl.company_id = ? AND pl.quantity > 0 
+                AND pl.product_id IN (${placeholders})
+                ORDER BY pl.product_id, (pl.expiry_date IS NULL) ASC, pl.expiry_date ASC`;
+
+            const res = await turso.execute({ sql, args: [activeCompanyId, ...productIds] });
+
+            const lots = res.rows.map(row => ({
                 id: row.id,
                 product_id: row.product_id,
                 batch_number: row.batch_number,
                 expiry_date: row.expiry_date,
                 quantity: row.quantity,
+                initial_quantity: row.initial_quantity || row.quantity,
                 cost: row.cost,
                 supplier_name: row.supplier_name,
                 created_at: row.created_at,
                 purchase_id: row.purchase_id,
-                // Purchase/Invoice info
                 invoice_number: row.invoice_number || null,
                 purchase_date: row.purchase_date || null,
-                // Product embedded info
                 product_name: row.p_name,
                 product_sku: row.p_sku,
                 product_image: row.p_image,
@@ -2046,9 +2086,10 @@ export const useStore = create(persist((set, get) => ({
                 product_price: row.p_price
             }));
 
+            return { products: lots, hasMore: productIds.length === productLimit };
         } catch (e) {
-            console.error("Error fetching product profit report:", e);
-            return [];
+            console.error("Error fetching product lots report:", e);
+            return { products: [], hasMore: false };
         }
     },
 
@@ -2110,6 +2151,390 @@ export const useStore = create(persist((set, get) => ({
             console.error("Error fetching stats:", e);
             return null;
         }
+    },
+
+    // Write off an expired lot: moves it to inventory_losses and sets quantity to 0
+    // reason: 'expired' (pérdida) | 'supplier_exchange' (cambio proveedor)
+    writeOffExpiredLot: async (lot, notes = '', reason = 'expired') => {
+        const { activeCompanyId, currentUser } = get();
+        try {
+            const now = new Date().toISOString();
+            const totalLoss = reason === 'expired' ? (lot.cost || 0) * (lot.quantity || 0) : 0;
+
+            await turso.batch([
+                // 1. Record the loss
+                {
+                    sql: `INSERT INTO inventory_losses (company_id, lot_id, product_id, product_name, product_sku, batch_number, expiry_date, quantity, cost_per_unit, total_loss, reason, notes, user_id, created_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    args: [
+                        activeCompanyId,
+                        lot.id,
+                        lot.product_id,
+                        lot.product_name || '',
+                        lot.product_sku || '',
+                        lot.batch_number || '',
+                        lot.expiry_date || null,
+                        lot.quantity,
+                        lot.cost || 0,
+                        totalLoss,
+                        reason,
+                        notes,
+                        currentUser?.id || null,
+                        now
+                    ]
+                },
+                // 2. Deduct from product stock
+                {
+                    sql: `UPDATE products SET stock = ROUND(stock - ?, 3) WHERE id = ? AND company_id = ?`,
+                    args: [lot.quantity, lot.product_id, activeCompanyId]
+                },
+                // 3. Zero out the lot
+                {
+                    sql: `UPDATE product_lots SET quantity = 0 WHERE id = ?`,
+                    args: [lot.id]
+                },
+                // 4. Audit log
+                {
+                    sql: `INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, 'WRITE_OFF', 'LOT', ?, ?)`,
+                    args: [activeCompanyId, currentUser?.id, JSON.stringify({ lot_id: lot.id, product: lot.product_name, quantity: lot.quantity, loss: totalLoss, reason }), now]
+                }
+            ]);
+
+            // Update local state
+            set((state) => ({
+                productLots: state.productLots.map(l =>
+                    l.id === lot.id ? { ...l, quantity: 0 } : l
+                ),
+                products: state.products.map(p =>
+                    p.id === lot.product_id
+                        ? { ...p, stock: Math.round((p.stock - lot.quantity) * 1000) / 1000 }
+                        : p
+                )
+            }));
+
+            return { success: true, totalLoss };
+        } catch (e) {
+            console.error('Error writing off lot:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // Write off ALL expired lots for a product at once
+    // reason: 'expired' | 'supplier_exchange'
+    writeOffAllExpiredLots: async (lots, notes = '', reason = 'expired') => {
+        const { activeCompanyId, currentUser } = get();
+        try {
+            const now = new Date().toISOString();
+            const queries = [];
+            let totalLossSum = 0;
+            let totalQtySum = 0;
+            const productStockDeductions = new Map();
+
+            for (const lot of lots) {
+                const totalLoss = reason === 'expired' ? (lot.cost || 0) * (lot.quantity || 0) : 0;
+                totalLossSum += totalLoss;
+                totalQtySum += lot.quantity;
+
+                const prev = productStockDeductions.get(lot.product_id) || 0;
+                productStockDeductions.set(lot.product_id, prev + lot.quantity);
+
+                queries.push({
+                    sql: `INSERT INTO inventory_losses (company_id, lot_id, product_id, product_name, product_sku, batch_number, expiry_date, quantity, cost_per_unit, total_loss, reason, notes, user_id, created_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    args: [activeCompanyId, lot.id, lot.product_id, lot.product_name || '', lot.product_sku || '', lot.batch_number || '', lot.expiry_date || null, lot.quantity, lot.cost || 0, totalLoss, reason, notes, currentUser?.id || null, now]
+                });
+                queries.push({
+                    sql: `UPDATE product_lots SET quantity = 0 WHERE id = ?`,
+                    args: [lot.id]
+                });
+            }
+
+            // Deduct stock per product
+            for (const [productId, qty] of productStockDeductions) {
+                queries.push({
+                    sql: `UPDATE products SET stock = ROUND(stock - ?, 3) WHERE id = ? AND company_id = ?`,
+                    args: [qty, productId, activeCompanyId]
+                });
+            }
+
+            // Audit
+            queries.push({
+                sql: `INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, 'WRITE_OFF_BATCH', 'LOT', ?, ?)`,
+                args: [activeCompanyId, currentUser?.id, JSON.stringify({ lots_count: lots.length, total_qty: totalQtySum, total_loss: totalLossSum }), now]
+            });
+
+            await turso.batch(queries);
+
+            // Update local state
+            const lotIds = new Set(lots.map(l => l.id));
+            set((state) => ({
+                productLots: state.productLots.map(l =>
+                    lotIds.has(l.id) ? { ...l, quantity: 0 } : l
+                ),
+                products: state.products.map(p => {
+                    const deduction = productStockDeductions.get(p.id);
+                    if (deduction) {
+                        return { ...p, stock: Math.round((p.stock - deduction) * 1000) / 1000 };
+                    }
+                    return p;
+                })
+            }));
+
+            return { success: true, totalLoss: totalLossSum, lotsProcessed: lots.length };
+        } catch (e) {
+            console.error('Error batch writing off lots:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // Fetch inventory losses history
+    fetchInventoryLosses: async (limit = 50, offset = 0) => {
+        const { activeCompanyId } = get();
+        try {
+            const res = await turso.execute({
+                sql: `SELECT il.*, u.name as user_name
+                      FROM inventory_losses il
+                      LEFT JOIN users u ON il.user_id = u.id
+                      WHERE il.company_id = ?
+                      ORDER BY il.created_at DESC
+                      LIMIT ? OFFSET ?`,
+                args: [activeCompanyId, limit, offset]
+            });
+            return res.rows;
+        } catch (e) {
+            console.error('Error fetching inventory losses:', e);
+            return [];
+        }
+    },
+
+    // Get summary stats of inventory losses
+    fetchInventoryLossesStats: async () => {
+        const { activeCompanyId } = get();
+        try {
+            const res = await turso.execute({
+                sql: `SELECT 
+                        COUNT(*) as total_records,
+                        SUM(quantity) as total_units,
+                        SUM(CASE WHEN reason = 'expired' THEN total_loss ELSE 0 END) as total_value,
+                        SUM(CASE WHEN reason = 'supplier_exchange' THEN quantity ELSE 0 END) as total_exchanged_units,
+                        SUM(CASE WHEN reason = 'supplier_exchange' THEN 1 ELSE 0 END) as total_exchanges,
+                        COUNT(DISTINCT product_id) as total_products
+                      FROM inventory_losses
+                      WHERE company_id = ?`,
+                args: [activeCompanyId]
+            });
+            return res.rows[0] || { total_records: 0, total_units: 0, total_value: 0, total_products: 0, total_exchanged_units: 0, total_exchanges: 0 };
+        } catch (e) {
+            console.error('Error fetching loss stats:', e);
+            return { total_records: 0, total_units: 0, total_value: 0, total_products: 0 };
+        }
+    },
+
+    // ============ INVENTORY RECONCILIATION ============
+
+    fetchReconciliationData: async ({ limit = 30, offset = 0, search = '' } = {}) => {
+        const { activeCompanyId } = get();
+        try {
+            const baseWhere = search
+                ? `WHERE p.company_id = ? AND (p.name LIKE ? OR p.sku LIKE ?)`
+                : `WHERE p.company_id = ?`;
+            const baseArgs = search
+                ? [activeCompanyId, `%${search}%`, `%${search}%`]
+                : [activeCompanyId];
+
+            // Stats query (only on first page without search to avoid repeated heavy queries)
+            let stats = null;
+            if (offset === 0 && !search) {
+                const statsRes = await turso.execute({
+                    sql: `SELECT 
+                            COUNT(*) as total,
+                            SUM(CASE WHEN diff > 0 THEN 1 ELSE 0 END) as stock_greater,
+                            SUM(CASE WHEN diff < 0 THEN 1 ELSE 0 END) as lots_greater,
+                            SUM(CASE WHEN sub.stock < 0 THEN 1 ELSE 0 END) as negative_stock
+                          FROM (
+                            SELECT p.stock, (p.stock - COALESCE(SUM(pl.quantity), 0)) as diff
+                            FROM products p
+                            LEFT JOIN product_lots pl ON pl.product_id = p.id AND pl.company_id = p.company_id AND pl.quantity > 0
+                            WHERE p.company_id = ?
+                            GROUP BY p.id
+                            HAVING ABS(p.stock - COALESCE(SUM(pl.quantity), 0)) > 0.01 OR (p.stock < 0)
+                          ) sub`,
+                    args: [activeCompanyId]
+                });
+                const s = statsRes.rows[0];
+                stats = { total: s.total || 0, stockGreater: s.stock_greater || 0, lotsGreater: s.lots_greater || 0, negativeStock: s.negative_stock || 0 };
+            }
+
+            // Paginated products query
+            const res = await turso.execute({
+                sql: `SELECT 
+                        p.id, p.name, p.sku, p.stock, p.image, p.unit, p.cost,
+                        COALESCE(SUM(pl.quantity), 0) as lots_total,
+                        COUNT(pl.id) as lots_count
+                      FROM products p
+                      LEFT JOIN product_lots pl ON pl.product_id = p.id AND pl.company_id = p.company_id AND pl.quantity > 0
+                      ${baseWhere}
+                      GROUP BY p.id
+                      HAVING ABS(p.stock - COALESCE(SUM(pl.quantity), 0)) > 0.01 OR (p.stock < 0)
+                      ORDER BY ABS(p.stock - COALESCE(SUM(pl.quantity), 0)) DESC
+                      LIMIT ? OFFSET ?`,
+                args: [...baseArgs, limit, offset]
+            });
+
+            const products = res.rows.map(r => ({
+                id: r.id, name: r.name, sku: r.sku, image: r.image, unit: r.unit, cost: r.cost,
+                stock: r.stock, lots_total: r.lots_total, lots_count: r.lots_count,
+                difference: Math.round((r.stock - r.lots_total) * 1000) / 1000
+            }));
+
+            return { products, hasMore: products.length === limit, stats };
+        } catch (e) {
+            console.error('Error fetching reconciliation data:', e);
+            return { products: [], hasMore: false, stats: null };
+        }
+    },
+
+    fetchProductLotsForReconciliation: async (productId) => {
+        const { activeCompanyId } = get();
+        try {
+            const res = await turso.execute({
+                sql: `SELECT pl.*, pu.invoice_number 
+                      FROM product_lots pl
+                      LEFT JOIN purchases pu ON pl.purchase_id = pu.id
+                      WHERE pl.product_id = ? AND pl.company_id = ?
+                      ORDER BY pl.quantity > 0 DESC, pl.expiry_date ASC`,
+                args: [productId, activeCompanyId]
+            });
+            return res.rows;
+        } catch (e) {
+            console.error('Error fetching lots for reconciliation:', e);
+            return [];
+        }
+    },
+
+    reconcileProduct: async (productId, action, notes = '') => {
+        // action: 'adjust_stock' = set product.stock to match lots total
+        //         'adjust_lots' = zero out lot quantities to match stock (0)
+        const { activeCompanyId, currentUser } = get();
+        try {
+            const now = new Date().toISOString();
+
+            if (action === 'adjust_stock') {
+                // Get current lots total
+                const lotsRes = await turso.execute({
+                    sql: `SELECT COALESCE(SUM(quantity), 0) as total FROM product_lots WHERE product_id = ? AND company_id = ? AND quantity > 0`,
+                    args: [productId, activeCompanyId]
+                });
+                const lotsTotal = lotsRes.rows[0]?.total || 0;
+
+                // Get current stock for audit
+                const prodRes = await turso.execute({
+                    sql: `SELECT stock, name FROM products WHERE id = ? AND company_id = ?`,
+                    args: [productId, activeCompanyId]
+                });
+                const oldStock = prodRes.rows[0]?.stock || 0;
+                const productName = prodRes.rows[0]?.name || '';
+
+                await turso.execute({
+                    sql: `UPDATE products SET stock = ? WHERE id = ? AND company_id = ?`,
+                    args: [lotsTotal, productId, activeCompanyId]
+                });
+
+                await turso.execute({
+                    sql: `INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, 'RECONCILIATION', 'INVENTORY', ?, ?)`,
+                    args: [activeCompanyId, currentUser?.id,
+                        JSON.stringify({ productId, productName, action: 'adjust_stock', oldStock, newStock: lotsTotal, notes }),
+                        now]
+                });
+
+                // Update Zustand state
+                set(state => ({
+                    products: state.products.map(p =>
+                        p.id === productId ? { ...p, stock: lotsTotal } : p
+                    )
+                }));
+
+                return { success: true, message: `Stock ajustado de ${oldStock} a ${lotsTotal}` };
+            }
+
+            if (action === 'adjust_lots') {
+                // Get product stock
+                const prodRes = await turso.execute({
+                    sql: `SELECT stock, name FROM products WHERE id = ? AND company_id = ?`,
+                    args: [productId, activeCompanyId]
+                });
+                const currentStock = prodRes.rows[0]?.stock || 0;
+                const productName = prodRes.rows[0]?.name || '';
+
+                const today = now.slice(0, 10); // 'YYYY-MM-DD'
+
+                // 1) Set all EXPIRED lots to 0
+                const expiredRes = await turso.execute({
+                    sql: `SELECT id, quantity FROM product_lots WHERE product_id = ? AND company_id = ? AND quantity > 0 AND expiry_date IS NOT NULL AND expiry_date < ?`,
+                    args: [productId, activeCompanyId, today]
+                });
+                for (const lot of expiredRes.rows) {
+                    await turso.execute({
+                        sql: `UPDATE product_lots SET quantity = 0 WHERE id = ?`,
+                        args: [lot.id]
+                    });
+                }
+
+                // 2) Get only ACTIVE lots (not expired) ordered by FEFO
+                const lotsRes = await turso.execute({
+                    sql: `SELECT id, quantity, expiry_date FROM product_lots WHERE product_id = ? AND company_id = ? AND quantity > 0 AND (expiry_date IS NULL OR expiry_date >= ?) ORDER BY (expiry_date IS NULL) ASC, expiry_date ASC`,
+                    args: [productId, activeCompanyId, today]
+                });
+
+                const lots = lotsRes.rows;
+                let remaining = Math.max(currentStock, 0);
+                const updates = [];
+
+                for (const lot of lots) {
+                    if (remaining <= 0) {
+                        updates.push({ id: lot.id, newQty: 0 });
+                    } else {
+                        const assign = Math.min(lot.quantity, remaining);
+                        updates.push({ id: lot.id, newQty: assign });
+                        remaining -= assign;
+                    }
+                }
+
+                // Execute updates on active lots
+                for (const u of updates) {
+                    await turso.execute({
+                        sql: `UPDATE product_lots SET quantity = ? WHERE id = ?`,
+                        args: [u.newQty, u.id]
+                    });
+                }
+
+                await turso.execute({
+                    sql: `INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, 'RECONCILIATION', 'INVENTORY', ?, ?)`,
+                    args: [activeCompanyId, currentUser?.id,
+                        JSON.stringify({ productId, productName, action: 'adjust_lots', stock: currentStock, lotsAdjusted: updates.length, notes }),
+                        now]
+                });
+
+                return { success: true, message: `${updates.length} lotes ajustados al stock (${currentStock})` };
+            }
+
+            return { success: false, error: 'Acción no válida' };
+        } catch (e) {
+            console.error('Error reconciling product:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    reconcileAllProducts: async (products, action, notes = '') => {
+        const { reconcileProduct } = get();
+        let success = 0;
+        let failed = 0;
+        for (const product of products) {
+            const result = await reconcileProduct(product.id, action, notes);
+            if (result.success) success++;
+            else failed++;
+        }
+        return { success: true, message: `${success} productos conciliados, ${failed} errores` };
     },
 
     fetchProductProfitReport: async (startDate, endDate) => {
@@ -2427,9 +2852,6 @@ export const useStore = create(persist((set, get) => ({
                 inventoryAdjustmentMode: activeCompany.inventory_adjustment_mode === 1
             });
 
-            // 🔒 Cargar permisos del rol
-            await get().fetchRolePermissions();
-
             // 5. Guardar en localStorage
             localStorage.setItem(`activeCompanyId:${user.id}`, activeCompanyId);
 
@@ -2483,6 +2905,9 @@ export const useStore = create(persist((set, get) => ({
         const { currentUser } = get();
 
         console.log('🚪 Logging out user:', currentUser?.username);
+
+        // Reset fetch lock so login can trigger fetchInitialData again
+        fetchInProgress = false;
 
         // Limpiar localStorage
         if (currentUser) {
@@ -4056,11 +4481,12 @@ export const useStore = create(persist((set, get) => ({
 
                 // Create Lot linked to purchase
                 queries.push({
-                    sql: "INSERT INTO product_lots (product_id, batch_number, expiry_date, quantity, cost, supplier_name, created_at, status, company_id, purchase_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+                    sql: "INSERT INTO product_lots (product_id, batch_number, expiry_date, quantity, initial_quantity, cost, supplier_name, created_at, status, company_id, purchase_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
                     args: [
                         item.id,
                         item.batchNumber || '',
                         item.expiryDate || null,
+                        item.quantity,
                         item.quantity,
                         item.cost,
                         purchase.supplierName,
@@ -4086,6 +4512,7 @@ export const useStore = create(persist((set, get) => ({
                 batch_number: item.batchNumber || '',
                 expiry_date: item.expiryDate || null,
                 quantity: parseFloat(item.quantity),
+                initial_quantity: parseFloat(item.quantity),
                 cost: parseFloat(item.cost),
                 supplier_name: purchase.supplierName,
                 created_at: new Date().toISOString(),
@@ -4592,6 +5019,13 @@ export const useStore = create(persist((set, get) => ({
             });
             const dbProducts = dbProductsRes.rows;
 
+            // Fetch fresh lots from DB (not from Zustand state which may be stale)
+            const dbLotsRes = await turso.execute({
+                sql: `SELECT * FROM product_lots WHERE product_id IN (${placeholders}) AND company_id = ? AND quantity > 0`,
+                args: [...itemIds, activeCompanyId]
+            });
+            const freshLots = dbLotsRes.rows;
+
             // Preparar todos los datos ANTES de entrar a la transacción
             const itemsToProcess = [];
             const productsToUpdate = [];
@@ -4604,7 +5038,7 @@ export const useStore = create(persist((set, get) => ({
             const productsMap = new Map(dbProducts.map(p => [String(p.id), p]));
             const lotsByProduct = new Map();
 
-            productLots.forEach(lot => {
+            freshLots.forEach(lot => {
                 const pId = String(lot.product_id);
                 if (!lotsByProduct.has(pId)) {
                     lotsByProduct.set(pId, []);
@@ -4737,8 +5171,7 @@ export const useStore = create(persist((set, get) => ({
                 const rawSaleId = saleResult.lastInsertRowid || Date.now();
                 const saleId = typeof rawSaleId === 'bigint' ? Number(rawSaleId) : rawSaleId;
 
-                // 2. BATCH UPDATE de productos (UN SOLO QUERY por producto)
-                // En lugar de hacer un UPDATE por cada item, los agrupamos
+                // 2. BATCH UPDATE de productos
                 const productUpdatePromises = productsToUpdate.map(p =>
                     tx.execute({
                         sql: `UPDATE products 
@@ -4757,11 +5190,7 @@ export const useStore = create(persist((set, get) => ({
                     })
                 );
 
-                // 4. Cash register update (NO se actualiza aquí, se calcula en refreshRegisterStats)
-                // La caja NO tiene columna current_balance, se calcula sumando ventas
-                const cashRegisterPromise = Promise.resolve();
-
-                // 5. Audit log
+                // 4. Audit log
                 const auditPromise = tx.execute({
                     sql: `INSERT INTO audit_logs
                           (company_id, user_id, action, entity, details, created_at)
@@ -4774,11 +5203,10 @@ export const useStore = create(persist((set, get) => ({
                     ]
                 });
 
-                // PARALELIZAR: Ejecutar todos los UPDATEs simultáneamente
+                // Ejecutar todos los UPDATEs
                 await Promise.all([
                     ...productUpdatePromises,
                     ...lotUpdatePromises,
-                    cashRegisterPromise,
                     auditPromise
                 ]);
 
@@ -8584,11 +9012,13 @@ export const useStore = create(persist((set, get) => ({
     fetchShifts: async (weekStart, weekEnd, userId = null) => {
         const { activeCompanyId } = get();
         try {
+            const startDate = String(weekStart).split('T')[0];
+            const endDate = String(weekEnd).split('T')[0];
             let sql = `SELECT ws.*, u.username, u.name 
                        FROM work_shifts ws
                        JOIN users u ON ws.user_id = u.id
                        WHERE ws.company_id = ? AND ws.shift_date BETWEEN ? AND ?`;
-            const args = [activeCompanyId, weekStart, weekEnd];
+            const args = [activeCompanyId, startDate, endDate];
 
             if (userId) {
                 sql += ` AND ws.user_id = ?`;

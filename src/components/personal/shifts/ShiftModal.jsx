@@ -1,7 +1,70 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
-import { X, Save, Trash2, Clock, Repeat } from 'lucide-react';
-import { format } from 'date-fns';
+import { X, Save, Trash2 } from 'lucide-react';
+import { format, startOfWeek, addWeeks, addDays } from 'date-fns';
+
+const SHIFT_TEMPLATES = {
+    morning: { label: 'Manana', start: '07:00', end: '15:00' },
+    afternoon: { label: 'Tarde', start: '15:00', end: '23:00' },
+    night: { label: 'Noche', start: '23:00', end: '07:00' },
+    custom: { label: 'Personalizado', start: '09:00', end: '18:00' }
+};
+
+const DAY_OPTIONS = [
+    { label: 'Lun', value: 1 },
+    { label: 'Mar', value: 2 },
+    { label: 'Mie', value: 3 },
+    { label: 'Jue', value: 4 },
+    { label: 'Vie', value: 5 },
+    { label: 'Sab', value: 6 },
+    { label: 'Dom', value: 0 }
+];
+
+const buildDefaultWeeklyConfig = () => {
+    const config = {};
+    DAY_OPTIONS.forEach((day) => {
+        config[day.value] = {
+            enabled: [1, 2, 3, 4, 5].includes(day.value),
+            template: [1, 2, 3, 4, 5].includes(day.value) ? 'morning' : 'custom',
+            start: [1, 2, 3, 4, 5].includes(day.value) ? SHIFT_TEMPLATES.morning.start : '09:00',
+            end: [1, 2, 3, 4, 5].includes(day.value) ? SHIFT_TEMPLATES.morning.end : '18:00'
+        };
+    });
+    return config;
+};
+
+const upsertDayConfig = (prev, dayValue, patch) => ({
+    ...prev,
+    [dayValue]: {
+        ...prev[dayValue],
+        ...patch
+    }
+});
+
+const timeFromIso = (isoDate) => {
+    if (!isoDate) return '09:00';
+    const date = new Date(isoDate);
+    if (Number.isNaN(date.getTime())) return '09:00';
+    return format(date, 'HH:mm');
+};
+
+const buildShiftPayload = (shiftDate, userId, startTime, endTime) => {
+    const startISO = `${shiftDate}T${startTime}:00`;
+
+    const endBase = new Date(`${shiftDate}T${endTime}:00`);
+    const startBase = new Date(`${shiftDate}T${startTime}:00`);
+
+    if (endBase <= startBase) {
+        endBase.setDate(endBase.getDate() + 1);
+    }
+
+    return {
+        user_id: userId,
+        shift_date: shiftDate,
+        start_time: startISO,
+        end_time: endBase.toISOString().slice(0, 19)
+    };
+};
 
 const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, onSuccess }) => {
     const { createShift, deleteShift, staffMembers } = useStore();
@@ -12,52 +75,109 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
     const [date, setDate] = useState(selectedDate || format(new Date(), 'yyyy-MM-dd'));
     const [startTime, setStartTime] = useState('09:00');
     const [endTime, setEndTime] = useState('18:00');
-    const [breakDuration, setBreakDuration] = useState(60); // minutes
-    const [repeatDays, setRepeatDays] = useState([]); // Array of day indexes [1,2,3,4,5]
+    const [scheduleMode, setScheduleMode] = useState('fixed'); // single | fixed
+    const [repeatWeeks, setRepeatWeeks] = useState(52);
+    const [weeklyConfig, setWeeklyConfig] = useState(buildDefaultWeeklyConfig());
 
     useEffect(() => {
         if (shiftData) {
             setUserId(shiftData.user_id);
             setDate(shiftData.start_time.split('T')[0]);
-            setStartTime(format(new Date(shiftData.start_time), 'HH:mm'));
-            setEndTime(format(new Date(shiftData.end_time), 'HH:mm'));
-            setBreakDuration(shiftData.break_minutes || 60);
+            setStartTime(timeFromIso(shiftData.start_time));
+            setEndTime(timeFromIso(shiftData.end_time));
+            setScheduleMode('single');
+            setWeeklyConfig(buildDefaultWeeklyConfig());
         } else {
             // New shift defaults
             if (selectedUser) setUserId(selectedUser);
             if (selectedDate) setDate(selectedDate);
             setStartTime('09:00');
             setEndTime('18:00');
+            setScheduleMode('fixed');
+            setRepeatWeeks(52);
+            setWeeklyConfig(buildDefaultWeeklyConfig());
         }
     }, [shiftData, selectedDate, selectedUser, isOpen]);
+
+    const toggleDayEnabled = (dayValue) => {
+        setWeeklyConfig((prev) => upsertDayConfig(prev, dayValue, { enabled: !prev[dayValue].enabled }));
+    };
+
+    const setDayTemplate = (dayValue, template) => {
+        const templateConfig = SHIFT_TEMPLATES[template];
+        setWeeklyConfig((prev) => upsertDayConfig(prev, dayValue, {
+            template,
+            start: templateConfig.start,
+            end: templateConfig.end
+        }));
+    };
+
+    const setDayTime = (dayValue, key, value) => {
+        setWeeklyConfig((prev) => upsertDayConfig(prev, dayValue, {
+            template: 'custom',
+            [key]: value
+        }));
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
 
-        const startISO = `${date}T${startTime}:00`;
-        const endISO = `${date}T${endTime}:00`;
+        if (scheduleMode === 'fixed' && !shiftData) {
+            const activeDays = DAY_OPTIONS
+                .filter((day) => weeklyConfig[day.value]?.enabled)
+                .map((day) => day.value);
 
-        // Validation: End must be after Start (handle overnight later if needed, assume one day for now)
-        if (endTime <= startTime) {
-            alert('La hora de fin debe ser posterior a la hora de inicio');
-            setLoading(false);
-            return;
-        }
+            if (!activeDays.length) {
+                alert('Selecciona al menos un dia para el horario rotativo/fijo.');
+                setLoading(false);
+                return;
+            }
 
-        const result = await createShift({
-            user_id: userId,
-            start_time: startISO,
-            end_time: endISO,
-            break_minutes: parseInt(breakDuration)
-        });
+            const baseWeekStart = startOfWeek(new Date(`${date}T00:00:00`), { weekStartsOn: 1 });
+            let successCount = 0;
+            let failedCount = 0;
 
-        if (result.success) {
+            for (let w = 0; w < repeatWeeks; w += 1) {
+                const weekDate = addWeeks(baseWeekStart, w);
+
+                for (const dayIndex of activeDays) {
+                    const dayConfig = weeklyConfig[dayIndex];
+                    if (!dayConfig?.start || !dayConfig?.end) {
+                        failedCount += 1;
+                        continue;
+                    }
+
+                    const dayOffset = dayIndex === 0 ? 6 : dayIndex - 1;
+                    const shiftDay = addDays(weekDate, dayOffset);
+                    const shiftDate = format(shiftDay, 'yyyy-MM-dd');
+
+                    const result = await createShift(
+                        buildShiftPayload(shiftDate, userId, dayConfig.start, dayConfig.end)
+                    );
+
+                    if (result.success) {
+                        successCount += 1;
+                    } else {
+                        failedCount += 1;
+                    }
+                }
+            }
+
             onSuccess();
             onClose();
+            alert(`Horario guardado. Turnos generados: ${successCount}${failedCount > 0 ? ` | Fallidos: ${failedCount}` : ''}`);
         } else {
-            alert(result.error || 'Error al guardar turno');
+            const result = await createShift(buildShiftPayload(date, userId, startTime, endTime));
+
+            if (result.success) {
+                onSuccess();
+                onClose();
+            } else {
+                alert(result.error || 'Error al guardar turno');
+            }
         }
+
         setLoading(false);
     };
 
@@ -88,7 +208,29 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
                     </button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                <form id="shift-form" onSubmit={handleSubmit} className="p-6 space-y-4">
+                    {!shiftData && (
+                        <div>
+                            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Modo de Asignacion</label>
+                            <div className="grid grid-cols-2 gap-2 p-1 rounded-lg bg-[var(--color-surface)] border border-[var(--glass-border)]">
+                                <button
+                                    type="button"
+                                    onClick={() => setScheduleMode('fixed')}
+                                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${scheduleMode === 'fixed' ? 'bg-[var(--glass-bg)] text-[var(--color-text)] border border-[var(--glass-border)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
+                                >
+                                    Horario Fijo
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setScheduleMode('single')}
+                                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${scheduleMode === 'single' ? 'bg-[var(--glass-bg)] text-[var(--color-text)] border border-[var(--glass-border)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
+                                >
+                                    Turno Unico
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     <div>
                         <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Empleado</label>
                         <select
@@ -105,7 +247,9 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
                     </div>
 
                     <div>
-                        <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Fecha</label>
+                        <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">
+                            {scheduleMode === 'fixed' && !shiftData ? 'Semana Base' : 'Fecha'}
+                        </label>
                         <input
                             type="date"
                             className="glass-input w-full"
@@ -115,26 +259,99 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
                         />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Inicio</label>
-                            <input
-                                type="time"
-                                className="glass-input w-full"
-                                value={startTime}
-                                onChange={e => setStartTime(e.target.value)}
-                            />
+                    {(shiftData || scheduleMode === 'single') && (
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Inicio</label>
+                                <input
+                                    type="time"
+                                    className="glass-input w-full"
+                                    value={startTime}
+                                    onChange={e => setStartTime(e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Fin</label>
+                                <input
+                                    type="time"
+                                    className="glass-input w-full"
+                                    value={endTime}
+                                    onChange={e => setEndTime(e.target.value)}
+                                />
+                            </div>
                         </div>
-                        <div>
-                            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Fin</label>
-                            <input
-                                type="time"
-                                className="glass-input w-full"
-                                value={endTime}
-                                onChange={e => setEndTime(e.target.value)}
-                            />
-                        </div>
-                    </div>
+                    )}
+
+                    {!shiftData && scheduleMode === 'fixed' && (
+                        <>
+                            <div>
+                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-2 uppercase">Turnos por Dia (Rotativo/Fijo)</label>
+                                <div className="space-y-3 max-h-64 overflow-auto pr-1">
+                                    {DAY_OPTIONS.map((day) => {
+                                        const cfg = weeklyConfig[day.value] || { enabled: false, template: 'custom', start: '09:00', end: '18:00' };
+
+                                        return (
+                                            <div key={day.value} className="rounded-lg border border-[var(--glass-border)] bg-[var(--color-surface)] p-3 space-y-2">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleDayEnabled(day.value)}
+                                                        className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-colors ${cfg.enabled ? 'bg-[var(--color-primary)]/20 border-[var(--color-primary)] text-[var(--color-primary)]' : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text-muted)]'}`}
+                                                    >
+                                                        {day.label}
+                                                    </button>
+
+                                                    <select
+                                                        value={cfg.template}
+                                                        onChange={(e) => setDayTemplate(day.value, e.target.value)}
+                                                        disabled={!cfg.enabled}
+                                                        className="glass-input text-xs w-40"
+                                                    >
+                                                        <option value="morning">Manana 07:00-15:00</option>
+                                                        <option value="afternoon">Tarde 15:00-23:00</option>
+                                                        <option value="night">Noche 23:00-07:00</option>
+                                                        <option value="custom">Personalizado</option>
+                                                    </select>
+                                                </div>
+
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <input
+                                                        type="time"
+                                                        value={cfg.start}
+                                                        onChange={(e) => setDayTime(day.value, 'start', e.target.value)}
+                                                        disabled={!cfg.enabled}
+                                                        className="glass-input"
+                                                    />
+                                                    <input
+                                                        type="time"
+                                                        value={cfg.end}
+                                                        onChange={(e) => setDayTime(day.value, 'end', e.target.value)}
+                                                        disabled={!cfg.enabled}
+                                                        className="glass-input"
+                                                    />
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Semanas a Generar</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={104}
+                                    value={repeatWeeks}
+                                    onChange={e => setRepeatWeeks(Math.max(1, Math.min(104, Number(e.target.value) || 1)))}
+                                    className="glass-input w-full"
+                                />
+                                <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                                    Recomendado: 52 semanas (1 anio). Soporta turnos nocturnos cruzando al dia siguiente.
+                                </p>
+                            </div>
+                        </>
+                    )}
                 </form>
 
                 <div className="p-4 border-t border-[var(--glass-border)] flex justify-between gap-3">
@@ -156,12 +373,13 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
                             Cancelar
                         </button>
                         <button
-                            onClick={handleSubmit}
+                            type="submit"
+                            form="shift-form"
                             disabled={loading || !userId}
                             className="px-4 py-2 rounded-xl font-bold bg-[var(--color-primary)] text-black hover:bg-cyan-400 transition-colors flex items-center gap-2"
                         >
                             <Save size={18} />
-                            Guardar
+                            {loading ? 'Guardando...' : 'Guardar'}
                         </button>
                     </div>
                 </div>

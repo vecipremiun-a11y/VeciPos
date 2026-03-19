@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
@@ -70,7 +70,8 @@ const MainLayout = () => {
                 { icon: FileText, label: 'Facturas', path: '/invoices', permission: 'invoices.view' },
                 { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view' },
                 { icon: Percent, label: 'Impuestos', path: '/taxes', permission: 'products.create' },
-                { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', permission: 'product_profile.view' }
+                { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', permission: 'product_profile.view' },
+                { icon: ShieldCheck, label: 'Conciliación', path: '/inventory/reconciliation', permission: 'products.adjust_stock' }
             ]
         },
         {

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Briefcase, Clock, Calendar, DollarSign, FileText, Umbrella, CheckSquare } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Briefcase, Clock, Calendar, DollarSign, FileText, Umbrella, CheckSquare, Maximize2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 import DailyPanel from '../components/personal/attendance/DailyPanel';
@@ -14,6 +15,7 @@ import VacationBalances from '../components/personal/vacations/VacationBalances'
 import ReportsDashboard from '../components/personal/reports/ReportsDashboard'; // Import new component
 
 const Personal = () => {
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('attendance');
     const [attendanceSubTab, setAttendanceSubTab] = useState('daily');
     const [vacationSubTab, setVacationSubTab] = useState('requests');
@@ -65,7 +67,20 @@ const Personal = () => {
                         </div>
 
                         {attendanceSubTab === 'daily' && <DailyPanel />}
-                        {attendanceSubTab === 'kiosk' && <KioskView />}
+                        {attendanceSubTab === 'kiosk' && (
+                            <div className="space-y-4">
+                                <div className="flex justify-end">
+                                    <button
+                                        onClick={() => navigate('/kiosk/asistencia')}
+                                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] text-[var(--color-text)] hover:text-[var(--color-primary)] transition-colors"
+                                    >
+                                        <Maximize2 size={16} />
+                                        Abrir en pantalla completa
+                                    </button>
+                                </div>
+                                <KioskView />
+                            </div>
+                        )}
                         {attendanceSubTab === 'history' && <AttendanceTable />}
                     </div>
                 )}

@@ -100,7 +100,7 @@ const Invoices = () => {
             if (paymentTypeFilter === 'credit' && !inv.is_credit) return false;
             if (searchQuery) {
                 const search = searchQuery.toLowerCase();
-                if (!inv.invoice_number?.toLowerCase().includes(search) && !inv.supplier_name?.toLowerCase().includes(search)) return false;
+                if (!String(inv.invoice_number || '').toLowerCase().includes(search) && !inv.supplier_name?.toLowerCase().includes(search)) return false;
             }
             return true;
         });
@@ -479,7 +479,7 @@ const Invoices = () => {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-[var(--glass-border)]">
-                                            {visibleInvoices.map(inv => (
+                                            {filteredInvoices.map(inv => (
                                                 <tr key={inv.id} onClick={() => handleInvoiceClick(inv.id)} className="hover:bg-[var(--glass-bg)] cursor-pointer group">
                                                     <td className="px-6 py-4 text-[var(--color-text)] font-medium"><FileText size={16} className="inline mr-2 text-[var(--color-primary)]" />{inv.invoice_number || 'S/N'}</td>
                                                     <td className="px-6 py-4 text-[var(--color-text-muted)]">{inv.supplier_name || 'Desconocido'}</td>
@@ -512,7 +512,7 @@ const Invoices = () => {
                                     )}
                                 </>
                             )}
-                            {visibleInvoices.length === 0 && !isLoadingInvoices && <div className="p-10 text-center text-[var(--color-text-muted)]">No se encontraron facturas.</div>}
+                            {filteredInvoices.length === 0 && !isLoadingInvoices && <div className="p-10 text-center text-[var(--color-text-muted)]">No se encontraron facturas.</div>}
                         </div>
                     )}
                 </div>

@@ -2,21 +2,81 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
 import { format, startOfWeek, endOfWeek, addWeeks, subWeeks, addDays, isSameDay } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Copy, Calendar, Plus, User } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Sunrise, Sunset, MoonStar, MoveHorizontal } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import ShiftModal from './ShiftModal';
+
+const getShiftType = (shift) => {
+    if (!shift?.start_time) return 'custom';
+    const startHour = new Date(shift.start_time).getHours();
+
+    if (startHour >= 6 && startHour < 14) return 'morning';
+    if (startHour >= 14 && startHour < 22) return 'afternoon';
+    return 'night';
+};
+
+const shiftTypeStyles = {
+    morning: {
+        label: 'Manana',
+        icon: Sunrise,
+        chip: 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+    },
+    afternoon: {
+        label: 'Tarde',
+        icon: Sunset,
+        chip: 'bg-orange-500/15 text-orange-300 border-orange-500/30'
+    },
+    night: {
+        label: 'Noche',
+        icon: MoonStar,
+        chip: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+    },
+    custom: {
+        label: 'Turno',
+        icon: MoveHorizontal,
+        chip: 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+    }
+};
+
+const remapShiftToCell = (shift, newUserId, newDate) => {
+    const originalStart = new Date(shift.start_time);
+    const originalEnd = new Date(shift.end_time);
+    const overnight = originalEnd <= originalStart || originalEnd.toISOString().slice(0, 10) !== originalStart.toISOString().slice(0, 10);
+
+    const startTime = format(originalStart, 'HH:mm:ss');
+    const endTime = format(originalEnd, 'HH:mm:ss');
+    const startISO = `${newDate}T${startTime}`;
+
+    const endDate = new Date(`${newDate}T00:00:00`);
+    if (overnight) endDate.setDate(endDate.getDate() + 1);
+    const endDateStr = format(endDate, 'yyyy-MM-dd');
+    const endISO = `${endDateStr}T${endTime}`;
+
+    return {
+        user_id: newUserId,
+        shift_date: newDate,
+        start_time: startISO,
+        end_time: endISO,
+        notes: shift.notes || '',
+        branch: shift.branch || 'Principal'
+    };
+};
 
 const ShiftCalendar = () => {
     const {
         workShifts,
         fetchShifts,
+        fetchAttendanceByRange,
+        createShift,
+        deleteShift,
         staffMembers,
-        fetchStaffMembers,
-        copyPreviousWeekShifts
+        fetchStaffMembers
     } = useStore();
 
     const [currentDate, setCurrentDate] = useState(new Date());
     const [loading, setLoading] = useState(false);
+    const [attendanceRange, setAttendanceRange] = useState([]);
+    const [dragData, setDragData] = useState(null);
 
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -38,9 +98,15 @@ const ShiftCalendar = () => {
 
     const loadShifts = async () => {
         setLoading(true);
-        // Ensure ISO strings cover the full days (start of first day to end of last day)
-        // weekStart is 00:00:00, weekEnd is 23:59:59
-        await fetchShifts(weekStart.toISOString(), weekEnd.toISOString());
+        const startDate = format(weekStart, 'yyyy-MM-dd');
+        const endDate = format(weekEnd, 'yyyy-MM-dd');
+
+        const [, attendance] = await Promise.all([
+            fetchShifts(startDate, endDate),
+            fetchAttendanceByRange(startDate, endDate)
+        ]);
+
+        setAttendanceRange(attendance || []);
         setLoading(false);
     };
 
@@ -51,7 +117,7 @@ const ShiftCalendar = () => {
         const dateStr = format(day, 'yyyy-MM-dd');
         const shift = workShifts.find(s =>
             s.user_id === user.id &&
-            s.start_time.startsWith(dateStr)
+            s.shift_date === dateStr
         );
 
         setSelectedShift(shift || null);
@@ -60,16 +126,72 @@ const ShiftCalendar = () => {
         setIsModalOpen(true);
     };
 
-    const handleCopyWeek = async () => {
-        if (!window.confirm("¿Copiar turnos de la semana pasada a esta semana? Se borrarán los turnos actuales de esta semana.")) return;
-        setLoading(true);
-        const result = await copyPreviousWeekShifts(weekStart.toISOString());
-        if (result.success) {
-            loadShifts();
-        } else {
-            alert(result.error);
+    const handleDragStart = (e, shift, userId, dateStr) => {
+        e.stopPropagation();
+        setDragData({
+            sourceShiftId: shift.id,
+            sourceUserId: userId,
+            sourceDate: dateStr
+        });
+    };
+
+    const handleDrop = async (e, targetUserId, targetDate) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (!dragData) return;
+        const { sourceShiftId, sourceUserId, sourceDate } = dragData;
+
+        if (sourceUserId === targetUserId && sourceDate === targetDate) {
+            setDragData(null);
+            return;
         }
-        setLoading(false);
+
+        const sourceShift = workShifts.find((s) => s.id === sourceShiftId);
+        const targetShift = workShifts.find((s) => s.user_id === targetUserId && s.shift_date === targetDate);
+
+        if (!sourceShift) {
+            setDragData(null);
+            return;
+        }
+
+        const sourceUser = staffMembers.find((u) => u.id === sourceUserId);
+        const targetUser = staffMembers.find((u) => u.id === targetUserId);
+        const confirmMessage = targetShift
+            ? `Se intercambiara el turno de ${sourceUser?.name || 'Empleado'} con ${targetUser?.name || 'Empleado'}. Esta accion queda como autorizada desde Gestion de Personal. Continuar?`
+            : `Se movera el turno de ${sourceUser?.name || 'Empleado'} a ${targetUser?.name || 'Empleado'} en ${targetDate}. Continuar?`;
+
+        if (!window.confirm(confirmMessage)) {
+            setDragData(null);
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const sourceToTarget = remapShiftToCell(sourceShift, targetUserId, targetDate);
+            const sourceWrite = await createShift(sourceToTarget);
+
+            if (!sourceWrite.success) {
+                throw new Error(sourceWrite.error || 'No se pudo mover/intercambiar el turno origen.');
+            }
+
+            if (targetShift) {
+                const targetToSource = remapShiftToCell(targetShift, sourceUserId, sourceDate);
+                const targetWrite = await createShift(targetToSource);
+                if (!targetWrite.success) {
+                    throw new Error(targetWrite.error || 'No se pudo completar el intercambio.');
+                }
+            } else {
+                await deleteShift(sourceShift.id);
+            }
+
+            await loadShifts();
+        } catch (error) {
+            alert(error.message || 'No fue posible aplicar el cambio de turno.');
+        } finally {
+            setLoading(false);
+            setDragData(null);
+        }
     };
 
     return (
@@ -95,13 +217,6 @@ const ShiftCalendar = () => {
 
                 <div className="flex gap-2 w-full md:w-auto">
                     <button
-                        onClick={handleCopyWeek}
-                        className="flex-1 md:flex-none btn-secondary flex items-center justify-center gap-2 text-sm"
-                    >
-                        <Copy size={16} />
-                        Copiar Semana Anterior
-                    </button>
-                    <button
                         onClick={() => {
                             setSelectedShift(null);
                             setModalUser(null);
@@ -111,9 +226,13 @@ const ShiftCalendar = () => {
                         className="flex-1 md:flex-none btn-primary flex items-center justify-center gap-2 text-sm"
                     >
                         <Plus size={16} />
-                        Nuevo Turno
+                        Asignar Horario Fijo
                     </button>
                 </div>
+            </div>
+
+            <div className="text-sm text-[var(--color-text-muted)]">
+                Configura turnos rotativos, identifica manana/tarde/noche y arrastra una celda con turno para mover o intercambiar con otra trabajadora.
             </div>
 
             {/* Calendar Grid */}
@@ -153,28 +272,93 @@ const ShiftCalendar = () => {
                                     const dateStr = format(day, 'yyyy-MM-dd');
                                     const shift = workShifts.find(s =>
                                         s.user_id === user.id &&
-                                        s.start_time.startsWith(dateStr)
+                                        s.shift_date === dateStr
                                     );
+
+                                    const attendanceDay = attendanceRange.filter(a =>
+                                        a.user_id === user.id &&
+                                        a.date === dateStr
+                                    );
+
+                                    const sortedAttendance = [...attendanceDay].sort((a, b) =>
+                                        new Date(a.recorded_at) - new Date(b.recorded_at)
+                                    );
+
+                                    const firstEntry = sortedAttendance.find(a => a.type === 'entry');
+                                    const lastExit = [...sortedAttendance].reverse().find(a => a.type === 'exit');
+
+                                    const isOvernightShift = shift
+                                        ? new Date(shift.end_time).toISOString().slice(0, 10) !== shift.shift_date
+                                        : false;
+
+                                    let overnightExit = null;
+                                    if (isOvernightShift && !lastExit) {
+                                        const nextDay = addDays(day, 1);
+                                        const nextDayStr = format(nextDay, 'yyyy-MM-dd');
+                                        const nextDayAttendance = attendanceRange
+                                            .filter(a => a.user_id === user.id && a.date === nextDayStr && a.type === 'exit')
+                                            .sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+
+                                        overnightExit = nextDayAttendance[0] || null;
+                                    }
+
+                                    const displayExit = lastExit || overnightExit;
+
+                                    const realSchedule = firstEntry || displayExit;
+                                    const shiftType = getShiftType(shift);
+                                    const shiftMeta = shiftTypeStyles[shiftType] || shiftTypeStyles.custom;
+                                    const ShiftTypeIcon = shiftMeta.icon;
 
                                     return (
                                         <td
                                             key={day.toISOString()}
                                             className="p-1 border-l border-[var(--glass-border)] relative h-16"
+                                            onDragOver={(e) => e.preventDefault()}
+                                            onDrop={(e) => handleDrop(e, user.id, dateStr)}
                                             onClick={() => handleCellClick(user, day)}
                                         >
                                             <div className={cn(
                                                 "w-full h-full rounded-lg flex flex-col items-center justify-center cursor-pointer transition-all border border-transparent",
                                                 shift
                                                     ? "bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 border-blue-500/20"
-                                                    : "hover:bg-[var(--glass-bg)] hover:border-[var(--glass-border)]"
+                                                    : realSchedule
+                                                        ? "bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border-amber-500/20"
+                                                        : "hover:bg-[var(--glass-bg)] hover:border-[var(--glass-border)]"
                                             )}>
-                                                {shift ? (
+                                                {shift || realSchedule ? (
                                                     <>
-                                                        <span className="text-xs font-bold">
-                                                            {format(new Date(shift.start_time), 'HH:mm')}
-                                                        </span>
-                                                        <span className="text-[10px] opacity-70">
-                                                            {format(new Date(shift.end_time), 'HH:mm')}
+                                                        {shift && (
+                                                            <>
+                                                                <span className={cn(
+                                                                    "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] leading-none mb-0.5",
+                                                                    shiftMeta.chip
+                                                                )}>
+                                                                    <ShiftTypeIcon size={10} />
+                                                                    {shiftMeta.label}
+                                                                </span>
+
+                                                                <span className="text-xs font-bold">
+                                                                    {format(new Date(shift.start_time), 'HH:mm')}
+                                                                </span>
+                                                                <span className="text-[10px] opacity-70">
+                                                                    {format(new Date(shift.end_time), 'HH:mm')}
+                                                                </span>
+
+                                                                <button
+                                                                    type="button"
+                                                                    draggable
+                                                                    onDragStart={(e) => handleDragStart(e, shift, user.id, dateStr)}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                    className="text-[9px] mt-1 px-1.5 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                                                                    title="Arrastra para mover/intercambiar"
+                                                                >
+                                                                    Arrastrar
+                                                                </button>
+                                                            </>
+                                                        )}
+
+                                                        <span className="text-[10px] opacity-80 mt-0.5">
+                                                            Real: {firstEntry ? format(new Date(firstEntry.recorded_at), 'HH:mm') : '--:--'} / {displayExit ? format(new Date(displayExit.recorded_at), 'HH:mm') : '--:--'}
                                                         </span>
                                                     </>
                                                 ) : (
@@ -194,6 +378,10 @@ const ShiftCalendar = () => {
                     </div>
                 )}
             </div>
+
+            {loading && (
+                <div className="text-sm text-[var(--color-text-muted)]">Cargando turnos y asistencias...</div>
+            )}
 
             <ShiftModal
                 isOpen={isModalOpen}

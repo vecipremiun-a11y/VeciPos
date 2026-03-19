@@ -6,7 +6,7 @@ import { cn } from '../lib/utils';
 
 const Login = () => {
     const navigate = useNavigate();
-    const { login, fetchInitialData } = useStore();
+    const { login } = useStore();
 
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
@@ -25,9 +25,7 @@ const Login = () => {
         try {
             const result = await login(username, password);
             if (result.success) {
-                console.log('✅ Login successful, loading data...');
-                await fetchInitialData();
-                console.log('✅ Data loaded, navigating to dashboard');
+                console.log('✅ Login successful, navigating to dashboard');
                 navigate('/dashboard');
             } else {
                 if (result.needsRenewal) {
