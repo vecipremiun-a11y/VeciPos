@@ -82,6 +82,7 @@ const POS = () => {
         searchProducts,
         loadCategoryProducts,
         getProductByBarcode,
+        fetchCombosForPOS,
         activeCompanyId,
         suspendSale,
         suspendedSalesCount,
@@ -178,7 +179,7 @@ const POS = () => {
     // Use stored categories for the filter list. 
     const categoryList = ['Todos', ...storedCategories
         .filter(c => c.status === 'active' && c.showInPos !== false)
-        .map(c => c.name)];
+        .map(c => c.name), 'Combos'];
 
     // Products are now served pre-filtered
     const visibleProducts = products;
@@ -239,10 +240,15 @@ const POS = () => {
         console.log('🔄 Changing category to:', category);
         setSelectedCategory(category);
         setIsLoadingProducts(true);
-        setOffset(0); // Reset pagination
+        setOffset(0);
 
-        const hasMoreResult = await loadCategoryProducts(category, 0);
-        setHasMore(hasMoreResult); // Update hasMore based on result
+        if (category === 'Combos') {
+            await fetchCombosForPOS();
+            setHasMore(false);
+        } else {
+            const hasMoreResult = await loadCategoryProducts(category, 0);
+            setHasMore(hasMoreResult);
+        }
 
         setIsLoadingProducts(false);
     };
@@ -456,6 +462,11 @@ const POS = () => {
                                 {(product.is_offer === 1 || product.is_offer === true) && (
                                     <div className="absolute top-2 left-2 z-20 bg-yellow-500 text-black text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse shadow-lg">
                                         OFERTA
+                                    </div>
+                                )}
+                                {product.is_combo && (
+                                    <div className="absolute top-2 left-2 z-20 bg-[var(--color-primary)] text-black text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg">
+                                        COMBO
                                     </div>
                                 )}
                                 <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-100 transition-opacity z-10">

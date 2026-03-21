@@ -7,7 +7,7 @@ import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFrom
 let migrationsExecuted = false;
 let fetchInProgress = false;
 const DDL_CACHE_KEY = 'poskem_ddl_v';
-const DDL_TARGET = 9; // Increment when adding new migrations/DDL
+const DDL_TARGET = 12; // Increment when adding new migrations/DDL
 
 const safeJsonStringify = (value) => JSON.stringify(value, (_key, currentValue) => {
     if (typeof currentValue === 'bigint') {
@@ -1161,6 +1161,40 @@ export const useStore = create(persist((set, get) => ({
                             notes TEXT, user_id TEXT, created_at TEXT
                         )`);
 
+                        // ── Inventory Control (Stock Take) ──
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS inventory_controls (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            user_name TEXT,
+                            name TEXT NOT NULL,
+                            type TEXT NOT NULL DEFAULT 'free',
+                            category TEXT,
+                            status TEXT DEFAULT 'in_progress',
+                            total_products INTEGER DEFAULT 0,
+                            counted_products INTEGER DEFAULT 0,
+                            notes TEXT,
+                            started_at TEXT NOT NULL,
+                            completed_at TEXT,
+                            created_at TEXT
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_inv_ctrl_company_status ON inventory_controls(company_id, status)`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS inventory_control_items (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            control_id INTEGER NOT NULL,
+                            product_id INTEGER NOT NULL,
+                            product_name TEXT NOT NULL,
+                            product_sku TEXT,
+                            system_stock REAL NOT NULL,
+                            counted_stock REAL NOT NULL,
+                            difference REAL NOT NULL,
+                            cost REAL DEFAULT 0,
+                            counted_at TEXT NOT NULL,
+                            updated_at TEXT,
+                            UNIQUE(control_id, product_id)
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_inv_ctrl_items_ctrl ON inventory_control_items(control_id)`);
+
                         // Column checks
                         const plInfo = await turso.execute("PRAGMA table_info(product_lots)");
                         const suppInfo = await turso.execute("PRAGMA table_info(suppliers)");
@@ -1234,6 +1268,79 @@ export const useStore = create(persist((set, get) => ({
                         } catch (e) {
                             console.warn('Fix initial_quantity migration skipped:', e.message);
                         }
+                    }
+
+                    // ── Always-run DDL for new tables (safe with IF NOT EXISTS) ──
+                    try {
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS inventory_controls (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            user_id INTEGER NOT NULL,
+                            user_name TEXT,
+                            name TEXT NOT NULL,
+                            type TEXT NOT NULL DEFAULT 'free',
+                            category TEXT,
+                            status TEXT DEFAULT 'in_progress',
+                            total_products INTEGER DEFAULT 0,
+                            counted_products INTEGER DEFAULT 0,
+                            notes TEXT,
+                            started_at TEXT NOT NULL,
+                            completed_at TEXT,
+                            created_at TEXT
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_inv_ctrl_company_status ON inventory_controls(company_id, status)`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS inventory_control_items (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            control_id INTEGER NOT NULL,
+                            product_id INTEGER NOT NULL,
+                            product_name TEXT NOT NULL,
+                            product_sku TEXT,
+                            system_stock REAL NOT NULL,
+                            counted_stock REAL NOT NULL,
+                            difference REAL NOT NULL,
+                            cost REAL DEFAULT 0,
+                            counted_at TEXT NOT NULL,
+                            updated_at TEXT,
+                            UNIQUE(control_id, product_id)
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_inv_ctrl_items_ctrl ON inventory_control_items(control_id)`);
+                    } catch (e) {
+                        console.warn('Inventory control tables creation skipped:', e.message);
+                    }
+
+                    // ── Combos / Packs tables ──
+                    try {
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS product_combos (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            name TEXT NOT NULL,
+                            sku TEXT,
+                            price REAL NOT NULL,
+                            cost REAL DEFAULT 0,
+                            image TEXT,
+                            description TEXT,
+                            is_active INTEGER DEFAULT 1,
+                            has_dates INTEGER DEFAULT 0,
+                            start_date TEXT,
+                            end_date TEXT,
+                            tax_rate REAL DEFAULT 0,
+                            created_at TEXT,
+                            updated_at TEXT
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_combos_company_active ON product_combos(company_id, is_active)`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS product_combo_items (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            combo_id INTEGER NOT NULL,
+                            product_id INTEGER NOT NULL,
+                            product_name TEXT NOT NULL,
+                            product_sku TEXT,
+                            quantity REAL NOT NULL DEFAULT 1,
+                            cost REAL DEFAULT 0,
+                            FOREIGN KEY(combo_id) REFERENCES product_combos(id) ON DELETE CASCADE
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_combo_items_combo ON product_combo_items(combo_id)`);
+                    } catch (e) {
+                        console.warn('Combo tables creation skipped:', e.message);
                     }
 
                     // Cache successful DDL in localStorage
@@ -2033,19 +2140,32 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    fetchProductLotsReport: async (productLimit = 20, productOffset = 0) => {
+    fetchProductLotsReport: async (productLimit = 20, productOffset = 0, searchTerm = '') => {
         const { activeCompanyId } = get();
         try {
             // Step 1: Get paginated product IDs that have active lots, ordered by earliest expiry
-            const prodRes = await turso.execute({
-                sql: `SELECT product_id, MIN(expiry_date) as min_expiry
+            let prodSql, prodArgs;
+            if (searchTerm.trim()) {
+                const likeTerm = `%${searchTerm.trim()}%`;
+                prodSql = `SELECT pl.product_id, MIN(pl.expiry_date) as min_expiry
+                      FROM product_lots pl
+                      JOIN products p ON pl.product_id = p.id
+                      WHERE pl.company_id = ? AND pl.quantity > 0 AND pl.expiry_date IS NOT NULL
+                      AND (p.name LIKE ? OR p.sku LIKE ?)
+                      GROUP BY pl.product_id
+                      ORDER BY min_expiry ASC
+                      LIMIT ? OFFSET ?`;
+                prodArgs = [activeCompanyId, likeTerm, likeTerm, productLimit, productOffset];
+            } else {
+                prodSql = `SELECT product_id, MIN(expiry_date) as min_expiry
                       FROM product_lots
                       WHERE company_id = ? AND quantity > 0 AND expiry_date IS NOT NULL
                       GROUP BY product_id
                       ORDER BY min_expiry ASC
-                      LIMIT ? OFFSET ?`,
-                args: [activeCompanyId, productLimit, productOffset]
-            });
+                      LIMIT ? OFFSET ?`;
+                prodArgs = [activeCompanyId, productLimit, productOffset];
+            }
+            const prodRes = await turso.execute({ sql: prodSql, args: prodArgs });
 
             const productIds = prodRes.rows.map(r => r.product_id);
             if (productIds.length === 0) return { products: [], hasMore: false };
@@ -2327,6 +2447,273 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error('Error fetching loss stats:', e);
             return { total_records: 0, total_units: 0, total_value: 0, total_products: 0 };
+        }
+    },
+
+    // ============ INVENTORY CONTROL (STOCK TAKE) ============
+
+    createInventoryControl: async ({ name, type, category }) => {
+        const { activeCompanyId, currentUser } = get();
+        try {
+            const now = new Date().toISOString();
+            // Check for existing active control
+            const existing = await turso.execute({
+                sql: `SELECT id, user_name, started_at FROM inventory_controls WHERE company_id = ? AND status = 'in_progress' LIMIT 1`,
+                args: [activeCompanyId]
+            });
+            if (existing.rows.length > 0) {
+                const e = existing.rows[0];
+                return { success: false, error: `Ya existe un control en progreso por ${e.user_name} desde ${e.started_at}`, existing: e };
+            }
+            // Count total products for scope
+            let totalProducts = 0;
+            if (type === 'complete') {
+                const cnt = await turso.execute({ sql: `SELECT COUNT(*) as c FROM products WHERE company_id = ?`, args: [activeCompanyId] });
+                totalProducts = cnt.rows[0]?.c || 0;
+            } else if (type === 'category') {
+                const cnt = await turso.execute({ sql: `SELECT COUNT(*) as c FROM products WHERE company_id = ? AND category = ?`, args: [activeCompanyId, category] });
+                totalProducts = cnt.rows[0]?.c || 0;
+            }
+            const res = await turso.execute({
+                sql: `INSERT INTO inventory_controls (company_id, user_id, user_name, name, type, category, status, total_products, counted_products, started_at, created_at) VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, 0, ?, ?)`,
+                args: [activeCompanyId, currentUser?.id, currentUser?.name || currentUser?.username || 'Usuario', name, type, category || null, totalProducts, now, now]
+            });
+            return { success: true, control: { id: Number(res.lastInsertRowid), company_id: activeCompanyId, user_id: currentUser?.id, user_name: currentUser?.name || currentUser?.username, name, type, category, status: 'in_progress', total_products: totalProducts, counted_products: 0, started_at: now } };
+        } catch (e) {
+            console.error('Error creating inventory control:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    fetchActiveInventoryControl: async () => {
+        const { activeCompanyId } = get();
+        try {
+            const res = await turso.execute({
+                sql: `SELECT * FROM inventory_controls WHERE company_id = ? AND status = 'in_progress' LIMIT 1`,
+                args: [activeCompanyId]
+            });
+            if (res.rows.length === 0) return null;
+            return res.rows[0];
+        } catch (e) {
+            console.error('Error fetching active control:', e);
+            return null;
+        }
+    },
+
+    fetchControlProducts: async (controlId, { limit = 50, offset = 0, search = '', filter = 'all', type = 'complete', category = null } = {}) => {
+        const { activeCompanyId } = get();
+        try {
+            let where = `WHERE p.company_id = ?`;
+            let args = [activeCompanyId];
+            if (type === 'category' && category) {
+                where += ` AND p.category = ?`;
+                args.push(category);
+            }
+            if (search) {
+                where += ` AND (p.name LIKE ? OR p.sku LIKE ?)`;
+                args.push(`%${search}%`, `%${search}%`);
+            }
+            let having = '';
+            if (filter === 'pending') having = `HAVING ci.id IS NULL`;
+            else if (filter === 'counted') having = `HAVING ci.id IS NOT NULL`;
+
+            const res = await turso.execute({
+                sql: `SELECT p.id, p.name, p.sku, p.stock, p.cost, p.category, p.image, p.unit,
+                             ci.id as item_id, ci.system_stock, ci.counted_stock, ci.difference, ci.counted_at
+                      FROM products p
+                      LEFT JOIN inventory_control_items ci ON ci.product_id = p.id AND ci.control_id = ?
+                      ${where}
+                      GROUP BY p.id
+                      ${having}
+                      ORDER BY ci.id IS NOT NULL ASC, p.name ASC
+                      LIMIT ? OFFSET ?`,
+                args: [controlId, ...args, limit, offset]
+            });
+            return res.rows;
+        } catch (e) {
+            console.error('Error fetching control products:', e);
+            return [];
+        }
+    },
+
+    saveControlItem: async (controlId, productId, countedStock) => {
+        const { activeCompanyId, currentUser } = get();
+        try {
+            const now = new Date().toISOString();
+            // Get current product data
+            const prodRes = await turso.execute({
+                sql: `SELECT id, name, sku, stock, cost FROM products WHERE id = ? AND company_id = ?`,
+                args: [productId, activeCompanyId]
+            });
+            if (prodRes.rows.length === 0) return { success: false, error: 'Producto no encontrado' };
+            const product = prodRes.rows[0];
+
+            // Check if already counted in this control
+            const existingItem = await turso.execute({
+                sql: `SELECT id, system_stock FROM inventory_control_items WHERE control_id = ? AND product_id = ?`,
+                args: [controlId, productId]
+            });
+
+            const roundedCount = Math.round(countedStock * 1000) / 1000;
+            let systemStock;
+
+            if (existingItem.rows.length > 0) {
+                // RE-EDIT: revert to original system_stock, then apply new count
+                systemStock = existingItem.rows[0].system_stock;
+                const difference = Math.round((roundedCount - systemStock) * 1000) / 1000;
+                // Update item
+                await turso.execute({
+                    sql: `UPDATE inventory_control_items SET counted_stock = ?, difference = ?, updated_at = ? WHERE control_id = ? AND product_id = ?`,
+                    args: [roundedCount, difference, now, controlId, productId]
+                });
+                // Update product stock immediately
+                await turso.execute({
+                    sql: `UPDATE products SET stock = ROUND(?, 3) WHERE id = ? AND company_id = ?`,
+                    args: [roundedCount, productId, activeCompanyId]
+                });
+                // Audit log
+                await turso.execute({
+                    sql: `INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, 'INVENTORY_CONTROL', 'PRODUCT', ?, ?)`,
+                    args: [activeCompanyId, currentUser?.id, JSON.stringify({ controlId, productId, productName: product.name, action: 're-edit', systemStock, oldCounted: product.stock, newCounted: roundedCount, difference }), now]
+                });
+                return { success: true, item: { product_id: productId, product_name: product.name, product_sku: product.sku, system_stock: systemStock, counted_stock: roundedCount, difference, cost: product.cost || 0, reEdit: true } };
+            } else {
+                // NEW count
+                systemStock = product.stock;
+                const difference = Math.round((roundedCount - systemStock) * 1000) / 1000;
+                await turso.execute({
+                    sql: `INSERT INTO inventory_control_items (control_id, product_id, product_name, product_sku, system_stock, counted_stock, difference, cost, counted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    args: [controlId, productId, product.name, product.sku || '', systemStock, roundedCount, difference, product.cost || 0, now]
+                });
+                // Update product stock immediately
+                await turso.execute({
+                    sql: `UPDATE products SET stock = ROUND(?, 3) WHERE id = ? AND company_id = ?`,
+                    args: [roundedCount, productId, activeCompanyId]
+                });
+                // Update counted_products counter
+                await turso.execute({
+                    sql: `UPDATE inventory_controls SET counted_products = counted_products + 1 WHERE id = ?`,
+                    args: [controlId]
+                });
+                // Audit log
+                await turso.execute({
+                    sql: `INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, 'INVENTORY_CONTROL', 'PRODUCT', ?, ?)`,
+                    args: [activeCompanyId, currentUser?.id, JSON.stringify({ controlId, productId, productName: product.name, action: 'count', systemStock, countedStock: roundedCount, difference }), now]
+                });
+                return { success: true, item: { product_id: productId, product_name: product.name, product_sku: product.sku, system_stock: systemStock, counted_stock: roundedCount, difference, cost: product.cost || 0, reEdit: false } };
+            }
+        } catch (e) {
+            console.error('Error saving control item:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    removeControlItem: async (controlId, productId) => {
+        const { activeCompanyId, currentUser } = get();
+        try {
+            const now = new Date().toISOString();
+            const item = await turso.execute({
+                sql: `SELECT * FROM inventory_control_items WHERE control_id = ? AND product_id = ?`,
+                args: [controlId, productId]
+            });
+            if (item.rows.length === 0) return { success: false, error: 'Item no encontrado' };
+            const row = item.rows[0];
+            // Revert stock to system_stock
+            await turso.execute({
+                sql: `UPDATE products SET stock = ROUND(?, 3) WHERE id = ? AND company_id = ?`,
+                args: [row.system_stock, productId, activeCompanyId]
+            });
+            await turso.execute({
+                sql: `DELETE FROM inventory_control_items WHERE control_id = ? AND product_id = ?`,
+                args: [controlId, productId]
+            });
+            await turso.execute({
+                sql: `UPDATE inventory_controls SET counted_products = MAX(counted_products - 1, 0) WHERE id = ?`,
+                args: [controlId]
+            });
+            await turso.execute({
+                sql: `INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, 'INVENTORY_CONTROL', 'PRODUCT', ?, ?)`,
+                args: [activeCompanyId, currentUser?.id, JSON.stringify({ controlId, productId, productName: row.product_name, action: 'remove', revertedTo: row.system_stock }), now]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error('Error removing control item:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    completeInventoryControl: async (controlId) => {
+        const { activeCompanyId } = get();
+        try {
+            const now = new Date().toISOString();
+            await turso.execute({
+                sql: `UPDATE inventory_controls SET status = 'completed', completed_at = ? WHERE id = ? AND company_id = ?`,
+                args: [now, controlId, activeCompanyId]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error('Error completing control:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    cancelInventoryControl: async (controlId) => {
+        const { activeCompanyId } = get();
+        try {
+            const now = new Date().toISOString();
+            await turso.execute({
+                sql: `UPDATE inventory_controls SET status = 'cancelled', completed_at = ? WHERE id = ? AND company_id = ?`,
+                args: [now, controlId, activeCompanyId]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error('Error cancelling control:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    fetchControlReport: async (controlId) => {
+        try {
+            const itemsRes = await turso.execute({
+                sql: `SELECT * FROM inventory_control_items WHERE control_id = ? ORDER BY counted_at ASC`,
+                args: [controlId]
+            });
+            const items = itemsRes.rows;
+            const totalCounted = items.length;
+            const withDifference = items.filter(i => Math.abs(i.difference) > 0.001);
+            const missing = items.filter(i => i.difference < -0.001);
+            const surplus = items.filter(i => i.difference > 0.001);
+            const matched = items.filter(i => Math.abs(i.difference) <= 0.001);
+            return {
+                items,
+                stats: {
+                    totalCounted,
+                    withDifference: withDifference.length,
+                    missing: missing.length,
+                    surplus: surplus.length,
+                    matched: matched.length,
+                    missingValue: Math.round(missing.reduce((s, i) => s + Math.abs(i.difference) * (i.cost || 0), 0) * 100) / 100,
+                    surplusValue: Math.round(surplus.reduce((s, i) => s + i.difference * (i.cost || 0), 0) * 100) / 100,
+                    totalDifferenceValue: Math.round(withDifference.reduce((s, i) => s + Math.abs(i.difference) * (i.cost || 0), 0) * 100) / 100
+                }
+            };
+        } catch (e) {
+            console.error('Error fetching control report:', e);
+            return { items: [], stats: { totalCounted: 0, withDifference: 0, missing: 0, surplus: 0, matched: 0, missingValue: 0, surplusValue: 0, totalDifferenceValue: 0 } };
+        }
+    },
+
+    fetchControlHistory: async (limit = 20, offset = 0) => {
+        const { activeCompanyId } = get();
+        try {
+            const res = await turso.execute({
+                sql: `SELECT * FROM inventory_controls WHERE company_id = ? AND status IN ('completed', 'cancelled') ORDER BY completed_at DESC LIMIT ? OFFSET ?`,
+                args: [activeCompanyId, limit, offset]
+            });
+            return res.rows;
+        } catch (e) {
+            console.error('Error fetching control history:', e);
+            return [];
         }
     },
 
@@ -5008,9 +5395,17 @@ export const useStore = create(persist((set, get) => ({
             // FASE 2: PRE-CÁLCULOS (ANTES DE TRANSACCIÓN)
             // ============================================
 
-            // Fetch fresh product data from DB to ensure we have all items (handling pagination/category switching)
-            // and to check REAL-TIME stock.
-            const itemIds = [...new Set(sale.items.map(i => i.id))];
+            // Separate regular items and combo items
+            const regularItems = sale.items.filter(i => !i.is_combo);
+            const comboItems = sale.items.filter(i => i.is_combo);
+
+            // Collect all product IDs needed (regular + combo components)
+            const regularIds = regularItems.map(i => i.id);
+            const comboComponentIds = comboItems.flatMap(c => (c.combo_items || []).map(ci => ci.product_id));
+            const allProductIds = [...new Set([...regularIds, ...comboComponentIds])];
+
+            // Fetch fresh product data from DB
+            const itemIds = allProductIds.length > 0 ? allProductIds : [0];
             const placeholders = itemIds.map(() => '?').join(',');
 
             const dbProductsRes = await turso.execute({
@@ -5052,6 +5447,62 @@ export const useStore = create(persist((set, get) => ({
 
             // Procesar cada item UNA SOLA VEZ
             for (const item of sale.items) {
+                // Combos: add to itemsToProcess but skip product stock deduction here
+                if (item.is_combo) {
+                    const quantity = parseFloat(item.quantity);
+                    const price = parseFloat(item.price);
+                    const cost = parseFloat(item.cost) || 0;
+                    itemsToProcess.push({
+                        id: item.id,
+                        name: item.name,
+                        quantity,
+                        price,
+                        cost,
+                        tax_rate: parseFloat(item.tax_rate) || 0,
+                        is_combo: true
+                    });
+
+                    // Deduct stock from each component product
+                    for (const comp of (item.combo_items || [])) {
+                        const compIdStr = String(comp.product_id);
+                        const compProduct = productsMap.get(compIdStr);
+                        if (!compProduct) continue;
+
+                        const compDeduct = (parseFloat(comp.quantity) || 1) * quantity;
+
+                        // Accumulate if same product appears in multiple combos
+                        const existing = productsToUpdate.find(p => String(p.id) === compIdStr);
+                        if (existing) {
+                            existing.quantityToDeduct += compDeduct;
+                        } else {
+                            productsToUpdate.push({
+                                id: comp.product_id,
+                                quantityToDeduct: compDeduct,
+                                markPending: false
+                            });
+                        }
+
+                        // FEFO lot deduction for component
+                        const compLots = (lotsByProduct.get(compIdStr) || [])
+                            .filter(l => l.quantity > 0)
+                            .sort((a, b) => {
+                                if (!a.expiry_date) return 1;
+                                if (!b.expiry_date) return -1;
+                                return new Date(a.expiry_date) - new Date(b.expiry_date);
+                            });
+
+                        let compRemaining = compDeduct;
+                        for (const lot of compLots) {
+                            if (compRemaining <= 0) break;
+                            if (lot.expiry_date && lot.expiry_date < today) continue;
+                            const deduct = Math.min(lot.quantity, compRemaining);
+                            lotsToUpdate.push({ id: lot.id, deduct });
+                            compRemaining -= deduct;
+                        }
+                    }
+                    continue;
+                }
+
                 const itemIdStr = String(item.id);
                 const product = productsMap.get(itemIdStr);
 
@@ -5217,6 +5668,8 @@ export const useStore = create(persist((set, get) => ({
 
                 const stockSyncByProduct = new Map();
                 itemsToProcess.forEach(item => {
+                    // For combos, sync component products instead
+                    if (item.is_combo) return;
                     const key = String(item.id);
                     const current = stockSyncByProduct.get(key) || {
                         product_id: item.id,
@@ -5227,6 +5680,22 @@ export const useStore = create(persist((set, get) => ({
 
                     current.quantity_sold += Number(item.quantity || 0);
                     stockSyncByProduct.set(key, current);
+                });
+
+                // Add combo component products to stock sync
+                comboItems.forEach(combo => {
+                    const saleQty = parseFloat(combo.quantity) || 1;
+                    (combo.combo_items || []).forEach(comp => {
+                        const key = String(comp.product_id);
+                        const current = stockSyncByProduct.get(key) || {
+                            product_id: comp.product_id,
+                            sku: null,
+                            quantity_sold: 0,
+                            stock: null,
+                        };
+                        current.quantity_sold += (parseFloat(comp.quantity) || 1) * saleQty;
+                        stockSyncByProduct.set(key, current);
+                    });
                 });
 
                 const stockSyncItems = Array.from(stockSyncByProduct.values()).map(item => {
@@ -9818,6 +10287,212 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error("Error updating balance:", e);
             return { success: false, error: e.message };
+        }
+    },
+
+    // ═══════════════════════════════════════════
+    // COMBOS / PACKS
+    // ═══════════════════════════════════════════
+
+    combos: [],
+
+    fetchCombos: async (search = '') => {
+        const { activeCompanyId } = get();
+        try {
+            let sql = `SELECT * FROM product_combos WHERE company_id = ?`;
+            let args = [activeCompanyId];
+            if (search) {
+                sql += ` AND (name LIKE ? OR sku LIKE ?)`;
+                args.push(`%${search}%`, `%${search}%`);
+            }
+            sql += ` ORDER BY created_at DESC`;
+            const result = await turso.execute({ sql, args });
+
+            // Fetch items for each combo
+            const combos = [];
+            for (const combo of result.rows) {
+                const itemsRes = await turso.execute({
+                    sql: `SELECT ci.*, p.stock as current_stock FROM product_combo_items ci LEFT JOIN products p ON p.id = ci.product_id WHERE ci.combo_id = ?`,
+                    args: [combo.id]
+                });
+                combos.push({ ...combo, items: itemsRes.rows });
+            }
+
+            set({ combos });
+            return combos;
+        } catch (e) {
+            console.error('Error fetching combos:', e);
+            return [];
+        }
+    },
+
+    createCombo: async (data) => {
+        const { activeCompanyId } = get();
+        try {
+            const now = new Date().toISOString();
+            const totalCost = (data.items || []).reduce((sum, it) => sum + (parseFloat(it.cost) || 0) * (parseFloat(it.quantity) || 1), 0);
+            const result = await turso.execute({
+                sql: `INSERT INTO product_combos (company_id, name, sku, price, cost, image, description, is_active, has_dates, start_date, end_date, tax_rate, created_at, updated_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+                args: [
+                    activeCompanyId,
+                    data.name,
+                    data.sku || null,
+                    parseFloat(data.price),
+                    Math.round(totalCost * 100) / 100,
+                    data.image || null,
+                    data.description || null,
+                    data.has_dates ? 1 : 0,
+                    data.start_date || null,
+                    data.end_date || null,
+                    parseFloat(data.tax_rate) || 0,
+                    now, now
+                ]
+            });
+            const comboId = typeof result.lastInsertRowid === 'bigint' ? Number(result.lastInsertRowid) : result.lastInsertRowid;
+
+            // Insert combo items
+            for (const item of (data.items || [])) {
+                await turso.execute({
+                    sql: `INSERT INTO product_combo_items (combo_id, product_id, product_name, product_sku, quantity, cost) VALUES (?, ?, ?, ?, ?, ?)`,
+                    args: [comboId, item.product_id, item.product_name, item.product_sku || null, parseFloat(item.quantity) || 1, parseFloat(item.cost) || 0]
+                });
+            }
+
+            await get().fetchCombos();
+            return { success: true, comboId };
+        } catch (e) {
+            console.error('Error creating combo:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    updateCombo: async (comboId, data) => {
+        const { activeCompanyId } = get();
+        try {
+            const now = new Date().toISOString();
+            const totalCost = (data.items || []).reduce((sum, it) => sum + (parseFloat(it.cost) || 0) * (parseFloat(it.quantity) || 1), 0);
+            await turso.execute({
+                sql: `UPDATE product_combos SET name=?, sku=?, price=?, cost=?, image=?, description=?, has_dates=?, start_date=?, end_date=?, tax_rate=?, updated_at=? WHERE id=? AND company_id=?`,
+                args: [
+                    data.name, data.sku || null, parseFloat(data.price),
+                    Math.round(totalCost * 100) / 100,
+                    data.image || null, data.description || null,
+                    data.has_dates ? 1 : 0, data.start_date || null, data.end_date || null,
+                    parseFloat(data.tax_rate) || 0, now, comboId, activeCompanyId
+                ]
+            });
+
+            // Replace items
+            await turso.execute({ sql: `DELETE FROM product_combo_items WHERE combo_id = ?`, args: [comboId] });
+            for (const item of (data.items || [])) {
+                await turso.execute({
+                    sql: `INSERT INTO product_combo_items (combo_id, product_id, product_name, product_sku, quantity, cost) VALUES (?, ?, ?, ?, ?, ?)`,
+                    args: [comboId, item.product_id, item.product_name, item.product_sku || null, parseFloat(item.quantity) || 1, parseFloat(item.cost) || 0]
+                });
+            }
+
+            await get().fetchCombos();
+            return { success: true };
+        } catch (e) {
+            console.error('Error updating combo:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deleteCombo: async (comboId) => {
+        const { activeCompanyId } = get();
+        try {
+            await turso.execute({ sql: `DELETE FROM product_combos WHERE id = ? AND company_id = ?`, args: [comboId, activeCompanyId] });
+            await get().fetchCombos();
+            return { success: true };
+        } catch (e) {
+            console.error('Error deleting combo:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    toggleComboActive: async (comboId) => {
+        const { activeCompanyId } = get();
+        try {
+            await turso.execute({
+                sql: `UPDATE product_combos SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END, updated_at = ? WHERE id = ? AND company_id = ?`,
+                args: [new Date().toISOString(), comboId, activeCompanyId]
+            });
+            await get().fetchCombos();
+            return { success: true };
+        } catch (e) {
+            console.error('Error toggling combo:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    fetchCombosForPOS: async () => {
+        const { activeCompanyId } = get();
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const result = await turso.execute({
+                sql: `SELECT * FROM product_combos WHERE company_id = ? AND is_active = 1`,
+                args: [activeCompanyId]
+            });
+
+            const combosForPOS = [];
+            for (const combo of result.rows) {
+                // Check vigencia
+                if (combo.has_dates) {
+                    if (combo.start_date && today < combo.start_date) continue;
+                    if (combo.end_date && today > combo.end_date) continue;
+                }
+
+                // Get items and calculate available stock
+                const itemsRes = await turso.execute({
+                    sql: `SELECT ci.*, p.stock as current_stock FROM product_combo_items ci LEFT JOIN products p ON p.id = ci.product_id WHERE ci.combo_id = ?`,
+                    args: [combo.id]
+                });
+
+                let availableStock = Infinity;
+                const comboItems = [];
+                for (const item of itemsRes.rows) {
+                    const qty = parseFloat(item.quantity) || 1;
+                    const stock = parseFloat(item.current_stock) || 0;
+                    availableStock = Math.min(availableStock, Math.floor(stock / qty));
+                    comboItems.push({
+                        product_id: item.product_id,
+                        product_name: item.product_name,
+                        product_sku: item.product_sku,
+                        quantity: qty,
+                        cost: parseFloat(item.cost) || 0
+                    });
+                }
+                if (availableStock === Infinity) availableStock = 0;
+
+                combosForPOS.push({
+                    id: `combo_${combo.id}`,
+                    name: combo.name,
+                    price: parseFloat(combo.price),
+                    cost: parseFloat(combo.cost) || 0,
+                    stock: availableStock,
+                    sku: combo.sku || '',
+                    image: combo.image || null,
+                    tax_rate: parseFloat(combo.tax_rate) || 0,
+                    unit: 'Und',
+                    category: 'Combos',
+                    is_combo: true,
+                    combo_id: combo.id,
+                    combo_items: comboItems,
+                    is_offer: false,
+                    offer_price: null,
+                    price_ranges: [],
+                    scale_group_id: null,
+                    original_price: parseFloat(combo.price)
+                });
+            }
+
+            set({ products: combosForPOS });
+            return combosForPOS;
+        } catch (e) {
+            console.error('Error fetching combos for POS:', e);
+            return [];
         }
     },
 

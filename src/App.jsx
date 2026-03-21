@@ -31,6 +31,8 @@ import SupplierOrders from './pages/SupplierOrders';
 import Preorders from './pages/Preorders';
 import Production from './pages/Production';
 import InventoryReconciliation from './pages/InventoryReconciliation';
+import InventoryControl from './pages/InventoryControl';
+import ProductCombos from './pages/ProductCombos';
 import MainLayout from './layouts/MainLayout';
 import AdminLayout from './layouts/AdminLayout';
 import RequireAdmin from './components/RequireAdmin';
@@ -209,6 +211,8 @@ function App() {
           <Route path="preorders" element={<ProtectedPage permission="preorders.view"><Preorders /></ProtectedPage>} />
           <Route path="production" element={<ProtectedPage permission="production.view"><Production /></ProtectedPage>} />
           <Route path="inventory/reconciliation" element={<ProtectedPage permission="products.adjust_stock"><InventoryReconciliation /></ProtectedPage>} />
+          <Route path="inventory/control" element={<ProtectedPage permission="products.adjust_stock"><InventoryControl /></ProtectedPage>} />
+          <Route path="inventory/combos" element={<ProtectedPage permission="products.create"><ProductCombos /></ProtectedPage>} />
 
           {/* Reports */}
           <Route path="reports" element={<ProtectedPage permission="reports.sales"><Reports /></ProtectedPage>} />

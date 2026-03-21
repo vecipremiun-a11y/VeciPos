@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import jsPDF from 'jspdf';
@@ -27,6 +27,7 @@ const ExpiringProductsReport = () => {
         fetchInventoryLosses, fetchInventoryLossesStats
     } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
     const [isLoading, setIsLoading] = useState(true);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
 
@@ -79,10 +80,16 @@ const ExpiringProductsReport = () => {
         if (node) observer.current.observe(node);
     }, [isLoading, isLoadingMore, hasMore]);
 
-    // Initial Load
-    React.useEffect(() => {
+    // Debounce search term (400ms)
+    useEffect(() => {
+        const timer = setTimeout(() => setDebouncedSearch(searchTerm), 400);
+        return () => clearTimeout(timer);
+    }, [searchTerm]);
+
+    // Reload when debounced search changes
+    useEffect(() => {
         loadInitialData();
-    }, []);
+    }, [debouncedSearch]);
 
     const loadInitialData = async () => {
         setIsLoading(true);
@@ -92,7 +99,7 @@ const ExpiringProductsReport = () => {
                 if (stats) setGlobalStats(stats);
             }
 
-            const result = await fetchProductLotsReport(PRODUCTS_PER_PAGE, 0);
+            const result = await fetchProductLotsReport(PRODUCTS_PER_PAGE, 0, debouncedSearch);
             setReportData(result.products);
             setProductOffset(PRODUCTS_PER_PAGE);
             setHasMore(result.hasMore);
@@ -107,7 +114,7 @@ const ExpiringProductsReport = () => {
         if (!hasMore || isLoadingMore) return;
         setIsLoadingMore(true);
         try {
-            const result = await fetchProductLotsReport(PRODUCTS_PER_PAGE, productOffset);
+            const result = await fetchProductLotsReport(PRODUCTS_PER_PAGE, productOffset, debouncedSearch);
             if (result.products.length > 0) {
                 setReportData(prev => [...prev, ...result.products]);
                 setProductOffset(prev => prev + PRODUCTS_PER_PAGE);
@@ -168,10 +175,13 @@ const ExpiringProductsReport = () => {
             if (allExpired && (p.stock <= 0)) return false;
 
             // Date filter: product must have at least one lot with expiry in [startDate, endDate]
-            const hasLotInRange = p.lots.some(l =>
-                l.expiry_date && l.expiry_date >= startDate && l.expiry_date <= endDate
-            );
-            if (!hasLotInRange) return false;
+            // Skip date filter when actively searching
+            if (!searchTerm.trim()) {
+                const hasLotInRange = p.lots.some(l =>
+                    l.expiry_date && l.expiry_date >= startDate && l.expiry_date <= endDate
+                );
+                if (!hasLotInRange) return false;
+            }
 
             return true;
         });

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
@@ -71,7 +71,9 @@ const MainLayout = () => {
                 { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view' },
                 { icon: Percent, label: 'Impuestos', path: '/taxes', permission: 'products.create' },
                 { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', permission: 'product_profile.view' },
-                { icon: ShieldCheck, label: 'Conciliación', path: '/inventory/reconciliation', permission: 'products.adjust_stock' }
+                { icon: ShieldCheck, label: 'Conciliación', path: '/inventory/reconciliation', permission: 'products.adjust_stock' },
+                { icon: ClipboardCheck, label: 'Control de Inventario', path: '/inventory/control', permission: 'products.adjust_stock' },
+                { icon: Gift, label: 'Combos / Packs', path: '/inventory/combos', permission: 'products.view' }
             ]
         },
         {
@@ -159,7 +161,7 @@ const MainLayout = () => {
                     </button>
                 </div>
 
-                <nav className="flex-1 py-6 px-3 space-y-2">
+                <nav className="flex-1 py-6 px-3 space-y-2 overflow-y-auto custom-scrollbar">
                     {navItems.map((item) => {
                         if (item.subItems) {
                             // If the entire submenu group is locked, render as a locked NavLink
@@ -223,7 +225,7 @@ const MainLayout = () => {
                                     {/* Subitems */}
                                     <div className={cn(
                                         "overflow-hidden transition-all duration-300 space-y-1",
-                                        isExpanded && isSidebarOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+                                        isExpanded && isSidebarOpen ? "max-h-[600px] opacity-100" : "max-h-0 opacity-0"
                                     )}>
                                         {item.subItems.map(subItem => (
                                             <NavLink
