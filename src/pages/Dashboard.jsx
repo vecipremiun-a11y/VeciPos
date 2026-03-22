@@ -1,12 +1,13 @@
 import React, { useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { AlertTriangle, TrendingDown, Clock } from 'lucide-react';
+import { AlertTriangle, TrendingDown, Clock, Bell, AlertCircle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { format, subDays, parseISO } from 'date-fns';
 import { usePermissions } from '../hooks/usePermissions';
 import { es } from 'date-fns/locale';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import { formatCurrency } from '../utils/formatCurrency';
+import CriticalAlertsModal from '../components/CriticalAlertsModal';
 
 
 const Dashboard = () => {
@@ -15,7 +16,10 @@ const Dashboard = () => {
         activeRegisters,
         currentCurrency,
         activeCompanyId,
-        currentCompanyTimezone
+        currentCompanyTimezone,
+        fetchAlertSummary,
+        checkStockPredictions,
+        checkInventoryAlerts
     } = useStore();
 
     const { can } = usePermissions();
@@ -28,6 +32,7 @@ const Dashboard = () => {
     const [recentSales, setRecentSales] = React.useState([]); // For Activity List
     const [lowStockProducts, setLowStockProducts] = React.useState([]);
     const [topProducts, setTopProducts] = React.useState([]);         // ← NUEVO
+    const [alertSummary, setAlertSummary] = React.useState({ criticalProducts: [], lowProducts: [] });
 
     React.useEffect(() => {
         const loadDashboardData = async () => {
@@ -44,11 +49,18 @@ const Dashboard = () => {
                 setLowStockProducts(data.lowStockProducts);
                 setTopProducts(data.topProducts);        // ← NUEVO
 
+                // Fetch alert summary
+                fetchAlertSummary().then(setAlertSummary);
+
                 console.log('✅ Dashboard data loaded');
             }
         };
 
         loadDashboardData();
+
+        // Run inventory alert checks on dashboard load (non-blocking)
+        checkInventoryAlerts();
+        checkStockPredictions();
 
         const interval = setInterval(() => {
             loadDashboardData();
@@ -118,6 +130,8 @@ const Dashboard = () => {
     return (
         <div className="space-y-6">
 
+            {/* Critical Alerts Modal (shows once per session after login) */}
+            <CriticalAlertsModal />
 
             {/* Subscription Banner */}
             {(() => {
@@ -273,7 +287,7 @@ const Dashboard = () => {
                     <AlertTriangle size={18} className="text-[var(--color-primary)]" />
                     Panel de Control en Tiempo Real
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
 
                     {/* 1. Más Vendidos Hoy */}
                     {can('dashboard.view_sales') && (
@@ -377,6 +391,52 @@ const Dashboard = () => {
                                         </div>
                                     </div>
                                 ))
+                            )}
+                        </div>
+                    </div>
+
+                    {/* 4. Alertas de Inventario */}
+                    <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-amber-500 p-0 overflow-hidden">
+                        <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] flex justify-between items-center">
+                            <h4 className="text-amber-500 font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
+                                <Bell size={16} /> Alertas Stock
+                            </h4>
+                            <span className="bg-amber-500/20 text-amber-400 text-[10px] px-2 py-0.5 rounded-full border border-amber-500/20 font-bold">
+                                {(alertSummary.criticalProducts?.length || 0) + (alertSummary.lowProducts?.length || 0)}
+                            </span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+                            {alertSummary.criticalProducts?.length === 0 && alertSummary.lowProducts?.length === 0 ? (
+                                <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">
+                                    Sin alertas activas
+                                </div>
+                            ) : (
+                                <>
+                                    {alertSummary.criticalProducts?.map(p => (
+                                        <div key={p.product_id} className="flex items-center justify-between p-2 rounded bg-red-500/10 border border-red-500/20 hover:bg-red-500/15 transition-colors">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <AlertCircle size={14} className="text-red-400 shrink-0" />
+                                                <div className="min-w-0">
+                                                    <p className="text-red-200 text-xs font-medium truncate">{p.name}</p>
+                                                    <p className="text-red-500/50 text-[10px]">Mín: {p.critical_stock}</p>
+                                                </div>
+                                            </div>
+                                            <span className="text-red-400 text-xs font-bold shrink-0">{p.stock}</span>
+                                        </div>
+                                    ))}
+                                    {alertSummary.lowProducts?.map(p => (
+                                        <div key={p.product_id} className="flex items-center justify-between p-2 rounded bg-amber-500/5 border border-amber-500/10 hover:bg-amber-500/10 transition-colors">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <AlertTriangle size={14} className="text-amber-400 shrink-0" />
+                                                <div className="min-w-0">
+                                                    <p className="text-amber-200 text-xs font-medium truncate">{p.name}</p>
+                                                    <p className="text-amber-500/50 text-[10px]">Mín: {p.min_stock}</p>
+                                                </div>
+                                            </div>
+                                            <span className="text-amber-400 text-xs font-bold shrink-0">{p.stock}</span>
+                                        </div>
+                                    ))}
+                                </>
                             )}
                         </div>
                     </div>

@@ -7,7 +7,7 @@ import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFrom
 let migrationsExecuted = false;
 let fetchInProgress = false;
 const DDL_CACHE_KEY = 'poskem_ddl_v';
-const DDL_TARGET = 12; // Increment when adding new migrations/DDL
+const DDL_TARGET = 15; // Increment when adding new migrations/DDL
 
 const safeJsonStringify = (value) => JSON.stringify(value, (_key, currentValue) => {
     if (typeof currentValue === 'bigint') {
@@ -1343,6 +1343,157 @@ export const useStore = create(persist((set, get) => ({
                         console.warn('Combo tables creation skipped:', e.message);
                     }
 
+                    // ── Inventory Alerts tables ──
+                    try {
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS product_alert_settings (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            product_id INTEGER NOT NULL,
+                            min_stock REAL NOT NULL DEFAULT 5,
+                            critical_stock REAL NOT NULL DEFAULT 2,
+                            priority TEXT DEFAULT 'normal',
+                            notify_system INTEGER DEFAULT 1,
+                            notify_whatsapp INTEGER DEFAULT 0,
+                            is_active INTEGER DEFAULT 1,
+                            cooldown_hours INTEGER DEFAULT 6,
+                            last_notified_at TEXT,
+                            created_at TEXT,
+                            UNIQUE(company_id, product_id)
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_alert_settings_company ON product_alert_settings(company_id, is_active)`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS inventory_alerts (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            product_id INTEGER,
+                            product_name TEXT,
+                            alert_type TEXT NOT NULL,
+                            priority TEXT DEFAULT 'normal',
+                            title TEXT NOT NULL,
+                            message TEXT NOT NULL,
+                            current_stock REAL,
+                            threshold REAL,
+                            days_remaining REAL,
+                            is_read INTEGER DEFAULT 0,
+                            channel TEXT DEFAULT 'system',
+                            sent INTEGER DEFAULT 0,
+                            sent_at TEXT,
+                            created_at TEXT
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_alerts_company_read ON inventory_alerts(company_id, is_read)`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_alerts_company_type ON inventory_alerts(company_id, alert_type)`);
+                    } catch (e) {
+                        console.warn('Alert tables creation skipped:', e.message);
+                    }
+
+                    // ── Migrate new permissions for existing companies ──
+                    try {
+                        const NEW_PERMS = [
+                            'combos.view', 'combos.create', 'combos.edit', 'combos.delete',
+                            'inventory_control.view', 'inventory_control.create', 'inventory_control.manage',
+                            'alerts.view', 'alerts.manage'
+                        ];
+                        // Check if these permissions exist in any company
+                        const permCheck = await turso.execute({
+                            sql: `SELECT COUNT(*) as count FROM role_permissions WHERE permission = 'combos.view'`,
+                            args: []
+                        });
+                        if (Number(permCheck.rows[0].count) === 0) {
+                            // Get all company+role combos
+                            const existingRoles = await turso.execute({
+                                sql: `SELECT DISTINCT company_id, role FROM role_permissions`,
+                                args: []
+                            });
+                            const ROLE_DEFAULTS = {
+                                'Vendedor': ['alerts.view'],
+                                'Bodeguero': ['combos.view', 'combos.create', 'combos.edit', 'combos.delete', 'inventory_control.view', 'inventory_control.create', 'inventory_control.manage', 'alerts.view', 'alerts.manage'],
+                                'Supervisor': ['combos.view', 'inventory_control.view', 'alerts.view'],
+                                'Administrador': NEW_PERMS
+                            };
+                            const batch = [];
+                            for (const row of existingRoles.rows) {
+                                const allowed = ROLE_DEFAULTS[row.role] || [];
+                                for (const p of NEW_PERMS) {
+                                    batch.push({
+                                        sql: `INSERT OR IGNORE INTO role_permissions (company_id, role, permission, granted) VALUES (?, ?, ?, ?)`,
+                                        args: [row.company_id, row.role, p, allowed.includes(p) ? 1 : 0]
+                                    });
+                                }
+                            }
+                            if (batch.length > 0) {
+                                const CHUNK = 50;
+                                for (let i = 0; i < batch.length; i += CHUNK) {
+                                    await turso.batch(batch.slice(i, i + CHUNK));
+                                }
+                                console.log(`✅ Migrated ${NEW_PERMS.length} new permissions for ${existingRoles.rows.length} role-company combos`);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Permission migration skipped:', e.message);
+                    }
+
+                    // ── DDL 15: Fix permission name mismatches + add missing perms ──
+                    try {
+                        // Rename mismatched permissions
+                        const RENAMES = [
+                            ['dashboard.view_profit', 'dashboard.view_profits'],
+                            ['clients.register_payment', 'clients.manage_payments'],
+                            ['settings.permissions', 'settings.manage_permissions'],
+                            ['orders.view', 'supplier_orders.view'],
+                            ['orders.create', 'supplier_orders.create'],
+                            ['orders.edit', 'supplier_orders.edit'],
+                            ['orders.receive', 'supplier_orders.receive'],
+                        ];
+                        const renameBatch = [];
+                        for (const [oldName, newName] of RENAMES) {
+                            renameBatch.push({
+                                sql: `UPDATE role_permissions SET permission = ? WHERE permission = ? AND NOT EXISTS (SELECT 1 FROM role_permissions rp2 WHERE rp2.company_id = role_permissions.company_id AND rp2.role = role_permissions.role AND rp2.permission = ?)`,
+                                args: [newName, oldName, newName]
+                            });
+                        }
+                        // Delete orphaned orders_history.view and settings.general
+                        renameBatch.push({ sql: `DELETE FROM role_permissions WHERE permission = 'orders_history.view'`, args: [] });
+                        renameBatch.push({ sql: `DELETE FROM role_permissions WHERE permission = 'settings.general'`, args: [] });
+                        if (renameBatch.length > 0) {
+                            await turso.batch(renameBatch);
+                            console.log('✅ Permission names fixed (DDL 15)');
+                        }
+
+                        // Add newly defined permissions that may be missing
+                        const EXTRA_PERMS = [
+                            'pos.cancel_sale', 'sales.export', 'products.view_cost',
+                            'invoices.pay', 'reports.export', 'users.manage',
+                            'supplier_orders.edit', 'supplier_orders.receive', 'supplier_orders.delete'
+                        ];
+                        const extraCheck = await turso.execute({
+                            sql: `SELECT COUNT(*) as count FROM role_permissions WHERE permission = 'pos.cancel_sale'`,
+                            args: []
+                        });
+                        if (Number(extraCheck.rows[0].count) === 0) {
+                            const existingRoles2 = await turso.execute({
+                                sql: `SELECT DISTINCT company_id, role FROM role_permissions`,
+                                args: []
+                            });
+                            const extraBatch = [];
+                            for (const row of existingRoles2.rows) {
+                                for (const p of EXTRA_PERMS) {
+                                    extraBatch.push({
+                                        sql: `INSERT OR IGNORE INTO role_permissions (company_id, role, permission, granted) VALUES (?, ?, ?, 0)`,
+                                        args: [row.company_id, row.role, p]
+                                    });
+                                }
+                            }
+                            if (extraBatch.length > 0) {
+                                const CHUNK = 50;
+                                for (let i = 0; i < extraBatch.length; i += CHUNK) {
+                                    await turso.batch(extraBatch.slice(i, i + CHUNK));
+                                }
+                                console.log(`✅ Added ${EXTRA_PERMS.length} missing permissions for ${existingRoles2.rows.length} role-company combos`);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Permission name fix migration skipped:', e.message);
+                    }
+
                     // Cache successful DDL in localStorage
                     localStorage.setItem(DDL_CACHE_KEY, String(DDL_TARGET));
                     migrationsExecuted = true;
@@ -1493,59 +1644,7 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    // ==========================================
-    // 🏷️ COMPANY MODULES (Feature Flags)
-    // ==========================================
-    fetchCompanyModules: async (companyId) => {
-        try {
-            const targetCompanyId = companyId || get().activeCompanyId;
-            const res = await turso.execute({
-                sql: 'SELECT * FROM company_modules WHERE company_id = ?',
-                args: [targetCompanyId]
-            });
-            // Only update global state if fetching for the active company
-            if (!companyId || companyId === get().activeCompanyId) {
-                set({ companyModules: res.rows });
-            }
-            return res.rows;
-        } catch (e) {
-            console.error('fetchCompanyModules error:', e);
-            return [];
-        }
-    },
-
-    updateCompanyModule: async (companyId, moduleKey, enabled) => {
-        try {
-            await turso.execute({
-                sql: `INSERT INTO company_modules (company_id, module_key, enabled, updated_at)
-                      VALUES (?, ?, ?, ?)
-                      ON CONFLICT(company_id, module_key)
-                      DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at`,
-                args: [companyId, moduleKey, enabled ? 1 : 0, new Date().toISOString()]
-            });
-            // Refresh local state if editing active company
-            if (companyId === get().activeCompanyId) {
-                await get().fetchCompanyModules(companyId);
-            }
-            return { success: true };
-        } catch (e) {
-            console.error('updateCompanyModule error:', e);
-            return { success: false, error: e.message };
-        }
-    },
-
-    hasModule: (moduleKey) => {
-        const { companyModules } = get();
-        const record = companyModules.find(m => m.module_key === moduleKey);
-        if (!record) {
-            // If no explicit record, check default from ALL_MODULES
-            // Import not available here so we use a simple lookup:
-            // Modules that default to disabled: 'personal'
-            const defaultDisabled = ['personal'];
-            return !defaultDisabled.includes(moduleKey);
-        }
-        return Number(record.enabled) === 1;
-    },
+    // 🏷️ COMPANY MODULES — see definition in "COMPANY MODULE MANAGEMENT" section below
 
     // NEW: Server-Side Search Actions
     searchProducts: async (term) => {
@@ -2600,6 +2699,9 @@ export const useStore = create(persist((set, get) => ({
                     sql: `INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, 'INVENTORY_CONTROL', 'PRODUCT', ?, ?)`,
                     args: [activeCompanyId, currentUser?.id, JSON.stringify({ controlId, productId, productName: product.name, action: 'count', systemStock, countedStock: roundedCount, difference }), now]
                 });
+                // Check inventory alerts after control (non-blocking)
+                setTimeout(() => { get().checkInventoryAlerts([productId]); }, 100);
+
                 return { success: true, item: { product_id: productId, product_name: product.name, product_sku: product.sku, system_stock: systemStock, counted_stock: roundedCount, difference, cost: product.cost || 0, reEdit: false } };
             }
         } catch (e) {
@@ -3774,7 +3876,8 @@ export const useStore = create(persist((set, get) => ({
                     'clients.view', 'clients.create', 'clients.view_account',
                     'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.complete',
                     'production.view', 'production.manage',
-                    'personal.view', 'personal.attendance', 'personal.corrections'
+                    'personal.view', 'personal.attendance', 'personal.corrections',
+                    'alerts.view'
                 ],
                 'Bodeguero': [
                     'dashboard.view',
@@ -3784,17 +3887,22 @@ export const useStore = create(persist((set, get) => ({
                     'invoices.view', 'invoices.create',
                     'purchases.view', 'purchases.create', 'purchases.edit',
                     'product_profile.view',
-                    'orders.view', 'orders.create', 'orders.edit', 'orders.receive',
-                    'orders_history.view',
-                    'reports.expiring'
+                    'supplier_orders.view', 'supplier_orders.create', 'supplier_orders.edit', 'supplier_orders.receive',
+                    'reports.expiring',
+                    'combos.view', 'combos.create', 'combos.edit', 'combos.delete',
+                    'inventory_control.view', 'inventory_control.create', 'inventory_control.manage',
+                    'alerts.view', 'alerts.manage'
                 ],
                 'Supervisor': [
-                    'dashboard.view', 'dashboard.view_sales', 'dashboard.view_profit',
+                    'dashboard.view', 'dashboard.view_sales', 'dashboard.view_profits',
                     'sales.view', 'sales.view_details', 'sales.export',
                     'clients.view', 'clients.view_account',
                     'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.export',
                     'products.view', 'products.view_cost',
-                    'taxes.view'
+                    'taxes.view',
+                    'combos.view',
+                    'inventory_control.view',
+                    'alerts.view'
                 ]
             };
 
@@ -3849,9 +3957,10 @@ export const useStore = create(persist((set, get) => ({
                     'sales.view', 'sales.view_details',
                     'clients.view', 'clients.create', 'clients.view_account',
                     'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.complete',
-                    'personal.view', 'personal.attendance', 'personal.corrections'
+                    'personal.view', 'personal.attendance', 'personal.corrections',
+                    'alerts.view'
                 ],
-                // Bodeguero: Inventory, Orders
+                // Bodeguero: Inventory, Orders, Combos, Control, Alerts
                 'Bodeguero': [
                     'dashboard.view',
                     'products.view', 'products.create', 'products.edit', 'products.adjust_stock', 'products.import', 'products.export',
@@ -3860,25 +3969,30 @@ export const useStore = create(persist((set, get) => ({
                     'invoices.view', 'invoices.create',
                     'purchases.view', 'purchases.create', 'purchases.edit',
                     'product_profile.view',
-                    'orders.view', 'orders.create', 'orders.edit', 'orders.receive',
-                    'orders_history.view',
-                    'reports.expiring'
+                    'supplier_orders.view', 'supplier_orders.create', 'supplier_orders.edit', 'supplier_orders.receive',
+                    'reports.expiring',
+                    'combos.view', 'combos.create', 'combos.edit', 'combos.delete',
+                    'inventory_control.view', 'inventory_control.create', 'inventory_control.manage',
+                    'alerts.view', 'alerts.manage'
                 ],
-                // Supervisor: Reports, View Only
+                // Supervisor: Reports, View Only, Alerts
                 'Supervisor': [
-                    'dashboard.view', 'dashboard.view_sales', 'dashboard.view_profit',
+                    'dashboard.view', 'dashboard.view_sales', 'dashboard.view_profits',
                     'sales.view', 'sales.view_details', 'sales.export',
                     'clients.view', 'clients.view_account',
                     'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.export',
                     'products.view', 'products.view_cost',
                     'taxes.view',
-                    'personal.view', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.absences', 'personal.reports'
+                    'personal.view', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.absences', 'personal.reports',
+                    'combos.view',
+                    'inventory_control.view',
+                    'alerts.view'
                 ]
             };
 
             const queries = [];
             const ALL_KNOWN_PERMISSIONS = [
-                'dashboard.view', 'dashboard.view_sales', 'dashboard.view_profit',
+                'dashboard.view', 'dashboard.view_sales', 'dashboard.view_profits',
                 'pos.access', 'pos.sell', 'pos.discount', 'pos.cancel_sale', 'pos.open_register', 'pos.close_register', 'pos.cash_in', 'pos.cash_out', 'pos.suspend_sale', 'pos.recover_sale',
                 'sales.view', 'sales.cancel', 'sales.export', 'sales.view_details',
                 'products.view', 'products.create', 'products.edit', 'products.delete', 'products.adjust_stock', 'products.import', 'products.export', 'products.view_cost',
@@ -3887,16 +4001,18 @@ export const useStore = create(persist((set, get) => ({
                 'invoices.view', 'invoices.create', 'invoices.edit', 'invoices.delete', 'invoices.pay',
                 'purchases.view', 'purchases.create', 'purchases.edit', 'purchases.delete',
                 'product_profile.view',
-                'clients.view', 'clients.create', 'clients.edit', 'clients.delete', 'clients.view_account', 'clients.register_payment',
+                'clients.view', 'clients.create', 'clients.edit', 'clients.delete', 'clients.view_account', 'clients.manage_payments',
                 'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.delete', 'preorders.complete',
                 'production.view', 'production.manage',
-                'orders.view', 'orders.create', 'orders.edit', 'orders.receive',
-                'orders_history.view',
+                'supplier_orders.view', 'supplier_orders.create', 'supplier_orders.edit', 'supplier_orders.receive', 'supplier_orders.delete',
                 'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.export',
-                'users.view', 'users.create', 'users.edit', 'users.delete',
-                'settings.view', 'settings.general', 'settings.company', 'settings.receipts', 'settings.payments', 'settings.system', 'settings.permissions',
+                'users.view', 'users.create', 'users.edit', 'users.delete', 'users.manage',
+                'settings.view', 'settings.company', 'settings.receipts', 'settings.payments', 'settings.system', 'settings.manage_permissions',
                 'taxes.view', 'taxes.create', 'taxes.edit', 'taxes.delete',
-                'personal.view', 'personal.manage', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.absences', 'personal.payroll', 'personal.vacations', 'personal.reports'
+                'personal.view', 'personal.manage', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.absences', 'personal.payroll', 'personal.vacations', 'personal.reports',
+                'combos.view', 'combos.create', 'combos.edit', 'combos.delete',
+                'inventory_control.view', 'inventory_control.create', 'inventory_control.manage',
+                'alerts.view', 'alerts.manage'
             ];
 
             // Generate Inserts
@@ -4031,6 +4147,11 @@ export const useStore = create(persist((set, get) => ({
                 console.warn('Product sync post-create setup error:', syncError);
             }
 
+            // Save alert config if provided
+            if (product._alertConfig) {
+                get().saveAlertSettings(newProduct.id, product._alertConfig).catch(e => console.warn('Alert settings save error:', e));
+            }
+
             return { success: true, product: newProduct };
         } catch (e) {
             console.error("Add product error", e);
@@ -4126,6 +4247,12 @@ export const useStore = create(persist((set, get) => ({
             set((state) => ({
                 products: state.products.map((p) => p.id === id ? { ...p, ...updatedProduct } : p)
             }));
+
+            // Save alert config if provided
+            if (updatedProduct._alertConfig) {
+                get().saveAlertSettings(id, updatedProduct._alertConfig).catch(e => console.warn('Alert settings save error:', e));
+            }
+
             return { success: true };
         } catch (e) {
             console.error("Update product error", e);
@@ -4939,6 +5066,12 @@ export const useStore = create(persist((set, get) => ({
 
             // UPDATE AGGREGATION
             await get().updateSupplierPurchaseSummary({ ...purchase, date: purchase.date || new Date().toISOString() }, activeCompanyId);
+
+            // Check inventory alerts after purchase (non-blocking)
+            setTimeout(() => {
+                const productIds = purchase.items?.map(i => i.productId || i.product_id).filter(Boolean);
+                get().checkInventoryAlerts(productIds);
+            }, 100);
 
             return { success: true };
         } catch (e) {
@@ -5823,6 +5956,12 @@ export const useStore = create(persist((set, get) => ({
                 const totalTime = (performance.now() - startTime).toFixed(2);
                 console.log(`✅ Venta completada en ${totalTime}ms`);
 
+                // Check inventory alerts (non-blocking)
+                setTimeout(() => {
+                    const productIds = itemsToProcess.map(i => i.id).filter(Boolean);
+                    get().checkInventoryAlerts(productIds);
+                }, 100);
+
                 return { success: true, saleId };
 
             } catch (error) {
@@ -5989,6 +6128,9 @@ export const useStore = create(persist((set, get) => ({
             } catch (syncErr) {
                 console.warn('Stock sync post-cancel setup error:', syncErr);
             }
+
+            // Check inventory alerts after cancel (non-blocking)
+            setTimeout(() => { get().checkInventoryAlerts(); }, 100);
 
             return true;
 
@@ -10493,6 +10635,388 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error('Error fetching combos for POS:', e);
             return [];
+        }
+    },
+
+    // ═══════════════════════════════════════════
+    // INVENTORY ALERTS SYSTEM
+    // ═══════════════════════════════════════════
+
+    inventoryAlerts: [],
+    unreadAlertCount: 0,
+
+    // ── Alert Settings CRUD ──
+
+    fetchAlertSettings: async (productId) => {
+        const { activeCompanyId } = get();
+        try {
+            const res = await turso.execute({
+                sql: `SELECT * FROM product_alert_settings WHERE company_id = ? AND product_id = ?`,
+                args: [activeCompanyId, productId]
+            });
+            return res.rows[0] || null;
+        } catch (e) {
+            console.error('Error fetching alert settings:', e);
+            return null;
+        }
+    },
+
+    saveAlertSettings: async (productId, settings) => {
+        const { activeCompanyId } = get();
+        try {
+            const now = new Date().toISOString();
+            await turso.execute({
+                sql: `INSERT INTO product_alert_settings (company_id, product_id, min_stock, critical_stock, priority, notify_system, notify_whatsapp, is_active, cooldown_hours, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      ON CONFLICT(company_id, product_id) DO UPDATE SET
+                        min_stock = excluded.min_stock,
+                        critical_stock = excluded.critical_stock,
+                        priority = excluded.priority,
+                        notify_system = excluded.notify_system,
+                        notify_whatsapp = excluded.notify_whatsapp,
+                        is_active = excluded.is_active,
+                        cooldown_hours = excluded.cooldown_hours`,
+                args: [
+                    activeCompanyId, productId,
+                    parseFloat(settings.min_stock) || 5,
+                    parseFloat(settings.critical_stock) || 2,
+                    settings.priority || 'normal',
+                    settings.notify_system ? 1 : 0,
+                    settings.notify_whatsapp ? 1 : 0,
+                    settings.is_active ? 1 : 0,
+                    parseInt(settings.cooldown_hours) || 6,
+                    now
+                ]
+            });
+            return { success: true };
+        } catch (e) {
+            console.error('Error saving alert settings:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // ── Notification Service (abstraction layer) ──
+
+    sendNotification: async ({ type = 'system', title, message, companyId, productId, productName, alertType, priority, currentStock, threshold, daysRemaining }) => {
+        try {
+            const now = new Date().toISOString();
+
+            // 1. Always save to DB
+            await turso.execute({
+                sql: `INSERT INTO inventory_alerts (company_id, product_id, product_name, alert_type, priority, title, message, current_stock, threshold, days_remaining, channel, sent, sent_at, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+                args: [companyId, productId || null, productName || null, alertType, priority || 'normal', title, message, currentStock ?? null, threshold ?? null, daysRemaining ?? null, type, now, now]
+            });
+
+            // 2. WhatsApp placeholder (ready for future integration)
+            if (type === 'whatsapp') {
+                // sendWhatsAppNotification({ to: company.phone, message })
+                console.log('📱 WhatsApp notification queued (not implemented):', { title, message });
+            }
+
+            return { success: true };
+        } catch (e) {
+            console.error('Error sending notification:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // ── Core Alert Engine ──
+
+    checkInventoryAlerts: async (specificProductIds = null) => {
+        const { activeCompanyId, sendNotification } = get();
+        if (!activeCompanyId) return;
+
+        try {
+            // Get all active alert settings with current product stock
+            let sql = `SELECT s.*, p.name as product_name, p.stock as current_stock, p.sku
+                        FROM product_alert_settings s
+                        JOIN products p ON p.id = s.product_id AND p.company_id = s.company_id
+                        WHERE s.company_id = ? AND s.is_active = 1`;
+            let args = [activeCompanyId];
+
+            if (specificProductIds && specificProductIds.length > 0) {
+                const placeholders = specificProductIds.map(() => '?').join(',');
+                sql += ` AND s.product_id IN (${placeholders})`;
+                args.push(...specificProductIds);
+            }
+
+            const result = await turso.execute({ sql, args });
+            const now = new Date();
+            const alertsToSend = [];
+
+            for (const setting of result.rows) {
+                const stock = parseFloat(setting.current_stock) || 0;
+                const minStock = parseFloat(setting.min_stock);
+                const criticalStock = parseFloat(setting.critical_stock);
+                const cooldownHours = parseInt(setting.cooldown_hours) || 6;
+
+                // Anti-spam: check cooldown
+                if (setting.last_notified_at) {
+                    const lastNotified = new Date(setting.last_notified_at);
+                    const hoursSince = (now - lastNotified) / (1000 * 60 * 60);
+                    if (hoursSince < cooldownHours) continue;
+                }
+
+                // Determine alert type
+                let alertType = null;
+                let threshold = null;
+
+                if (stock <= criticalStock) {
+                    alertType = 'critical';
+                    threshold = criticalStock;
+                } else if (stock <= minStock) {
+                    alertType = 'low';
+                    threshold = minStock;
+                }
+
+                if (!alertType) continue;
+
+                alertsToSend.push({
+                    ...setting,
+                    alertType,
+                    threshold,
+                    stock
+                });
+            }
+
+            // Send grouped alerts
+            if (alertsToSend.length > 0) {
+                const criticalAlerts = alertsToSend.filter(a => a.alertType === 'critical');
+                const lowAlerts = alertsToSend.filter(a => a.alertType === 'low');
+
+                // Individual notifications per product for tracking
+                for (const alert of alertsToSend) {
+                    const emoji = alert.alertType === 'critical' ? '🚨' : '⚠️';
+                    const typeLabel = alert.alertType === 'critical' ? 'CRÍTICO' : 'Bajo';
+                    const title = `${emoji} Stock ${typeLabel}: ${alert.product_name}`;
+                    const message = `${alert.product_name} tiene ${alert.stock} unidades (mínimo: ${alert.threshold})`;
+
+                    if (alert.notify_system) {
+                        await sendNotification({
+                            type: 'system', title, message,
+                            companyId: activeCompanyId,
+                            productId: alert.product_id,
+                            productName: alert.product_name,
+                            alertType: alert.alertType,
+                            priority: alert.priority,
+                            currentStock: alert.stock,
+                            threshold: alert.threshold
+                        });
+                    }
+
+                    if (alert.notify_whatsapp) {
+                        await sendNotification({
+                            type: 'whatsapp', title, message,
+                            companyId: activeCompanyId,
+                            productId: alert.product_id,
+                            productName: alert.product_name,
+                            alertType: alert.alertType,
+                            priority: alert.priority,
+                            currentStock: alert.stock,
+                            threshold: alert.threshold
+                        });
+                    }
+
+                    // Update last_notified_at (anti-spam)
+                    await turso.execute({
+                        sql: `UPDATE product_alert_settings SET last_notified_at = ? WHERE id = ?`,
+                        args: [now.toISOString(), alert.id]
+                    });
+                }
+
+                console.log(`🔔 Alerts sent: ${criticalAlerts.length} critical, ${lowAlerts.length} low`);
+            }
+
+            // Refresh unread count
+            await get().fetchUnreadAlertCount();
+
+            return { criticalCount: alertsToSend.filter(a => a.alertType === 'critical').length, lowCount: alertsToSend.filter(a => a.alertType === 'low').length };
+        } catch (e) {
+            console.error('Error checking inventory alerts:', e);
+            return { criticalCount: 0, lowCount: 0 };
+        }
+    },
+
+    // ── Prediction Engine (PRO) ──
+
+    checkStockPredictions: async () => {
+        const { activeCompanyId, sendNotification } = get();
+        if (!activeCompanyId) return;
+
+        try {
+            // Get average daily sales for last 7 days per product
+            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+            const result = await turso.execute({
+                sql: `SELECT s.product_id, s.product_name, p.stock as current_stock, p.name,
+                             SUM(s.quantity_sold) as total_sold
+                      FROM (
+                          SELECT json_each.value->>'id' as product_id,
+                                 json_each.value->>'name' as product_name,
+                                 CAST(json_each.value->>'quantity' AS REAL) as quantity_sold
+                          FROM sales, json_each(sales.items)
+                          WHERE sales.company_id = ? AND sales.date >= ? AND sales.status = 'completed'
+                      ) s
+                      JOIN products p ON p.id = s.product_id AND p.company_id = ?
+                      JOIN product_alert_settings pas ON pas.product_id = p.id AND pas.company_id = ? AND pas.is_active = 1
+                      GROUP BY s.product_id`,
+                args: [activeCompanyId, sevenDaysAgo, activeCompanyId, activeCompanyId]
+            });
+
+            for (const row of result.rows) {
+                const avgDaily = (parseFloat(row.total_sold) || 0) / 7;
+                if (avgDaily <= 0) continue;
+
+                const stock = parseFloat(row.current_stock) || 0;
+                const daysRemaining = stock / avgDaily;
+
+                if (daysRemaining < 3 && daysRemaining >= 0) {
+                    // Check cooldown (no duplicate prediction alerts within 24h)
+                    const existing = await turso.execute({
+                        sql: `SELECT id FROM inventory_alerts WHERE company_id = ? AND product_id = ? AND alert_type = 'prediction' AND created_at > datetime('now', '-24 hours')`,
+                        args: [activeCompanyId, row.product_id]
+                    });
+                    if (existing.rows.length > 0) continue;
+
+                    await sendNotification({
+                        type: 'system',
+                        title: `📊 Predicción: ${row.name} se agotará en ${Math.round(daysRemaining * 10) / 10} días`,
+                        message: `${row.name} tiene ${stock} unidades. Promedio de venta: ${Math.round(avgDaily * 10) / 10}/día. Se agotará en ~${Math.round(daysRemaining)} días.`,
+                        companyId: activeCompanyId,
+                        productId: row.product_id,
+                        productName: row.name,
+                        alertType: 'prediction',
+                        priority: daysRemaining < 1 ? 'critical' : 'important',
+                        currentStock: stock,
+                        daysRemaining: Math.round(daysRemaining * 10) / 10
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('Error checking stock predictions:', e);
+        }
+    },
+
+    // ── Fetch & Manage Alerts ──
+
+    fetchInventoryAlerts: async (limit = 50) => {
+        const { activeCompanyId } = get();
+        try {
+            const result = await turso.execute({
+                sql: `SELECT * FROM inventory_alerts WHERE company_id = ? ORDER BY created_at DESC LIMIT ?`,
+                args: [activeCompanyId, limit]
+            });
+            set({ inventoryAlerts: result.rows });
+            return result.rows;
+        } catch (e) {
+            console.error('Error fetching alerts:', e);
+            return [];
+        }
+    },
+
+    fetchUnreadAlertCount: async () => {
+        const { activeCompanyId } = get();
+        try {
+            const result = await turso.execute({
+                sql: `SELECT COUNT(*) as count FROM inventory_alerts WHERE company_id = ? AND is_read = 0`,
+                args: [activeCompanyId]
+            });
+            const count = result.rows[0]?.count || 0;
+            set({ unreadAlertCount: count });
+            return count;
+        } catch (e) {
+            return 0;
+        }
+    },
+
+    markAlertRead: async (alertId) => {
+        try {
+            await turso.execute({ sql: `UPDATE inventory_alerts SET is_read = 1 WHERE id = ?`, args: [alertId] });
+            await get().fetchUnreadAlertCount();
+        } catch (e) {
+            console.error('Error marking alert read:', e);
+        }
+    },
+
+    markAllAlertsRead: async () => {
+        const { activeCompanyId } = get();
+        try {
+            await turso.execute({
+                sql: `UPDATE inventory_alerts SET is_read = 1 WHERE company_id = ? AND is_read = 0`,
+                args: [activeCompanyId]
+            });
+            set({ unreadAlertCount: 0 });
+        } catch (e) {
+            console.error('Error marking all alerts read:', e);
+        }
+    },
+
+    deleteOldAlerts: async (daysOld = 30) => {
+        const { activeCompanyId } = get();
+        try {
+            await turso.execute({
+                sql: `DELETE FROM inventory_alerts WHERE company_id = ? AND created_at < datetime('now', '-' || ? || ' days')`,
+                args: [activeCompanyId, daysOld]
+            });
+        } catch (e) {
+            console.error('Error deleting old alerts:', e);
+        }
+    },
+
+    // ── WhatsApp Placeholder ──
+
+    sendWhatsAppNotification: async (payload) => {
+        // PLACEHOLDER: Ready for future WhatsApp integration
+        // payload: { to, message, companyId }
+        console.log('📱 [WhatsApp Placeholder] Would send:', payload);
+        // Future: Call WhatsApp Business API here
+        // await fetch('https://api.whatsapp.com/...', { method: 'POST', body: JSON.stringify(payload) });
+        return { success: true, status: 'queued' };
+    },
+
+    // ── Dashboard Alert Summary ──
+
+    fetchAlertSummary: async () => {
+        const { activeCompanyId } = get();
+        try {
+            // Get products with active alerts that are currently in alert state
+            const result = await turso.execute({
+                sql: `SELECT s.priority, s.min_stock, s.critical_stock, p.id as product_id, p.name, p.stock, p.sku
+                      FROM product_alert_settings s
+                      JOIN products p ON p.id = s.product_id AND p.company_id = s.company_id
+                      WHERE s.company_id = ? AND s.is_active = 1 AND (p.stock <= s.min_stock)
+                      ORDER BY
+                        CASE WHEN p.stock <= s.critical_stock THEN 0 ELSE 1 END,
+                        CASE s.priority WHEN 'critical' THEN 0 WHEN 'important' THEN 1 ELSE 2 END,
+                        p.stock ASC`,
+                args: [activeCompanyId]
+            });
+
+            const criticalProducts = [];
+            const lowProducts = [];
+
+            for (const row of result.rows) {
+                const item = {
+                    product_id: row.product_id,
+                    name: row.name,
+                    sku: row.sku,
+                    stock: parseFloat(row.stock),
+                    min_stock: parseFloat(row.min_stock),
+                    critical_stock: parseFloat(row.critical_stock),
+                    priority: row.priority
+                };
+
+                if (item.stock <= parseFloat(row.critical_stock)) {
+                    criticalProducts.push(item);
+                } else {
+                    lowProducts.push(item);
+                }
+            }
+
+            return { criticalProducts, lowProducts };
+        } catch (e) {
+            console.error('Error fetching alert summary:', e);
+            return { criticalProducts: [], lowProducts: [] };
         }
     },
 

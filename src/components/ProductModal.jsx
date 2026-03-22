@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { X, ArrowLeft, Trash2, Plus } from 'lucide-react';
+import { X, ArrowLeft, Trash2, Plus, Bell } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
+import { usePermissions } from '../hooks/usePermissions';
 import { compressImage, validateImage } from '../lib/imageCompression';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
-    const { categories, suppliers, currentCurrency, taxRates } = useStore();
+    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, saveAlertSettings } = useStore();
+    const { can } = usePermissions();
     const [formData, setFormData] = useState({
         name: '',
         price: '',
@@ -30,6 +32,15 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         preorder_use_base_price: true
     });
     const [marginPercentage, setMarginPercentage] = useState('');
+    const [alertConfig, setAlertConfig] = useState({
+        is_active: false,
+        min_stock: 5,
+        critical_stock: 2,
+        priority: 'normal',
+        notify_system: true,
+        notify_whatsapp: false,
+        cooldown_hours: 6
+    });
 
     useEffect(() => {
         if (productToEdit) {
@@ -60,8 +71,28 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         } else {
             setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0, is_offer: false, offer_price: '', sale_mode: 'sale_only', allow_item_notes: false, preorder_unit: '', preorder_billing_unit: 'unit', preorder_price_per_kg: '', preorder_gram_per_unit: '', preorder_use_base_price: true });
             setMarginPercentage('');
+            setAlertConfig({ is_active: false, min_stock: 5, critical_stock: 2, priority: 'normal', notify_system: true, notify_whatsapp: false, cooldown_hours: 6 });
         }
     }, [productToEdit, isOpen]);
+
+    // Load alert settings when editing a product
+    useEffect(() => {
+        if (productToEdit?.id && isOpen) {
+            fetchAlertSettings(productToEdit.id).then(settings => {
+                if (settings) {
+                    setAlertConfig({
+                        is_active: !!settings.is_active,
+                        min_stock: settings.min_stock ?? 5,
+                        critical_stock: settings.critical_stock ?? 2,
+                        priority: settings.priority || 'normal',
+                        notify_system: !!settings.notify_system,
+                        notify_whatsapp: !!settings.notify_whatsapp,
+                        cooldown_hours: settings.cooldown_hours ?? 6
+                    });
+                }
+            });
+        }
+    }, [productToEdit?.id, isOpen]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -145,12 +176,9 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
             stock: Math.round(toNum(formData.stock) * 1000) / 1000,
             tax_rate: toNum(formData.tax_rate),
             offer_price: toNum(formData.offer_price),
-            // Ensure price_ranges logic preserves numbers logic if needed, 
-            // but they are usually strings in inputs. 
-            // The map logic in implementation handles them. 
-            // But let's be safe and ensure price_ranges numbers are numbers?
-            // The store stringifies them anyway.
         };
+        // Save alert settings in background (needs product ID, so we pass alertConfig for the caller to handle)
+        dataToSave._alertConfig = alertConfig;
         onSave(dataToSave);
     };
 
@@ -510,6 +538,104 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             Productos con el mismo ID sumarán sus cantidades para aplicar el precio mayorista.
                         </p>
                     </div>
+
+                    {/* ALERT SETTINGS SECTION */}
+                    {can('alerts.manage') && (
+                    <div className={`mt-4 p-4 rounded-xl border transition-all duration-300 ${alertConfig.is_active ? 'bg-amber-500/10 border-amber-500/30' : 'bg-black/20 border-white/10'}`}>
+                        <div className="flex justify-between items-center mb-2">
+                            <label className="text-white font-bold flex items-center gap-2">
+                                <Bell size={16} className={alertConfig.is_active ? 'text-amber-400' : 'text-gray-500'} />
+                                Alerta de Stock
+                                {alertConfig.is_active && <span className="text-[10px] bg-amber-500 text-black px-2 py-0.5 rounded-full font-bold">ACTIVO</span>}
+                            </label>
+                            <button
+                                type="button"
+                                onClick={() => setAlertConfig(prev => ({ ...prev, is_active: !prev.is_active }))}
+                                className={`w-12 h-6 rounded-full flex items-center p-1 transition-all duration-300 ${alertConfig.is_active ? 'bg-amber-500' : 'bg-gray-600'}`}
+                            >
+                                <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-all duration-300 ${alertConfig.is_active ? 'translate-x-6' : 'translate-x-0'}`} />
+                            </button>
+                        </div>
+
+                        {alertConfig.is_active && (
+                            <div className="mt-3 space-y-3 animate-in slide-in-from-top-2 fade-in duration-300">
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs text-amber-400 mb-1">Stock Mínimo</label>
+                                        <input
+                                            type="number"
+                                            value={alertConfig.min_stock}
+                                            onChange={(e) => setAlertConfig(prev => ({ ...prev, min_stock: e.target.value }))}
+                                            className="glass-input w-full text-sm"
+                                            min="0"
+                                            step="1"
+                                        />
+                                        <p className="text-[10px] text-gray-500 mt-0.5">Alerta baja</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-red-400 mb-1">Stock Crítico</label>
+                                        <input
+                                            type="number"
+                                            value={alertConfig.critical_stock}
+                                            onChange={(e) => setAlertConfig(prev => ({ ...prev, critical_stock: e.target.value }))}
+                                            className="glass-input w-full text-sm"
+                                            min="0"
+                                            step="1"
+                                        />
+                                        <p className="text-[10px] text-gray-500 mt-0.5">Alerta crítica</p>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">Prioridad</label>
+                                    <select
+                                        value={alertConfig.priority}
+                                        onChange={(e) => setAlertConfig(prev => ({ ...prev, priority: e.target.value }))}
+                                        className="glass-input w-full text-sm"
+                                    >
+                                        <option value="normal" className="bg-gray-900">Normal</option>
+                                        <option value="important" className="bg-gray-900">Importante</option>
+                                        <option value="critical" className="bg-gray-900">Crítico</option>
+                                    </select>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={alertConfig.notify_system}
+                                            onChange={(e) => setAlertConfig(prev => ({ ...prev, notify_system: e.target.checked }))}
+                                            className="w-4 h-4 accent-amber-500"
+                                        />
+                                        <span className="text-xs text-gray-300">Notificación sistema</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={alertConfig.notify_whatsapp}
+                                            onChange={(e) => setAlertConfig(prev => ({ ...prev, notify_whatsapp: e.target.checked }))}
+                                            className="w-4 h-4 accent-green-500"
+                                        />
+                                        <span className="text-xs text-gray-300">WhatsApp</span>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">Cooldown (horas)</label>
+                                    <input
+                                        type="number"
+                                        value={alertConfig.cooldown_hours}
+                                        onChange={(e) => setAlertConfig(prev => ({ ...prev, cooldown_hours: e.target.value }))}
+                                        className="glass-input w-full text-sm"
+                                        min="1"
+                                        max="168"
+                                    />
+                                    <p className="text-[10px] text-gray-500 mt-0.5">Tiempo mínimo entre alertas repetidas</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    )}
 
                     {/* AVAILABILITY / PREORDERS SECTION (Only shows specific options if enabled) */}
                     {(formData.sale_mode === 'preorder_only' || formData.sale_mode === 'both') && (

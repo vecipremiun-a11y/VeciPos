@@ -4,6 +4,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { compressImage } from '../lib/imageCompression';
 import { cn } from '../lib/utils';
 import { Plus, Search, Edit2, Trash2, Power, Package, X, ImagePlus, Gift, AlertCircle, ChevronDown } from 'lucide-react';
+import { usePermissions } from '../hooks/usePermissions';
 
 const GlassCard = ({ children, className = '' }) => (
     <div className={cn("bg-[var(--glass-bg)] backdrop-blur-xl border border-[var(--glass-border)] rounded-2xl", className)}>
@@ -16,6 +17,7 @@ const ProductCombos = () => {
         combos, fetchCombos, createCombo, updateCombo, deleteCombo, toggleComboActive,
         searchProductsForDropdown, taxRates, fetchTaxRates, currentCurrency
     } = useStore();
+    const { can } = usePermissions();
 
     const [search, setSearch] = useState('');
     const [showModal, setShowModal] = useState(false);
@@ -187,7 +189,7 @@ const ProductCombos = () => {
                         Agrupa productos con precio especial
                     </p>
                 </div>
-                <button onClick={openNew} className="flex items-center gap-2 px-5 py-2.5 bg-[var(--color-primary)] text-black rounded-xl font-bold hover:brightness-110 transition-all shadow-lg shadow-[var(--color-primary)]/20">
+                <button onClick={openNew} className="flex items-center gap-2 px-5 py-2.5 bg-[var(--color-primary)] text-black rounded-xl font-bold hover:brightness-110 transition-all shadow-lg shadow-[var(--color-primary)]/20" style={{ display: can('combos.create') ? '' : 'none' }}>
                     <Plus size={18} /> Nuevo Combo
                 </button>
             </div>
@@ -298,15 +300,21 @@ const ProductCombos = () => {
 
                                 {/* Actions */}
                                 <div className="flex gap-2 pt-2 border-t border-[var(--glass-border)]">
+                                    {can('combos.edit') && (
                                     <button onClick={() => openEdit(combo)} className="flex-1 flex items-center justify-center gap-1 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-primary)] hover:border-[var(--color-primary)] transition-all text-xs font-medium">
                                         <Edit2 size={14} /> Editar
                                     </button>
+                                    )}
+                                    {can('combos.edit') && (
                                     <button onClick={() => toggleComboActive(combo.id)} className={cn("flex-1 flex items-center justify-center gap-1 py-2 rounded-lg border text-xs font-medium transition-all", combo.is_active ? "bg-[var(--glass-bg)] border-[var(--glass-border)] text-yellow-400 hover:border-yellow-400" : "bg-green-500/10 border-green-500/30 text-green-400 hover:border-green-400")}>
                                         <Power size={14} /> {combo.is_active ? 'Desactivar' : 'Activar'}
                                     </button>
+                                    )}
+                                    {can('combos.delete') && (
                                     <button onClick={() => handleDelete(combo)} className="p-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-red-400 hover:border-red-400 transition-all">
                                         <Trash2 size={14} />
                                     </button>
+                                    )}
                                 </div>
                             </GlassCard>
                         );

@@ -211,8 +211,8 @@ function App() {
           <Route path="preorders" element={<ProtectedPage permission="preorders.view"><Preorders /></ProtectedPage>} />
           <Route path="production" element={<ProtectedPage permission="production.view"><Production /></ProtectedPage>} />
           <Route path="inventory/reconciliation" element={<ProtectedPage permission="products.adjust_stock"><InventoryReconciliation /></ProtectedPage>} />
-          <Route path="inventory/control" element={<ProtectedPage permission="products.adjust_stock"><InventoryControl /></ProtectedPage>} />
-          <Route path="inventory/combos" element={<ProtectedPage permission="products.create"><ProductCombos /></ProtectedPage>} />
+          <Route path="inventory/control" element={<ProtectedPage permission="inventory_control.view"><InventoryControl /></ProtectedPage>} />
+          <Route path="inventory/combos" element={<ProtectedPage permission="combos.view"><ProductCombos /></ProtectedPage>} />
 
           {/* Reports */}
           <Route path="reports" element={<ProtectedPage permission="reports.sales"><Reports /></ProtectedPage>} />

@@ -10,6 +10,7 @@ import {
     ChevronDown, History, Trash2, Edit3, XCircle, PackageCheck, Filter,
     Hash, Eye, Download, Share2
 } from 'lucide-react';
+import { usePermissions } from '../hooks/usePermissions';
 
 // ─── Tiny beep via Web Audio API ───
 const audioCtx = typeof window !== 'undefined' ? new (window.AudioContext || window.webkitAudioContext)() : null;
@@ -95,6 +96,7 @@ const InventoryControl = () => {
         getProductByBarcode, categories: storeCategories, currentCurrency,
         activeCompanyId
     } = useStore();
+    const { can } = usePermissions();
 
     // ─ View state ─
     const [view, setView] = useState('loading'); // 'loading' | 'home' | 'counting' | 'report'
@@ -477,6 +479,7 @@ const InventoryControl = () => {
 
             {/* New Control Button / Form */}
             {!showForm ? (
+                can('inventory_control.create') && (
                 <GlassCard className="group" onClick={() => setShowForm(true)} gradient="from-blue-500/10 to-purple-500/5">
                     <div className="p-6 flex items-center justify-center gap-3 text-blue-400 group-hover:text-blue-300">
                         <div className="p-3 rounded-full bg-blue-500/10 border border-blue-500/20 group-hover:bg-blue-500/20 transition-all">
@@ -485,6 +488,7 @@ const InventoryControl = () => {
                         <span className="text-lg font-semibold">Nuevo Control de Inventario</span>
                     </div>
                 </GlassCard>
+                )
             ) : (
                 <GlassCard gradient="from-blue-500/10 to-purple-500/5">
                     <div className="p-6 space-y-4">

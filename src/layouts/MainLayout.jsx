@@ -4,6 +4,7 @@ import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, 
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
+import NotificationBell from '../components/NotificationBell';
 import SupportWidget from '../components/SupportWidget';
 import { usePermissions } from '../hooks/usePermissions';
 import { useCompanyFeatures } from '../hooks/useCompanyFeatures';
@@ -69,11 +70,11 @@ const MainLayout = () => {
                 { icon: Truck, label: 'Proveedores', path: '/suppliers', permission: 'suppliers.view' },
                 { icon: FileText, label: 'Facturas', path: '/invoices', permission: 'invoices.view' },
                 { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view' },
-                { icon: Percent, label: 'Impuestos', path: '/taxes', permission: 'products.create' },
+                { icon: Percent, label: 'Impuestos', path: '/taxes', permission: 'taxes.view' },
                 { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', permission: 'product_profile.view' },
                 { icon: ShieldCheck, label: 'Conciliación', path: '/inventory/reconciliation', permission: 'products.adjust_stock' },
-                { icon: ClipboardCheck, label: 'Control de Inventario', path: '/inventory/control', permission: 'products.adjust_stock' },
-                { icon: Gift, label: 'Combos / Packs', path: '/inventory/combos', permission: 'products.view' }
+                { icon: ClipboardCheck, label: 'Control de Inventario', path: '/inventory/control', permission: 'inventory_control.view' },
+                { icon: Gift, label: 'Combos / Packs', path: '/inventory/combos', permission: 'combos.view' }
             ]
         },
         {
@@ -333,6 +334,9 @@ const MainLayout = () => {
                     <div className="flex items-center gap-4">
                         {/* Company Switcher */}
                         <CompanySwitcher />
+
+                        {/* Notification Bell */}
+                        <NotificationBell />
 
                         <div className="flex items-center gap-3 pl-4 border-l border-[var(--glass-border)]">
                             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[var(--color-primary)] to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-[var(--color-primary)]/20">

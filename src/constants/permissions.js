@@ -21,6 +21,7 @@ export const ALL_PERMISSIONS = [
             { id: 'pos.cash_out', label: 'Retiro de Dinero' },
             { id: 'pos.suspend_sale', label: 'Suspender Venta' },
             { id: 'pos.recover_sale', label: 'Recuperar Venta' },
+            { id: 'pos.cancel_sale', label: 'Anular Venta desde POS' },
             { id: 'pos.manage_cart', label: 'Gestionar Carritos (Tickets)' },
         ]
     },
@@ -31,6 +32,7 @@ export const ALL_PERMISSIONS = [
             { id: 'sales.view', label: 'Ver Historial' },
             { id: 'sales.view_details', label: 'Ver Detalles de Venta' },
             { id: 'sales.cancel', label: 'Anular Venta' },
+            { id: 'sales.export', label: 'Exportar Ventas' },
         ]
     },
     {
@@ -44,6 +46,34 @@ export const ALL_PERMISSIONS = [
             { id: 'products.adjust_stock', label: 'Ajustar Stock' },
             { id: 'products.import', label: 'Importar Productos' },
             { id: 'products.export', label: 'Exportar Productos' },
+            { id: 'products.view_cost', label: 'Ver Costo de Productos' },
+        ]
+    },
+    {
+        id: 'combos',
+        label: 'Combos / Packs',
+        permissions: [
+            { id: 'combos.view', label: 'Ver Combos' },
+            { id: 'combos.create', label: 'Crear Combos' },
+            { id: 'combos.edit', label: 'Editar Combos' },
+            { id: 'combos.delete', label: 'Eliminar Combos' },
+        ]
+    },
+    {
+        id: 'inventory_control',
+        label: 'Control de Inventario',
+        permissions: [
+            { id: 'inventory_control.view', label: 'Ver Controles' },
+            { id: 'inventory_control.create', label: 'Crear Control' },
+            { id: 'inventory_control.manage', label: 'Gestionar Control (Reconciliar)' },
+        ]
+    },
+    {
+        id: 'alerts',
+        label: 'Alertas de Inventario',
+        permissions: [
+            { id: 'alerts.view', label: 'Ver Alertas' },
+            { id: 'alerts.manage', label: 'Configurar Alertas' },
         ]
     },
     {
@@ -104,6 +134,8 @@ export const ALL_PERMISSIONS = [
         permissions: [
             { id: 'supplier_orders.view', label: 'Ver Pedidos' },
             { id: 'supplier_orders.create', label: 'Crear Pedidos' },
+            { id: 'supplier_orders.edit', label: 'Editar Pedidos' },
+            { id: 'supplier_orders.receive', label: 'Recibir Pedidos' },
             { id: 'supplier_orders.delete', label: 'Eliminar Pedidos' },
         ]
     },
@@ -144,6 +176,7 @@ export const ALL_PERMISSIONS = [
             { id: 'invoices.create', label: 'Crear Facturas' },
             { id: 'invoices.edit', label: 'Editar Facturas' },
             { id: 'invoices.delete', label: 'Eliminar Facturas' },
+            { id: 'invoices.pay', label: 'Registrar Pago de Factura' },
         ]
     },
     {
@@ -163,6 +196,7 @@ export const ALL_PERMISSIONS = [
             { id: 'reports.movements', label: 'Ver Movimientos de Caja' },
             { id: 'reports.invoice_payments', label: 'Ver Pagos de Facturas' },
             { id: 'reports.profit', label: 'Ver Reporte de Utilidades' },
+            { id: 'reports.export', label: 'Exportar Reportes' },
         ]
     },
     {
