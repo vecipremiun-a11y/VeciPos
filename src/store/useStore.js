@@ -888,6 +888,24 @@ export const useStore = create(persist((set, get) => ({
                 )
             `);
 
+            // ============================================
+            // 🔄 SALE RETURNS TABLE (Devoluciones)
+            // ============================================
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS sale_returns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id TEXT NOT NULL,
+                    sale_id INTEGER NOT NULL,
+                    user_id INTEGER,
+                    reason TEXT NOT NULL,
+                    items TEXT NOT NULL,
+                    total REAL NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            `);
+            await turso.execute(`CREATE INDEX IF NOT EXISTS idx_sale_returns_sale ON sale_returns(sale_id, company_id)`);
+            await turso.execute(`CREATE INDEX IF NOT EXISTS idx_sale_returns_company ON sale_returns(company_id, created_at DESC)`);
+
             console.log("SaaS Migrations Completed.");
 
         } catch (e) {
@@ -6077,12 +6095,7 @@ export const useStore = create(persist((set, get) => ({
                         return { ...p, stock: Math.round(((parseFloat(p.stock) || 0) + parseFloat(item.quantity)) * 1000) / 1000 };
                     }
                     return p;
-                }),
-
-                // Update local cash register balance if matches
-                cashRegister: (state.cashRegister && cashRegister && state.cashRegister.id === cashRegister.id)
-                    ? { ...state.cashRegister, current_balance: (state.cashRegister.current_balance || 0) - sale.total }
-                    : state.cashRegister
+                })
             }));
 
             // 6. Sync restored stock to online store (WooCommerce)
@@ -6139,11 +6152,232 @@ export const useStore = create(persist((set, get) => ({
             // Check inventory alerts after cancel (non-blocking)
             setTimeout(() => { get().checkInventoryAlerts(); }, 100);
 
+            // Refrescar stats de caja para descontar la venta anulada
+            const postCancelRegister = get().cashRegister;
+            if (postCancelRegister?.id) {
+                get().refreshRegisterStats(postCancelRegister.id);
+            }
+
             return true;
 
         } catch (e) {
             console.error("Cancel sale error", e);
             return { success: false, error: e?.message || String(e) };
+        }
+    },
+
+    // ============================================
+    // 🔄 DEVOLUCIONES (Product Returns)
+    // ============================================
+
+    processReturn: async (saleId, returnItems, reason) => {
+        try {
+            const { activeCompanyId, currentUser, fetchSaleDetails, sales, currentCompanyTimezone } = get();
+
+            // Ensure table exists
+            await turso.execute(`
+                CREATE TABLE IF NOT EXISTS sale_returns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id TEXT NOT NULL,
+                    sale_id INTEGER NOT NULL,
+                    user_id INTEGER,
+                    reason TEXT NOT NULL,
+                    items TEXT NOT NULL,
+                    total REAL NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            `);
+
+            // 1. Get full sale details
+            let sale = sales.find(s => s.id === saleId);
+            if (!sale || !sale.items) {
+                sale = await fetchSaleDetails(saleId);
+            }
+            if (!sale) return { success: false, error: 'Venta no encontrada' };
+
+            const items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items;
+
+            // 2. Fetch existing returns for this sale to validate quantities
+            const existingReturnsResult = await turso.execute({
+                sql: "SELECT items FROM sale_returns WHERE sale_id = ? AND company_id = ?",
+                args: [saleId, activeCompanyId]
+            });
+
+            // Build map of already-returned quantities
+            const alreadyReturned = {};
+            for (const row of existingReturnsResult.rows) {
+                const retItems = typeof row.items === 'string' ? JSON.parse(row.items) : row.items;
+                for (const ri of retItems) {
+                    alreadyReturned[ri.id] = (alreadyReturned[ri.id] || 0) + ri.quantity;
+                }
+            }
+
+            // 3. Validate each return item
+            const validatedItems = [];
+            for (const ri of returnItems) {
+                const originalItem = items.find(i => i.id === ri.id);
+                if (!originalItem) continue;
+
+                const previouslyReturned = alreadyReturned[ri.id] || 0;
+                const maxReturnable = originalItem.quantity - previouslyReturned;
+
+                if (ri.quantity <= 0 || ri.quantity > maxReturnable) {
+                    return { success: false, error: `Cantidad inválida para ${originalItem.name}. Máximo devolvible: ${maxReturnable}` };
+                }
+
+                validatedItems.push({
+                    id: ri.id,
+                    name: originalItem.name,
+                    sku: originalItem.sku || '',
+                    quantity: ri.quantity,
+                    price: originalItem.price,
+                    cost: originalItem.cost || 0,
+                    unit: originalItem.unit || 'Und'
+                });
+            }
+
+            if (validatedItems.length === 0) {
+                return { success: false, error: 'No hay productos válidos para devolver' };
+            }
+
+            const returnTotal = validatedItems.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+            const now = new Date().toISOString();
+
+            const saleDateObj = new Date(sale.date);
+            const saleDay = !isNaN(saleDateObj.getTime())
+                ? saleDateObj.toISOString().split('T')[0]
+                : new Date().toISOString().split('T')[0];
+
+            // 4. Build transaction queries
+            const queries = [
+                // Insert the return record
+                {
+                    sql: "INSERT INTO sale_returns (company_id, sale_id, user_id, reason, items, total, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    args: [activeCompanyId, saleId, currentUser?.id, reason, JSON.stringify(validatedItems), returnTotal, now]
+                },
+                // Audit log
+                {
+                    sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    args: [activeCompanyId, currentUser?.id, 'RETURN', 'SALE', JSON.stringify({ saleId, returnTotal, items: validatedItems.map(i => ({ id: i.id, name: i.name, qty: i.quantity })), reason }), now]
+                }
+            ];
+
+            // 5. Restore stock for each returned item
+            for (const item of validatedItems) {
+                queries.push({
+                    sql: "UPDATE products SET stock = ROUND(stock + ?, 3) WHERE id = ? AND company_id = ?",
+                    args: [item.quantity, item.id, activeCompanyId]
+                });
+                // Restore to most recent lot
+                queries.push({
+                    sql: `UPDATE product_lots 
+                           SET quantity = quantity + ? 
+                           WHERE id = (
+                               SELECT id FROM product_lots 
+                               WHERE product_id = ? AND company_id = ? 
+                               ORDER BY created_at DESC LIMIT 1
+                           )`,
+                    args: [item.quantity, item.id, activeCompanyId]
+                });
+            }
+
+            // 6. Update daily summary
+            queries.push({
+                sql: `UPDATE sales_daily_summary 
+                      SET total_sales = total_sales - ?
+                      WHERE day = ? AND company_id = ?`,
+                args: [returnTotal, saleDay, activeCompanyId]
+            });
+
+            // Execute all queries as a batch
+            await turso.batch(queries);
+
+            // 7. Update local state - stock
+            set(state => ({
+                products: state.products.map(p => {
+                    const returnedItem = validatedItems.find(i => i.id === p.id);
+                    if (returnedItem) {
+                        return { ...p, stock: Math.round(((parseFloat(p.stock) || 0) + parseFloat(returnedItem.quantity)) * 1000) / 1000 };
+                    }
+                    return p;
+                })
+            }));
+
+            // 8. Sync stock to online store (non-blocking)
+            try {
+                const { products: updatedProducts } = get();
+                const productIds = validatedItems.map(item => item.id).filter(Boolean);
+
+                if (productIds.length > 0) {
+                    const placeholders = productIds.map(() => '?').join(',');
+                    const dbResult = await turso.execute({
+                        sql: `SELECT id, sku, stock, unit FROM products WHERE id IN (${placeholders}) AND company_id = ?`,
+                        args: [...productIds, activeCompanyId]
+                    });
+                    const dbProducts = dbResult.rows || [];
+
+                    const stockSyncItems = validatedItems.map(item => {
+                        const dbProd = dbProducts.find(p => String(p.id) === String(item.id));
+                        const stateProd = updatedProducts.find(p => String(p.id) === String(item.id));
+                        const sku = dbProd?.sku || stateProd?.sku || null;
+                        const unit = (dbProd?.unit || stateProd?.unit || 'un').toLowerCase();
+                        const raw = parseFloat(dbProd?.stock ?? stateProd?.stock ?? 0);
+                        const stock = (unit === 'kg' || unit === 'lt')
+                            ? Math.round(raw * 1000) / 1000
+                            : Math.round(raw);
+                        return { product_id: item.id, sku, stock, unit: dbProd?.unit || stateProd?.unit || 'Und' };
+                    }).filter(item => item.sku && normalizeSku(item.sku) && Number.isFinite(item.stock));
+
+                    if (stockSyncItems.length > 0) {
+                        get().syncSaleStockToStore({
+                            saleId,
+                            soldAt: now,
+                            items: stockSyncItems,
+                        }).catch(err => console.warn('Stock sync post-return error:', err));
+                    }
+                }
+            } catch (syncErr) {
+                console.warn('Stock sync post-return setup error:', syncErr);
+            }
+
+            // Registrar movimiento de caja por el reembolso
+            const postReturnRegister = get().cashRegister;
+            if (postReturnRegister?.id) {
+                await turso.execute({
+                    sql: "INSERT INTO cash_movements (register_id, type, amount, reason, date, company_id) VALUES (?, ?, ?, ?, ?, ?)",
+                    args: [postReturnRegister.id, 'OUT', returnTotal, `Devolución Venta #${saleId}: ${reason}`, now, activeCompanyId]
+                });
+                get().refreshRegisterStats(postReturnRegister.id);
+            }
+
+            setTimeout(() => { get().checkInventoryAlerts(); }, 100);
+
+            return { success: true, returnTotal };
+
+        } catch (e) {
+            console.error("Process return error:", e);
+            return { success: false, error: e?.message || String(e) };
+        }
+    },
+
+    fetchSaleReturns: async (saleId) => {
+        try {
+            const { activeCompanyId } = get();
+            await turso.execute(`CREATE TABLE IF NOT EXISTS sale_returns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, company_id TEXT NOT NULL, sale_id INTEGER NOT NULL,
+                user_id INTEGER, reason TEXT NOT NULL, items TEXT NOT NULL, total REAL NOT NULL, created_at TEXT NOT NULL
+            )`);
+            const result = await turso.execute({
+                sql: "SELECT id, sale_id, user_id, reason, items, total, created_at FROM sale_returns WHERE sale_id = ? AND company_id = ? ORDER BY created_at DESC",
+                args: [saleId, activeCompanyId]
+            });
+            return result.rows.map(r => ({
+                ...r,
+                items: typeof r.items === 'string' ? JSON.parse(r.items) : r.items
+            }));
+        } catch (e) {
+            console.error("Fetch sale returns error:", e);
+            return [];
         }
     },
 
@@ -6440,7 +6674,8 @@ export const useStore = create(persist((set, get) => ({
                           FROM sales 
                           WHERE user_id = ? 
                           AND date >= ? 
-                          AND company_id = ?`,
+                          AND company_id = ?
+                          AND status != 'cancelled'`,
                     args: [register.user_id, openingTime, activeCompanyId]
                 },
                 // Movimientos
@@ -6455,6 +6690,7 @@ export const useStore = create(persist((set, get) => ({
                           WHERE user_id = ? 
                           AND date >= ? 
                           AND company_id = ?
+                          AND status != 'cancelled'
                           AND (payment_method = 'Efectivo' OR payment_method = 'Mixto')
                           ORDER BY date DESC 
                           LIMIT 20`,
@@ -6485,6 +6721,7 @@ export const useStore = create(persist((set, get) => ({
                       WHERE user_id = ? 
                       AND date >= ? 
                       AND company_id = ?
+                      AND status != 'cancelled'
                       AND payment_method = 'Mixto'`,
                 args: [register.user_id, openingTime, activeCompanyId]
             });

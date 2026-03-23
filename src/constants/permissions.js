@@ -32,6 +32,7 @@ export const ALL_PERMISSIONS = [
             { id: 'sales.view', label: 'Ver Historial' },
             { id: 'sales.view_details', label: 'Ver Detalles de Venta' },
             { id: 'sales.cancel', label: 'Anular Venta' },
+            { id: 'sales.return', label: 'Realizar Devoluciones' },
             { id: 'sales.export', label: 'Exportar Ventas' },
         ]
     },

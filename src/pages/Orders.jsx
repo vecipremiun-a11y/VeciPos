@@ -495,7 +495,14 @@ const Orders = () => {
                                             isSelected && "bg-[var(--color-primary)]/10 border-l-4 border-l-[var(--color-primary)]"
                                         )}
                                     >
-                                        <div className="flex justify-between items-start">
+                                        <div className="flex justify-between items-start gap-3">
+                                            <div className="w-10 h-10 rounded-lg overflow-hidden bg-black/20 shrink-0 flex items-center justify-center">
+                                                {product.image ? (
+                                                    <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <Package size={18} className="text-[var(--color-text-muted)] opacity-40" />
+                                                )}
+                                            </div>
                                             <div className="flex-1 min-w-0">
                                                 <p className="font-medium text-[var(--color-text)] text-sm truncate">{product.name}</p>
                                                 <p className="text-xs text-[var(--color-text-muted)]">{product.sku || 'Sin SKU'}</p>

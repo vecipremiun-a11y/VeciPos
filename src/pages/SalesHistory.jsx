@@ -1,14 +1,15 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { turso } from '../lib/turso';
-import { Search, Calendar, CreditCard, User, Download, Send, Trash2, Printer, AlertTriangle, FileText, X } from 'lucide-react';
+import { Search, Calendar, CreditCard, User, Download, Send, Trash2, Printer, AlertTriangle, FileText, X, RotateCcw } from 'lucide-react';
 import { generateReceiptPDF, generateWhatsAppLink } from '../utils/receipt';
 import { formatCurrency } from '../utils/formatCurrency';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import { usePermissions } from '../hooks/usePermissions';
+import ReturnModal from '../components/ReturnModal';
 
 const SalesHistory = () => {
-    const { sales, users, cancelSale, currentUser, currentCompanyTimezone, fetchSales, fetchSaleDetails, activeCompanyId, currentCurrency } = useStore();
+    const { sales, users, cancelSale, fetchSaleReturns, currentUser, currentCompanyTimezone, fetchSales, fetchSaleDetails, activeCompanyId, currentCurrency } = useStore();
     const [selectedSale, setSelectedSale] = useState(null);
     const [isLoadingDetails, setIsLoadingDetails] = useState(false);
     const { can } = usePermissions();
@@ -35,6 +36,9 @@ const SalesHistory = () => {
     const [phoneNumber, setPhoneNumber] = useState('');
     const [showCancelModal, setShowCancelModal] = useState(false);
     const [cancellationReason, setCancellationReason] = useState('');
+    const [showReturnModal, setShowReturnModal] = useState(false);
+    const [saleReturns, setSaleReturns] = useState([]);
+    const [returnSuccess, setReturnSuccess] = useState(null);
 
     // Fetch Initial Data on Date Change
     React.useEffect(() => {
@@ -66,6 +70,7 @@ const SalesHistory = () => {
 
         // Optimistic selection (show what we have)
         setSelectedSale(sale);
+        setSaleReturns([]);
 
         // Check if we have details
         if (!sale.items) {
@@ -76,12 +81,38 @@ const SalesHistory = () => {
             }
             setIsLoadingDetails(false);
         }
+
+        // Load returns for this sale
+        const returns = await fetchSaleReturns(sale.id);
+        setSaleReturns(returns);
+    };
+
+    const handleReturnSuccess = async (returnTotal) => {
+        setShowReturnModal(false);
+        setReturnSuccess(returnTotal);
+        // Reload returns
+        const returns = await fetchSaleReturns(selectedSale.id);
+        setSaleReturns(returns);
+        setTimeout(() => setReturnSuccess(null), 4000);
     };
 
     // Calculate totals from CURRENTLY LOADED sales (Note: this is only what's viewed, not DB total)
     // For proper totals, we might need a separate endpoint, but for now summing loaded is okay-ish 
     const totalSales = sales.reduce((acc, curr) => acc + (curr.status === 'cancelled' ? 0 : curr.total), 0);
     const totalCount = sales.filter(s => s.status !== 'cancelled').length;
+
+    // Build per-product returned quantities map from saleReturns
+    const returnedMap = useMemo(() => {
+        const map = {};
+        for (const ret of saleReturns) {
+            for (const item of ret.items) {
+                map[item.id] = (map[item.id] || 0) + item.quantity;
+            }
+        }
+        return map;
+    }, [saleReturns]);
+
+    const totalReturned = useMemo(() => saleReturns.reduce((sum, r) => sum + r.total, 0), [saleReturns]);
 
     const handleDownloadPDF = async () => {
         if (!selectedSale || !selectedSale.items) return; // Guard against missing details
@@ -382,7 +413,7 @@ const SalesHistory = () => {
                                 </div>
 
                                 {/* Actions Toolbar */}
-                                <div className="p-3 border-b border-[var(--glass-border)] flex gap-2">
+                                <div className="p-3 border-b border-[var(--glass-border)] flex gap-2 flex-wrap">
                                     <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-2 bg-[var(--glass-bg)] hover:bg-[var(--color-surface-hover)] rounded-lg text-sm text-gray-200 transition-colors">
                                         <Download size={16} />
                                         Descargar PDF
@@ -392,6 +423,12 @@ const SalesHistory = () => {
                                         Compartir WhatsApp
                                     </button>
                                     <div className="flex-1"></div>
+                                    {selectedSale.status !== 'cancelled' && can('sales.return') && (
+                                        <button onClick={() => setShowReturnModal(true)} className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-lg text-sm transition-colors border border-orange-500/20">
+                                            <RotateCcw size={16} />
+                                            Devolución
+                                        </button>
+                                    )}
                                     {selectedSale.status !== 'cancelled' && can('sales.cancel') && (
                                         <button onClick={handleCancelSale} className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-sm transition-colors border border-red-500/20">
                                             <Trash2 size={16} />
@@ -419,11 +456,26 @@ const SalesHistory = () => {
                                                     </td>
                                                 </tr>
                                             ) : (
-                                                selectedSale.items.map((item, idx) => (
-                                                    <tr key={idx} className="border-b border-[var(--glass-border)] text-[var(--color-text-muted)] text-sm hover:bg-[var(--glass-bg)]/30 transition-colors">
+                                                selectedSale.items.map((item, idx) => {
+                                                    const retQty = returnedMap[item.id] || 0;
+                                                    const effectiveQty = item.quantity - retQty;
+                                                    const isFullReturn = retQty >= item.quantity;
+                                                    return (
+                                                    <tr key={idx} className={`border-b border-[var(--glass-border)] text-[var(--color-text-muted)] text-sm hover:bg-[var(--glass-bg)]/30 transition-colors ${isFullReturn ? 'opacity-50' : ''}`}>
                                                         <td className="py-3 pl-2">
-                                                            <div className="font-medium text-[var(--color-text)]">{item.name}</div>
+                                                            <div className={`font-medium ${isFullReturn ? 'line-through text-[var(--color-text-muted)]' : 'text-[var(--color-text)]'}`}>{item.name}</div>
                                                             {item.sku && <div className="text-xs text-[var(--color-text-muted)] opacity-70">{item.sku}</div>}
+                                                            {retQty > 0 && (
+                                                                <div className="flex items-center gap-1.5 mt-1">
+                                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 text-[10px] font-bold">
+                                                                        <RotateCcw size={9} />
+                                                                        {isFullReturn ? 'DEVUELTO' : `Dev: ${retQty} ${item.unit || 'Und'}`}
+                                                                    </span>
+                                                                    {!isFullReturn && (
+                                                                        <span className="text-[10px] text-[var(--color-text-muted)]">Queda: {effectiveQty} {item.unit || 'Und'}</span>
+                                                                    )}
+                                                                </div>
+                                                            )}
                                                         </td>
                                                         <td className="py-3 text-center">
                                                             <span className="px-2 py-1 rounded bg-[var(--glass-bg)] text-[var(--color-text)] font-medium text-xs border border-[var(--glass-border)]">
@@ -433,11 +485,19 @@ const SalesHistory = () => {
                                                         <td className="py-3 text-right text-[var(--color-text)]">
                                                             {formatCurrency(item.price, currentCurrency)}
                                                         </td>
-                                                        <td className="py-3 text-right font-bold text-[var(--color-text)] pr-2">
-                                                            {formatCurrency((item.price * item.quantity), currentCurrency)}
+                                                        <td className="py-3 text-right pr-2">
+                                                            <div className={`font-bold ${isFullReturn ? 'text-[var(--color-text-muted)] line-through' : 'text-[var(--color-text)]'}`}>
+                                                                {formatCurrency((item.price * item.quantity), currentCurrency)}
+                                                            </div>
+                                                            {retQty > 0 && !isFullReturn && (
+                                                                <div className="text-[10px] text-orange-400 font-medium">
+                                                                    Neto: {formatCurrency(item.price * effectiveQty, currentCurrency)}
+                                                                </div>
+                                                            )}
                                                         </td>
                                                     </tr>
-                                                ))
+                                                    );
+                                                })
                                             )}
                                         </tbody>
                                     </table>
@@ -449,13 +509,19 @@ const SalesHistory = () => {
                                                 <span>Subtotal</span>
                                                 <span>{formatCurrency(selectedSale.total, currentCurrency)}</span>
                                             </div>
+                                            {totalReturned > 0 && (
+                                                <div className="flex justify-between text-orange-400 text-sm">
+                                                    <span>Devoluciones</span>
+                                                    <span>-{formatCurrency(totalReturned, currentCurrency)}</span>
+                                                </div>
+                                            )}
                                             <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
                                                 <span>Impuestos</span>
                                                 <span>{formatCurrency(0, currentCurrency)}</span>
                                             </div>
                                             <div className="border-t border-[var(--glass-border)] pt-2 flex justify-between text-[var(--color-text)] font-bold text-lg">
                                                 <span>Total</span>
-                                                <span className="text-[var(--color-primary)]">{formatCurrency(selectedSale.total, currentCurrency)}</span>
+                                                <span className="text-[var(--color-primary)]">{formatCurrency(selectedSale.total - totalReturned, currentCurrency)}</span>
                                             </div>
 
                                             <div className="mt-6 p-4 bg-[var(--glass-bg)] rounded-lg border border-[var(--glass-border)]">
@@ -500,9 +566,65 @@ const SalesHistory = () => {
                                                     </p>
                                                 </div>
                                             )}
+
+                                            {/* Returns History */}
+                                            {saleReturns.length > 0 && (
+                                                <div className="mt-4 p-4 bg-orange-500/10 rounded-lg border border-orange-500/20">
+                                                    <p className="text-xs text-orange-400 uppercase font-bold mb-3 flex items-center gap-2">
+                                                        <RotateCcw size={12} />
+                                                        Devoluciones ({saleReturns.length})
+                                                    </p>
+                                                    <div className="space-y-3">
+                                                        {saleReturns.map((ret, idx) => (
+                                                            <div key={ret.id} className="p-3 bg-black/20 rounded-lg">
+                                                                <div className="flex justify-between items-start mb-2">
+                                                                    <span className="text-xs text-[var(--color-text-muted)]">
+                                                                        {formatInCompanyTime(ret.created_at, currentCompanyTimezone, 'dd/MM/yyyy HH:mm')}
+                                                                    </span>
+                                                                    <span className="text-sm font-bold text-orange-400">
+                                                                        -{formatCurrency(ret.total, currentCurrency)}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    {ret.items.map((item, i) => (
+                                                                        <div key={i} className="flex justify-between text-xs text-[var(--color-text-muted)]">
+                                                                            <span>{item.name}</span>
+                                                                            <span>x{item.quantity}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                                <p className="text-xs text-orange-300/70 italic mt-2">"{ret.reason}"</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    <div className="mt-3 pt-3 border-t border-orange-500/20 flex justify-between text-sm">
+                                                        <span className="text-orange-400 font-bold">Total Devuelto</span>
+                                                        <span className="text-orange-400 font-bold">
+                                                            -{formatCurrency(saleReturns.reduce((sum, r) => sum + r.total, 0), currentCurrency)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
+
+                                {/* Return Success Toast */}
+                                {returnSuccess && (
+                                    <div className="absolute top-4 right-4 z-30 bg-green-500/90 text-white px-4 py-3 rounded-xl shadow-lg animate-[float_0.3s_ease-out] flex items-center gap-2">
+                                        <RotateCcw size={16} />
+                                        <span className="text-sm font-bold">Devolución procesada: {formatCurrency(returnSuccess, currentCurrency)}</span>
+                                    </div>
+                                )}
+
+                                {/* Return Modal */}
+                                {showReturnModal && selectedSale && (
+                                    <ReturnModal
+                                        sale={selectedSale}
+                                        onClose={() => setShowReturnModal(false)}
+                                        onSuccess={handleReturnSuccess}
+                                    />
+                                )}
 
                                 {/* WhatsApp Phone Input Overlay */}
                                 {showPhoneInput && (
@@ -646,6 +768,12 @@ const SalesHistory = () => {
                             <Send size={14} />
                             Compartir WhatsApp
                         </button>
+                        {selectedSale.status !== 'cancelled' && can('sales.return') && (
+                            <button onClick={() => setShowReturnModal(true)} className="flex items-center gap-1.5 px-3 py-2 bg-orange-500/10 text-orange-400 rounded-lg text-xs border border-orange-500/20 whitespace-nowrap">
+                                <RotateCcw size={14} />
+                                Devolución
+                            </button>
+                        )}
                         {selectedSale.status !== 'cancelled' && can('sales.cancel') && (
                             <button onClick={handleCancelSale} className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 text-red-400 rounded-lg text-xs border border-red-500/20 whitespace-nowrap">
                                 <Trash2 size={14} />
@@ -679,11 +807,26 @@ const SalesHistory = () => {
                                                 </td>
                                             </tr>
                                         ) : (
-                                            selectedSale.items.map((item, idx) => (
-                                                <tr key={idx} className="border-b border-[var(--glass-border)]">
+                                            selectedSale.items.map((item, idx) => {
+                                                const retQty = returnedMap[item.id] || 0;
+                                                const effectiveQty = item.quantity - retQty;
+                                                const isFullReturn = retQty >= item.quantity;
+                                                return (
+                                                <tr key={idx} className={`border-b border-[var(--glass-border)] ${isFullReturn ? 'opacity-50' : ''}`}>
                                                     <td className="py-3 pr-2">
-                                                        <div className="font-medium text-[var(--color-text)] text-sm">{item.name}</div>
+                                                        <div className={`font-medium text-sm ${isFullReturn ? 'line-through text-[var(--color-text-muted)]' : 'text-[var(--color-text)]'}`}>{item.name}</div>
                                                         {item.sku && <div className="text-[10px] text-[var(--color-text-muted)] opacity-70">{item.sku}</div>}
+                                                        {retQty > 0 && (
+                                                            <div className="flex items-center gap-1.5 mt-1">
+                                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 text-[9px] font-bold">
+                                                                    <RotateCcw size={8} />
+                                                                    {isFullReturn ? 'DEVUELTO' : `Dev: ${retQty}`}
+                                                                </span>
+                                                                {!isFullReturn && (
+                                                                    <span className="text-[9px] text-[var(--color-text-muted)]">Queda: {effectiveQty}</span>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className="py-3 text-center">
                                                         <span className="px-2 py-1 bg-[var(--glass-bg)] rounded text-[var(--color-text)] text-xs font-bold border border-[var(--glass-border)]">
@@ -691,15 +834,21 @@ const SalesHistory = () => {
                                                         </span>
                                                     </td>
                                                     <td className="py-3 text-right">
-                                                        <div className="font-bold text-[var(--color-text)] text-sm">
+                                                        <div className={`font-bold text-sm ${isFullReturn ? 'line-through text-[var(--color-text-muted)]' : 'text-[var(--color-text)]'}`}>
                                                             {formatCurrency(item.price * item.quantity, currentCurrency)}
                                                         </div>
                                                         <div className="text-[10px] text-[var(--color-text-muted)]">
                                                             {item.quantity} x {formatCurrency(item.price, currentCurrency)}
                                                         </div>
+                                                        {retQty > 0 && !isFullReturn && (
+                                                            <div className="text-[9px] text-orange-400 font-medium">
+                                                                Neto: {formatCurrency(item.price * effectiveQty, currentCurrency)}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                 </tr>
-                                            ))
+                                                );
+                                            })
                                         )}
                                     </tbody>
                                 </table>
@@ -710,13 +859,19 @@ const SalesHistory = () => {
                                         <span>Subtotal</span>
                                         <span>{formatCurrency(selectedSale.total, currentCurrency)}</span>
                                     </div>
+                                    {totalReturned > 0 && (
+                                        <div className="flex justify-between text-sm text-orange-400">
+                                            <span>Devoluciones</span>
+                                            <span>-{formatCurrency(totalReturned, currentCurrency)}</span>
+                                        </div>
+                                    )}
                                     <div className="flex justify-between text-sm text-[var(--color-text-muted)]">
                                         <span>Impuestos</span>
                                         <span>{formatCurrency(0, currentCurrency)}</span>
                                     </div>
                                     <div className="border-t border-[var(--glass-border)] pt-2 flex justify-between font-bold text-[var(--color-text)]">
                                         <span>Total</span>
-                                        <span className="text-[var(--color-primary)] text-lg">{formatCurrency(selectedSale.total, currentCurrency)}</span>
+                                        <span className="text-[var(--color-primary)] text-lg">{formatCurrency(selectedSale.total - totalReturned, currentCurrency)}</span>
                                     </div>
                                 </div>
 
@@ -764,9 +919,67 @@ const SalesHistory = () => {
                                         </p>
                                     </div>
                                 )}
+
+                                {/* Returns History (Mobile) */}
+                                {saleReturns.length > 0 && (
+                                    <div className="mt-4 p-4 bg-orange-500/10 rounded-xl border border-orange-500/20">
+                                        <p className="text-xs text-orange-400 uppercase font-bold mb-3 flex items-center gap-2">
+                                            <RotateCcw size={12} />
+                                            Devoluciones ({saleReturns.length})
+                                        </p>
+                                        <div className="space-y-3">
+                                            {saleReturns.map((ret) => (
+                                                <div key={ret.id} className="p-3 bg-black/20 rounded-lg">
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <span className="text-xs text-[var(--color-text-muted)]">
+                                                            {formatInCompanyTime(ret.created_at, currentCompanyTimezone, 'dd/MM/yyyy HH:mm')}
+                                                        </span>
+                                                        <span className="text-sm font-bold text-orange-400">
+                                                            -{formatCurrency(ret.total, currentCurrency)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        {ret.items.map((item, i) => (
+                                                            <div key={i} className="flex justify-between text-xs text-[var(--color-text-muted)]">
+                                                                <span>{item.name}</span>
+                                                                <span>x{item.quantity}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    <p className="text-xs text-orange-300/70 italic mt-2">"{ret.reason}"</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="mt-3 pt-3 border-t border-orange-500/20 flex justify-between text-sm">
+                                            <span className="text-orange-400 font-bold">Total Devuelto</span>
+                                            <span className="text-orange-400 font-bold">
+                                                -{formatCurrency(saleReturns.reduce((sum, r) => sum + r.total, 0), currentCurrency)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
                             </>
                         )}
                     </div>
+
+                    {/* Mobile Return Modal */}
+                    {showReturnModal && selectedSale && (
+                        <div className="fixed inset-0 z-[99999]">
+                            <ReturnModal
+                                sale={selectedSale}
+                                onClose={() => setShowReturnModal(false)}
+                                onSuccess={handleReturnSuccess}
+                            />
+                        </div>
+                    )}
+
+                    {/* Mobile Return Success Toast */}
+                    {returnSuccess && (
+                        <div className="fixed top-4 left-4 right-4 z-[99999] bg-green-500/90 text-white px-4 py-3 rounded-xl shadow-lg flex items-center justify-center gap-2">
+                            <RotateCcw size={16} />
+                            <span className="text-sm font-bold">Devolución: {formatCurrency(returnSuccess, currentCurrency)}</span>
+                        </div>
+                    )}
 
                     {/* Mobile Close Button */}
                     <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)]">
