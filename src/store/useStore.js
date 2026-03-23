@@ -2572,6 +2572,9 @@ export const useStore = create(persist((set, get) => ({
             } else if (type === 'category') {
                 const cnt = await turso.execute({ sql: `SELECT COUNT(*) as c FROM products WHERE company_id = ? AND category = ?`, args: [activeCompanyId, category] });
                 totalProducts = cnt.rows[0]?.c || 0;
+            } else if (type === 'supplier') {
+                const cnt = await turso.execute({ sql: `SELECT COUNT(*) as c FROM products WHERE company_id = ? AND supplier = ?`, args: [activeCompanyId, category] });
+                totalProducts = cnt.rows[0]?.c || 0;
             }
             const res = await turso.execute({
                 sql: `INSERT INTO inventory_controls (company_id, user_id, user_name, name, type, category, status, total_products, counted_products, started_at, created_at) VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, 0, ?, ?)`,
@@ -2606,6 +2609,10 @@ export const useStore = create(persist((set, get) => ({
             let args = [activeCompanyId];
             if (type === 'category' && category) {
                 where += ` AND p.category = ?`;
+                args.push(category);
+            }
+            if (type === 'supplier' && category) {
+                where += ` AND p.supplier = ?`;
                 args.push(category);
             }
             if (search) {

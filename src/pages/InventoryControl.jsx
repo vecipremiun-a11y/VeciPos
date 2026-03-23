@@ -8,7 +8,7 @@ import {
     ClipboardCheck, Search, Package, BarChart3, AlertTriangle, CheckCircle2,
     TrendingDown, TrendingUp, X, Plus, ScanBarcode, ArrowLeft, Loader2,
     ChevronDown, History, Trash2, Edit3, XCircle, PackageCheck, Filter,
-    Hash, Eye, Download, Share2, Camera
+    Hash, Eye, Download, Share2, Camera, Truck
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -95,7 +95,7 @@ const InventoryControl = () => {
         saveControlItem, removeControlItem, completeInventoryControl,
         cancelInventoryControl, fetchControlReport, fetchControlHistory,
         getProductByBarcode, categories: storeCategories, currentCurrency,
-        activeCompanyId
+        activeCompanyId, suppliers
     } = useStore();
     const { can } = usePermissions();
 
@@ -108,6 +108,7 @@ const InventoryControl = () => {
     const [formName, setFormName] = useState('');
     const [formType, setFormType] = useState('complete');
     const [formCategory, setFormCategory] = useState('');
+    const [formSupplier, setFormSupplier] = useState('');
     const [creating, setCreating] = useState(false);
     const [showForm, setShowForm] = useState(false);
 
@@ -324,7 +325,7 @@ const InventoryControl = () => {
         const result = await createInventoryControl({
             name: formName.trim(),
             type: formType,
-            category: formType === 'category' ? formCategory : null
+            category: formType === 'category' ? formCategory : formType === 'supplier' ? formSupplier : null
         });
         setCreating(false);
         if (result.success) {
@@ -378,7 +379,7 @@ const InventoryControl = () => {
 
     const fmt = (v) => formatCurrency(v, currentCurrency);
     const fmtNum = (v) => (Math.round(v * 1000) / 1000).toString();
-    const typeLabel = (t) => t === 'complete' ? 'Completo' : t === 'category' ? 'Por Categoría' : 'Libre';
+    const typeLabel = (t) => t === 'complete' ? 'Completo' : t === 'category' ? 'Por Categoría' : t === 'supplier' ? 'Por Proveedor' : 'Libre';
 
     // ─── PDF Download ───
     const downloadReportPDF = (ctrl, rep, items, fmtC, fmtN) => {
@@ -571,10 +572,11 @@ const InventoryControl = () => {
                         {/* Type */}
                         <div>
                             <label className="text-sm text-zinc-400 mb-2 block">Tipo de control</label>
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-4 gap-2">
                                 {[
                                     { key: 'complete', label: 'Completo', icon: Package, desc: 'Todos los productos' },
                                     { key: 'category', label: 'Categoría', icon: Filter, desc: 'Una categoría' },
+                                    { key: 'supplier', label: 'Proveedor', icon: Truck, desc: 'Un proveedor' },
                                     { key: 'free', label: 'Libre', icon: ScanBarcode, desc: 'Escaneo libre' },
                                 ].map(opt => (
                                     <button
@@ -610,10 +612,27 @@ const InventoryControl = () => {
                             </div>
                         )}
 
+                        {/* Supplier selector */}
+                        {formType === 'supplier' && (
+                            <div>
+                                <label className="text-sm text-zinc-400 mb-1 block">Proveedor</label>
+                                <select
+                                    value={formSupplier}
+                                    onChange={e => setFormSupplier(e.target.value)}
+                                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-blue-500/50 transition-all"
+                                >
+                                    <option value="">Seleccionar proveedor...</option>
+                                    {(suppliers || []).filter(s => s.status === 'active').map(s => (
+                                        <option key={s.id} value={s.name} className="bg-zinc-900">{s.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
                         {/* Create button */}
                         <button
                             onClick={handleCreate}
-                            disabled={creating || !formName.trim() || (formType === 'category' && !formCategory)}
+                            disabled={creating || !formName.trim() || (formType === 'category' && !formCategory) || (formType === 'supplier' && !formSupplier)}
                             className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold
                                        hover:from-blue-500 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed
                                        shadow-[0_4px_20px_rgba(59,130,246,0.3)] hover:shadow-[0_6px_25px_rgba(59,130,246,0.4)]
