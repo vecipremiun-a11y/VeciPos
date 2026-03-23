@@ -2555,14 +2555,14 @@ export const useStore = create(persist((set, get) => ({
         const { activeCompanyId, currentUser } = get();
         try {
             const now = new Date().toISOString();
-            // Check for existing active control
+            // Check for existing active control for THIS user
             const existing = await turso.execute({
-                sql: `SELECT id, user_name, started_at FROM inventory_controls WHERE company_id = ? AND status = 'in_progress' LIMIT 1`,
-                args: [activeCompanyId]
+                sql: `SELECT id, user_name, started_at FROM inventory_controls WHERE company_id = ? AND user_id = ? AND status = 'in_progress' LIMIT 1`,
+                args: [activeCompanyId, currentUser?.id]
             });
             if (existing.rows.length > 0) {
                 const e = existing.rows[0];
-                return { success: false, error: `Ya existe un control en progreso por ${e.user_name} desde ${e.started_at}`, existing: e };
+                return { success: false, error: `Ya tienes un control en progreso desde ${e.started_at}`, existing: e };
             }
             // Count total products for scope
             let totalProducts = 0;
@@ -2585,11 +2585,11 @@ export const useStore = create(persist((set, get) => ({
     },
 
     fetchActiveInventoryControl: async () => {
-        const { activeCompanyId } = get();
+        const { activeCompanyId, currentUser } = get();
         try {
             const res = await turso.execute({
-                sql: `SELECT * FROM inventory_controls WHERE company_id = ? AND status = 'in_progress' LIMIT 1`,
-                args: [activeCompanyId]
+                sql: `SELECT * FROM inventory_controls WHERE company_id = ? AND user_id = ? AND status = 'in_progress' LIMIT 1`,
+                args: [activeCompanyId, currentUser?.id]
             });
             if (res.rows.length === 0) return null;
             return res.rows[0];
