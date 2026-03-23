@@ -215,24 +215,44 @@ const InventoryControl = () => {
 
     const startCameraScanner = useCallback(async () => {
         setCameraOpen(true);
-        // Wait for DOM to mount
         setTimeout(async () => {
             try {
-                const { Html5Qrcode } = await import('html5-qrcode');
-                const scanner = new Html5Qrcode('camera-scanner-region');
+                const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
+
+                // Only 1D barcode formats for speed
+                const barcodeFormats = [
+                    Html5QrcodeSupportedFormats.EAN_13,
+                    Html5QrcodeSupportedFormats.EAN_8,
+                    Html5QrcodeSupportedFormats.CODE_128,
+                    Html5QrcodeSupportedFormats.CODE_39,
+                    Html5QrcodeSupportedFormats.UPC_A,
+                    Html5QrcodeSupportedFormats.UPC_E,
+                    Html5QrcodeSupportedFormats.ITF,
+                    Html5QrcodeSupportedFormats.CODABAR,
+                ];
+
+                const scanner = new Html5Qrcode('camera-scanner-region', {
+                    formatsToSupport: barcodeFormats,
+                    verbose: false
+                });
                 cameraScannerRef.current = scanner;
+
                 await scanner.start(
                     { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 250, height: 120 }, aspectRatio: 1.0 },
+                    {
+                        fps: 15,
+                        qrbox: { width: 280, height: 150 },
+                        aspectRatio: 1.333,
+                        disableFlip: true,
+                    },
                     (decodedText) => {
                         scanBeep();
                         vibrate([100, 50, 100]);
                         setSearchTerm(decodedText);
                         stopCameraScanner();
-                        // Trigger barcode search
                         handleBarcodeScan(decodedText);
                     },
-                    () => {} // ignore errors during scanning
+                    () => {}
                 );
             } catch (err) {
                 console.error('Error starting camera scanner:', err);
@@ -379,7 +399,12 @@ const InventoryControl = () => {
 
     const fmt = (v) => formatCurrency(v, currentCurrency);
     const fmtNum = (v) => (Math.round(v * 1000) / 1000).toString();
-    const typeLabel = (t) => t === 'complete' ? 'Completo' : t === 'category' ? 'Por Categoría' : t === 'supplier' ? 'Por Proveedor' : 'Libre';
+    const typeLabel = (t, cat) => {
+        if (t === 'complete') return 'Completo';
+        if (t === 'category') return cat ? `Por Categoría: ${cat}` : 'Por Categoría';
+        if (t === 'supplier') return cat ? `Por Proveedor: ${cat}` : 'Por Proveedor';
+        return 'Libre';
+    };
 
     // ─── PDF Download ───
     const downloadReportPDF = (ctrl, rep, items, fmtC, fmtN) => {
@@ -661,7 +686,7 @@ const InventoryControl = () => {
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-3 text-xs text-zinc-500 mt-1">
-                                        <span>{typeLabel(h.type)}</span>
+                                        <span>{typeLabel(h.type, h.category)}</span>
                                         <span>•</span>
                                         <span>{h.user_name}</span>
                                         <span>•</span>
@@ -696,7 +721,7 @@ const InventoryControl = () => {
                             <div className="min-w-0">
                                 <h1 className="font-bold text-white truncate">{control.name}</h1>
                                 <p className="text-xs text-zinc-500">
-                                    {typeLabel(control.type)}{control.category ? ` — ${control.category}` : ''} • {control.user_name}
+                                    {typeLabel(control.type, control.category)} • {control.user_name}
                                 </p>
                             </div>
                         </div>
@@ -761,8 +786,8 @@ const InventoryControl = () => {
 
             {/* Camera scanner modal */}
             {cameraOpen && (
-                <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4" onClick={stopCameraScanner}>
-                    <div className="bg-[#0f0f2d] border border-white/10 rounded-2xl overflow-hidden w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                <div className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center p-4" onClick={stopCameraScanner}>
+                    <div className="bg-[#0f0f2d] border border-white/10 rounded-2xl overflow-hidden w-full max-w-md" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-between p-4 border-b border-white/10">
                             <div className="flex items-center gap-2 text-white font-medium">
                                 <Camera size={18} className="text-blue-400" />
@@ -772,8 +797,21 @@ const InventoryControl = () => {
                                 <X size={18} />
                             </button>
                         </div>
-                        <div id="camera-scanner-region" className="w-full" />
-                        <p className="text-center text-zinc-500 text-xs py-3">Apunta la cámara al código de barras</p>
+                        <div className="relative">
+                            <div id="camera-scanner-region" className="w-full" />
+                            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                                <div className="w-[280px] h-[150px] border-2 border-blue-400/40 rounded-lg">
+                                    <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-blue-400 rounded-tl-lg" />
+                                    <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-blue-400 rounded-tr-lg" />
+                                    <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-blue-400 rounded-bl-lg" />
+                                    <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-blue-400 rounded-br-lg" />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="text-center py-3 px-4">
+                            <p className="text-zinc-400 text-xs">Centra el código de barras dentro del recuadro</p>
+                            <p className="text-zinc-600 text-[10px] mt-1">EAN-13 • EAN-8 • Code128 • Code39 • UPC-A • UPC-E</p>
+                        </div>
                     </div>
                 </div>
             )}
@@ -1018,7 +1056,7 @@ const InventoryControl = () => {
                     <div className="flex-1 min-w-0">
                         <h1 className="text-xl font-bold text-white truncate">Reporte — {reportControl?.name}</h1>
                         <p className="text-xs text-zinc-500">
-                            {typeLabel(reportControl?.type)}{reportControl?.category ? ` — ${reportControl?.category}` : ''} • {reportControl?.user_name} • {new Date(reportControl?.completed_at || reportControl?.started_at).toLocaleString()}
+                            {typeLabel(reportControl?.type, reportControl?.category)} • {reportControl?.user_name} • {new Date(reportControl?.completed_at || reportControl?.started_at).toLocaleString()}
                         </p>
                     </div>
                 </div>
