@@ -8,7 +8,7 @@ import {
     ClipboardCheck, Search, Package, BarChart3, AlertTriangle, CheckCircle2,
     TrendingDown, TrendingUp, X, Plus, ScanBarcode, ArrowLeft, Loader2,
     ChevronDown, History, Trash2, Edit3, XCircle, PackageCheck, Filter,
-    Hash, Eye, Download, Share2
+    Hash, Eye, Download, Share2, Camera
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -26,6 +26,7 @@ const playBeep = (freq = 880, duration = 0.12) => {
     } catch (_) {}
 };
 const successBeep = () => playBeep(1100, 0.1);
+const scanBeep = () => { playBeep(1200, 0.15); setTimeout(() => playBeep(1500, 0.1), 160); };
 const diffBeep = () => { playBeep(440, 0.08); setTimeout(() => playBeep(440, 0.08), 120); };
 const vibrate = (pattern) => { try { navigator?.vibrate?.(pattern); } catch (_) {} };
 
@@ -205,6 +206,58 @@ const InventoryControl = () => {
         }
     }, [view, products, getProductByBarcode]);
     useBarcodeScanner(handleBarcodeScan);
+
+    // ─── Camera barcode scanner ───
+    const [cameraOpen, setCameraOpen] = useState(false);
+    const cameraScannerRef = useRef(null);
+    const cameraRegionRef = useRef(null);
+
+    const startCameraScanner = useCallback(async () => {
+        setCameraOpen(true);
+        // Wait for DOM to mount
+        setTimeout(async () => {
+            try {
+                const { Html5Qrcode } = await import('html5-qrcode');
+                const scanner = new Html5Qrcode('camera-scanner-region');
+                cameraScannerRef.current = scanner;
+                await scanner.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 250, height: 120 }, aspectRatio: 1.0 },
+                    (decodedText) => {
+                        scanBeep();
+                        vibrate([100, 50, 100]);
+                        setSearchTerm(decodedText);
+                        stopCameraScanner();
+                        // Trigger barcode search
+                        handleBarcodeScan(decodedText);
+                    },
+                    () => {} // ignore errors during scanning
+                );
+            } catch (err) {
+                console.error('Error starting camera scanner:', err);
+                setCameraOpen(false);
+            }
+        }, 100);
+    }, [handleBarcodeScan]);
+
+    const stopCameraScanner = useCallback(() => {
+        if (cameraScannerRef.current) {
+            cameraScannerRef.current.stop().then(() => {
+                cameraScannerRef.current.clear();
+                cameraScannerRef.current = null;
+            }).catch(() => {});
+        }
+        setCameraOpen(false);
+    }, []);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (cameraScannerRef.current) {
+                cameraScannerRef.current.stop().catch(() => {});
+            }
+        };
+    }, []);
 
     // ─── Search click on product ───
     const handleProductClick = (product) => {
@@ -658,25 +711,53 @@ const InventoryControl = () => {
             </GlassCard>
 
             {/* Scan input */}
-            <div className="relative">
-                <ScanBarcode size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
-                <input
-                    ref={searchInputRef}
-                    type="text"
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    placeholder="Escanear código de barras o buscar producto..."
-                    className="w-full pl-11 pr-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-zinc-500
-                               focus:outline-none focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 focus:bg-white/[0.07]
-                               shadow-[0_4px_20px_rgba(0,0,0,0.2)] transition-all text-sm"
-                    autoFocus
-                />
-                {searchTerm && (
-                    <button onClick={() => { setSearchTerm(''); searchInputRef.current?.focus(); }} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-white/10 text-zinc-500">
-                        <X size={16} />
-                    </button>
-                )}
+            <div className="relative flex gap-2">
+                <div className="relative flex-1">
+                    <ScanBarcode size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
+                    <input
+                        ref={searchInputRef}
+                        type="text"
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                        placeholder="Escanear código de barras o buscar producto..."
+                        className="w-full pl-11 pr-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-zinc-500
+                                   focus:outline-none focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 focus:bg-white/[0.07]
+                                   shadow-[0_4px_20px_rgba(0,0,0,0.2)] transition-all text-sm"
+                        autoFocus
+                    />
+                    {searchTerm && (
+                        <button onClick={() => { setSearchTerm(''); searchInputRef.current?.focus(); }} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-white/10 text-zinc-500">
+                            <X size={16} />
+                        </button>
+                    )}
+                </div>
+                <button
+                    onClick={startCameraScanner}
+                    className="shrink-0 p-3.5 bg-white/5 border border-white/10 rounded-2xl text-zinc-400 hover:text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/30 transition-all"
+                    title="Escanear con cámara"
+                >
+                    <Camera size={20} />
+                </button>
             </div>
+
+            {/* Camera scanner modal */}
+            {cameraOpen && (
+                <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4" onClick={stopCameraScanner}>
+                    <div className="bg-[#0f0f2d] border border-white/10 rounded-2xl overflow-hidden w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-4 border-b border-white/10">
+                            <div className="flex items-center gap-2 text-white font-medium">
+                                <Camera size={18} className="text-blue-400" />
+                                Escanear código de barras
+                            </div>
+                            <button onClick={stopCameraScanner} className="p-1 rounded-full hover:bg-white/10 text-zinc-400">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div id="camera-scanner-region" className="w-full" />
+                        <p className="text-center text-zinc-500 text-xs py-3">Apunta la cámara al código de barras</p>
+                    </div>
+                </div>
+            )}
 
             {/* Scanned product card */}
             {scannedProduct && (
