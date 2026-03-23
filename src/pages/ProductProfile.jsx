@@ -219,7 +219,7 @@ const ProductProfile = () => {
 
 
     return (
-        <div className="h-full flex flex-col gap-4 p-4 lg:p-0 animate-in fade-in duration-300">
+        <div className="min-h-full flex flex-col gap-4 p-4 lg:p-0 pb-8 animate-in fade-in duration-300">
             {/* Header Product Search */}
             <div className="glass-card p-4 relative z-[50]">
                 <div className="flex gap-3">
@@ -411,7 +411,7 @@ const ProductProfile = () => {
                     </div>
 
                     {/* Content */}
-                    <div className="p-0 min-h-[400px]">
+                    <div className="p-0 min-h-[500px] max-h-[60vh] overflow-y-auto">
                         {isLoadingData ? (
                             <div className="flex flex-col items-center justify-center py-20 text-[var(--color-text-muted)]">
                                 <RefreshCw className="animate-spin mb-4" size={32} />
@@ -425,13 +425,13 @@ const ProductProfile = () => {
                                         <table className="w-full text-left border-collapse">
                                             <thead>
                                                 <tr className="border-b border-[var(--glass-border)] text-[var(--color-text-muted)] text-xs uppercase bg-[var(--glass-bg)]">
-                                                    <th className="p-4 font-semibold">Fecha</th>
-                                                    <th className="p-4 font-semibold">N° Factura</th>
-                                                    <th className="p-4 font-semibold">Proveedor</th>
-                                                    <th className="p-4 font-semibold text-center">Cant.</th>
-                                                    <th className="p-4 font-semibold text-right">Costo Unit.</th>
-                                                    <th className="p-4 font-semibold text-right">Subtotal</th>
-                                                    <th className="p-4 font-semibold text-center">Estado</th>
+                                                    <th className="p-4 font-semibold sticky top-0 bg-[var(--glass-bg)] z-10">Fecha</th>
+                                                    <th className="p-4 font-semibold sticky top-0 bg-[var(--glass-bg)] z-10">N° Factura</th>
+                                                    <th className="p-4 font-semibold sticky top-0 bg-[var(--glass-bg)] z-10">Proveedor</th>
+                                                    <th className="p-4 font-semibold text-center sticky top-0 bg-[var(--glass-bg)] z-10">Cant.</th>
+                                                    <th className="p-4 font-semibold text-right sticky top-0 bg-[var(--glass-bg)] z-10">Costo Unit.</th>
+                                                    <th className="p-4 font-semibold text-right sticky top-0 bg-[var(--glass-bg)] z-10">Subtotal</th>
+                                                    <th className="p-4 font-semibold text-center sticky top-0 bg-[var(--glass-bg)] z-10">Estado</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -485,14 +485,14 @@ const ProductProfile = () => {
                                         <table className="w-full text-left border-collapse">
                                             <thead>
                                                 <tr className="border-b border-[var(--glass-border)] text-[var(--color-text-muted)] text-xs uppercase bg-[var(--glass-bg)]">
-                                                    <th className="p-4 font-semibold">Fecha</th>
-                                                    <th className="p-4 font-semibold">N° Boleta</th>
-                                                    <th className="p-4 font-semibold">Vendedor</th>
-                                                    <th className="p-4 font-semibold">Cliente</th>
-                                                    <th className="p-4 font-semibold text-center">Cant.</th>
-                                                    <th className="p-4 font-semibold text-right">Precio Unit.</th>
-                                                    <th className="p-4 font-semibold text-right">Subtotal</th>
-                                                    <th className="p-4 font-semibold text-center">Método</th>
+                                                    <th className="p-4 font-semibold sticky top-0 bg-[var(--glass-bg)] z-10">Fecha</th>
+                                                    <th className="p-4 font-semibold sticky top-0 bg-[var(--glass-bg)] z-10">N° Boleta</th>
+                                                    <th className="p-4 font-semibold sticky top-0 bg-[var(--glass-bg)] z-10">Vendedor</th>
+                                                    <th className="p-4 font-semibold sticky top-0 bg-[var(--glass-bg)] z-10">Cliente</th>
+                                                    <th className="p-4 font-semibold text-center sticky top-0 bg-[var(--glass-bg)] z-10">Cant.</th>
+                                                    <th className="p-4 font-semibold text-right sticky top-0 bg-[var(--glass-bg)] z-10">Precio Unit.</th>
+                                                    <th className="p-4 font-semibold text-right sticky top-0 bg-[var(--glass-bg)] z-10">Subtotal</th>
+                                                    <th className="p-4 font-semibold text-center sticky top-0 bg-[var(--glass-bg)] z-10">Método</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -567,13 +567,13 @@ const ProductProfile = () => {
                                         <table className="w-full">
                                             <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] text-xs uppercase">
                                                 <tr>
-                                                    <th className="text-left p-3">#</th>
-                                                    <th className="text-left p-3">Tipo</th>
-                                                    <th className="text-left p-3">Referencia</th>
-                                                    <th className="text-right p-3">Cantidad</th>
-                                                    <th className="text-right p-3">Precio/Costo</th>
-                                                    <th className="text-left p-3">Fecha</th>
-                                                    <th className="text-left p-3">Usuario</th>
+                                                    <th className="text-left p-3 sticky top-0 bg-[var(--glass-bg)] z-10">#</th>
+                                                    <th className="text-left p-3 sticky top-0 bg-[var(--glass-bg)] z-10">Tipo</th>
+                                                    <th className="text-left p-3 sticky top-0 bg-[var(--glass-bg)] z-10">Referencia</th>
+                                                    <th className="text-right p-3 sticky top-0 bg-[var(--glass-bg)] z-10">Cantidad</th>
+                                                    <th className="text-right p-3 sticky top-0 bg-[var(--glass-bg)] z-10">Precio/Costo</th>
+                                                    <th className="text-left p-3 sticky top-0 bg-[var(--glass-bg)] z-10">Fecha</th>
+                                                    <th className="text-left p-3 sticky top-0 bg-[var(--glass-bg)] z-10">Usuario</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-[var(--glass-border)]">

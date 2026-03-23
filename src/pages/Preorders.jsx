@@ -226,7 +226,7 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] font-bold">$</span>
                                     <input
                                         type="number"
-                                        className="glass-input w-full pl-7 text-lg font-bold text-green-400"
+                                        className="glass-input w-full !pl-7 text-lg font-bold text-green-400"
                                         placeholder="0"
                                         value={depositAmount}
                                         onChange={e => setDepositAmount(e.target.value)}
@@ -489,7 +489,7 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
                                 <div className="relative">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
                                     <input type="number" placeholder={String(details.preorder.remaining_amount)}
-                                        className="glass-input w-full pl-8 font-bold"
+                                        className="glass-input w-full !pl-8 font-bold"
                                         value={payAmount} onChange={e => setPayAmount(e.target.value)} />
                                 </div>
                                 <div className="flex gap-2">

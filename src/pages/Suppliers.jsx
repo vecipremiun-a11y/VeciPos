@@ -254,7 +254,7 @@ const SupplierModal = ({ isOpen, onClose, onSave, supplierToEdit }) => {
                                 type="tel"
                                 value={formData.phone}
                                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                                className="glass-input w-full pl-10"
+                                className="glass-input w-full !pl-10"
                                 placeholder="+56 9 1234 5678"
                             />
                         </div>
@@ -268,7 +268,7 @@ const SupplierModal = ({ isOpen, onClose, onSave, supplierToEdit }) => {
                                 type="email"
                                 value={formData.email}
                                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                className="glass-input w-full pl-10"
+                                className="glass-input w-full !pl-10"
                                 placeholder="contacto@proveedor.com"
                             />
                         </div>

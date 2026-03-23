@@ -146,7 +146,7 @@ const DailyPanel = () => {
                     <div className="relative flex-1 max-w-md">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={16} />
                         <input
-                            className="glass-input pl-9 w-full"
+                            className="glass-input !pl-9 w-full"
                             placeholder="Buscar empleado..."
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}

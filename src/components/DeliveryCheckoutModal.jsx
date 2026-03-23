@@ -124,7 +124,7 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
                                                 step="0.01"
                                                 min="0"
                                                 placeholder="Peso real"
-                                                className="glass-input w-full pl-9 pr-10 text-lg font-bold"
+                                                className="glass-input w-full !pl-9 !pr-10 text-lg font-bold"
                                                 value={iw.real_weight_kg}
                                                 onChange={e => handleWeightChange(iw.id, e.target.value)}
                                                 onClick={e => e.target.select()}

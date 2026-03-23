@@ -474,7 +474,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 value={formData.price}
                                 onChange={handleChange}
                                 style={{ fontSize: '42px' }}
-                                className="glass-input w-full font-bold text-center pl-8 text-white h-16"
+                                className="glass-input w-full font-bold text-center !pl-8 text-white h-16"
                                 required
                             />
                         </div>
@@ -725,7 +725,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                                     value={formData.preorder_price_per_kg}
                                                     onChange={handleChange}
                                                     placeholder="0"
-                                                    className="glass-input w-full pl-8"
+                                                    className="glass-input w-full !pl-8"
                                                 />
                                             </div>
                                         </div>
@@ -886,7 +886,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                                     newRanges[index] = { ...newRanges[index], price: val, margin: margin };
                                                     setFormData(prev => ({ ...prev, price_ranges: newRanges }));
                                                 }}
-                                                className="glass-input w-full py-1 px-2 text-sm pl-5 font-bold text-white"
+                                                className="glass-input w-full py-1 px-2 text-sm !pl-5 font-bold text-white"
                                                 placeholder="0.00"
                                             />
                                         </div>

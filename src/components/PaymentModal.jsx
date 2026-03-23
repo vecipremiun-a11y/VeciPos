@@ -528,7 +528,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                                     type="number"
                                                     value={row.amount}
                                                     onChange={(e) => updatePaymentRow(row.id, 'amount', e.target.value)}
-                                                    className="glass-input w-full p-3 pl-8 text-sm h-12 font-bold text-right"
+                                                    className="glass-input w-full p-3 !pl-8 text-sm h-12 font-bold text-right"
                                                     placeholder="0"
                                                 />
                                             </div>

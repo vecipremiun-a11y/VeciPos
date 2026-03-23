@@ -550,7 +550,7 @@ const Purchases = () => {
                                 placeholder="Buscar producto por nombre o código..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                className="glass-input w-full pl-10"
+                                className="glass-input w-full !pl-10"
                             />
                             {searchTerm && !selectedProduct && filteredProducts.length > 0 && (
                                 <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--color-surface)] dark:bg-[#1a1c2e] border border-[var(--glass-border)] rounded-lg shadow-xl z-50 max-h-[400px] overflow-y-auto custom-scrollbar">

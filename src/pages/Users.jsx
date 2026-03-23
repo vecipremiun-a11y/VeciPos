@@ -246,7 +246,7 @@ const Users = () => {
                     <input
                         type="text"
                         placeholder="Buscar usuario..."
-                        className="glass-input pl-10 w-full"
+                        className="glass-input !pl-10 w-full"
                         value={searchTerm}
                         onChange={(e) => {
                             setSearchTerm(e.target.value);

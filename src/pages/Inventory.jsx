@@ -205,7 +205,7 @@ const Inventory = () => {
                         <input
                             type="text"
                             placeholder="Buscar por nombre, SKU o categoría..."
-                            className="glass-input pl-10 w-full text-sm lg:text-base"
+                            className="glass-input !pl-10 w-full text-sm lg:text-base"
                             value={localSearchTerm}
                             onChange={(e) => setLocalSearchTerm(e.target.value)}
                         />

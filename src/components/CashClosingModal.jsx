@@ -95,7 +95,7 @@ const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => 
                                 type="number"
                                 value={actualAmount}
                                 onChange={(e) => setActualAmount(e.target.value)}
-                                className="glass-input w-full pl-8 text-right text-2xl font-bold text-white tracking-wider appearance-none"
+                                className="glass-input w-full !pl-8 text-right text-2xl font-bold text-white tracking-wider appearance-none"
                                 placeholder="0"
                             />
                         </div>

@@ -81,7 +81,7 @@ const AdvanceModal = ({ isOpen, onClose, onSuccess }) => {
                             <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={16} />
                             <input
                                 type="number"
-                                className="glass-input w-full pl-9"
+                                className="glass-input w-full !pl-9"
                                 value={formData.amount}
                                 onChange={e => setFormData({ ...formData, amount: e.target.value })}
                                 required

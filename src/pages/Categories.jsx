@@ -313,7 +313,7 @@ const CategoryModal = ({ isOpen, onClose, onSave, categoryToEdit }) => {
                                 <select
                                     value={formData.status}
                                     onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                                    className="glass-input w-full appearance-none pl-4 pr-10 py-3 cursor-pointer hover:border-[var(--color-primary)] transition-colors"
+                                    className="glass-input w-full appearance-none !pl-4 !pr-10 py-3 cursor-pointer hover:border-[var(--color-primary)] transition-colors"
                                 >
                                     <option value="active" className="bg-gray-900 text-white py-2">🟢 Activa</option>
                                     <option value="inactive" className="bg-gray-900 text-white py-2">🔴 Inactiva</option>

@@ -124,7 +124,7 @@ const QuickPreorderProductModal = ({ isOpen, onClose, onSuccess }) => {
                                     type="number"
                                     value={formData.price_per_kg}
                                     onChange={(e) => setFormData(prev => ({ ...prev, price_per_kg: e.target.value }))}
-                                    className="glass-input w-full pl-7"
+                                    className="glass-input w-full !pl-7"
                                     placeholder="0"
                                 />
                             </div>
