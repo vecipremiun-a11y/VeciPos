@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { AlertTriangle, TrendingDown, Clock, Bell, AlertCircle } from 'lucide-react';
+import { AlertTriangle, TrendingDown, Clock, Bell, AlertCircle, Users, CalendarClock } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { format, subDays, parseISO } from 'date-fns';
 import { usePermissions } from '../hooks/usePermissions';
@@ -19,7 +19,9 @@ const Dashboard = () => {
         currentCompanyTimezone,
         fetchAlertSummary,
         checkStockPredictions,
-        checkInventoryAlerts
+        checkInventoryAlerts,
+        clients,
+        productLots
     } = useStore();
 
     const { can } = usePermissions();
@@ -438,6 +440,138 @@ const Dashboard = () => {
                                     ))}
                                 </>
                             )}
+                        </div>
+                    </div>
+
+                </div>
+
+                {/* Second Row */}
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mt-6">
+
+                    {/* 5. Clientes con Deuda */}
+                    <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-rose-500 p-0 overflow-hidden xl:col-span-2">
+                        <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] flex justify-between items-center">
+                            <h4 className="text-rose-400 font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
+                                <Users size={16} /> Deudores
+                            </h4>
+                            <span className="bg-rose-500/20 text-rose-400 text-[10px] px-2 py-0.5 rounded-full border border-rose-500/20 font-bold">
+                                {clients.filter(c => (parseFloat(c.total_debt) || 0) > 0).length}
+                            </span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+                            {(() => {
+                                const debtors = clients
+                                    .filter(c => (parseFloat(c.total_debt) || 0) > 0)
+                                    .map(c => ({ ...c, debt: parseFloat(c.total_debt) || 0, overdue: parseInt(c.overdue_count) || 0 }))
+                                    .sort((a, b) => b.overdue !== a.overdue ? b.overdue - a.overdue : b.debt - a.debt)
+                                    .slice(0, 10);
+                                if (debtors.length === 0) return (
+                                    <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">Sin clientes con deuda</div>
+                                );
+                                return debtors.map(c => (
+                                    <div key={c.id} className={`flex items-center justify-between p-2 rounded border transition-colors ${
+                                        c.overdue > 0 ? 'bg-red-500/10 border-red-500/20 hover:bg-red-500/15' : 'bg-rose-500/5 border-rose-500/10 hover:bg-rose-500/10'
+                                    }`}>
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[10px] ${
+                                                c.overdue > 0 ? 'bg-red-500/20 text-red-400' : 'bg-rose-500/20 text-rose-400'
+                                            }`}>
+                                                {c.name.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-[var(--color-text)] text-xs font-medium truncate">{c.name}</p>
+                                                <div className="flex items-center gap-1.5">
+                                                    {c.overdue > 0 && (
+                                                        <span className="text-red-400 text-[10px] font-bold">MOROSO</span>
+                                                    )}
+                                                    {c.client_status === 'blocked' && (
+                                                        <span className="text-red-400 text-[10px]">Bloqueado</span>
+                                                    )}
+                                                    {c.pending_sales_count > 0 && (
+                                                        <span className="text-[var(--color-text-muted)] text-[10px]">{c.pending_sales_count} boleta{c.pending_sales_count > 1 ? 's' : ''}</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <span className={`text-xs font-bold shrink-0 ${c.overdue > 0 ? 'text-red-400' : 'text-rose-400'}`}>
+                                            {formatCurrency(c.debt, currentCurrency)}
+                                        </span>
+                                    </div>
+                                ));
+                            })()}
+                        </div>
+                    </div>
+
+                    {/* 6. Productos Vencidos / Por Vencer (FEFO) */}
+                    <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-purple-500 p-0 overflow-hidden xl:col-span-2">
+                        <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] flex justify-between items-center">
+                            <h4 className="text-purple-400 font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
+                                <CalendarClock size={16} /> Productos por Vencer
+                            </h4>
+                            {(() => {
+                                const now = new Date();
+                                const expiredCount = productLots.filter(l => l.expiry_date && new Date(l.expiry_date) < now && l.quantity > 0).length;
+                                const nearCount = productLots.filter(l => {
+                                    if (!l.expiry_date || l.quantity <= 0) return false;
+                                    const d = new Date(l.expiry_date);
+                                    return d >= now && d <= new Date(now.getTime() + 30 * 86400000);
+                                }).length;
+                                const total = expiredCount + nearCount;
+                                return (
+                                    <div className="flex items-center gap-1.5">
+                                        {expiredCount > 0 && <span className="bg-red-500/20 text-red-400 text-[10px] px-2 py-0.5 rounded-full border border-red-500/20 font-bold">{expiredCount} vencidos</span>}
+                                        {nearCount > 0 && <span className="bg-yellow-500/20 text-yellow-400 text-[10px] px-2 py-0.5 rounded-full border border-yellow-500/20 font-bold">{nearCount} por vencer</span>}
+                                        {total === 0 && <span className="bg-green-500/20 text-green-400 text-[10px] px-2 py-0.5 rounded-full border border-green-500/20 font-bold">0</span>}
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+                            {(() => {
+                                const now = new Date();
+                                const expiryLots = productLots
+                                    .filter(l => l.expiry_date && l.quantity > 0)
+                                    .map(l => {
+                                        const expDate = new Date(l.expiry_date);
+                                        const diffDays = Math.ceil((expDate - now) / 86400000);
+                                        return { ...l, diffDays, productName: l.product_name || `Producto #${l.product_id}`, unit: l.product_unit || 'Und' };
+                                    })
+                                    .filter(l => l.diffDays <= 30)
+                                    .sort((a, b) => a.diffDays - b.diffDays)
+                                    .slice(0, 15);
+
+                                if (expiryLots.length === 0) return (
+                                    <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">Sin productos vencidos o por vencer</div>
+                                );
+
+                                return expiryLots.map(l => {
+                                    const isExpired = l.diffDays < 0;
+                                    const isUrgent = l.diffDays >= 0 && l.diffDays <= 7;
+                                    const colorClass = isExpired ? 'red' : isUrgent ? 'orange' : 'yellow';
+                                    return (
+                                        <div key={l.id} className={`flex items-center justify-between p-2 rounded border transition-colors bg-${colorClass}-500/5 border-${colorClass}-500/10 hover:bg-${colorClass}-500/10`}>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-[var(--color-text)] text-xs font-medium truncate">{l.productName}</p>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[var(--color-text-muted)] text-[10px]">
+                                                        Lote: {l.batch_number || 'S/N'} · {l.quantity} {l.unit}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className="text-right shrink-0 ml-2">
+                                                <span className={`text-[10px] font-bold ${
+                                                    isExpired ? 'text-red-400' : isUrgent ? 'text-orange-400' : 'text-yellow-400'
+                                                }`}>
+                                                    {isExpired ? `VENCIDO (${Math.abs(l.diffDays)}d)` : l.diffDays === 0 ? 'VENCE HOY' : `${l.diffDays}d`}
+                                                </span>
+                                                <p className="text-[var(--color-text-muted)] text-[10px]">
+                                                    {new Date(l.expiry_date).toLocaleDateString('es-CL')}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    );
+                                });
+                            })()}
                         </div>
                     </div>
 

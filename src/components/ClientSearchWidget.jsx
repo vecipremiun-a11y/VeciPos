@@ -1,15 +1,32 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Search, UserPlus, X, User, Check } from 'lucide-react';
+import { Search, UserPlus, X, User, Check, ShieldAlert, AlertTriangle, Ban } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const ClientSearchWidget = () => {
-    const { clients, carts, activeCartId, setPosSelectedClient, addClient } = useStore();
+    const { clients, carts, activeCartId, setPosSelectedClient, addClient, currentCurrency } = useStore();
 
     // Derivar el cliente seleccionado desde el carrito activo
     const posSelectedClient = useMemo(() => {
         return carts.find(c => c.id === activeCartId)?.client || null;
     }, [carts, activeCartId]);
+
+    const clientData = useMemo(() => {
+        if (!posSelectedClient) return null;
+        return clients.find(c => c.id === posSelectedClient.id) || null;
+    }, [posSelectedClient, clients]);
+
+    // Derive credit status directly from client columns (instant, no async)
+    const creditStatus = useMemo(() => {
+        if (!clientData) return null;
+        return {
+            totalDebt: parseFloat(clientData.total_debt) || 0,
+            pendingCount: parseInt(clientData.pending_sales_count) || 0,
+            overdueCount: parseInt(clientData.overdue_count) || 0
+        };
+    }, [clientData]);
+
     const [searchTerm, setSearchTerm] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -66,15 +83,67 @@ const ClientSearchWidget = () => {
         }
     };
 
+    // Determine if we need to show a credit alert banner
+    const creditAlertInfo = useMemo(() => {
+        if (!clientData || !creditStatus) return null;
+        const isBlocked = clientData.client_status === 'blocked';
+        const isCreditBlocked = clientData.client_status === 'credit_blocked';
+        const isOverdue = creditStatus.overdueCount > 0;
+
+        if (isBlocked) return {
+            type: 'blocked',
+            icon: Ban,
+            title: 'Cliente Bloqueado',
+            message: 'Este cliente se encuentra INACTIVO por cuenta vencida. Necesita abonar o cancelar su deuda para poder seguir vendiendo a crédito.',
+            color: 'red'
+        };
+        if (isOverdue) return {
+            type: 'overdue',
+            icon: AlertTriangle,
+            title: `Cliente Moroso — ${creditStatus.overdueCount} ${creditStatus.overdueCount === 1 ? 'venta vencida' : 'ventas vencidas'}`,
+            message: `Tiene una deuda de ${formatCurrency(creditStatus.totalDebt, currentCurrency)} con pagos vencidos. Debe abonar o cancelar su cuenta antes de venderle a crédito.`,
+            color: 'red'
+        };
+        if (isCreditBlocked) return {
+            type: 'credit_blocked',
+            icon: ShieldAlert,
+            title: 'Crédito Suspendido',
+            message: 'El crédito de este cliente está bloqueado. Necesita abonar o cancelar su deuda pendiente para reactivar las ventas a crédito.',
+            color: 'orange'
+        };
+        return null;
+    }, [clientData, creditStatus, currentCurrency]);
+
     return (
         <div className="relative w-full" ref={wrapperRef}>
             {posSelectedClient ? (
+                <>
                 <div className="flex items-center justify-between bg-[var(--color-primary)]/10 border border-[var(--color-primary)] rounded-lg px-3 py-2">
                     <div className="flex items-center gap-2 overflow-hidden">
                         <User size={18} className="text-[var(--color-primary)] shrink-0" />
                         <div className="flex flex-col truncate">
-                            <span className="text-[var(--color-text)] font-medium text-sm truncate">{posSelectedClient.name}</span>
-                            {posSelectedClient.rut && <span className="text-[var(--color-text-muted)] text-xs">{posSelectedClient.rut}</span>}
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-[var(--color-text)] font-medium text-sm truncate">{posSelectedClient.name}</span>
+                                {clientData?.client_status === 'blocked' && (
+                                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400 flex items-center gap-0.5">
+                                        <ShieldAlert size={10} /> Bloq
+                                    </span>
+                                )}
+                                {clientData?.client_status === 'credit_blocked' && (
+                                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-400">Sin Créd</span>
+                                )}
+                                {creditStatus?.overdueCount > 0 && (
+                                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400 flex items-center gap-0.5">
+                                        <AlertTriangle size={10} /> Moroso
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {posSelectedClient.rut && <span className="text-[var(--color-text-muted)] text-xs">{posSelectedClient.rut}</span>}
+                                {creditStatus && creditStatus.totalDebt > 0 && (
+                                    <span className="text-xs text-red-400 font-medium">Deuda: {formatCurrency(creditStatus.totalDebt, currentCurrency)}</span>
+                                )}
+                            </div>
                         </div>
                     </div>
                     <button
@@ -84,6 +153,38 @@ const ClientSearchWidget = () => {
                         <X size={16} />
                     </button>
                 </div>
+
+                {/* ── Credit Alert Banner ── */}
+                {creditAlertInfo && (() => {
+                    const AlertIcon = creditAlertInfo.icon;
+                    return (
+                    <div className={cn(
+                        'mt-2 rounded-lg p-3 border animate-in fade-in slide-in-from-top-2 duration-300',
+                        creditAlertInfo.color === 'red'
+                            ? 'bg-red-500/15 border-red-500/40'
+                            : 'bg-orange-500/15 border-orange-500/40'
+                    )}>
+                        <div className="flex items-start gap-2">
+                            <AlertIcon
+                                size={18}
+                                className={cn('shrink-0 mt-0.5', creditAlertInfo.color === 'red' ? 'text-red-400' : 'text-orange-400')}
+                            />
+                            <div className="flex-1 min-w-0">
+                                <p className={cn(
+                                    'text-xs font-bold',
+                                    creditAlertInfo.color === 'red' ? 'text-red-400' : 'text-orange-400'
+                                )}>
+                                    {creditAlertInfo.title}
+                                </p>
+                                <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5 leading-snug">
+                                    {creditAlertInfo.message}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    );
+                })()}
+                </>
             ) : (
                 <div className="relative">
                     <div className="relative">

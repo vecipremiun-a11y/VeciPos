@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Calendar, FileText, Check, Eye, MessageCircle, Banknote } from 'lucide-react';
+import { ArrowLeft, Calendar, FileText, Check, Eye, MessageCircle, Banknote, Shield, ShieldAlert, ShieldOff, AlertTriangle, Clock, Download } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import ClientReceiptModal from './ClientReceiptModal';
@@ -8,9 +8,11 @@ import { formatCurrency } from '../utils/formatCurrency';
 
 import { usePermissions } from '../hooks/usePermissions';
 import AccessDenied from './auth/AccessDenied';
+import { generateAccountStatementPDF } from '../utils/generateAccountPDF';
 
 const ClientAccountDetails = ({ client, onBack }) => {
-    const { users, registerClientPayment, fetchClientSales, currentCurrency } = useStore();
+    const { users, registerClientPayment, fetchClientSales, currentCurrency, getClientCreditStatus, activeCompanyId } = useStore();
+    const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
     const { can } = usePermissions();
 
     // Permission Check
@@ -53,6 +55,18 @@ const ClientAccountDetails = ({ client, onBack }) => {
         s.payment_method === 'Crédito' && s.status !== 'paid' && s.status !== 'cancelled'
     );
     const totalDebt = pendingSales.reduce((sum, sale) => sum + parseFloat(sale.total), 0);
+
+    // Credit status info
+    const creditLimit = parseFloat(client.credit_limit || 0);
+    const creditEnabled = client.credit_enabled === 1 || client.credit_enabled === true;
+    const clientStatus = client.client_status || 'active';
+    const availableCredit = creditLimit > 0 ? Math.max(0, creditLimit - totalDebt) : null;
+    const creditUsagePercent = creditLimit > 0 ? Math.min(100, (totalDebt / creditLimit) * 100) : 0;
+    const overdueCount = pendingSales.filter(s => s.payment_due_date && new Date(s.payment_due_date) < new Date()).length;
+    const oldestOverdue = pendingSales
+        .filter(s => s.payment_due_date && new Date(s.payment_due_date) < new Date())
+        .sort((a, b) => new Date(a.payment_due_date) - new Date(b.payment_due_date))[0];
+    const oldestOverdueDays = oldestOverdue ? Math.floor((Date.now() - new Date(oldestOverdue.payment_due_date).getTime()) / (1000 * 60 * 60 * 24)) : 0;
 
     // Determine which sales to show based on viewMode
     const salesToShow = rawClientSales.filter(sale => {
@@ -184,6 +198,35 @@ const ClientAccountDetails = ({ client, onBack }) => {
                         </button>
                     </div>
 
+                    <button
+                        onClick={async () => {
+                            setIsGeneratingPDF(true);
+                            try {
+                                await generateAccountStatementPDF({
+                                    client,
+                                    pendingSales,
+                                    allSales: rawClientSales,
+                                    totalDebt,
+                                    creditLimit,
+                                    creditEnabled,
+                                    clientStatus,
+                                    activeCompanyId,
+                                    currentCurrency,
+                                    users
+                                });
+                            } catch (e) {
+                                console.error('Error generating PDF:', e);
+                            } finally {
+                                setIsGeneratingPDF(false);
+                            }
+                        }}
+                        disabled={isGeneratingPDF}
+                        className="px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 border border-[var(--color-primary)]/50 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 transition-all disabled:opacity-50"
+                    >
+                        <Download size={18} className={isGeneratingPDF ? 'animate-bounce' : ''} />
+                        {isGeneratingPDF ? 'Generando...' : 'Descargar PDF'}
+                    </button>
+
                     {can('clients.manage_payments') && (
                         <button
                             onClick={() => setIsPaymentModalOpen(true)}
@@ -198,7 +241,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
             </div>
 
             {/* Dashboard Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 shrink-0">
                 {/* Total Debt Card */}
                 <div className="glass-card p-6 bg-red-500/10 border-red-500/20 relative overflow-hidden group">
                     <div className="relative z-10">
@@ -210,14 +253,79 @@ const ClientAccountDetails = ({ client, onBack }) => {
                     </div>
                 </div>
 
-                {/* Last Purchase Card (Example Placeholder) */}
+                {/* Credit Limit Card */}
+                <div className="glass-card p-6 bg-[var(--glass-bg)] border-[var(--glass-border)]">
+                    <p className="text-[var(--color-text-muted)] text-sm font-bold uppercase tracking-wider mb-2">Límite de Crédito</p>
+                    {creditLimit > 0 ? (
+                        <>
+                            <p className="text-xl font-bold text-[var(--color-text)]">{formatCurrency(creditLimit, currentCurrency)}</p>
+                            <div className="mt-2 w-full bg-white/10 rounded-full h-2">
+                                <div
+                                    className={cn(
+                                        'h-2 rounded-full transition-all',
+                                        creditUsagePercent >= 95 ? 'bg-red-500' :
+                                        creditUsagePercent >= 80 ? 'bg-yellow-500' : 'bg-green-500'
+                                    )}
+                                    style={{ width: `${creditUsagePercent}%` }}
+                                />
+                            </div>
+                            <p className="text-xs text-[var(--color-text-muted)] mt-1">{creditUsagePercent.toFixed(0)}% utilizado</p>
+                        </>
+                    ) : (
+                        <p className="text-xl font-bold text-[var(--color-text)]">Sin límite</p>
+                    )}
+                </div>
+
+                {/* Available Credit / Status Card */}
+                <div className={cn(
+                    'glass-card p-6',
+                    overdueCount > 0 ? 'bg-red-500/10 border-red-500/20' :
+                    clientStatus !== 'active' ? 'bg-orange-500/10 border-orange-500/20' :
+                    'bg-green-500/10 border-green-500/20'
+                )}>
+                    <p className="text-[var(--color-text-muted)] text-sm font-bold uppercase tracking-wider mb-2">Estado</p>
+                    {overdueCount > 0 ? (
+                        <div className="flex items-center gap-2">
+                            <AlertTriangle className="text-red-400" size={24} />
+                            <div>
+                                <p className="text-xl font-bold text-red-400">Moroso</p>
+                                <p className="text-xs text-red-400/80">{oldestOverdueDays} días de atraso • {overdueCount} deuda{overdueCount > 1 ? 's' : ''}</p>
+                            </div>
+                        </div>
+                    ) : clientStatus === 'blocked' ? (
+                        <div className="flex items-center gap-2">
+                            <ShieldAlert className="text-red-400" size={24} />
+                            <p className="text-xl font-bold text-red-400">Bloqueado</p>
+                        </div>
+                    ) : clientStatus === 'credit_blocked' ? (
+                        <div className="flex items-center gap-2">
+                            <ShieldOff className="text-orange-400" size={24} />
+                            <p className="text-xl font-bold text-orange-400">Sin Crédito</p>
+                        </div>
+                    ) : !creditEnabled ? (
+                        <div className="flex items-center gap-2">
+                            <ShieldOff className="text-orange-400" size={24} />
+                            <p className="text-xl font-bold text-orange-400">Crédito OFF</p>
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-2">
+                            <Shield className="text-green-400" size={24} />
+                            <p className="text-xl font-bold text-green-400">Al Día</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Last Movement Card */}
                 <div className="glass-card p-6 bg-[var(--glass-bg)] border-[var(--glass-border)]">
                     <p className="text-[var(--color-text-muted)] text-sm font-bold uppercase tracking-wider mb-2">Último Movimiento</p>
                     <p className="text-xl font-bold text-[var(--color-text)]">
                         {rawClientSales.length > 0 ? new Date(rawClientSales[0].date).toLocaleDateString() : 'N/A'}
                     </p>
                     <p className="text-sm text-[var(--color-text-muted)] mt-1">
-                        {rawClientSales.length > 0 ? 'Registro de cliente' : 'Sin movimientos recientes'}
+                        {creditLimit > 0 && availableCredit !== null
+                            ? `Disponible: ${formatCurrency(availableCredit, currentCurrency)}`
+                            : rawClientSales.length > 0 ? `Plazo: ${client.credit_period_days || 30} días` : 'Sin movimientos'
+                        }
                     </p>
                 </div>
             </div>
@@ -293,6 +401,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
                                 <tr>
                                     <th className="p-4 text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Fecha</th>
                                     <th className="p-4 text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Detalle</th>
+                                    <th className="p-4 text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Vence</th>
                                     <th className="p-4 text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider text-right">Monto</th>
                                     <th className="p-4 text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider text-right">Acciones</th>
                                 </tr>
@@ -326,6 +435,38 @@ const ClientAccountDetails = ({ client, onBack }) => {
                                                 <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
                                                     COMPROBANTE DE PAGO
                                                 </span>
+                                            )}
+                                        </td>
+                                        <td className="p-4 text-sm whitespace-nowrap">
+                                            {sale.payment_due_date ? (() => {
+                                                const dueDate = new Date(sale.payment_due_date);
+                                                const now = new Date();
+                                                const daysLeft = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
+                                                const isPaid = sale.status === 'paid';
+                                                const isCancelled = sale.status === 'cancelled';
+                                                
+                                                if (isPaid || isCancelled) {
+                                                    return <span className="text-[var(--color-text-muted)]">{dueDate.toLocaleDateString()}</span>;
+                                                }
+                                                if (daysLeft < 0) {
+                                                    return (
+                                                        <span className="text-red-400 font-bold flex items-center gap-1">
+                                                            <AlertTriangle size={14} />
+                                                            Vencido ({Math.abs(daysLeft)}d)
+                                                        </span>
+                                                    );
+                                                }
+                                                if (daysLeft <= 3) {
+                                                    return (
+                                                        <span className="text-yellow-400 font-medium flex items-center gap-1">
+                                                            <Clock size={14} />
+                                                            {daysLeft === 0 ? 'Hoy' : `${daysLeft}d`}
+                                                        </span>
+                                                    );
+                                                }
+                                                return <span className="text-green-400">{dueDate.toLocaleDateString()}</span>;
+                                            })() : (
+                                                <span className="text-[var(--color-text-muted)] text-xs">-</span>
                                             )}
                                         </td>
                                         <td className="p-4 text-right">

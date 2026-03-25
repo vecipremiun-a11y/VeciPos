@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Banknote, CreditCard, Landmark, Coins, ArrowLeft, Check, Plus, Trash2, FileText, Loader2 } from 'lucide-react';
+import { X, Banknote, CreditCard, Landmark, Coins, ArrowLeft, Check, Plus, Trash2, FileText, Loader2, AlertTriangle, ShieldAlert, ShieldOff } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -12,13 +12,38 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
         paymentMethodsConfig,
         paymentTerminals,
         bankAccounts,
-        fetchPaymentMethodsSettings
+        fetchPaymentMethodsSettings,
+        getClientCreditStatus,
+        creditBlockMode,
+        clients
     } = useStore();
 
-    // Derivar el cliente seleccionado desde el carrito activo
+    // Derive selected client from active cart (don't rely on store getter)
     const posSelectedClient = useMemo(() => {
         return carts.find(c => c.id === activeCartId)?.client || null;
     }, [carts, activeCartId]);
+
+    // Client credit data
+    const clientData = useMemo(() => {
+        if (!posSelectedClient) return null;
+        return clients.find(c => c.id === posSelectedClient.id) || null;
+    }, [posSelectedClient, clients]);
+    const isClientBlocked = clientData?.client_status === 'blocked';
+    const isCreditBlocked = clientData?.client_status === 'credit_blocked' || clientData?.credit_enabled === 0;
+    const [creditStatus, setCreditStatus] = useState(null);
+
+    useEffect(() => {
+        if (isOpen && posSelectedClient?.id) {
+            getClientCreditStatus(posSelectedClient.id).then(setCreditStatus);
+        } else {
+            setCreditStatus(null);
+        }
+    }, [isOpen, posSelectedClient?.id]);
+
+    const creditLimitExceeded = useMemo(() => {
+        if (!creditStatus || !clientData?.credit_limit || clientData.credit_limit <= 0) return false;
+        return (creditStatus.totalDebt + total) > clientData.credit_limit;
+    }, [creditStatus, clientData, total]);
 
     const [step, setStep] = useState('select-method'); // 'select-method' | 'payment-details'
     const [method, setMethod] = useState(null);
@@ -348,6 +373,16 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
 
                     {step === 'select-method' && (
                         <div className="flex flex-col gap-6">
+                            {/* Blocked client banner */}
+                            {isClientBlocked && posSelectedClient && (
+                                <div className="flex items-center gap-3 p-3 rounded-xl bg-red-500/20 border border-red-500/40">
+                                    <ShieldAlert size={20} className="text-red-400 shrink-0" />
+                                    <span className="text-red-300 text-sm">
+                                        <strong>{posSelectedClient.name}</strong> está bloqueado. No se pueden realizar ventas a este cliente.
+                                    </span>
+                                </div>
+                            )}
+
                             <h3 className="text-center text-gray-300 text-lg">
                                 Elige cómo quieres procesar el pago por <span className="text-[var(--color-primary)] font-bold text-xl">{formatCurrency(total, currentCurrency)}</span>
                             </h3>
@@ -359,6 +394,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                         label="Efectivo"
                                         color="text-green-400"
                                         onClick={() => handleMethodSelect('Efectivo')}
+                                        disabled={isClientBlocked}
                                     />
                                 )}
                                 {paymentMethodsConfig.card_enabled === 1 && (
@@ -367,6 +403,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                         label="Tarjeta"
                                         color="text-blue-400"
                                         onClick={() => handleMethodSelect('Tarjeta')}
+                                        disabled={isClientBlocked}
                                     />
                                 )}
                                 {paymentMethodsConfig.transfer_enabled === 1 && (
@@ -375,6 +412,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                         label="Transferencia"
                                         color="text-purple-400"
                                         onClick={() => handleMethodSelect('Transferencia')}
+                                        disabled={isClientBlocked}
                                     />
                                 )}
                                 {paymentMethodsConfig.mixed_enabled === 1 && (
@@ -383,6 +421,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                         label="Pago Mixto"
                                         color="text-pink-400"
                                         onClick={() => handleMethodSelect('Mixto')}
+                                        disabled={isClientBlocked}
                                     />
                                 )}
                                 {paymentMethodsConfig.credit_enabled === 1 && (
@@ -390,9 +429,15 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                         icon={<FileText size={40} />}
                                         label="Crédito"
                                         color="text-orange-400"
+                                        disabled={isClientBlocked || isCreditBlocked}
                                         onClick={() => {
                                             if (!posSelectedClient) {
                                                 alert("Debes seleccionar un cliente para ventas a crédito.");
+                                                return;
+                                            }
+                                            if (isCreditBlocked) return;
+                                            if (creditLimitExceeded && creditBlockMode === 'block') {
+                                                alert(`El cliente excede su límite de crédito (${formatCurrency(clientData.credit_limit, currentCurrency)}). Venta a crédito bloqueada.`);
                                                 return;
                                             }
                                             handleMethodSelect('Crédito');
@@ -613,6 +658,49 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                     <p className="text-red-400/80 text-sm mt-2 font-medium">Monto a anotar: {formatCurrency(total, currentCurrency)}</p>
                                 </div>
                             </div>
+
+                            {/* Credit info cards */}
+                            {creditStatus && clientData?.credit_limit > 0 && (
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="glass-card p-3 text-center">
+                                        <p className="text-xs text-gray-400">Deuda Actual</p>
+                                        <p className="text-lg font-bold text-white">{formatCurrency(creditStatus.totalDebt, currentCurrency)}</p>
+                                    </div>
+                                    <div className="glass-card p-3 text-center">
+                                        <p className="text-xs text-gray-400">Límite</p>
+                                        <p className="text-lg font-bold text-white">{formatCurrency(clientData.credit_limit, currentCurrency)}</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Overdue warning */}
+                            {creditStatus && creditStatus.overdueCount > 0 && (
+                                <div className="bg-red-500/10 border border-red-500/30 p-3 rounded-lg flex gap-3 items-center">
+                                    <AlertTriangle size={18} className="text-red-400 shrink-0" />
+                                    <p className="text-sm text-red-300">
+                                        Este cliente tiene <strong>{creditStatus.overdueCount}</strong> {creditStatus.overdueCount === 1 ? 'venta vencida' : 'ventas vencidas'}
+                                        {creditStatus.oldestOverdueDays > 0 && <> (hasta {creditStatus.oldestOverdueDays} días)</>}.
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Credit limit exceeded warning */}
+                            {creditLimitExceeded && (
+                                <div className={cn(
+                                    "p-3 rounded-lg flex gap-3 items-center",
+                                    creditBlockMode === 'block'
+                                        ? "bg-red-500/20 border border-red-500/40"
+                                        : "bg-yellow-500/10 border border-yellow-500/30"
+                                )}>
+                                    <ShieldAlert size={18} className={creditBlockMode === 'block' ? "text-red-400 shrink-0" : "text-yellow-400 shrink-0"} />
+                                    <p className={cn("text-sm", creditBlockMode === 'block' ? "text-red-300" : "text-yellow-300")}>
+                                        {creditBlockMode === 'block'
+                                            ? 'Esta venta excede el límite de crédito. No se puede procesar.'
+                                            : 'Advertencia: esta venta excederá el límite de crédito del cliente.'}
+                                    </p>
+                                </div>
+                            )}
+
                             <div className="space-y-4">
                                 <div className="space-y-2">
                                     <label className="text-white font-medium block">Observaciones (Opcional)</label>
@@ -695,7 +783,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                             : method === 'Transferencia'
                                                 ? !observations
                                                 : method === 'Crédito'
-                                                    ? false // Always valid if arrived here (client check done before)
+                                                    ? (creditLimitExceeded && creditBlockMode === 'block')
                                                     : (parseFloat(amountPaid) || 0) < total
                                 )
                             }
@@ -725,12 +813,16 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
     );
 };
 
-const MethodButton = ({ icon, label, color, onClick }) => (
+const MethodButton = ({ icon, label, color, onClick, disabled }) => (
     <button
         onClick={onClick}
-        className="glass-card hover:bg-white/10 transition-all p-8 flex flex-col items-center justify-center gap-4 group border border-white/5 hover:border-[var(--color-primary)]/50"
+        disabled={disabled}
+        className={cn(
+            "glass-card transition-all p-8 flex flex-col items-center justify-center gap-4 group border border-white/5",
+            disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10 hover:border-[var(--color-primary)]/50"
+        )}
     >
-        <div className={cn("transition-transform group-hover:scale-110 duration-300", color)}>
+        <div className={cn("transition-transform duration-300", color, !disabled && "group-hover:scale-110")}>
             {icon}
         </div>
         <span className="text-white font-bold text-lg">{label}</span>

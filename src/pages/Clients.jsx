@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Search, Plus, Edit, Trash2, User, Phone, Mail, MapPin, X, Check, CreditCard, FileText } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Plus, Edit, Trash2, User, Phone, Mail, MapPin, X, Check, CreditCard, FileText, ShieldAlert, ShieldOff, Shield, AlertTriangle, Clock, DollarSign, Filter } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { usePermissions } from '../hooks/usePermissions';
@@ -11,7 +11,11 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
         rut: client?.rut || '',
         phone: client?.phone || '',
         email: client?.email || '',
-        address: client?.address || ''
+        address: client?.address || '',
+        credit_limit: client?.credit_limit || 0,
+        credit_period_days: client?.credit_period_days || 30,
+        credit_enabled: client?.credit_enabled !== undefined ? (client.credit_enabled === 1 || client.credit_enabled === true) : true,
+        client_status: client?.client_status || 'active'
     });
 
     React.useEffect(() => {
@@ -21,10 +25,14 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
                 rut: client.rut || '',
                 phone: client.phone || '',
                 email: client.email || '',
-                address: client.address || ''
+                address: client.address || '',
+                credit_limit: client.credit_limit || 0,
+                credit_period_days: client.credit_period_days || 30,
+                credit_enabled: client.credit_enabled === 1 || client.credit_enabled === true,
+                client_status: client.client_status || 'active'
             });
         } else {
-            setFormData({ name: '', rut: '', phone: '', email: '', address: '' });
+            setFormData({ name: '', rut: '', phone: '', email: '', address: '', credit_limit: 0, credit_period_days: 30, credit_enabled: true, client_status: 'active' });
         }
     }, [client, isOpen]);
 
@@ -128,6 +136,85 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
                         </div>
                     </div>
 
+                    {/* Credit Management Section */}
+                    <div className="border-t border-[var(--glass-border)] pt-4 mt-4">
+                        <h3 className="text-sm font-bold text-[var(--color-text)] mb-3 flex items-center gap-2">
+                            <DollarSign size={16} className="text-[var(--color-primary)]" />
+                            Configuración de Crédito
+                        </h3>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            {/* Client Status */}
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-[var(--color-text-muted)]">Estado del Cliente</label>
+                                <select
+                                    className="glass-input w-full"
+                                    value={formData.client_status}
+                                    onChange={e => setFormData({ ...formData, client_status: e.target.value })}
+                                >
+                                    <option value="active">Activo</option>
+                                    <option value="credit_blocked">Bloqueado Crédito</option>
+                                    <option value="blocked">Bloqueado Total</option>
+                                </select>
+                            </div>
+
+                            {/* Credit Enabled Toggle */}
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-[var(--color-text-muted)]">Permitir Crédito</label>
+                                <button
+                                    type="button"
+                                    onClick={() => setFormData({ ...formData, credit_enabled: !formData.credit_enabled })}
+                                    disabled={formData.client_status === 'blocked' || formData.client_status === 'credit_blocked'}
+                                    className={cn(
+                                        'w-full h-10 rounded-lg border transition-all flex items-center justify-center gap-2 text-sm font-medium',
+                                        formData.credit_enabled && formData.client_status === 'active'
+                                            ? 'bg-green-500/20 border-green-500/50 text-green-400'
+                                            : 'bg-red-500/10 border-red-500/30 text-red-400',
+                                        (formData.client_status === 'blocked' || formData.client_status === 'credit_blocked') && 'opacity-50 cursor-not-allowed'
+                                    )}
+                                >
+                                    {formData.credit_enabled && formData.client_status === 'active' ? (
+                                        <><Shield size={16} /> Habilitado</>
+                                    ) : (
+                                        <><ShieldOff size={16} /> Deshabilitado</>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+
+                        {formData.credit_enabled && formData.client_status === 'active' && (
+                            <div className="grid grid-cols-2 gap-4 mt-3">
+                                {/* Credit Limit */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-[var(--color-text-muted)]">Límite de Crédito ($)</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="1000"
+                                        className="glass-input w-full"
+                                        value={formData.credit_limit || ''}
+                                        onChange={e => setFormData({ ...formData, credit_limit: parseFloat(e.target.value) || 0 })}
+                                        placeholder="0 = Sin límite"
+                                    />
+                                </div>
+
+                                {/* Credit Period Days */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-[var(--color-text-muted)]">Plazo de Pago (días)</label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="365"
+                                        className="glass-input w-full"
+                                        value={formData.credit_period_days}
+                                        onChange={e => setFormData({ ...formData, credit_period_days: parseInt(e.target.value) || 30 })}
+                                        placeholder="30"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     <div className="flex justify-end gap-3 pt-4">
                         <button
                             type="button"
@@ -158,14 +245,32 @@ const Clients = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingClient, setEditingClient] = useState(null);
+    const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'moroso', 'blocked'
 
     // Account View State
     const [selectedAccountClient, setSelectedAccountClient] = useState(null);
 
-    const filteredClients = clients.filter(client =>
-        client.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (client.rut && client.rut.includes(searchTerm))
-    );
+    const getClientDebtInfo = (client) => ({
+        totalDebt: parseFloat(client.total_debt) || 0,
+        pendingCount: parseInt(client.pending_sales_count) || 0,
+        overdueCount: parseInt(client.overdue_count) || 0,
+        dueSoonCount: 0,
+        oldestOverdueDays: 0
+    });
+
+    const filteredClients = clients.filter(client => {
+        const matchesSearch = client.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (client.rut && client.rut.includes(searchTerm));
+        if (!matchesSearch) return false;
+
+        if (statusFilter === 'moroso') {
+            return (parseInt(client.overdue_count) || 0) > 0;
+        }
+        if (statusFilter === 'blocked') {
+            return client.client_status === 'blocked' || client.client_status === 'credit_blocked';
+        }
+        return true;
+    });
 
     const handleSubmit = async (data) => {
         if (editingClient) {
@@ -242,14 +347,59 @@ const Clients = () => {
                 )}
             </div>
 
+            {/* Filter Buttons */}
+            <div className="flex gap-2 shrink-0 flex-wrap">
+                <button
+                    onClick={() => setStatusFilter('all')}
+                    className={cn(
+                        'px-3 py-1.5 rounded-lg text-xs font-medium transition-all border',
+                        statusFilter === 'all'
+                            ? 'bg-[var(--color-primary)]/20 border-[var(--color-primary)]/50 text-[var(--color-primary)]'
+                            : 'border-[var(--glass-border)] text-[var(--color-text-muted)] hover:bg-white/5'
+                    )}
+                >
+                    Todos ({clients.length})
+                </button>
+                <button
+                    onClick={() => setStatusFilter('moroso')}
+                    className={cn(
+                        'px-3 py-1.5 rounded-lg text-xs font-medium transition-all border flex items-center gap-1',
+                        statusFilter === 'moroso'
+                            ? 'bg-red-500/20 border-red-500/50 text-red-400'
+                            : 'border-[var(--glass-border)] text-[var(--color-text-muted)] hover:bg-white/5'
+                    )}
+                >
+                    <AlertTriangle size={14} />
+                    Morosos ({clients.filter(c => (parseInt(c.overdue_count) || 0) > 0).length})
+                </button>
+                <button
+                    onClick={() => setStatusFilter('blocked')}
+                    className={cn(
+                        'px-3 py-1.5 rounded-lg text-xs font-medium transition-all border flex items-center gap-1',
+                        statusFilter === 'blocked'
+                            ? 'bg-orange-500/20 border-orange-500/50 text-orange-400'
+                            : 'border-[var(--glass-border)] text-[var(--color-text-muted)] hover:bg-white/5'
+                    )}
+                >
+                    <ShieldAlert size={14} />
+                    Bloqueados ({clients.filter(c => c.client_status === 'blocked' || c.client_status === 'credit_blocked').length})
+                </button>
+            </div>
+
             {/* Client List - Cards on Mobile, Table on Desktop */}
             <div className="flex-1 overflow-hidden">
                 {/* Mobile Cards View */}
                 <div className="lg:hidden h-full overflow-y-auto space-y-3 pb-20">
-                    {filteredClients.map((client) => (
+                    {filteredClients.map((client) => {
+                        const debtInfo = getClientDebtInfo(client);
+                        return (
                         <div
                             key={client.id}
-                            className="glass-card p-4 space-y-3"
+                            className={cn(
+                                "glass-card p-4 space-y-3",
+                                client.client_status === 'blocked' && 'border-red-500/30',
+                                client.client_status === 'credit_blocked' && 'border-orange-500/30'
+                            )}
                             onClick={() => {
                                 if (can('clients.view_account')) {
                                     handleViewAccount(client)
@@ -258,11 +408,20 @@ const Clients = () => {
                         >
                             {/* Header: Avatar + Name/RUT */}
                             <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 rounded-full bg-[var(--color-primary)]/20 flex items-center justify-center text-[var(--color-primary)] font-bold text-lg">
+                                <div className={cn(
+                                    "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg",
+                                    client.client_status === 'blocked' ? 'bg-red-500/20 text-red-400' :
+                                    client.client_status === 'credit_blocked' ? 'bg-orange-500/20 text-orange-400' :
+                                    'bg-[var(--color-primary)]/20 text-[var(--color-primary)]'
+                                )}>
                                     {client.name.charAt(0).toUpperCase()}
                                 </div>
                                 <div className="flex-1">
-                                    <div className="font-bold text-[var(--color-text)] text-base">{client.name}</div>
+                                    <div className="font-bold text-[var(--color-text)] text-base flex items-center gap-2">
+                                        {client.name}
+                                        {client.client_status === 'blocked' && <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">Bloqueado</span>}
+                                        {client.client_status === 'credit_blocked' && <span className="text-xs px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400">Sin Crédito</span>}
+                                    </div>
                                     <div className="text-sm text-[var(--color-text-muted)]">{client.rut || 'Sin RUT'}</div>
                                 </div>
                                 {/* Quick Actions */}
@@ -313,8 +472,29 @@ const Clients = () => {
                                     </div>
                                 )}
                             </div>
+                            {/* Debt & Status Indicators */}
+                            {(debtInfo.totalDebt > 0 || debtInfo.overdueCount > 0) && (
+                                <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-[var(--glass-border)]">
+                                    {debtInfo.totalDebt > 0 && (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-medium">
+                                            Deuda: ${debtInfo.totalDebt.toLocaleString()}
+                                        </span>
+                                    )}
+                                    {debtInfo.overdueCount > 0 && (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-bold flex items-center gap-1">
+                                            <AlertTriangle size={12} /> Moroso ({debtInfo.oldestOverdueDays}d)
+                                        </span>
+                                    )}
+                                    {debtInfo.overdueCount === 0 && debtInfo.dueSoonCount > 0 && (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 font-medium flex items-center gap-1">
+                                            <Clock size={12} /> Por vencer
+                                        </span>
+                                    )}
+                                </div>
+                            )}
                         </div>
-                    ))}
+                    );
+                    })}
                     {filteredClients.length === 0 && (
                         <div className="text-center py-12 text-[var(--color-text-muted)]">
                             No se encontraron clientes.
@@ -329,23 +509,81 @@ const Clients = () => {
                             <thead className="bg-black/20 border-b border-[var(--glass-border)] sticky top-0">
                                 <tr>
                                     <th className="text-left p-4 text-[var(--color-text-muted)] font-medium">Cliente</th>
+                                    <th className="text-left p-4 text-[var(--color-text-muted)] font-medium">Estado</th>
+                                    <th className="text-left p-4 text-[var(--color-text-muted)] font-medium">Deuda</th>
                                     <th className="text-left p-4 text-[var(--color-text-muted)] font-medium">Contacto</th>
-                                    <th className="text-left p-4 text-[var(--color-text-muted)] font-medium">Ubicación</th>
                                     <th className="text-right p-4 text-[var(--color-text-muted)] font-medium">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[var(--glass-border)]">
-                                {filteredClients.map((client) => (
-                                    <tr key={client.id} className="hover:bg-white/5 transition-colors group">
+                                {filteredClients.map((client) => {
+                                    const debtInfo = getClientDebtInfo(client);
+                                    return (
+                                    <tr key={client.id} className={cn("hover:bg-white/5 transition-colors group", client.client_status === 'blocked' && 'bg-red-500/5')}>
                                         <td className="p-4">
                                             <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-full bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)] font-bold">
+                                                <div className={cn(
+                                                    "w-10 h-10 rounded-full flex items-center justify-center font-bold",
+                                                    client.client_status === 'blocked' ? 'bg-red-500/10 text-red-400' :
+                                                    client.client_status === 'credit_blocked' ? 'bg-orange-500/10 text-orange-400' :
+                                                    'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+                                                )}>
                                                     {client.name.charAt(0).toUpperCase()}
                                                 </div>
                                                 <div>
                                                     <div className="font-medium text-[var(--color-text)]">{client.name}</div>
                                                     <div className="text-xs text-[var(--color-text-muted)]">{client.rut || 'Sin RUT'}</div>
                                                 </div>
+                                            </div>
+                                        </td>
+                                        <td className="p-4">
+                                            <div className="flex flex-col gap-1">
+                                                {client.client_status === 'blocked' && (
+                                                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-bold w-fit">
+                                                        <ShieldAlert size={12} /> Bloqueado
+                                                    </span>
+                                                )}
+                                                {client.client_status === 'credit_blocked' && (
+                                                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 font-medium w-fit">
+                                                        <ShieldOff size={12} /> Sin Crédito
+                                                    </span>
+                                                )}
+                                                {client.client_status === 'active' && !client.credit_enabled && (
+                                                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-400 font-medium w-fit">
+                                                        <ShieldOff size={12} /> Crédito OFF
+                                                    </span>
+                                                )}
+                                                {client.client_status === 'active' && (client.credit_enabled === 1 || client.credit_enabled === true) && (
+                                                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 w-fit">
+                                                        <Shield size={12} /> Activo
+                                                    </span>
+                                                )}
+                                                {debtInfo.overdueCount > 0 && (
+                                                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-bold w-fit animate-pulse">
+                                                        <AlertTriangle size={12} /> Moroso ({debtInfo.oldestOverdueDays}d)
+                                                    </span>
+                                                )}
+                                                {debtInfo.overdueCount === 0 && debtInfo.dueSoonCount > 0 && (
+                                                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 w-fit">
+                                                        <Clock size={12} /> Por vencer
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="p-4">
+                                            <div className="space-y-1">
+                                                {debtInfo.totalDebt > 0 ? (
+                                                    <div className="text-sm font-bold text-red-400">
+                                                        ${debtInfo.totalDebt.toLocaleString()}
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-sm text-green-400">Sin deuda</div>
+                                                )}
+                                                {client.credit_limit > 0 && (
+                                                    <div className="text-xs text-[var(--color-text-muted)]">
+                                                        Límite: ${parseFloat(client.credit_limit).toLocaleString()}
+                                                    </div>
+                                                )}
                                             </div>
                                         </td>
                                         <td className="p-4">
@@ -363,14 +601,6 @@ const Clients = () => {
                                                     </div>
                                                 )}
                                             </div>
-                                        </td>
-                                        <td className="p-4">
-                                            {client.address && (
-                                                <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] max-w-[200px] truncate">
-                                                    <MapPin size={14} className="shrink-0" />
-                                                    <span className="truncate">{client.address}</span>
-                                                </div>
-                                            )}
                                         </td>
                                         <td className="p-4 text-right">
                                             <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -405,10 +635,11 @@ const Clients = () => {
                                             </div>
                                         </td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                                 {filteredClients.length === 0 && (
                                     <tr>
-                                        <td colSpan="4" className="p-8 text-center text-[var(--color-text-muted)]">
+                                        <td colSpan="6" className="p-8 text-center text-[var(--color-text-muted)]">
                                             No se encontraron clientes.
                                         </td>
                                     </tr>

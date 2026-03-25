@@ -25,7 +25,9 @@ const PaymentMethodsSettings = () => {
         deletePaymentTerminal,
         addBankAccount,
         updateBankAccount,
-        deleteBankAccount
+        deleteBankAccount,
+        creditBlockMode,
+        setCreditBlockMode
     } = useStore();
 
     const [isTerminalModalOpen, setIsTerminalModalOpen] = useState(false);
@@ -337,6 +339,38 @@ const PaymentMethodsSettings = () => {
                             <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
                         </label>
                     </div>
+
+                    {/* Credit block mode */}
+                    {paymentMethodsConfig.credit_enabled === 1 && (
+                        <div className="mt-3 p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+                            <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2">Cuando se excede el límite de crédito:</p>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => setCreditBlockMode('warn')}
+                                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all border ${
+                                        creditBlockMode === 'warn'
+                                            ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-400'
+                                            : 'bg-transparent border-white/10 text-gray-400 hover:bg-white/5'
+                                    }`}
+                                >
+                                    ⚠️ Advertir
+                                </button>
+                                <button
+                                    onClick={() => setCreditBlockMode('block')}
+                                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all border ${
+                                        creditBlockMode === 'block'
+                                            ? 'bg-red-500/20 border-red-500/50 text-red-400'
+                                            : 'bg-transparent border-white/10 text-gray-400 hover:bg-white/5'
+                                    }`}
+                                >
+                                    🚫 Bloquear
+                                </button>
+                            </div>
+                            <p className="text-[10px] text-[var(--color-text-muted)] mt-1.5">
+                                {creditBlockMode === 'warn' ? 'Se mostrará una advertencia pero se permitirá la venta.' : 'No se permitirá procesar ventas a crédito que excedan el límite.'}
+                            </p>
+                        </div>
+                    )}
                 </div>
 
                 {/* PAGO MIXTO */}

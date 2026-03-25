@@ -7,7 +7,7 @@ import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFrom
 let migrationsExecuted = false;
 let fetchInProgress = false;
 const DDL_CACHE_KEY = 'poskem_ddl_v';
-const DDL_TARGET = 15; // Increment when adding new migrations/DDL
+const DDL_TARGET = 18; // Increment when adding new migrations/DDL
 
 const safeJsonStringify = (value) => JSON.stringify(value, (_key, currentValue) => {
     if (typeof currentValue === 'bigint') {
@@ -96,6 +96,7 @@ export const useStore = create(persist((set, get) => ({
     toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
 
     inventoryAdjustmentMode: false, // Will be loaded from DB per company
+    creditBlockMode: 'warn', // 'warn' or 'block' - loaded from DB per company
 
     toggleInventoryAdjustmentMode: async () => {
         const { activeCompanyId, inventoryAdjustmentMode } = get();
@@ -906,6 +907,33 @@ export const useStore = create(persist((set, get) => ({
             await turso.execute(`CREATE INDEX IF NOT EXISTS idx_sale_returns_sale ON sale_returns(sale_id, company_id)`);
             await turso.execute(`CREATE INDEX IF NOT EXISTS idx_sale_returns_company ON sale_returns(company_id, created_at DESC)`);
 
+            // === Migration 16: Credit management system ===
+            try {
+                const clientInfo = await turso.execute(`PRAGMA table_info(clients)`);
+                const hasCreditLimit = clientInfo.rows.some(col => col.name === 'credit_limit');
+                if (!hasCreditLimit) {
+                    console.log('Adding credit management columns to clients...');
+                    await turso.execute(`ALTER TABLE clients ADD COLUMN credit_limit REAL DEFAULT 0`);
+                    await turso.execute(`ALTER TABLE clients ADD COLUMN credit_period_days INTEGER DEFAULT 30`);
+                    await turso.execute(`ALTER TABLE clients ADD COLUMN credit_enabled INTEGER DEFAULT 1`);
+                    await turso.execute(`ALTER TABLE clients ADD COLUMN client_status TEXT DEFAULT 'active'`);
+                }
+                const salesInfo = await turso.execute(`PRAGMA table_info(sales)`);
+                const hasDueDate = salesInfo.rows.some(col => col.name === 'payment_due_date');
+                if (!hasDueDate) {
+                    console.log('Adding payment_due_date to sales...');
+                    await turso.execute(`ALTER TABLE sales ADD COLUMN payment_due_date TEXT`);
+                }
+                const companyInfo16 = await turso.execute(`PRAGMA table_info(companies)`);
+                const hasCreditBlockMode = companyInfo16.rows.some(col => col.name === 'credit_block_mode');
+                if (!hasCreditBlockMode) {
+                    console.log('Adding credit_block_mode to companies...');
+                    await turso.execute(`ALTER TABLE companies ADD COLUMN credit_block_mode TEXT DEFAULT 'warn'`);
+                }
+            } catch (e) {
+                console.warn('Migration 16 (credit management) error:', e);
+            }
+
             console.log("SaaS Migrations Completed.");
 
         } catch (e) {
@@ -921,7 +949,7 @@ export const useStore = create(persist((set, get) => ({
     addClient: async (client) => {
         try {
             const result = await turso.execute({
-                sql: "INSERT INTO clients (name, rut, phone, email, address, created_at, company_id) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO clients (name, rut, phone, email, address, created_at, company_id, credit_limit, credit_period_days, credit_enabled, client_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     client.name,
                     client.rut || '',
@@ -929,7 +957,11 @@ export const useStore = create(persist((set, get) => ({
                     client.email || '',
                     client.address || '',
                     new Date().toISOString(),
-                    get().activeCompanyId
+                    get().activeCompanyId,
+                    client.credit_limit || 0,
+                    client.credit_period_days || 30,
+                    client.credit_enabled !== undefined ? (client.credit_enabled ? 1 : 0) : 1,
+                    client.client_status || 'active'
                 ]
             });
             const newClient = result.rows[0];
@@ -954,8 +986,8 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             await turso.execute({
-                sql: "UPDATE clients SET name = ?, rut = ?, phone = ?, email = ?, address = ? WHERE id = ? AND company_id = ?",
-                args: [updatedClient.name, updatedClient.rut, updatedClient.phone, updatedClient.email, updatedClient.address, id, activeCompanyId]
+                sql: "UPDATE clients SET name = ?, rut = ?, phone = ?, email = ?, address = ?, credit_limit = ?, credit_period_days = ?, credit_enabled = ?, client_status = ? WHERE id = ? AND company_id = ?",
+                args: [updatedClient.name, updatedClient.rut, updatedClient.phone, updatedClient.email, updatedClient.address, updatedClient.credit_limit || 0, updatedClient.credit_period_days || 30, updatedClient.credit_enabled !== undefined ? (updatedClient.credit_enabled ? 1 : 0) : 1, updatedClient.client_status || 'active', id, activeCompanyId]
             });
 
             // Audit
@@ -1007,7 +1039,7 @@ export const useStore = create(persist((set, get) => ({
         try {
             const res = await turso.execute({
                 sql: `
-                    SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, c.currency, uc.role 
+                    SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, c.currency, c.credit_block_mode, uc.role 
                     FROM user_companies uc
                     JOIN companies c ON uc.company_id = c.id
                     WHERE uc.user_id = ? AND c.status = 'active'
@@ -1040,6 +1072,7 @@ export const useStore = create(persist((set, get) => ({
             activeCompanyId: companyId,
             // Load inventory mode from target company
             inventoryAdjustmentMode: targetCompany.inventory_adjustment_mode === 1,
+            creditBlockMode: targetCompany.credit_block_mode || 'warn',
             // Clear all data lists
             products: [],
             productLots: [],
@@ -1512,6 +1545,66 @@ export const useStore = create(persist((set, get) => ({
                         console.warn('Permission name fix migration skipped:', e.message);
                     }
 
+                    // ── Migration 16: Credit management columns (always-run) ──
+                    try {
+                        const clientInfo16 = await turso.execute(`PRAGMA table_info(clients)`);
+                        const hasCreditLimit = clientInfo16.rows.some(col => col.name === 'credit_limit');
+                        if (!hasCreditLimit) {
+                            console.log('Adding credit management columns to clients...');
+                            await turso.execute(`ALTER TABLE clients ADD COLUMN credit_limit REAL DEFAULT 0`);
+                            await turso.execute(`ALTER TABLE clients ADD COLUMN credit_period_days INTEGER DEFAULT 30`);
+                            await turso.execute(`ALTER TABLE clients ADD COLUMN credit_enabled INTEGER DEFAULT 1`);
+                            await turso.execute(`ALTER TABLE clients ADD COLUMN client_status TEXT DEFAULT 'active'`);
+                        }
+                        const salesInfo16 = await turso.execute(`PRAGMA table_info(sales)`);
+                        const hasDueDate = salesInfo16.rows.some(col => col.name === 'payment_due_date');
+                        if (!hasDueDate) {
+                            await turso.execute(`ALTER TABLE sales ADD COLUMN payment_due_date TEXT`);
+                        }
+                        const companyInfo16 = await turso.execute(`PRAGMA table_info(companies)`);
+                        const hasCreditBlockMode = companyInfo16.rows.some(col => col.name === 'credit_block_mode');
+                        if (!hasCreditBlockMode) {
+                            await turso.execute(`ALTER TABLE companies ADD COLUMN credit_block_mode TEXT DEFAULT 'warn'`);
+                        }
+                    } catch (e) {
+                        console.warn('Migration 16 (credit management) error:', e);
+                    }
+
+                    // ── Migration 17: Denormalized debt columns on clients (always-run) ──
+                    try {
+                        const clientInfo17 = await turso.execute(`PRAGMA table_info(clients)`);
+                        const cols17 = clientInfo17.rows.map(c => c.name);
+                        if (!cols17.includes('total_debt')) {
+                            console.log('Adding denormalized debt columns to clients...');
+                            await turso.execute(`ALTER TABLE clients ADD COLUMN total_debt REAL DEFAULT 0`);
+                            await turso.execute(`ALTER TABLE clients ADD COLUMN pending_sales_count INTEGER DEFAULT 0`);
+                            await turso.execute(`ALTER TABLE clients ADD COLUMN overdue_count INTEGER DEFAULT 0`);
+                            // Backfill from existing sales
+                            await turso.execute(`
+                                UPDATE clients SET
+                                    total_debt = COALESCE((
+                                        SELECT SUM(s.total) FROM sales s
+                                        WHERE s.client_id = clients.id AND s.company_id = clients.company_id
+                                        AND s.payment_method = 'Crédito' AND s.status NOT IN ('paid','cancelled')
+                                    ), 0),
+                                    pending_sales_count = COALESCE((
+                                        SELECT COUNT(*) FROM sales s
+                                        WHERE s.client_id = clients.id AND s.company_id = clients.company_id
+                                        AND s.payment_method = 'Crédito' AND s.status NOT IN ('paid','cancelled')
+                                    ), 0),
+                                    overdue_count = COALESCE((
+                                        SELECT COUNT(*) FROM sales s
+                                        WHERE s.client_id = clients.id AND s.company_id = clients.company_id
+                                        AND s.payment_method = 'Crédito' AND s.status NOT IN ('paid','cancelled')
+                                        AND s.payment_due_date IS NOT NULL AND s.payment_due_date < datetime('now')
+                                    ), 0)
+                            `);
+                            console.log('✅ Backfilled client debt columns from sales');
+                        }
+                    } catch (e) {
+                        console.warn('Migration 17 (debt columns) error:', e);
+                    }
+
                     // Cache successful DDL in localStorage
                     localStorage.setItem(DDL_CACHE_KEY, String(DDL_TARGET));
                     migrationsExecuted = true;
@@ -1536,7 +1629,7 @@ export const useStore = create(persist((set, get) => ({
 
                 // Cargar empresas del usuario
                 const companiesRes = await turso.execute({
-                    sql: `SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, c.currency, uc.role 
+                    sql: `SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, c.currency, c.credit_block_mode, uc.role 
                           FROM user_companies uc
                           JOIN companies c ON uc.company_id = c.id
                           WHERE uc.user_id = ? AND c.status = 'active'`,
@@ -1576,7 +1669,8 @@ export const useStore = create(persist((set, get) => ({
                     currentCompanyTimezone: activeCompany.timezone || 'America/Santiago',
                     currentCurrency: activeCompany.currency || 'CLP',
                     currentUserCompanyRole: activeCompany.role,
-                    inventoryAdjustmentMode: activeCompany.inventory_adjustment_mode === 1
+                    inventoryAdjustmentMode: activeCompany.inventory_adjustment_mode === 1,
+                    creditBlockMode: activeCompany.credit_block_mode || 'warn'
                 });
 
 
@@ -1590,10 +1684,11 @@ export const useStore = create(persist((set, get) => ({
             // ==========================================
             console.time('⏱️ BatchFetch');
             const [productLotsRes, categoriesRes, suppliersRes, usersRes] = await Promise.all([
-                turso.execute({ sql: `SELECT id, product_id, batch_number, expiry_date, quantity, cost, supplier_name, created_at, status, company_id 
-                          FROM product_lots 
-                          WHERE company_id = ? AND quantity > 0 
-                          ORDER BY expiry_date ASC 
+                turso.execute({ sql: `SELECT pl.id, pl.product_id, pl.batch_number, pl.expiry_date, pl.quantity, pl.cost, pl.supplier_name, pl.created_at, pl.status, pl.company_id, p.name AS product_name, p.unit AS product_unit
+                          FROM product_lots pl
+                          LEFT JOIN products p ON p.id = pl.product_id
+                          WHERE pl.company_id = ? AND pl.quantity > 0 
+                          ORDER BY pl.expiry_date ASC 
                           LIMIT 200`, args: [activeCompanyId] }),
                 turso.execute({ sql: "SELECT * FROM categories WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] }),
                 turso.execute({ sql: "SELECT * FROM suppliers WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] }),
@@ -1609,7 +1704,7 @@ export const useStore = create(persist((set, get) => ({
                 turso.execute({ sql: "SELECT * FROM payment_methods_config WHERE company_id = ?", args: [activeCompanyId] }),
                 turso.execute({ sql: "SELECT * FROM payment_terminals WHERE company_id = ? AND is_active = 1", args: [activeCompanyId] }),
                 turso.execute({ sql: "SELECT * FROM bank_accounts WHERE company_id = ? AND is_active = 1", args: [activeCompanyId] }),
-                turso.execute({ sql: "SELECT inventory_adjustment_mode, currency FROM companies WHERE id = ?", args: [activeCompanyId] })
+                turso.execute({ sql: "SELECT inventory_adjustment_mode, currency, credit_block_mode FROM companies WHERE id = ?", args: [activeCompanyId] })
             ]);
             console.timeEnd('⏱️ BatchFetch');
 
@@ -1627,7 +1722,8 @@ export const useStore = create(persist((set, get) => ({
             if (companyConfigRes.rows.length > 0) {
                 const freshMode = companyConfigRes.rows[0].inventory_adjustment_mode === 1;
                 const freshCurrency = companyConfigRes.rows[0].currency || 'CLP';
-                set({ inventoryAdjustmentMode: freshMode, currentCurrency: freshCurrency });
+                const freshCreditBlockMode = companyConfigRes.rows[0].credit_block_mode || 'warn';
+                set({ inventoryAdjustmentMode: freshMode, currentCurrency: freshCurrency, creditBlockMode: freshCreditBlockMode });
             }
 
             // Removed products mapping
@@ -1961,6 +2057,147 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error("Error fetching client sales:", e);
             return [];
+        }
+    },
+
+    // Sync denormalized debt columns for a single client (DB + local state)
+    _syncClientDebt: async (clientId) => {
+        try {
+            const { activeCompanyId } = get();
+            if (!clientId || !activeCompanyId) return;
+            const res = await turso.execute({
+                sql: `SELECT 
+                        COALESCE(SUM(total), 0) as total_debt,
+                        COUNT(*) as pending_count,
+                        COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') THEN 1 END) as overdue_count
+                      FROM sales
+                      WHERE client_id = ? AND company_id = ? AND payment_method = 'Crédito'
+                        AND status NOT IN ('paid', 'cancelled')`,
+                args: [clientId, activeCompanyId]
+            });
+            const r = res.rows[0] || {};
+            const totalDebt = parseFloat(r.total_debt) || 0;
+            const pendingCount = parseInt(r.pending_count) || 0;
+            const overdueCount = parseInt(r.overdue_count) || 0;
+
+            await turso.execute({
+                sql: `UPDATE clients SET total_debt = ?, pending_sales_count = ?, overdue_count = ? WHERE id = ? AND company_id = ?`,
+                args: [totalDebt, pendingCount, overdueCount, clientId, activeCompanyId]
+            });
+
+            set(state => ({
+                clients: state.clients.map(c =>
+                    c.id === clientId ? { ...c, total_debt: totalDebt, pending_sales_count: pendingCount, overdue_count: overdueCount } : c
+                )
+            }));
+        } catch (e) {
+            console.warn('_syncClientDebt error:', e);
+        }
+    },
+
+    // Get credit status for a single client (debt, limit, overdue status)
+    getClientCreditStatus: async (clientId) => {
+        try {
+            const { activeCompanyId } = get();
+            const clientData = get().clients.find(c => c.id === clientId);
+            if (!clientData) return null;
+
+            const result = await turso.execute({
+                sql: `SELECT 
+                        COALESCE(SUM(total), 0) as total_debt,
+                        COUNT(*) as pending_count,
+                        MIN(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') AND status NOT IN ('paid','cancelled') THEN payment_due_date END) as oldest_overdue_date,
+                        COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') AND status NOT IN ('paid','cancelled') THEN 1 END) as overdue_count,
+                        COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date >= datetime('now') AND payment_due_date <= datetime('now', '+3 days') AND status NOT IN ('paid','cancelled') THEN 1 END) as due_soon_count
+                      FROM sales 
+                      WHERE client_id = ? AND company_id = ? AND payment_method = 'Crédito' 
+                      AND status NOT IN ('paid', 'cancelled')`,
+                args: [clientId, activeCompanyId]
+            });
+
+            const row = result.rows[0];
+            const totalDebt = parseFloat(row?.total_debt || 0);
+            const creditLimit = parseFloat(clientData.credit_limit || 0);
+            const overdueCount = parseInt(row?.overdue_count || 0);
+            const dueSoonCount = parseInt(row?.due_soon_count || 0);
+            let oldestOverdueDays = 0;
+            if (row?.oldest_overdue_date) {
+                oldestOverdueDays = Math.floor((Date.now() - new Date(row.oldest_overdue_date).getTime()) / (1000 * 60 * 60 * 24));
+            }
+
+            return {
+                totalDebt,
+                creditLimit,
+                availableCredit: creditLimit > 0 ? Math.max(0, creditLimit - totalDebt) : null,
+                creditUsagePercent: creditLimit > 0 ? Math.min(100, (totalDebt / creditLimit) * 100) : 0,
+                hasOverdue: overdueCount > 0,
+                overdueCount,
+                dueSoonCount,
+                oldestOverdueDays,
+                pendingCount: parseInt(row?.pending_count || 0),
+                clientStatus: clientData.client_status || 'active',
+                creditEnabled: clientData.credit_enabled === 1 || clientData.credit_enabled === true
+            };
+        } catch (e) {
+            console.error('Error getting client credit status:', e);
+            return null;
+        }
+    },
+
+    // Fetch debt summary for ALL clients (for list view indicators)
+    fetchClientsDebtSummary: async () => {
+        try {
+            const { activeCompanyId } = get();
+            const result = await turso.execute({
+                sql: `SELECT 
+                        client_id,
+                        COALESCE(SUM(total), 0) as total_debt,
+                        COUNT(*) as pending_count,
+                        MIN(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') THEN payment_due_date END) as oldest_overdue_date,
+                        COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') THEN 1 END) as overdue_count,
+                        COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date >= datetime('now') AND payment_due_date <= datetime('now', '+3 days') THEN 1 END) as due_soon_count
+                      FROM sales 
+                      WHERE company_id = ? AND payment_method = 'Crédito' 
+                      AND status NOT IN ('paid', 'cancelled')
+                      AND client_id IS NOT NULL
+                      GROUP BY client_id`,
+                args: [activeCompanyId]
+            });
+
+            const debtMap = {};
+            for (const row of result.rows) {
+                let oldestOverdueDays = 0;
+                if (row.oldest_overdue_date) {
+                    oldestOverdueDays = Math.floor((Date.now() - new Date(row.oldest_overdue_date).getTime()) / (1000 * 60 * 60 * 24));
+                }
+                debtMap[row.client_id] = {
+                    totalDebt: parseFloat(row.total_debt || 0),
+                    pendingCount: parseInt(row.pending_count || 0),
+                    overdueCount: parseInt(row.overdue_count || 0),
+                    dueSoonCount: parseInt(row.due_soon_count || 0),
+                    oldestOverdueDays
+                };
+            }
+            return debtMap;
+        } catch (e) {
+            console.error('Error fetching clients debt summary:', e);
+            return {};
+        }
+    },
+
+    // Update credit_block_mode for the current company
+    setCreditBlockMode: async (mode) => {
+        try {
+            const { activeCompanyId } = get();
+            await turso.execute({
+                sql: 'UPDATE companies SET credit_block_mode = ? WHERE id = ?',
+                args: [mode, activeCompanyId]
+            });
+            set({ creditBlockMode: mode });
+            return { success: true };
+        } catch (e) {
+            console.error('Error setting credit block mode:', e);
+            return { success: false, error: e.message };
         }
     },
 
@@ -5547,7 +5784,43 @@ export const useStore = create(persist((set, get) => ({
             }
 
             const saleTotal = parseFloat(sale.total);
-            const { inventoryAdjustmentMode } = get();
+            const { inventoryAdjustmentMode, creditBlockMode } = get();
+
+            // ============================================
+            // CREDIT VALIDATION (before heavy processing)
+            // ============================================
+            if (sale.client?.id) {
+                const clientData = get().clients.find(c => c.id === sale.client.id);
+                if (clientData) {
+                    // 1. Check if client is fully blocked
+                    if (clientData.client_status === 'blocked') {
+                        return { success: false, error: 'CLIENT_BLOCKED', message: 'Este cliente está bloqueado y no puede realizar compras.' };
+                    }
+                    // 2. Check credit-specific blocks when paying with credit
+                    if (sale.paymentMethod === 'Crédito') {
+                        if (clientData.client_status === 'credit_blocked' || clientData.credit_enabled === 0) {
+                            return { success: false, error: 'CREDIT_NOT_ALLOWED', message: 'Este cliente no tiene habilitado el crédito.' };
+                        }
+                        // 3. Check credit limit
+                        if (clientData.credit_limit > 0) {
+                            const debtRes = await turso.execute({
+                                sql: `SELECT COALESCE(SUM(total), 0) as total_debt FROM sales 
+                                      WHERE client_id = ? AND company_id = ? AND payment_method = 'Crédito' 
+                                      AND status NOT IN ('paid', 'cancelled')`,
+                                args: [sale.client.id, activeCompanyId]
+                            });
+                            const currentDebt = parseFloat(debtRes.rows[0]?.total_debt || 0);
+                            if (currentDebt + saleTotal > clientData.credit_limit) {
+                                if (creditBlockMode === 'block') {
+                                    return { success: false, error: 'CREDIT_LIMIT_EXCEEDED', message: `Límite de crédito excedido. Límite: $${clientData.credit_limit.toLocaleString()}, Deuda actual: $${currentDebt.toLocaleString()}` };
+                                }
+                                // warn mode: continue but flag it
+                                sale._creditWarning = `Crédito excedido. Límite: $${clientData.credit_limit.toLocaleString()}, Deuda: $${currentDebt.toLocaleString()}, Nueva deuda: $${(currentDebt + saleTotal).toLocaleString()}`;
+                            }
+                        }
+                    }
+                }
+            }
 
             // ============================================
             // FASE 2: PRE-CÁLCULOS (ANTES DE TRANSACCIÓN)
@@ -5759,11 +6032,21 @@ export const useStore = create(persist((set, get) => ({
                 const itemsJson = JSON.stringify(itemsToProcess);
                 const detailsJson = JSON.stringify(sale.paymentDetails);
 
+                // Calculate payment_due_date for credit sales
+                let paymentDueDate = null;
+                if (sale.paymentMethod === 'Crédito' && sale.client?.id) {
+                    const clientData = get().clients.find(c => c.id === sale.client.id);
+                    const periodDays = clientData?.credit_period_days || 30;
+                    const dueDate = new Date();
+                    dueDate.setDate(dueDate.getDate() + periodDays);
+                    paymentDueDate = dueDate.toISOString();
+                }
+
                 // 1. INSERT sale (crítico)
                 const saleResult = await tx.execute({
                     sql: `INSERT INTO sales 
-                          (company_id, user_id, date, items, total, summary, payment_method, payment_details, status, client_id) 
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)`,
+                          (company_id, user_id, date, items, total, summary, payment_method, payment_details, status, client_id, client_name, payment_due_date) 
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?)`,
                     args: [
                         activeCompanyId,
                         currentUser?.id,
@@ -5773,7 +6056,9 @@ export const useStore = create(persist((set, get) => ({
                         sale.summary,
                         sale.paymentMethod,
                         detailsJson,
-                        sale.client?.id || null
+                        sale.client?.id || null,
+                        sale.client?.name || null,
+                        paymentDueDate
                     ]
                 });
 
@@ -5924,6 +6209,8 @@ export const useStore = create(persist((set, get) => ({
                         status: 'completed',
                         clientId: sale.client?.id || null,
                         clientName: sale.client?.name || null,
+                        client_id: sale.client?.id || null,
+                        client_name: sale.client?.name || null,
                         company_id: activeCompanyId,
                         user_id: currentUser?.id,
                         user_name: currentUser?.name,
@@ -5987,7 +6274,12 @@ export const useStore = create(persist((set, get) => ({
                     get().checkInventoryAlerts(productIds);
                 }, 100);
 
-                return { success: true, saleId };
+                // Sync client debt columns if credit sale
+                if (sale.paymentMethod === 'Crédito' && sale.client?.id) {
+                    get()._syncClientDebt(sale.client.id);
+                }
+
+                return { success: true, saleId, creditWarning: sale._creditWarning || null };
 
             } catch (error) {
                 // ROLLBACK COMPLETO
@@ -6156,6 +6448,12 @@ export const useStore = create(persist((set, get) => ({
             const postCancelRegister = get().cashRegister;
             if (postCancelRegister?.id) {
                 get().refreshRegisterStats(postCancelRegister.id);
+            }
+
+            // Sync client debt if this was a credit sale
+            const cancelledClientId = sale.client_id || sale.clientId;
+            if (cancelledClientId && sale.payment_method === 'Crédito') {
+                get()._syncClientDebt(cancelledClientId);
             }
 
             return true;
@@ -6451,6 +6749,9 @@ export const useStore = create(persist((set, get) => ({
             if (cashRegister) {
                 refreshRegisterStats(cashRegister.id);
             }
+
+            // 6. Sync client debt columns
+            await get()._syncClientDebt(client.id);
 
             return { success: true };
 
