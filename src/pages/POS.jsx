@@ -398,12 +398,6 @@ const POS = () => {
                         <CashStatusWidget />
                     </div>
 
-                    {inventoryAdjustmentMode && (
-                        <div className="bg-yellow-500/20 border border-yellow-500/30 text-yellow-500 px-2 py-1 lg:px-3 lg:py-1.5 rounded-lg text-xs lg:text-sm font-bold flex items-center justify-center animate-pulse">
-                            ⚠️ MODO AJUSTE DE INVENTARIO ACTIVO
-                        </div>
-                    )}
-
                     <div className="flex gap-1.5 lg:gap-2 overflow-x-auto pb-1 lg:pb-2 scrollbar-thin">
                         {categoryList.map(cat => (
                             <button

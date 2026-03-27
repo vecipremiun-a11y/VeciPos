@@ -13,7 +13,7 @@ const MainLayout = () => {
     // Helper to check window width strictly for initial state (avoid hydration mismatch if SSR, but this is SPA)
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
     const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile); // Closed by default on mobile, open on desktop
-    const { currentUser, logout } = useStore();
+    const { currentUser, logout, inventoryAdjustmentMode } = useStore();
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -326,6 +326,11 @@ const MainLayout = () => {
                                     )}>
                                         {activeItem?.label || 'Bienvenido'}
                                     </h2>
+                                    {inventoryAdjustmentMode && location.pathname === '/pos' && (
+                                        <span className="bg-yellow-500/20 border border-yellow-500/30 text-yellow-500 px-2 py-0.5 rounded text-[10px] lg:text-xs font-bold animate-pulse whitespace-nowrap">
+                                            ⚠️ AJUSTE INVENTARIO
+                                        </span>
+                                    )}
                                 </div>
                             );
                         })()}
