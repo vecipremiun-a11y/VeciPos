@@ -197,11 +197,11 @@ const Orders = () => {
 
             const result = await turso.execute({
                 sql: `SELECT 
-                    SUM(sp.quantity) as total_quantity,
+                    SUM(json_extract(sp.value, '$.quantity')) as total_quantity,
                     COUNT(DISTINCT DATE(s.date)) as days_sold,
                     MAX(DATE(s.date)) as last_sale_date
                 FROM sales s
-                JOIN json_each(s.items) AS sp ON json_extract(sp.value, '$.id') = ?
+                JOIN json_each(s.items) AS sp ON CAST(json_extract(sp.value, '$.id') AS INTEGER) = ?
                 WHERE s.company_id = ? AND DATE(s.date) >= ?`,
                 args: [product.id, activeCompanyId, thirtyDaysAgoStr]
             });
@@ -214,7 +214,7 @@ const Orders = () => {
                     p.date
                 FROM purchases p, json_each(p.items) as item
                 WHERE p.company_id = ? 
-                    AND json_extract(item.value, '$.id') = ?
+                    AND CAST(json_extract(item.value, '$.id') AS INTEGER) = ?
                 ORDER BY p.date DESC
                 LIMIT 2`,
                 args: [activeCompanyId, product.id]
@@ -746,50 +746,6 @@ const Orders = () => {
                                                 </p>
                                             </div>
                                         </div>
-
-                                        {/* Sales Statistics in Stock Card */}
-                                        {loadingStats ? (
-                                            <div className="flex items-center gap-2 py-2">
-                                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--color-primary)]"></div>
-                                                <span className="text-xs text-[var(--color-text-muted)]">Cargando estadísticas...</span>
-                                            </div>
-                                        ) : productStats && (
-                                            <div className="border-t border-[var(--glass-border)] pt-3 space-y-2">
-                                                <div className="flex justify-between text-sm">
-                                                    <span className="text-[var(--color-text-muted)]">Venta diaria</span>
-                                                    <span className="font-medium text-[var(--color-text)]">{productStats.avgDailySales} uds</span>
-                                                </div>
-                                                <div className="flex justify-between text-sm">
-                                                    <span className="text-[var(--color-text-muted)]">Venta semanal</span>
-                                                    <span className="font-medium text-[var(--color-text)]">{productStats.avgWeeklySales} uds</span>
-                                                </div>
-                                                <div className="flex justify-between text-sm">
-                                                    <span className="text-[var(--color-text-muted)]">Duración stock</span>
-                                                    <span className={cn(
-                                                        "font-bold",
-                                                        productStats.daysOfStock <= 7 ? "text-red-400" :
-                                                            productStats.daysOfStock <= 14 ? "text-yellow-400" : "text-green-400"
-                                                    )}>
-                                                        {productStats.daysOfStock > 365 ? '+365' : productStats.daysOfStock} días
-                                                    </span>
-                                                </div>
-                                                <div className="flex justify-between text-sm">
-                                                    <span className="text-[var(--color-text-muted)]">Última venta</span>
-                                                    <span className="font-medium text-[var(--color-text)]">{productStats.lastSaleDate}</span>
-                                                </div>
-                                                <div className="flex justify-between items-center text-sm pt-1">
-                                                    <span className="text-[var(--color-text-muted)]">Velocidad</span>
-                                                    <span className={cn(
-                                                        "px-2 py-0.5 rounded-full text-xs font-bold uppercase",
-                                                        productStats.velocity === 'lento' ? "bg-red-500/20 text-red-400" :
-                                                            productStats.velocity === 'rápido' ? "bg-green-500/20 text-green-400" :
-                                                                "bg-yellow-500/20 text-yellow-400"
-                                                    )}>
-                                                        {productStats.velocity}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        )}
 
                                         {selectedProduct.stock <= (selectedProduct.min_stock || 5) && (
                                             <div className="mt-3 p-2 bg-red-500/10 rounded-lg border border-red-500/20 flex items-center gap-2">

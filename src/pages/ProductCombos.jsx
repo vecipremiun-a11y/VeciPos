@@ -59,7 +59,9 @@ const ProductCombos = () => {
 
     const totalCost = form.items.reduce((sum, it) => sum + (parseFloat(it.cost) || 0) * (parseFloat(it.quantity) || 1), 0);
     const price = parseFloat(form.price) || 0;
-    const margin = totalCost > 0 ? ((price - totalCost) / totalCost * 100).toFixed(1) : '—';
+    const taxRate = parseFloat(form.tax_rate) || 0;
+    const netPrice = taxRate > 0 ? price / (1 + taxRate / 100) : price;
+    const margin = totalCost > 0 ? ((netPrice - totalCost) / totalCost * 100).toFixed(1) : '—';
 
     // Available stock calculation
     const availableStock = form.items.length > 0
@@ -225,7 +227,9 @@ const ProductCombos = () => {
                         const comboStock = getComboAvailableStock(combo.items);
                         const isExpired = combo.has_dates && combo.end_date && combo.end_date < today;
                         const isActive = combo.is_active && !isExpired;
-                        const comboMargin = combo.cost > 0 ? ((combo.price - combo.cost) / combo.cost * 100).toFixed(1) : '—';
+                        const comboTaxRate = parseFloat(combo.tax_rate) || 0;
+                        const comboNetPrice = comboTaxRate > 0 ? combo.price / (1 + comboTaxRate / 100) : combo.price;
+                        const comboMargin = combo.cost > 0 ? ((comboNetPrice - combo.cost) / combo.cost * 100).toFixed(1) : '—';
 
                         return (
                             <GlassCard key={combo.id} className={cn("p-4 space-y-3 transition-all", !isActive && "opacity-60")}>
@@ -253,7 +257,7 @@ const ProductCombos = () => {
                                 </div>
 
                                 {/* Price & Cost */}
-                                <div className="grid grid-cols-3 gap-2 text-center">
+                                <div className="grid grid-cols-4 gap-2 text-center">
                                     <div className="bg-[var(--glass-bg)] rounded-lg p-2 border border-[var(--glass-border)]">
                                         <p className="text-[10px] text-[var(--color-text-muted)]">Precio</p>
                                         <p className="font-bold text-[var(--color-primary)] text-sm">{formatCurrency(combo.price, currentCurrency)}</p>
@@ -261,6 +265,10 @@ const ProductCombos = () => {
                                     <div className="bg-[var(--glass-bg)] rounded-lg p-2 border border-[var(--glass-border)]">
                                         <p className="text-[10px] text-[var(--color-text-muted)]">Costo</p>
                                         <p className="font-bold text-[var(--color-text)] text-sm">{formatCurrency(combo.cost, currentCurrency)}</p>
+                                    </div>
+                                    <div className="bg-[var(--glass-bg)] rounded-lg p-2 border border-[var(--glass-border)]">
+                                        <p className="text-[10px] text-[var(--color-text-muted)]">Impuesto</p>
+                                        <p className="font-bold text-yellow-400 text-sm">{comboTaxRate > 0 ? `${comboTaxRate}%` : '—'}</p>
                                     </div>
                                     <div className="bg-[var(--glass-bg)] rounded-lg p-2 border border-[var(--glass-border)]">
                                         <p className="text-[10px] text-[var(--color-text-muted)]">Margen</p>
