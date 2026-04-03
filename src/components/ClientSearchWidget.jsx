@@ -36,9 +36,13 @@ const ClientSearchWidget = () => {
     const [newClientData, setNewClientData] = useState({
         name: '',
         rut: '',
+        razon_social: '',
+        giro: '',
         phone: '',
         email: '',
-        address: ''
+        address: '',
+        comuna: '',
+        ciudad: ''
     });
 
     useEffect(() => {
@@ -77,7 +81,7 @@ const ClientSearchWidget = () => {
         if (result.success) {
             handleSelectClient(result.client);
             setIsAddModalOpen(false);
-            setNewClientData({ name: '', rut: '', phone: '', email: '', address: '' });
+            setNewClientData({ name: '', rut: '', razon_social: '', giro: '', phone: '', email: '', address: '', comuna: '', ciudad: '' });
         } else {
             alert('Error al crear cliente');
         }
@@ -304,6 +308,55 @@ const ClientSearchWidget = () => {
                                     onChange={e => setNewClientData({ ...newClientData, address: e.target.value })}
                                     placeholder="Dirección..."
                                 />
+                            </div>
+
+                            {/* Datos Facturación SII */}
+                            <div className="border-t border-[var(--glass-border)] pt-3">
+                                <p className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Datos Facturación</p>
+                                <div className="space-y-3">
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-[var(--color-text-muted)]">Razón Social</label>
+                                        <input
+                                            type="text"
+                                            className="glass-input w-full"
+                                            value={newClientData.razon_social}
+                                            onChange={e => setNewClientData({ ...newClientData, razon_social: e.target.value })}
+                                            placeholder="Nombre legal"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-[var(--color-text-muted)]">Giro</label>
+                                        <input
+                                            type="text"
+                                            className="glass-input w-full"
+                                            value={newClientData.giro}
+                                            onChange={e => setNewClientData({ ...newClientData, giro: e.target.value })}
+                                            placeholder="Actividad económica"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-medium text-[var(--color-text-muted)]">Comuna</label>
+                                            <input
+                                                type="text"
+                                                className="glass-input w-full"
+                                                value={newClientData.comuna}
+                                                onChange={e => setNewClientData({ ...newClientData, comuna: e.target.value })}
+                                                placeholder="Comuna"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-medium text-[var(--color-text-muted)]">Ciudad</label>
+                                            <input
+                                                type="text"
+                                                className="glass-input w-full"
+                                                value={newClientData.ciudad}
+                                                onChange={e => setNewClientData({ ...newClientData, ciudad: e.target.value })}
+                                                placeholder="Ciudad"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <button

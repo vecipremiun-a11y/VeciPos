@@ -1,12 +1,40 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Printer, ShoppingCart, FileText, Send } from 'lucide-react';
+import { X, Printer, ShoppingCart, FileText, Send, Receipt, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import html2canvas from 'html2canvas';
+import bwipjs from 'bwip-js';
 
 import { turso } from '../lib/turso';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
+
+// Extraer TED XML del DTE firmado
+function extractTED(xmlFirmado) {
+    if (!xmlFirmado) return null;
+    const match = xmlFirmado.match(/<TED[\s\S]*?<\/TED>/);
+    return match ? match[0] : null;
+}
+
+// Generar imagen PDF417 del timbre
+async function generateTimbreImage(tedXml) {
+    if (!tedXml) return null;
+    try {
+        const canvas = document.createElement('canvas');
+        bwipjs.toCanvas(canvas, {
+            bcid: 'pdf417',
+            text: tedXml,
+            scale: 2,
+            columns: 7,
+            rowmult: 2,
+            eclevel: 5,
+        });
+        return canvas.toDataURL('image/png');
+    } catch (e) {
+        console.error('Error generating PDF417 timbre:', e);
+        return null;
+    }
+}
 
 const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) => {
     const { activeCompanyId, currentCurrency } = useStore();
@@ -24,6 +52,52 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         show_phone: false,
         show_email: false
     });
+
+    const [dteInfo, setDteInfo] = useState(null);
+    const [timbreImg, setTimbreImg] = useState(null);
+
+    // Polling para obtener info del DTE emitido
+    useEffect(() => {
+        if (!isOpen || !activeCompanyId || !saleDetails?.tipoDte) {
+            setDteInfo(null);
+            setTimbreImg(null);
+            return;
+        }
+        let cancelled = false;
+        let attempts = 0;
+        const maxAttempts = 10;
+
+        const poll = async () => {
+            try {
+                const result = await turso.execute({
+                    sql: `SELECT folio, tipo_dte AS tipo, estado AS status, track_id, xml_firmado FROM sii_dtes 
+                          WHERE company_id = ? AND tipo_dte = ?
+                          ORDER BY created_at DESC LIMIT 1`,
+                    args: [activeCompanyId, saleDetails.tipoDte]
+                });
+                if (!cancelled && result.rows.length > 0) {
+                    const row = result.rows[0];
+                    setDteInfo(row);
+                    // Generar timbre PDF417
+                    const ted = extractTED(row.xml_firmado);
+                    if (ted) {
+                        const img = await generateTimbreImage(ted);
+                        if (!cancelled) setTimbreImg(img);
+                    }
+                    return; // Stop polling
+                }
+            } catch (e) {
+                // ignore
+            }
+            attempts++;
+            if (!cancelled && attempts < maxAttempts) {
+                setTimeout(poll, 2000);
+            }
+        };
+
+        const timer = setTimeout(poll, 3000);
+        return () => { cancelled = true; clearTimeout(timer); };
+    }, [isOpen, activeCompanyId, saleDetails?.tipoDte]);
 
     // Cargar configuración de boletas cuando se abre el modal
     useEffect(() => {
@@ -128,8 +202,19 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         const date = new Date().toLocaleString('es-CL');
         const ticketId = `T-${Date.now().toString().slice(-6)}`;
 
+        const dteLabel = saleDetails.tipoDte === 33 ? 'FACTURA ELECTRÓNICA' : 'BOLETA ELECTRÓNICA';
+
         doc.setFontSize(7);
-        doc.text(`Boleta: ${ticketId}`, 2, yPos);
+        if (dteInfo?.folio) {
+            doc.text(`${dteLabel}`, 29, yPos, { align: 'center' });
+            yPos += 4;
+            doc.text(`Folio: ${dteInfo.folio}`, 29, yPos, { align: 'center' });
+            yPos += 4;
+        } else {
+            doc.text(`Boleta: ${ticketId}`, 2, yPos);
+            yPos += 4;
+        }
+        doc.text(`Fecha: ${date}`, 2, yPos);
         yPos += 4;
         doc.text(`Fecha: ${date}`, 2, yPos);
         yPos += 4;
@@ -197,6 +282,19 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
             yPos += 5;
         });
 
+        // Timbre SII (PDF417)
+        if (timbreImg) {
+            yPos += 5;
+            doc.setFontSize(6);
+            doc.text('Timbre Electrónico SII', 29, yPos, { align: 'center' });
+            yPos += 3;
+            doc.addImage(timbreImg, 'PNG', 2, yPos, 54, 18);
+            yPos += 20;
+            doc.setFontSize(5);
+            doc.text('Res. Ex. SII - Documento tributario electrónico', 29, yPos, { align: 'center' });
+            yPos += 4;
+        }
+
         return doc.output('blob');
     };
 
@@ -230,7 +328,13 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         }
 
         receiptText += `\n`;
-        receiptText += `Boleta: ${ticketId}\n`;
+        if (dteInfo?.folio) {
+            const dteLabel = saleDetails.tipoDte === 33 ? 'FACTURA ELECTRÓNICA' : 'BOLETA ELECTRÓNICA';
+            receiptText += `*${dteLabel}*\n`;
+            receiptText += `Folio: ${dteInfo.folio}\n`;
+        } else {
+            receiptText += `Boleta: ${ticketId}\n`;
+        }
         receiptText += `Fecha: ${date}\n`;
         receiptText += `Vend: ${sellerName}\n`;
         receiptText += `--------------------------------\n`;
@@ -333,7 +437,11 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                         ${receiptConfig.header_message ? `<p style="margin: 10px 0; font-size: 10px; font-style: italic;">${receiptConfig.header_message}</p>` : ''}
                         <br/>
                         <div style="font-size: 10px; text-align: left;">
-                            <div>Boleta: ${ticketId}</div>
+                            ${dteInfo?.folio 
+                                ? `<div style="text-align: center; font-weight: bold; font-size: 11px;">${saleDetails.tipoDte === 33 ? 'FACTURA ELECTRÓNICA' : 'BOLETA ELECTRÓNICA'}</div>
+                                   <div style="text-align: center;">Folio: ${dteInfo.folio}</div>`
+                                : `<div>Boleta: ${ticketId}</div>`
+                            }
                             <div>Fecha: ${date}</div>
                             <div>Vend: ${sellerName}</div> 
                         </div>
@@ -386,13 +494,34 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                             ${receiptConfig.footer_message.split('\n').map(line => `<div style="margin: 3px 0;">${line}</div>`).join('')}
                         </div>
                     </div>
+                    ${timbreImg ? `
+                    <div style="text-align:center; margin-top:15px; padding-top:10px; border-top:1px dashed #ccc;">
+                        <div style="font-size:8px; font-weight:bold; margin-bottom:5px;">Timbre Electrónico SII</div>
+                        <img src="${timbreImg}" style="width:100%; max-width:220px;" />
+                        <div style="font-size:7px; margin-top:3px;">Res. Ex. SII - Documento tributario electrónico</div>
+                    </div>
+                    ` : ''}
                 </body>
             </html>
         `);
         printWindow.document.close();
-        printWindow.focus();
-        printWindow.print();
-        printWindow.close();
+
+        const doPrint = () => {
+            printWindow.focus();
+            printWindow.print();
+            printWindow.close();
+        };
+
+        // Esperar a que la imagen del timbre cargue antes de imprimir
+        if (timbreImg) {
+            const img = printWindow.document.querySelector('img[src^="data:image"]');
+            if (img && !img.complete) {
+                img.onload = doPrint;
+                img.onerror = doPrint; // imprimir igual si falla la imagen
+                return;
+            }
+        }
+        doPrint();
     };
 
     return (
@@ -419,6 +548,36 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                 </div>
 
                 <h2 className="text-2xl font-bold text-white mb-2">¡Venta completada!</h2>
+
+                {/* DTE Badge */}
+                {saleDetails.tipoDte && (
+                    <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-bold mb-3 ${
+                        saleDetails.tipoDte === 33
+                            ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                            : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                    }`}>
+                        {saleDetails.tipoDte === 33 ? <FileText size={16} /> : <Receipt size={16} />}
+                        {saleDetails.tipoDte === 33 ? 'Factura Electrónica' : 'Boleta Electrónica'}
+                        {dteInfo ? (
+                            <span className="flex items-center gap-1 ml-1">
+                                {dteInfo.status === 'accepted' ? (
+                                    <CheckCircle2 size={14} className="text-green-400" />
+                                ) : dteInfo.status === 'rejected' ? (
+                                    <AlertTriangle size={14} className="text-red-400" />
+                                ) : (
+                                    <Clock size={14} className="text-yellow-400" />
+                                )}
+                                N° {dteInfo.folio}
+                            </span>
+                        ) : (
+                            <span className="flex items-center gap-1 ml-1">
+                                <Clock size={14} className="text-yellow-400 animate-pulse" />
+                                Emitiendo...
+                            </span>
+                        )}
+                    </div>
+                )}
+
                 <p className="text-4xl font-bold text-[var(--color-primary)] mb-8">
                     {formatCurrency(saleDetails.total, currentCurrency)}
                 </p>
@@ -455,10 +614,11 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                 <div className="grid grid-cols-3 gap-3 w-full">
                     <button
                         onClick={handlePrint}
-                        className="flex flex-col items-center justify-center gap-1 p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors text-xs text-gray-300"
+                        disabled={saleDetails?.tipoDte && !timbreImg}
+                        className="flex flex-col items-center justify-center gap-1 p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors text-xs text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         <Printer size={20} />
-                        Imprimir
+                        {saleDetails?.tipoDte && !timbreImg ? 'Esperando timbre...' : 'Imprimir'}
                     </button>
                     <button
                         onClick={onNewSale}

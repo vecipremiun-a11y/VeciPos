@@ -2,7 +2,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { formatCurrency } from './formatCurrency';
 
-export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = null, currencyCode = 'CLP') => {
+export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = null, currencyCode = 'CLP', timbreImg = null) => {
     // Si no se pasa config, usar valores por defecto
     const config = receiptConfig || {
         business_name: 'VECI',
@@ -74,6 +74,16 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
     const ticketId = saleDetails.id ? `T-${String(saleDetails.id).slice(-6)}` : `T-${Date.now().toString().slice(-6)}`;
 
     doc.setFontSize(7);
+    // DTE folio (if SII electronic invoicing is active)
+    if (saleDetails.dte_folio) {
+        const dteLabel = saleDetails.dte_tipo === 33 ? 'Factura Electrónica' : 'Boleta Electrónica';
+        doc.setFont('courier', 'bold');
+        doc.text(`${dteLabel}`, 29, yPos, { align: 'center' });
+        yPos += 3;
+        doc.text(`Folio N° ${saleDetails.dte_folio}`, 29, yPos, { align: 'center' });
+        yPos += 4;
+        doc.setFont('courier', 'normal');
+    }
     doc.text(`Boleta: ${ticketId}`, 2, yPos);
     yPos += 4;
     doc.text(`Fecha: ${date}`, 2, yPos);
@@ -151,6 +161,19 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
         yPos += 5;
     });
 
+    // Timbre SII (PDF417)
+    if (timbreImg) {
+        yPos += 5;
+        doc.setFontSize(6);
+        doc.text('Timbre Electrónico SII', 29, yPos, { align: 'center' });
+        yPos += 3;
+        doc.addImage(timbreImg, 'PNG', 2, yPos, 54, 18);
+        yPos += 20;
+        doc.setFontSize(5);
+        doc.text('Res. Ex. SII - Documento tributario electrónico', 29, yPos, { align: 'center' });
+        yPos += 4;
+    }
+
     return doc.output('blob');
 };
 
@@ -195,6 +218,11 @@ export const generateWhatsAppLink = (phoneNumber, saleDetails, seller, receiptCo
     }
 
     receiptText += `\n`;
+    // DTE folio (SII electronic invoicing)
+    if (saleDetails.dte_folio) {
+        const dteLabel = saleDetails.dte_tipo === 33 ? 'Factura Electrónica' : 'Boleta Electrónica';
+        receiptText += `*${dteLabel} - Folio N° ${saleDetails.dte_folio}*\n`;
+    }
     receiptText += `Boleta: ${ticketId}\n`;
     receiptText += `Fecha: ${date}\n`;
     receiptText += `Vend: ${sellerName}\n`;

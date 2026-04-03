@@ -23,6 +23,7 @@ const Invoices = () => {
     // Filtros
     const [dateFrom, setDateFrom] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
     const [dateTo, setDateTo] = useState(() => format(endOfMonth(new Date()), 'yyyy-MM-dd'));
+    const [activeQuickFilter, setActiveQuickFilter] = useState(0);
     const [supplierFilter, setSupplierFilter] = useState('');
     const [paymentTypeFilter, setPaymentTypeFilter] = useState('all');
     const [searchQuery, setSearchQuery] = useState('');
@@ -193,6 +194,7 @@ const Invoices = () => {
         const now = new Date();
         setDateFrom(format(startOfMonth(months === 0 ? now : subMonths(now, months)), 'yyyy-MM-dd'));
         setDateTo(format(endOfMonth(now), 'yyyy-MM-dd'));
+        setActiveQuickFilter(months);
     };
 
     const toggleSupplier = (id) => {
@@ -259,13 +261,13 @@ const Invoices = () => {
                     <div className="flex flex-wrap items-center gap-2">
                         <div className="flex items-center gap-2 bg-[var(--color-surface)] rounded-lg px-3 py-2">
                             <Calendar size={16} className="text-[var(--color-text-muted)]" />
-                            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="bg-transparent text-[var(--color-text)] text-sm focus:outline-none" />
+                            <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setActiveQuickFilter(null); }} className="bg-transparent text-[var(--color-text)] text-sm focus:outline-none" />
                             <span className="text-[var(--color-text-muted)]">-</span>
-                            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="bg-transparent text-[var(--color-text)] text-sm focus:outline-none" />
+                            <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setActiveQuickFilter(null); }} className="bg-transparent text-[var(--color-text)] text-sm focus:outline-none" />
                         </div>
                         <div className="flex gap-1">
                             {[{ l: 'Este mes', v: 0 }, { l: '3 meses', v: 2 }, { l: '6 meses', v: 5 }].map(b => (
-                                <button key={b.l} onClick={() => handleQuickFilter(b.v)} className="px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 rounded-lg text-[var(--color-text-muted)]">{b.l}</button>
+                                <button key={b.l} onClick={() => handleQuickFilter(b.v)} className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${activeQuickFilter === b.v ? 'bg-[var(--color-primary)] text-white' : 'bg-white/5 hover:bg-white/10 text-[var(--color-text-muted)]'}`}>{b.l}</button>
                             ))}
                         </div>
                     </div>

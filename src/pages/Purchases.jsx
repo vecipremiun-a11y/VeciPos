@@ -344,12 +344,20 @@ const Purchases = () => {
                                 </div>
                             </div>
 
-                            {/* SKU and IVA */}
+                            {/* SKU and Cost */}
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">SKU / Código</label>
                                     <input type="text" name="sku" value={entryForm.sku} onChange={handleEntryChange} className="glass-input w-full text-sm" />
                                 </div>
+                                <div>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Costo ($)</label>
+                                    <input type="number" name="cost" value={entryForm.cost} onChange={handleEntryChange} className="glass-input w-full text-sm" required min="0" step="0.01" />
+                                </div>
+                            </div>
+
+                            {/* IVA and Margin */}
+                            <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">IVA</label>
                                     <select name="tax" value={entryForm.tax} onChange={handleEntryChange} className="glass-input w-full text-sm">
@@ -357,18 +365,16 @@ const Purchases = () => {
                                         <option value="19">IVA (19%)</option>
                                     </select>
                                 </div>
-                            </div>
-
-                            {/* Margin and Price */}
-                            <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">Utilidad (%)</label>
                                     <input type="number" name="margin" value={entryForm.margin} onChange={handleEntryChange} className="glass-input w-full text-sm" />
                                 </div>
-                                <div>
-                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Precio Venta ($)</label>
-                                    <input type="number" name="price" value={entryForm.price} onChange={handleEntryChange} className="glass-input w-full text-sm" />
-                                </div>
+                            </div>
+
+                            {/* Precio Venta */}
+                            <div>
+                                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Precio Venta ($)</label>
+                                <input type="number" name="price" value={entryForm.price} onChange={handleEntryChange} className="glass-input w-full text-sm" />
                             </div>
 
                             {/* Quantity */}

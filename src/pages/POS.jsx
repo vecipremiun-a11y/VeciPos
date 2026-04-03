@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift, FileText, Receipt } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
@@ -11,8 +11,10 @@ import SaleSuccessModal from '../components/SaleSuccessModal';
 import ClientSearchWidget from '../components/ClientSearchWidget';
 import OptimizedImage from '../components/OptimizedImage';
 import SuspendedSalesModal from '../components/SuspendedSalesModal';
+import InvoiceDataModal from '../components/InvoiceDataModal';
 import { usePermissions } from '../hooks/usePermissions';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
+import { turso } from '../lib/turso';
 
 // Component for Kg quantity input that allows typing decimals with comma
 const KgQuantityInput = ({ value, onChange, onCommit }) => {
@@ -79,6 +81,7 @@ const POS = () => {
         checkRegisterStatus,
         inventoryAdjustmentMode,
         setPosSelectedClient,
+        setCartTipoDte,
         searchProducts,
         loadCategoryProducts,
         getProductByBarcode,
@@ -121,9 +124,53 @@ const POS = () => {
     const posSelectedClient = React.useMemo(() => {
         return carts.find(c => c.id === activeCartId)?.client || null;
     }, [carts, activeCartId]);
+
+    const posTipoDte = React.useMemo(() => {
+        const dte = carts.find(c => c.id === activeCartId)?.tipoDte;
+        return dte != null ? dte : 39;
+    }, [carts, activeCartId]);
+
+    const [siiActive, setSiiActive] = React.useState(false);
+    const [enabledDtes, setEnabledDtes] = React.useState([0, 39, 33, 34]);
+    const [defaultDte, setDefaultDte] = React.useState(39);
+
+    React.useEffect(() => {
+        if (!activeCompanyId) return;
+        turso.execute({
+            sql: "SELECT is_active, enabled_dtes, default_dte FROM sii_config WHERE company_id = ?",
+            args: [activeCompanyId]
+        }).then(r => {
+            if (r.rows.length > 0 && Number(r.rows[0].is_active) === 1) {
+                setSiiActive(true);
+                if (r.rows[0].enabled_dtes) {
+                    try { setEnabledDtes(JSON.parse(r.rows[0].enabled_dtes)); } catch {}
+                }
+                if (r.rows[0].default_dte != null) {
+                    const def = Number(r.rows[0].default_dte);
+                    setDefaultDte(def);
+                    setCartTipoDte(def);
+                }
+            } else {
+                setSiiActive(false);
+            }
+        }).catch(() => setSiiActive(false));
+    }, [activeCompanyId]);
+
+    // Auto-switch a Factura (33) si el cliente tiene RUT, otherwise use default
+    React.useEffect(() => {
+        if (!siiActive) return;
+        if (posSelectedClient?.rut && enabledDtes.includes(33)) {
+            setCartTipoDte(33);
+        } else {
+            setCartTipoDte(defaultDte);
+        }
+    }, [posSelectedClient, siiActive, enabledDtes, defaultDte]);
+
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('Todos');
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+    const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+    const [pendingInvoiceData, setPendingInvoiceData] = useState(null);
     const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
     const [lastSaleDetails, setLastSaleDetails] = useState(null);
     const [isLoadingProducts, setIsLoadingProducts] = useState(true);
@@ -202,6 +249,21 @@ const POS = () => {
 
     const handleCheckoutClick = () => {
         if (cart.length === 0) return;
+        // Si es Factura (33 o 34), abrir modal de datos de facturación primero
+        if (siiActive && (posTipoDte === 33 || posTipoDte === 34)) {
+            setIsInvoiceModalOpen(true);
+            return;
+        }
+        setIsPaymentModalOpen(true);
+    };
+
+    const handleInvoiceConfirm = (invoiceData) => {
+        setPendingInvoiceData(invoiceData);
+        // Actualizar tipoDte del carrito si cambió en el modal
+        if (invoiceData.tipoDte !== posTipoDte) {
+            setCartTipoDte(invoiceData.tipoDte);
+        }
+        setIsInvoiceModalOpen(false);
         setIsPaymentModalOpen(true);
     };
 
@@ -212,13 +274,16 @@ const POS = () => {
             summary: `${cart.length} productos`,
             paymentMethod: paymentData.method,
             paymentDetails: paymentData,
-            client: posSelectedClient
+            client: posSelectedClient,
+            tipoDte: pendingInvoiceData?.tipoDte || posTipoDte,
+            invoiceData: pendingInvoiceData || null
         };
 
         // ⚡ UI INSTANTÁNEA - Mostrar éxito ANTES de que termine la BD
         setLastSaleDetails(saleData);
         setIsSuccessModalOpen(true);
         setPosSelectedClient(null);
+        setPendingInvoiceData(null);
 
         // Ejecutar venta en background (no bloquea UI)
         addSale(saleData).then(result => {
@@ -762,6 +827,22 @@ const POS = () => {
                 </div>
 
                 <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] space-y-2">
+                    {/* DTE Type Selector */}
+                    {siiActive && enabledDtes.length > 0 && (
+                        <div className="mb-1">
+                            <select
+                                value={posTipoDte}
+                                onChange={(e) => setCartTipoDte(Number(e.target.value))}
+                                className="w-full py-1.5 px-3 rounded-lg text-xs font-bold bg-[var(--glass-bg)] text-[var(--color-text)] border border-[var(--glass-border)] focus:outline-none focus:border-blue-500 appearance-none cursor-pointer"
+                                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}
+                            >
+                                {enabledDtes.includes(0) && <option value={0}>📝 Nota de Venta (sin SII)</option>}
+                                {enabledDtes.includes(39) && <option value={39}>📄 Boleta Electrónica (39)</option>}
+                                {enabledDtes.includes(33) && <option value={33}>📋 Factura Electrónica (33)</option>}
+                                {enabledDtes.includes(34) && <option value={34}>📋 Factura Exenta (34)</option>}
+                            </select>
+                        </div>
+                    )}
                     {/* Total row - clickable to expand/collapse details */}
                     <div
                         className="flex justify-between items-center text-[var(--color-text)] text-2xl font-bold cursor-pointer hover:opacity-80 transition-opacity"
@@ -962,6 +1043,22 @@ const POS = () => {
 
                             {/* Footer with Total and Checkout */}
                             <div className="p-4 border-t border-white/10 bg-[#14141f] space-y-3 pb-8">
+                                {/* DTE Type Selector - Mobile */}
+                                {siiActive && enabledDtes.length > 0 && (
+                                    <div>
+                                        <select
+                                            value={posTipoDte}
+                                            onChange={(e) => setCartTipoDte(Number(e.target.value))}
+                                            className="w-full py-2 px-3 rounded-lg text-sm font-bold bg-white/5 text-white border border-white/10 focus:outline-none focus:border-blue-500 appearance-none cursor-pointer"
+                                            style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center' }}
+                                        >
+                                            {enabledDtes.includes(0) && <option value={0}>📝 Nota de Venta (sin SII)</option>}
+                                            {enabledDtes.includes(39) && <option value={39}>📄 Boleta Electrónica (39)</option>}
+                                            {enabledDtes.includes(33) && <option value={33}>📋 Factura Electrónica (33)</option>}
+                                            {enabledDtes.includes(34) && <option value={34}>📋 Factura Exenta (34)</option>}
+                                        </select>
+                                    </div>
+                                )}
                                 <div className="flex justify-between items-center">
                                     <span className="text-gray-400">Total a Pagar</span>
                                     <span className="text-2xl font-black text-green-400">
@@ -989,6 +1086,13 @@ const POS = () => {
             <SuspendedSalesModal
                 isOpen={showSuspendedModal}
                 onClose={() => setShowSuspendedModal(false)}
+            />
+
+            <InvoiceDataModal
+                isOpen={isInvoiceModalOpen}
+                onClose={() => setIsInvoiceModalOpen(false)}
+                onConfirm={handleInvoiceConfirm}
+                initialTipoDte={posTipoDte}
             />
 
             <PaymentModal

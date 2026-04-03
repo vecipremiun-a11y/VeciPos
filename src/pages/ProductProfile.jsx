@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
 
-import { Search, Package, ArrowDownCircle, ArrowUpCircle, RefreshCw, Truck, ShoppingCart, RotateCcw, Globe, Smartphone, FileText, User, Calendar, Hash, Eye } from 'lucide-react';
+import { Search, Package, ArrowDownCircle, ArrowUpCircle, RefreshCw, Truck, ShoppingCart, RotateCcw, Globe, Smartphone, FileText, User, Calendar, Hash, Eye, AlertTriangle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { turso } from '../lib/turso';
 import { formatCurrency } from '../utils/formatCurrency';
 import { cn } from '../lib/utils';
 import OptimizedImage from '../components/OptimizedImage';
+import { formatInCompanyTime } from '../lib/dateHelpers';
 import { format, subDays, startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 const ProductProfile = () => {
-    const { activeCompanyId, currentCurrency, searchProductsForDropdown, users } = useStore();
+    const { activeCompanyId, currentCurrency, searchProductsForDropdown, users, currentCompanyTimezone } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -29,6 +30,13 @@ const ProductProfile = () => {
     const [purchases, setPurchases] = useState([]);
     const [sales, setSales] = useState([]);
     const [movements, setMovements] = useState([]);
+
+    // Sales stats (pre-calculated from DB)
+    const [salesStats, setSalesStats] = useState(null);
+    const [isLoadingStats, setIsLoadingStats] = useState(false);
+
+    // FEFO lots
+    const [lots, setLots] = useState([]);
 
 
     // Search products using store function
@@ -80,7 +88,64 @@ const ProductProfile = () => {
         setSearchResults([]);
         setSelectedProduct(product);
         setSearchTerm(product.name);
+        loadSalesStats(product.id, product.stock);
+        loadProductLots(product.id);
         await loadProductMovements(product.id, product);
+    };
+
+    // Load pre-calculated sales stats from DB (fast)
+    const loadSalesStats = async (productId, currentStock) => {
+        setIsLoadingStats(true);
+        try {
+            const today = format(new Date(), 'yyyy-MM-dd');
+            const thirtyDaysAgo = format(subDays(new Date(), 30), 'yyyy-MM-dd');
+
+            const [profitRes, statsRes] = await Promise.all([
+                turso.execute({
+                    sql: `SELECT COALESCE(SUM(total_quantity), 0) as total_sold,
+                                 COUNT(DISTINCT day) as days_with_sales
+                          FROM product_daily_profit
+                          WHERE company_id = ? AND product_id = ? AND day >= ? AND day <= ?`,
+                    args: [activeCompanyId, productId, thirtyDaysAgo, today]
+                }),
+                turso.execute({
+                    sql: `SELECT last_sale_date FROM product_movement_stats
+                          WHERE company_id = ? AND product_id = ?`,
+                    args: [activeCompanyId, productId]
+                })
+            ]);
+
+            const totalSold30d = parseFloat(profitRes.rows[0]?.total_sold) || 0;
+            const avgDaily = totalSold30d / 30;
+            const avgWeekly = avgDaily * 7;
+            const daysOfStock = avgDaily > 0 ? Math.round(currentStock / avgDaily) : null;
+            const lastSaleDate = statsRes.rows[0]?.last_sale_date || null;
+
+            let velocity = 'NORMAL';
+            let velocityColor = 'yellow';
+            if (avgDaily < 0.5) { velocity = 'LENTO'; velocityColor = 'red'; }
+            else if (avgDaily > 3) { velocity = 'RÁPIDO'; velocityColor = 'green'; }
+
+            setSalesStats({ avgDaily, avgWeekly, daysOfStock, lastSaleDate, velocity, velocityColor });
+        } catch (e) {
+            console.error('Error loading sales stats:', e);
+            setSalesStats(null);
+        }
+        setIsLoadingStats(false);
+    };
+
+    // Load FEFO lots for product
+    const loadProductLots = async (productId) => {
+        try {
+            const result = await turso.execute({
+                sql: `SELECT * FROM product_lots WHERE product_id = ? AND company_id = ? ORDER BY expiry_date DESC`,
+                args: [productId, activeCompanyId]
+            });
+            setLots(result.rows || []);
+        } catch (e) {
+            console.error('Error loading lots:', e);
+            setLots([]);
+        }
     };
 
     // Load product movements (purchases and sales)
@@ -94,9 +159,10 @@ const ProductProfile = () => {
         try {
             // Purchases Query - filtered by product ID in items JSON
             const purchasesResult = await turso.execute({
-                sql: `SELECT p.*, s.name as supplier_name, s.email as supplier_email, s.phone as supplier_phone
+                sql: `SELECT p.*, s.name as supplier_name, s.email as supplier_email, s.phone as supplier_phone, u.name as purchase_user_name
                       FROM purchases p
                       LEFT JOIN suppliers s ON p.supplier_id = s.id
+                      LEFT JOIN users u ON p.user_id = u.id
                       WHERE p.company_id = ? AND date(p.date) BETWEEN date(?) AND date(?)
                       AND p.items LIKE ?
                       ORDER BY p.date DESC
@@ -114,7 +180,11 @@ const ProductProfile = () => {
                         productPurchases.push({
                             ...purchase,
                             productItem: productItem,
-                            formattedDate: format(parseISO(purchase.date), 'dd/MM/yyyy HH:mm'),
+                            formattedDate: currentCompanyTimezone
+                                ? formatInCompanyTime(purchase.date.length === 10 ? purchase.date + 'T12:00:00' : purchase.date, currentCompanyTimezone, 'dd/MM/yyyy HH:mm')
+                                : purchase.date.length === 10
+                                    ? purchase.date.split('-').reverse().join('/')
+                                    : format(parseISO(purchase.date), 'dd/MM/yyyy HH:mm'),
                             quantity: productItem.quantity,
                             cost: productItem.cost || productItem.price
                         });
@@ -146,7 +216,9 @@ const ProductProfile = () => {
                         productSales.push({
                             ...sale,
                             productItem: productItem,
-                            formattedDate: format(parseISO(sale.date), 'dd/MM/yyyy HH:mm'),
+                            formattedDate: currentCompanyTimezone
+                                ? formatInCompanyTime(sale.date, currentCompanyTimezone, 'dd/MM/yyyy HH:mm')
+                                : format(parseISO(sale.date), 'dd/MM/yyyy HH:mm'),
                             quantity: productItem.quantity,
                             price: productItem.price,
                             subtotal: productItem.quantity * productItem.price
@@ -158,6 +230,17 @@ const ProductProfile = () => {
             }
             setSales(productSales);
 
+            // Stock Adjustments Query
+            const adjustmentsResult = await turso.execute({
+                sql: `SELECT * FROM stock_adjustments
+                      WHERE company_id = ? AND product_id = ? AND date(created_at) BETWEEN date(?) AND date(?)
+                      ORDER BY created_at DESC
+                      LIMIT 100`,
+                args: [activeCompanyId, productId, dateRange.from, dateRange.to]
+            }).catch(() => ({ rows: [] }));
+
+            const reasonLabels = { manual: 'Ajuste Manual', reconciliacion: 'Reconciliación', control_inventario: 'Control Inventario' };
+
             // Combine for Movements
             const allMovements = [
                 ...productPurchases.map(p => ({
@@ -166,7 +249,7 @@ const ProductProfile = () => {
                     reference: `Factura #${p.invoice_number}`,
                     quantity: p.quantity,
                     price: p.cost,
-                    user: 'Sistema',
+                    user: p.purchase_user_name || 'Desconocido',
                     color: 'text-green-400',
                     icon: ArrowDownCircle
                 })),
@@ -179,8 +262,36 @@ const ProductProfile = () => {
                     user: s.user_name || 'Desconocido',
                     color: 'text-red-400',
                     icon: ArrowUpCircle
+                })),
+                ...adjustmentsResult.rows.map(a => ({
+                    type: 'ajuste',
+                    date: a.created_at,
+                    reference: reasonLabels[a.reason] || 'Ajuste',
+                    quantity: Math.abs(a.difference),
+                    adjustmentDiff: a.difference,
+                    oldStock: a.old_stock,
+                    newStock: a.new_stock,
+                    price: null,
+                    user: a.user_name || 'Desconocido',
+                    color: 'text-yellow-400',
+                    icon: RefreshCw
                 }))
             ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            // Calculate running stock balance (from newest to oldest)
+            let runningStock = currentProduct.stock || 0;
+            for (let i = 0; i < allMovements.length; i++) {
+                allMovements[i].stockAfter = runningStock;
+                // Undo this movement to get the stock before it
+                if (allMovements[i].type === 'ajuste') {
+                    // For adjustments, we know the exact old/new stock
+                    runningStock = allMovements[i].oldStock;
+                } else if (allMovements[i].type === 'entrada') {
+                    runningStock -= allMovements[i].quantity;
+                } else {
+                    runningStock += allMovements[i].quantity;
+                }
+            }
 
             setMovements(allMovements);
         } catch (error) {
@@ -208,12 +319,18 @@ const ProductProfile = () => {
         return user ? user.name : 'Usuario';
     };
 
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const soon = format(subDays(new Date(), -30), 'yyyy-MM-dd');
+    const expiredLots = lots.filter(l => l.expiry_date && l.expiry_date < today);
+    const soonLots = lots.filter(l => l.expiry_date && l.expiry_date >= today && l.expiry_date <= soon);
+
     // Movement type tabs
     const tabs = [
         { id: 'purchases', label: 'Compras', icon: Truck, count: purchases.length },
         { id: 'sales', label: 'Ventas', icon: ShoppingCart, count: sales.length },
         { id: 'returns', label: 'Devoluciones', icon: RotateCcw, count: 0 },
-        { id: 'movements', label: 'Movimientos', icon: RefreshCw, count: movements.length }
+        { id: 'movements', label: 'Movimientos', icon: RefreshCw, count: movements.length },
+        { id: 'fefo', label: 'FEFO', icon: AlertTriangle, count: lots.length }
     ];
 
 
@@ -358,6 +475,49 @@ const ProductProfile = () => {
                             </div>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* Sales Stats Cards */}
+            {selectedProduct && salesStats && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                    <div className="glass-card p-4">
+                        <p className="text-[10px] uppercase text-[var(--color-text-muted)] mb-1">Venta promedio diaria</p>
+                        <p className="text-lg font-bold text-[var(--color-text)]">{salesStats.avgDaily.toFixed(1)} <span className="text-xs font-normal text-[var(--color-text-muted)]">uds</span></p>
+                    </div>
+                    <div className="glass-card p-4">
+                        <p className="text-[10px] uppercase text-[var(--color-text-muted)] mb-1">Venta promedio semanal</p>
+                        <p className="text-lg font-bold text-[var(--color-text)]">{salesStats.avgWeekly.toFixed(1)} <span className="text-xs font-normal text-[var(--color-text-muted)]">uds</span></p>
+                    </div>
+                    <div className="glass-card p-4">
+                        <p className="text-[10px] uppercase text-[var(--color-text-muted)] mb-1">Días que dura el stock</p>
+                        <p className={`text-lg font-bold ${salesStats.daysOfStock !== null && salesStats.daysOfStock <= 7 ? 'text-red-400' : salesStats.daysOfStock !== null && salesStats.daysOfStock <= 15 ? 'text-yellow-400' : 'text-green-400'}`}>
+                            {salesStats.daysOfStock !== null ? `${salesStats.daysOfStock} días` : 'Sin ventas'}
+                        </p>
+                    </div>
+                    <div className="glass-card p-4">
+                        <p className="text-[10px] uppercase text-[var(--color-text-muted)] mb-1">Última venta</p>
+                        <p className="text-lg font-bold text-[var(--color-text)]">{salesStats.lastSaleDate ? format(parseISO(salesStats.lastSaleDate), 'dd/MM/yyyy') : 'Sin ventas'}</p>
+                    </div>
+                    <div className="glass-card p-4 col-span-2 md:col-span-1">
+                        <p className="text-[10px] uppercase text-[var(--color-text-muted)] mb-1">Velocidad</p>
+                        <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold
+                            ${salesStats.velocityColor === 'green' ? 'bg-green-500/20 text-green-400' : 
+                              salesStats.velocityColor === 'red' ? 'bg-red-500/20 text-red-400' : 
+                              'bg-yellow-500/20 text-yellow-400'}`}>
+                            {salesStats.velocity}
+                        </span>
+                    </div>
+                </div>
+            )}
+            {selectedProduct && isLoadingStats && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                    {[...Array(5)].map((_, i) => (
+                        <div key={i} className="glass-card p-4 animate-pulse">
+                            <div className="h-3 w-24 bg-white/10 rounded mb-2" />
+                            <div className="h-5 w-16 bg-white/10 rounded" />
+                        </div>
+                    ))}
                 </div>
             )}
 
@@ -530,7 +690,7 @@ const ProductProfile = () => {
                                                 ))}
                                                 {sales.length === 0 && (
                                                     <tr>
-                                                        <td colSpan="8" className="p-8 text-center text-[var(--color-text-muted)]">
+                                                        <td colSpan="7" className="p-8 text-center text-[var(--color-text-muted)]">
                                                             No hay ventas registradas en este periodo
                                                         </td>
                                                     </tr>
@@ -549,6 +709,91 @@ const ProductProfile = () => {
                                     </div>
                                 )}
 
+                                {/* FEFO Tab */}
+                                {activeTab === 'fefo' && (
+                                    <div className="overflow-x-auto">
+                                        {/* Summary */}
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                                            <div className="bg-[var(--color-surface)] rounded-lg p-3 text-center">
+                                                <p className="text-[10px] uppercase text-[var(--color-text-muted)]">Total Lotes</p>
+                                                <p className="text-lg font-bold text-[var(--color-text)]">{lots.length}</p>
+                                            </div>
+                                            <div className="bg-[var(--color-surface)] rounded-lg p-3 text-center">
+                                                <p className="text-[10px] uppercase text-[var(--color-text-muted)]">Stock en Lotes</p>
+                                                <p className="text-lg font-bold text-[var(--color-primary)]">{lots.reduce((s, l) => s + (parseFloat(l.quantity) || 0), 0)}</p>
+                                            </div>
+                                            <div className="bg-[var(--color-surface)] rounded-lg p-3 text-center">
+                                                <p className="text-[10px] uppercase text-red-400">Vencidos</p>
+                                                <p className="text-lg font-bold text-red-400">{expiredLots.length}</p>
+                                            </div>
+                                            <div className="bg-[var(--color-surface)] rounded-lg p-3 text-center">
+                                                <p className="text-[10px] uppercase text-yellow-400">Por Vencer (30d)</p>
+                                                <p className="text-lg font-bold text-yellow-400">{soonLots.length}</p>
+                                            </div>
+                                        </div>
+
+                                        <table className="w-full">
+                                            <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] text-xs uppercase">
+                                                <tr>
+                                                    <th className="text-left p-3">Lote</th>
+                                                    <th className="text-left p-3">Vencimiento</th>
+                                                    <th className="text-right p-3">Cantidad</th>
+                                                    <th className="text-right p-3">Costo</th>
+                                                    <th className="text-left p-3">Proveedor</th>
+                                                    <th className="text-center p-3">Estado</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-[var(--glass-border)]">
+                                                {lots.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan="6" className="p-8 text-center text-[var(--color-text-muted)]">
+                                                            No hay lotes registrados para este producto
+                                                        </td>
+                                                    </tr>
+                                                ) : (
+                                                    lots.map((lot) => {
+                                                        const isExpired = lot.expiry_date && lot.expiry_date < today;
+                                                        const isSoon = lot.expiry_date && !isExpired && lot.expiry_date <= soon;
+                                                        const isEmpty = (parseFloat(lot.quantity) || 0) <= 0;
+                                                        return (
+                                                            <tr key={lot.id} className={`hover:bg-[var(--glass-bg)] transition-colors ${isExpired ? 'opacity-60' : ''}`}>
+                                                                <td className="p-3 text-[var(--color-text)] font-medium">{lot.batch_number || '-'}</td>
+                                                                <td className="p-3">
+                                                                    {lot.expiry_date ? (
+                                                                        <span className={`font-medium ${isExpired ? 'text-red-400' : isSoon ? 'text-yellow-400' : 'text-green-400'}`}>
+                                                                            {format(parseISO(lot.expiry_date), 'dd/MM/yyyy')}
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="text-[var(--color-text-muted)]">Sin fecha</span>
+                                                                    )}
+                                                                </td>
+                                                                <td className={`p-3 text-right font-bold ${isEmpty ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text)]'}`}>
+                                                                    {parseFloat(lot.quantity) || 0}
+                                                                </td>
+                                                                <td className="p-3 text-right text-[var(--color-text)]">
+                                                                    {formatCurrency(parseFloat(lot.cost) || 0, currentCurrency)}
+                                                                </td>
+                                                                <td className="p-3 text-blue-400">{lot.supplier_name || '-'}</td>
+                                                                <td className="p-3 text-center">
+                                                                    {isExpired ? (
+                                                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400">VENCIDO</span>
+                                                                    ) : isSoon ? (
+                                                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-yellow-500/20 text-yellow-400">POR VENCER</span>
+                                                                    ) : isEmpty ? (
+                                                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-500/20 text-gray-400">AGOTADO</span>
+                                                                    ) : (
+                                                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-500/20 text-green-400">VIGENTE</span>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+
                                 {/* Movements Tab */}
                                 {activeTab === 'movements' && (
                                     <div className="overflow-x-auto">
@@ -562,6 +807,10 @@ const ProductProfile = () => {
                                                 <div className="w-3 h-3 rounded-full bg-red-500"></div>
                                                 <span className="text-[var(--color-text-muted)]">Salida (Venta)</span>
                                             </div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                                                <span className="text-[var(--color-text-muted)]">Ajuste de Stock</span>
+                                            </div>
                                         </div>
 
                                         <table className="w-full">
@@ -573,13 +822,14 @@ const ProductProfile = () => {
                                                     <th className="text-right p-3 sticky top-0 bg-[var(--glass-bg)] z-10">Cantidad</th>
                                                     <th className="text-right p-3 sticky top-0 bg-[var(--glass-bg)] z-10">Precio/Costo</th>
                                                     <th className="text-left p-3 sticky top-0 bg-[var(--glass-bg)] z-10">Fecha</th>
+                                                    <th className="text-right p-3 sticky top-0 bg-[var(--glass-bg)] z-10">Stock</th>
                                                     <th className="text-left p-3 sticky top-0 bg-[var(--glass-bg)] z-10">Usuario</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-[var(--glass-border)]">
                                                 {movements.length === 0 ? (
                                                     <tr>
-                                                        <td colSpan="7" className="p-8 text-center text-[var(--color-text-muted)]">
+                                                        <td colSpan="8" className="p-8 text-center text-[var(--color-text-muted)]">
                                                             No hay movimientos registrados para este producto
                                                         </td>
                                                     </tr>
@@ -591,19 +841,21 @@ const ProductProfile = () => {
                                                                 <div className="flex items-center gap-2">
                                                                     <div className={cn(
                                                                         "p-1 rounded",
-                                                                        mov.type === 'entrada' ? "bg-green-500/20" : "bg-red-500/20"
+                                                                        mov.type === 'entrada' ? "bg-green-500/20" : mov.type === 'ajuste' ? "bg-yellow-500/20" : "bg-red-500/20"
                                                                     )}>
                                                                         {mov.type === 'entrada' ? (
                                                                             <ArrowDownCircle size={14} className="text-green-400" />
+                                                                        ) : mov.type === 'ajuste' ? (
+                                                                            <RefreshCw size={14} className="text-yellow-400" />
                                                                         ) : (
                                                                             <ArrowUpCircle size={14} className="text-red-400" />
                                                                         )}
                                                                     </div>
                                                                     <span className={cn(
                                                                         "font-medium",
-                                                                        mov.type === 'entrada' ? "text-green-400" : "text-red-400"
+                                                                        mov.type === 'entrada' ? "text-green-400" : mov.type === 'ajuste' ? "text-yellow-400" : "text-red-400"
                                                                     )}>
-                                                                        {mov.type === 'entrada' ? 'Entrada' : 'Salida'}
+                                                                        {mov.type === 'entrada' ? 'Entrada' : mov.type === 'ajuste' ? 'Ajuste' : 'Salida'}
                                                                     </span>
                                                                 </div>
                                                             </td>
@@ -611,16 +863,37 @@ const ProductProfile = () => {
                                                             <td className="p-3 text-right">
                                                                 <span className={cn(
                                                                     "font-bold",
-                                                                    mov.type === 'entrada' ? "text-green-400" : "text-red-400"
+                                                                    mov.type === 'entrada' ? "text-green-400" : mov.type === 'ajuste' ? "text-yellow-400" : "text-red-400"
                                                                 )}>
-                                                                    {mov.type === 'entrada' ? '+' : '-'}{mov.quantity}
+                                                                    {mov.type === 'ajuste'
+                                                                        ? `${mov.oldStock} → ${mov.newStock}`
+                                                                        : `${mov.type === 'entrada' ? '+' : '-'}${mov.quantity}`
+                                                                    }
                                                                 </span>
                                                             </td>
                                                             <td className="p-3 text-right text-[var(--color-text)]">
-                                                                {formatCurrency(mov.price, currentCurrency)}
+                                                                {mov.price != null ? formatCurrency(mov.price, currentCurrency) : '-'}
                                                             </td>
                                                             <td className="p-3 text-[var(--color-text-muted)]">
-                                                                {new Date(mov.date).toLocaleDateString('es-CL')}
+                                                                {(() => {
+                                                                    try {
+                                                                        if (currentCompanyTimezone) {
+                                                                            return formatInCompanyTime(mov.date, currentCompanyTimezone, 'dd/MM/yyyy');
+                                                                        }
+                                                                        // Fallback: parse date-only strings without UTC conversion
+                                                                        const d = mov.date;
+                                                                        if (d && d.length === 10) {
+                                                                            const [y, m, day] = d.split('-');
+                                                                            return `${day}/${m}/${y}`;
+                                                                        }
+                                                                        return format(parseISO(d), 'dd/MM/yyyy');
+                                                                    } catch {
+                                                                        return mov.date;
+                                                                    }
+                                                                })()}
+                                                            </td>
+                                                            <td className="p-3 text-right">
+                                                                <span className="font-bold text-[var(--color-text)]">{mov.stockAfter}</span>
                                                             </td>
                                                             <td className="p-3 text-blue-400">{mov.user}</td>
                                                         </tr>
@@ -630,7 +903,7 @@ const ProductProfile = () => {
                                         </table>
                                         {movements.length > 0 && (
                                             <div className="p-4 border-t border-[var(--glass-border)] bg-[var(--glass-bg)]">
-                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
                                                     <div>
                                                         <p className="text-xs text-[var(--color-text-muted)]">Entradas</p>
                                                         <p className="text-xl font-bold text-green-400">
@@ -641,6 +914,12 @@ const ProductProfile = () => {
                                                         <p className="text-xs text-[var(--color-text-muted)]">Salidas</p>
                                                         <p className="text-xl font-bold text-red-400">
                                                             -{movements.filter(m => m.type === 'salida').reduce((sum, m) => sum + m.quantity, 0)}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs text-[var(--color-text-muted)]">Ajustes</p>
+                                                        <p className="text-xl font-bold text-yellow-400">
+                                                            {movements.filter(m => m.type === 'ajuste').length}
                                                         </p>
                                                     </div>
                                                     <div>

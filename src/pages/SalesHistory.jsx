@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { turso } from '../lib/turso';
-import { Search, Calendar, CreditCard, User, Download, Send, Trash2, Printer, AlertTriangle, FileText, X, RotateCcw } from 'lucide-react';
+import { Search, Calendar, CreditCard, User, Download, Send, Trash2, Printer, AlertTriangle, FileText, X, RotateCcw, Receipt, CheckCircle2, Clock, Stamp } from 'lucide-react';
 import { generateReceiptPDF, generateWhatsAppLink } from '../utils/receipt';
+import bwipjs from 'bwip-js';
 import { formatCurrency } from '../utils/formatCurrency';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import { usePermissions } from '../hooks/usePermissions';
@@ -39,6 +40,8 @@ const SalesHistory = () => {
     const [showReturnModal, setShowReturnModal] = useState(false);
     const [saleReturns, setSaleReturns] = useState([]);
     const [returnSuccess, setReturnSuccess] = useState(null);
+    const [dteMap, setDteMap] = useState({});
+    const [selectedDteInfo, setSelectedDteInfo] = useState(null);
 
     // Fetch Initial Data on Date Change
     React.useEffect(() => {
@@ -51,6 +54,27 @@ const SalesHistory = () => {
         };
         loadInitial();
     }, [dateFrom, dateTo, paymentMethodFilter, sellerFilter, saleIdFilter]);
+
+    // Load DTE info for visible sales
+    React.useEffect(() => {
+        const loadDteMap = async () => {
+            if (!activeCompanyId || sales.length === 0) return;
+            try {
+                const saleIds = sales.map(s => s.id);
+                const placeholders = saleIds.map(() => '?').join(',');
+                const result = await turso.execute({
+                    sql: `SELECT sale_id, folio, tipo_dte AS tipo, estado AS status FROM sii_dtes WHERE company_id = ? AND sale_id IN (${placeholders})`,
+                    args: [activeCompanyId, ...saleIds]
+                });
+                const map = {};
+                result.rows.forEach(r => { map[r.sale_id] = r; });
+                setDteMap(map);
+            } catch(e) {
+                // SII tables may not exist
+            }
+        };
+        loadDteMap();
+    }, [sales, activeCompanyId]);
 
     // Infinite Scroll Handler
     const handleScroll = async (e) => {
@@ -71,6 +95,7 @@ const SalesHistory = () => {
         // Optimistic selection (show what we have)
         setSelectedSale(sale);
         setSaleReturns([]);
+        setSelectedDteInfo(null);
 
         // Check if we have details
         if (!sale.items) {
@@ -80,6 +105,19 @@ const SalesHistory = () => {
                 setSelectedSale(fullDetails);
             }
             setIsLoadingDetails(false);
+        }
+
+        // Load DTE info for this sale
+        if (activeCompanyId) {
+            try {
+                const dteResult = await turso.execute({
+                    sql: `SELECT folio, tipo_dte AS tipo, estado AS status, track_id, created_at FROM sii_dtes WHERE company_id = ? AND sale_id = ? LIMIT 1`,
+                    args: [activeCompanyId, sale.id]
+                });
+                if (dteResult.rows.length > 0) {
+                    setSelectedDteInfo(dteResult.rows[0]);
+                }
+            } catch(e) { /* SII tables may not exist */ }
         }
 
         // Load returns for this sale
@@ -115,7 +153,7 @@ const SalesHistory = () => {
     const totalReturned = useMemo(() => saleReturns.reduce((sum, r) => sum + r.total, 0), [saleReturns]);
 
     const handleDownloadPDF = async () => {
-        if (!selectedSale || !selectedSale.items) return; // Guard against missing details
+        if (!selectedSale || !selectedSale.items) return;
         const seller = users.find(u => u.id === selectedSale.user_id);
 
         try {
@@ -142,7 +180,36 @@ const SalesHistory = () => {
                 show_email: configResult.rows[0].show_email === 1
             } : null;
 
-            const pdfBlob = await generateReceiptPDF(selectedSale, seller, receiptConfig, currentCurrency);
+            // Generar timbre PDF417 si hay DTE
+            let timbreImg = null;
+            if (activeCompanyId && selectedSale.id) {
+                try {
+                    const dteResult = await turso.execute({
+                        sql: `SELECT xml_firmado FROM sii_dtes WHERE company_id = ? AND sale_id = ? LIMIT 1`,
+                        args: [activeCompanyId, selectedSale.id]
+                    });
+                    if (dteResult.rows.length > 0 && dteResult.rows[0].xml_firmado) {
+                        const xmlFirmado = dteResult.rows[0].xml_firmado;
+                        const tedMatch = xmlFirmado.match(/<TED[\s\S]*?<\/TED>/);
+                        if (tedMatch) {
+                            const canvas = document.createElement('canvas');
+                            bwipjs.toCanvas(canvas, {
+                                bcid: 'pdf417',
+                                text: tedMatch[0],
+                                scale: 2,
+                                columns: 7,
+                                rowmult: 2,
+                                eclevel: 5,
+                            });
+                            timbreImg = canvas.toDataURL('image/png');
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error generating timbre for PDF:', e);
+                }
+            }
+
+            const pdfBlob = await generateReceiptPDF(selectedSale, seller, receiptConfig, currentCurrency, timbreImg);
             const url = window.URL.createObjectURL(pdfBlob);
             const link = document.createElement('a');
             link.href = url;
@@ -361,6 +428,17 @@ const SalesHistory = () => {
                                             {formatInCompanyTime(sale.date, currentCompanyTimezone, 'dd-MM-yyyy HH:mm')}
                                         </p>
                                     </div>
+                                    {dteMap[sale.id] && (
+                                        <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                                            Number(dteMap[sale.id].tipo) === 33
+                                                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                                                : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                        }`}>
+                                            {Number(dteMap[sale.id].tipo) === 33 ? <FileText size={10} /> : <Receipt size={10} />}
+                                            {Number(dteMap[sale.id].tipo) === 33 ? 'F' : 'B'}-{dteMap[sale.id].folio}
+                                            {dteMap[sale.id].status === 'accepted' && <CheckCircle2 size={10} className="text-green-400" />}
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -554,6 +632,46 @@ const SalesHistory = () => {
                                                     </div>
                                                 )}
                                             </div>
+
+                                            {/* DTE Info */}
+                                            {selectedDteInfo && (
+                                                <div className="mt-4 p-4 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
+                                                    <p className="text-xs text-indigo-400 uppercase font-bold mb-2 flex items-center gap-2">
+                                                        <Stamp size={12} />
+                                                        Documento Tributario Electrónico
+                                                    </p>
+                                                    <div className="space-y-1.5">
+                                                        <div className="flex justify-between text-sm">
+                                                            <span className="text-[var(--color-text-muted)]">Tipo</span>
+                                                            <span className={`font-bold ${Number(selectedDteInfo.tipo) === 33 ? 'text-purple-400' : 'text-blue-400'}`}>
+                                                                {Number(selectedDteInfo.tipo) === 33 ? 'Factura Electrónica' : 'Boleta Electrónica'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex justify-between text-sm">
+                                                            <span className="text-[var(--color-text-muted)]">Folio</span>
+                                                            <span className="text-[var(--color-text)] font-bold">N° {selectedDteInfo.folio}</span>
+                                                        </div>
+                                                        <div className="flex justify-between text-sm">
+                                                            <span className="text-[var(--color-text-muted)]">Estado</span>
+                                                            <span className={`inline-flex items-center gap-1 font-bold ${
+                                                                selectedDteInfo.status === 'accepted' ? 'text-green-400' :
+                                                                selectedDteInfo.status === 'rejected' ? 'text-red-400' :
+                                                                'text-yellow-400'
+                                                            }`}>
+                                                                {selectedDteInfo.status === 'accepted' ? <><CheckCircle2 size={14} /> Aceptado</> :
+                                                                 selectedDteInfo.status === 'rejected' ? 'Rechazado' :
+                                                                 <><Clock size={14} /> Pendiente</>}
+                                                            </span>
+                                                        </div>
+                                                        {selectedDteInfo.track_id && (
+                                                            <div className="flex justify-between text-sm">
+                                                                <span className="text-[var(--color-text-muted)]">Track ID</span>
+                                                                <span className="text-[var(--color-text)] font-mono text-xs">{selectedDteInfo.track_id}</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
 
                                             {selectedSale.status === 'cancelled' && (
                                                 <div className="mt-4 p-4 bg-red-500/10 rounded-lg border border-red-500/20">

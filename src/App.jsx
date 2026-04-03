@@ -33,6 +33,8 @@ import Production from './pages/Production';
 import InventoryReconciliation from './pages/InventoryReconciliation';
 import InventoryControl from './pages/InventoryControl';
 import ProductCombos from './pages/ProductCombos';
+import DocumentosSII from './pages/DocumentosSII';
+import FolioSettings from './pages/FolioSettings';
 import MainLayout from './layouts/MainLayout';
 import AdminLayout from './layouts/AdminLayout';
 import RequireAdmin from './components/RequireAdmin';
@@ -213,6 +215,8 @@ function App() {
           <Route path="inventory/reconciliation" element={<ProtectedPage permission="products.adjust_stock"><InventoryReconciliation /></ProtectedPage>} />
           <Route path="inventory/control" element={<ProtectedPage permission="inventory_control.view"><InventoryControl /></ProtectedPage>} />
           <Route path="inventory/combos" element={<ProtectedPage permission="combos.view"><ProductCombos /></ProtectedPage>} />
+          <Route path="documentos-sii" element={<ProtectedPage permission="settings.view"><DocumentosSII /></ProtectedPage>} />
+          <Route path="sii/folios" element={<ProtectedPage permission="settings.view"><FolioSettings /></ProtectedPage>} />
 
           {/* Reports */}
           <Route path="reports" element={<ProtectedPage permission="reports.sales"><Reports /></ProtectedPage>} />

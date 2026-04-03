@@ -9,9 +9,13 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
     const [formData, setFormData] = useState({
         name: client?.name || '',
         rut: client?.rut || '',
+        razon_social: client?.razon_social || '',
+        giro: client?.giro || '',
         phone: client?.phone || '',
         email: client?.email || '',
         address: client?.address || '',
+        comuna: client?.comuna || '',
+        ciudad: client?.ciudad || '',
         credit_limit: client?.credit_limit || 0,
         credit_period_days: client?.credit_period_days || 30,
         credit_enabled: client?.credit_enabled !== undefined ? (client.credit_enabled === 1 || client.credit_enabled === true) : true,
@@ -23,16 +27,20 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
             setFormData({
                 name: client.name || '',
                 rut: client.rut || '',
+                razon_social: client.razon_social || '',
+                giro: client.giro || '',
                 phone: client.phone || '',
                 email: client.email || '',
                 address: client.address || '',
+                comuna: client.comuna || '',
+                ciudad: client.ciudad || '',
                 credit_limit: client.credit_limit || 0,
                 credit_period_days: client.credit_period_days || 30,
                 credit_enabled: client.credit_enabled === 1 || client.credit_enabled === true,
                 client_status: client.client_status || 'active'
             });
         } else {
-            setFormData({ name: '', rut: '', phone: '', email: '', address: '', credit_limit: 0, credit_period_days: 30, credit_enabled: true, client_status: 'active' });
+            setFormData({ name: '', rut: '', razon_social: '', giro: '', phone: '', email: '', address: '', comuna: '', ciudad: '', credit_limit: 0, credit_period_days: 30, credit_enabled: true, client_status: 'active' });
         }
     }, [client, isOpen]);
 
@@ -131,8 +139,60 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
                                 className="glass-input !pl-10 w-full"
                                 value={formData.address}
                                 onChange={e => setFormData({ ...formData, address: e.target.value })}
-                                placeholder="Calle, Número, Ciudad"
+                                placeholder="Calle, Número"
                             />
+                        </div>
+                    </div>
+
+                    {/* Datos de Facturación SII */}
+                    <div className="border-t border-[var(--glass-border)] pt-4 mt-4">
+                        <h3 className="text-sm font-bold text-[var(--color-text)] mb-3 flex items-center gap-2">
+                            <FileText size={16} className="text-blue-400" />
+                            Datos de Facturación (SII)
+                        </h3>
+                        <div className="space-y-3">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-[var(--color-text-muted)]">Razón Social</label>
+                                <input
+                                    type="text"
+                                    className="glass-input w-full"
+                                    value={formData.razon_social}
+                                    onChange={e => setFormData({ ...formData, razon_social: e.target.value })}
+                                    placeholder="Nombre legal de la empresa"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-[var(--color-text-muted)]">Giro</label>
+                                <input
+                                    type="text"
+                                    className="glass-input w-full"
+                                    value={formData.giro}
+                                    onChange={e => setFormData({ ...formData, giro: e.target.value })}
+                                    placeholder="Actividad económica"
+                                />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-[var(--color-text-muted)]">Comuna</label>
+                                    <input
+                                        type="text"
+                                        className="glass-input w-full"
+                                        value={formData.comuna}
+                                        onChange={e => setFormData({ ...formData, comuna: e.target.value })}
+                                        placeholder="Comuna"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-[var(--color-text-muted)]">Ciudad</label>
+                                    <input
+                                        type="text"
+                                        className="glass-input w-full"
+                                        value={formData.ciudad}
+                                        onChange={e => setFormData({ ...formData, ciudad: e.target.value })}
+                                        placeholder="Ciudad"
+                                    />
+                                </div>
+                            </div>
                         </div>
                     </div>
 

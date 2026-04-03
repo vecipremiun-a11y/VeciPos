@@ -9,6 +9,15 @@ import integrationSyncStockHandler from './api/integration/sync-stock.js';
 import integrationRetryStockHandler from './api/integration/retry-stock.js';
 import integrationSyncProductHandler from './api/integration/sync-product.js';
 
+import siiConfigHandler from './api/sii/config.js';
+import siiUploadCertHandler from './api/sii/upload-cert.js';
+import siiRequestCafHandler from './api/sii/request-caf.js';
+import siiFoliosHandler from './api/sii/folios.js';
+import siiEmitHandler from './api/sii/emit.js';
+import siiStatusHandler from './api/sii/status.js';
+import siiRcofHandler from './api/sii/rcof.js';
+import siiLookupRutHandler from './api/sii/lookup-rut.js';
+
 dotenv.config({ path: '.env.local' });
 dotenv.config();
 
@@ -118,6 +127,40 @@ app.all('/api/integration/retry-stock', async (req, res) => {
             message: error.message,
         });
     }
+});
+
+// SII routes
+app.all('/api/sii/config', async (req, res) => {
+    try { return await siiConfigHandler(req, res); }
+    catch (error) { console.error('❌ /api/sii/config error:', error); return res.status(500).json({ error: error.message }); }
+});
+app.all('/api/sii/upload-cert', async (req, res) => {
+    try { return await siiUploadCertHandler(req, res); }
+    catch (error) { console.error('❌ /api/sii/upload-cert error:', error); return res.status(500).json({ error: error.message }); }
+});
+app.all('/api/sii/request-caf', async (req, res) => {
+    try { return await siiRequestCafHandler(req, res); }
+    catch (error) { console.error('❌ /api/sii/request-caf error:', error); return res.status(500).json({ error: error.message }); }
+});
+app.all('/api/sii/folios', async (req, res) => {
+    try { return await siiFoliosHandler(req, res); }
+    catch (error) { console.error('❌ /api/sii/folios error:', error); return res.status(500).json({ error: error.message }); }
+});
+app.all('/api/sii/emit', async (req, res) => {
+    try { return await siiEmitHandler(req, res); }
+    catch (error) { console.error('❌ /api/sii/emit error:', error); return res.status(500).json({ error: error.message }); }
+});
+app.all('/api/sii/status', async (req, res) => {
+    try { return await siiStatusHandler(req, res); }
+    catch (error) { console.error('❌ /api/sii/status error:', error); return res.status(500).json({ error: error.message }); }
+});
+app.all('/api/sii/rcof', async (req, res) => {
+    try { return await siiRcofHandler(req, res); }
+    catch (error) { console.error('❌ /api/sii/rcof error:', error); return res.status(500).json({ error: error.message }); }
+});
+app.all('/api/sii/lookup-rut', async (req, res) => {
+    try { return await siiLookupRutHandler(req, res); }
+    catch (error) { console.error('❌ /api/sii/lookup-rut error:', error); return res.status(500).json({ error: error.message }); }
 });
 
 app.use('/api', (_req, res) => {

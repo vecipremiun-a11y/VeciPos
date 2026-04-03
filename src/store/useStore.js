@@ -43,6 +43,7 @@ export const useStore = create(persist((set, get) => ({
             name: 'Ticket 1',
             items: [],
             client: null,
+            tipoDte: 39,
             createdAt: Date.now()
         }
     ],
@@ -949,13 +950,17 @@ export const useStore = create(persist((set, get) => ({
     addClient: async (client) => {
         try {
             const result = await turso.execute({
-                sql: "INSERT INTO clients (name, rut, phone, email, address, created_at, company_id, credit_limit, credit_period_days, credit_enabled, client_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO clients (name, rut, phone, email, address, razon_social, giro, comuna, ciudad, created_at, company_id, credit_limit, credit_period_days, credit_enabled, client_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     client.name,
                     client.rut || '',
                     client.phone || '',
                     client.email || '',
                     client.address || '',
+                    client.razon_social || '',
+                    client.giro || '',
+                    client.comuna || '',
+                    client.ciudad || '',
                     new Date().toISOString(),
                     get().activeCompanyId,
                     client.credit_limit || 0,
@@ -986,8 +991,8 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             await turso.execute({
-                sql: "UPDATE clients SET name = ?, rut = ?, phone = ?, email = ?, address = ?, credit_limit = ?, credit_period_days = ?, credit_enabled = ?, client_status = ? WHERE id = ? AND company_id = ?",
-                args: [updatedClient.name, updatedClient.rut, updatedClient.phone, updatedClient.email, updatedClient.address, updatedClient.credit_limit || 0, updatedClient.credit_period_days || 30, updatedClient.credit_enabled !== undefined ? (updatedClient.credit_enabled ? 1 : 0) : 1, updatedClient.client_status || 'active', id, activeCompanyId]
+                sql: "UPDATE clients SET name = ?, rut = ?, phone = ?, email = ?, address = ?, razon_social = ?, giro = ?, comuna = ?, ciudad = ?, credit_limit = ?, credit_period_days = ?, credit_enabled = ?, client_status = ? WHERE id = ? AND company_id = ?",
+                args: [updatedClient.name, updatedClient.rut, updatedClient.phone, updatedClient.email, updatedClient.address, updatedClient.razon_social || '', updatedClient.giro || '', updatedClient.comuna || '', updatedClient.ciudad || '', updatedClient.credit_limit || 0, updatedClient.credit_period_days || 30, updatedClient.credit_enabled !== undefined ? (updatedClient.credit_enabled ? 1 : 0) : 1, updatedClient.client_status || 'active', id, activeCompanyId]
             });
 
             // Audit
@@ -1211,6 +1216,19 @@ export const useStore = create(persist((set, get) => ({
                             total_loss REAL, reason TEXT DEFAULT 'expired',
                             notes TEXT, user_id TEXT, created_at TEXT
                         )`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS stock_adjustments (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            product_id INTEGER NOT NULL,
+                            user_id INTEGER,
+                            user_name TEXT,
+                            old_stock REAL NOT NULL,
+                            new_stock REAL NOT NULL,
+                            difference REAL NOT NULL,
+                            reason TEXT DEFAULT 'manual',
+                            created_at TEXT NOT NULL
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_stock_adj_product ON stock_adjustments(company_id, product_id)`);
 
                         // ── Inventory Control (Stock Take) ──
                         await turso.execute(`CREATE TABLE IF NOT EXISTS inventory_controls (
@@ -1436,6 +1454,80 @@ export const useStore = create(persist((set, get) => ({
                         console.warn('Alert tables creation skipped:', e.message);
                     }
 
+                    // ── SII Chile (DTE) tables ──
+                    try {
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS sii_config (
+                            company_id TEXT PRIMARY KEY,
+                            rut_emisor TEXT NOT NULL,
+                            razon_social TEXT NOT NULL,
+                            giro TEXT NOT NULL,
+                            direccion TEXT,
+                            comuna TEXT,
+                            ciudad TEXT,
+                            acteco TEXT,
+                            certificado_pfx TEXT,
+                            certificado_password TEXT,
+                            ambiente TEXT DEFAULT 'certificacion',
+                            sii_resolution_number TEXT,
+                            sii_resolution_date TEXT,
+                            auto_emit INTEGER DEFAULT 1,
+                            is_active INTEGER DEFAULT 0,
+                            created_at TEXT,
+                            updated_at TEXT,
+                            FOREIGN KEY(company_id) REFERENCES companies(id)
+                        )`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS sii_cafs (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            tipo_dte INTEGER NOT NULL,
+                            folio_desde INTEGER NOT NULL,
+                            folio_hasta INTEGER NOT NULL,
+                            folio_actual INTEGER NOT NULL,
+                            caf_xml TEXT NOT NULL,
+                            caf_fingerprint TEXT,
+                            estado TEXT DEFAULT 'active',
+                            created_at TEXT,
+                            updated_at TEXT,
+                            FOREIGN KEY(company_id) REFERENCES companies(id)
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_sii_cafs_lookup ON sii_cafs(company_id, tipo_dte, estado)`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS sii_dtes (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            sale_id INTEGER,
+                            tipo_dte INTEGER NOT NULL,
+                            folio INTEGER NOT NULL,
+                            rut_receptor TEXT,
+                            razon_social_receptor TEXT,
+                            monto_total INTEGER,
+                            monto_neto INTEGER,
+                            monto_iva INTEGER,
+                            xml_firmado TEXT,
+                            track_id TEXT,
+                            estado TEXT DEFAULT 'pending',
+                            sii_response TEXT,
+                            created_at TEXT,
+                            updated_at TEXT,
+                            FOREIGN KEY(company_id) REFERENCES companies(id)
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_sii_dtes_sale ON sii_dtes(company_id, sale_id)`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_sii_dtes_estado ON sii_dtes(company_id, estado)`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_sii_dtes_folio ON sii_dtes(company_id, tipo_dte, folio)`);
+                        await turso.execute(`CREATE TABLE IF NOT EXISTS sii_rcof (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id TEXT NOT NULL,
+                            fecha TEXT NOT NULL,
+                            xml TEXT,
+                            track_id TEXT,
+                            estado TEXT DEFAULT 'pending',
+                            created_at TEXT,
+                            FOREIGN KEY(company_id) REFERENCES companies(id)
+                        )`);
+                        await turso.execute(`CREATE INDEX IF NOT EXISTS idx_sii_rcof_lookup ON sii_rcof(company_id, fecha)`);
+                    } catch (e) {
+                        console.warn('SII tables creation skipped:', e.message);
+                    }
+
                     // ── Migrate new permissions for existing companies ──
                     try {
                         const NEW_PERMS = [
@@ -1568,6 +1660,22 @@ export const useStore = create(persist((set, get) => ({
                         }
                     } catch (e) {
                         console.warn('Migration 16 (credit management) error:', e);
+                    }
+
+                    // ── Migration 18: Billing fields for SII invoicing on clients ──
+                    try {
+                        const clientInfo18 = await turso.execute(`PRAGMA table_info(clients)`);
+                        const cols18 = clientInfo18.rows.map(c => c.name);
+                        if (!cols18.includes('razon_social')) {
+                            console.log('Adding SII billing columns to clients...');
+                            await turso.execute(`ALTER TABLE clients ADD COLUMN razon_social TEXT DEFAULT ''`);
+                            await turso.execute(`ALTER TABLE clients ADD COLUMN giro TEXT DEFAULT ''`);
+                            await turso.execute(`ALTER TABLE clients ADD COLUMN comuna TEXT DEFAULT ''`);
+                            await turso.execute(`ALTER TABLE clients ADD COLUMN ciudad TEXT DEFAULT ''`);
+                            console.log('✅ SII billing columns added to clients');
+                        }
+                    } catch (e) {
+                        console.warn('Migration 18 (SII billing columns) error:', e);
                     }
 
                     // ── Migration 17: Denormalized debt columns on clients (always-run) ──
@@ -2213,6 +2321,21 @@ export const useStore = create(persist((set, get) => ({
 
             if (result.rows.length > 0) {
                 const fullSale = result.rows[0];
+
+                // Check for DTE (SII electronic invoice)
+                let dte_folio = null;
+                let dte_tipo = null;
+                try {
+                    const dteResult = await turso.execute({
+                        sql: "SELECT folio, tipo_dte FROM sii_dtes WHERE sale_id = ? AND company_id = ? AND estado IN ('sent', 'accepted') LIMIT 1",
+                        args: [saleId, activeCompanyId]
+                    });
+                    if (dteResult.rows.length > 0) {
+                        dte_folio = dteResult.rows[0].folio;
+                        dte_tipo = dteResult.rows[0].tipo_dte;
+                    }
+                } catch (_) { /* sii_dtes table may not exist yet */ }
+
                 const processedSale = {
                     ...fullSale,
                     items: fullSale.items ? JSON.parse(fullSale.items) : [],
@@ -2220,7 +2343,9 @@ export const useStore = create(persist((set, get) => ({
                     paymentDetails: fullSale.payment_details ? JSON.parse(fullSale.payment_details) : null,
                     observation: fullSale.observation || '',
                     clientId: fullSale.client_id,
-                    clientName: fullSale.client_name
+                    clientName: fullSale.client_name,
+                    dte_folio,
+                    dte_tipo,
                 };
 
                 // Update the specific sale in the list with full details
@@ -2932,6 +3057,13 @@ export const useStore = create(persist((set, get) => ({
                     sql: `UPDATE products SET stock = ROUND(?, 3) WHERE id = ? AND company_id = ?`,
                     args: [roundedCount, productId, activeCompanyId]
                 });
+                // Log stock adjustment
+                if (Math.abs(roundedCount - (parseFloat(product.stock) || 0)) >= 0.001) {
+                    await turso.execute({
+                        sql: `INSERT INTO stock_adjustments (company_id, product_id, user_id, user_name, old_stock, new_stock, difference, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        args: [activeCompanyId, productId, currentUser?.id, currentUser?.name || currentUser?.username || 'Desconocido', product.stock, roundedCount, Math.round((roundedCount - product.stock) * 1000) / 1000, 'control_inventario', now]
+                    });
+                }
                 // Audit log
                 await turso.execute({
                     sql: `INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, 'INVENTORY_CONTROL', 'PRODUCT', ?, ?)`,
@@ -2951,6 +3083,13 @@ export const useStore = create(persist((set, get) => ({
                     sql: `UPDATE products SET stock = ROUND(?, 3) WHERE id = ? AND company_id = ?`,
                     args: [roundedCount, productId, activeCompanyId]
                 });
+                // Log stock adjustment
+                if (Math.abs(roundedCount - systemStock) >= 0.001) {
+                    await turso.execute({
+                        sql: `INSERT INTO stock_adjustments (company_id, product_id, user_id, user_name, old_stock, new_stock, difference, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        args: [activeCompanyId, productId, currentUser?.id, currentUser?.name || currentUser?.username || 'Desconocido', systemStock, roundedCount, difference, 'control_inventario', now]
+                    });
+                }
                 // Update counted_products counter
                 await turso.execute({
                     sql: `UPDATE inventory_controls SET counted_products = counted_products + 1 WHERE id = ?`,
@@ -3190,6 +3329,14 @@ export const useStore = create(persist((set, get) => ({
                     sql: `UPDATE products SET stock = ? WHERE id = ? AND company_id = ?`,
                     args: [lotsTotal, productId, activeCompanyId]
                 });
+
+                // Log stock adjustment
+                if (Math.abs(lotsTotal - oldStock) >= 0.001) {
+                    await turso.execute({
+                        sql: `INSERT INTO stock_adjustments (company_id, product_id, user_id, user_name, old_stock, new_stock, difference, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        args: [activeCompanyId, productId, currentUser?.id, currentUser?.name || currentUser?.username || 'Desconocido', oldStock, lotsTotal, Math.round((lotsTotal - oldStock) * 1000) / 1000, 'reconciliacion', now]
+                    });
+                }
 
                 await turso.execute({
                     sql: `INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, 'RECONCILIATION', 'INVENTORY', ?, ?)`,
@@ -4426,6 +4573,12 @@ export const useStore = create(persist((set, get) => ({
             const { activeCompanyId, currentUser, validateCompanyAccess } = get();
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
+            // Detect stock change before update
+            const oldProduct = get().products.find(p => p.id === id);
+            const oldStock = oldProduct ? parseFloat(oldProduct.stock) || 0 : 0;
+            const newStock = Math.round((parseFloat(updatedProduct.stock) || 0) * 1000) / 1000;
+            const stockChanged = Math.abs(newStock - oldStock) >= 0.001;
+
             await turso.execute({
                 sql: "UPDATE products SET name=?, price=?, stock=ROUND(?, 3), category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=?, sale_mode=?, allow_item_notes=?, preorder_unit=?, preorder_billing_unit=?, preorder_price_per_kg=?, preorder_gram_per_unit=?, preorder_use_base_price=? WHERE id = ? AND company_id = ?",
                 args: [
@@ -4455,12 +4608,21 @@ export const useStore = create(persist((set, get) => ({
                 ]
             });
 
+            // Log stock adjustment if stock changed
+            if (stockChanged) {
+                const now = new Date().toISOString();
+                await turso.execute({
+                    sql: `INSERT INTO stock_adjustments (company_id, product_id, user_id, user_name, old_stock, new_stock, difference, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    args: [activeCompanyId, id, currentUser?.id, currentUser?.name || currentUser?.username || 'Desconocido', oldStock, newStock, Math.round((newStock - oldStock) * 1000) / 1000, 'manual', now]
+                });
+            }
+
             // POS -> Tienda: sincronizar producto completo al editar
             try {
                 if (updatedProduct.sku && normalizeSku(updatedProduct.sku)) {
                     // Solo enviar imagen si realmente cambió (evitar enviar ~200KB base64 cada vez)
-                    const oldProduct = get().products.find(p => p.id === id);
-                    const imageChanged = updatedProduct.image !== (oldProduct?.image || null);
+                    const oldProd = get().products.find(p => p.id === id);
+                    const imageChanged = updatedProduct.image !== (oldProd?.image || null);
                     console.log('🔄 Sync:', { sku: updatedProduct.sku, imageChanged, hasImage: !!updatedProduct.image });
 
                     const syncPayload = {
@@ -5423,6 +5585,7 @@ export const useStore = create(persist((set, get) => ({
             name: `Ticket ${carts.length + 1}`,
             items: [],
             client: null,
+            tipoDte: 39,
             createdAt: Date.now()
         };
 
@@ -5506,6 +5669,16 @@ export const useStore = create(persist((set, get) => ({
             carts: state.carts.map(c =>
                 c.id === state.activeCartId
                     ? { ...c, client }
+                    : c
+            )
+        }));
+    },
+
+    setCartTipoDte: (tipoDte) => {
+        set(state => ({
+            carts: state.carts.map(c =>
+                c.id === state.activeCartId
+                    ? { ...c, tipoDte }
                     : c
             )
         }));
@@ -5636,7 +5809,11 @@ export const useStore = create(persist((set, get) => ({
                 scale_group_id: product.scale_group_id || null,
                 original_price: product.original_price || product.price,
                 is_offer: product.is_offer,
-                offer_price: product.offer_price
+                offer_price: product.offer_price,
+                // Combo / Pack support
+                is_combo: product.is_combo || false,
+                combo_id: product.combo_id || null,
+                combo_items: product.combo_items || null
             };
 
             const updatedItems = [...currentCart.items, rawNewItem];
@@ -5917,6 +6094,9 @@ export const useStore = create(persist((set, get) => ({
                         const compLots = (lotsByProduct.get(compIdStr) || [])
                             .filter(l => l.quantity > 0)
                             .sort((a, b) => {
+                                const aExpired = a.expiry_date && a.expiry_date < today;
+                                const bExpired = b.expiry_date && b.expiry_date < today;
+                                if (aExpired !== bExpired) return aExpired ? 1 : -1;
                                 if (!a.expiry_date) return 1;
                                 if (!b.expiry_date) return -1;
                                 return new Date(a.expiry_date) - new Date(b.expiry_date);
@@ -5925,9 +6105,8 @@ export const useStore = create(persist((set, get) => ({
                         let compRemaining = compDeduct;
                         for (const lot of compLots) {
                             if (compRemaining <= 0) break;
-                            if (lot.expiry_date && lot.expiry_date < today) continue;
                             const deduct = Math.min(lot.quantity, compRemaining);
-                            lotsToUpdate.push({ id: lot.id, deduct });
+                            lotsToUpdate.push({ id: Number(lot.id), deduct });
                             compRemaining -= deduct;
                         }
                     }
@@ -6000,6 +6179,10 @@ export const useStore = create(persist((set, get) => ({
                 const validLots = itemLots
                     .filter(l => l.quantity > 0)
                     .sort((a, b) => {
+                        // Priority: non-expired first (FEFO), then expired, then no-date
+                        const aExpired = a.expiry_date && a.expiry_date < today;
+                        const bExpired = b.expiry_date && b.expiry_date < today;
+                        if (aExpired !== bExpired) return aExpired ? 1 : -1;
                         if (!a.expiry_date) return 1;
                         if (!b.expiry_date) return -1;
                         return new Date(a.expiry_date) - new Date(b.expiry_date);
@@ -6008,11 +6191,10 @@ export const useStore = create(persist((set, get) => ({
                 let remainingQty = quantity;
                 for (const lot of validLots) {
                     if (remainingQty <= 0) break;
-                    if (lot.expiry_date && lot.expiry_date < today) continue;
 
                     const deduct = Math.min(lot.quantity, remainingQty);
                     lotsToUpdate.push({
-                        id: lot.id,
+                        id: Number(lot.id),
                         deduct
                     });
                     remainingQty -= deduct;
@@ -6020,6 +6202,7 @@ export const useStore = create(persist((set, get) => ({
             }
 
             console.log(`⚡ Pre-cálculos: ${(performance.now() - startTime).toFixed(2)}ms`);
+            console.log(`📦 Lots to update: ${lotsToUpdate.length}, Products to update: ${productsToUpdate.length}`);
 
             // ============================================
             // FASE 3: TRANSACCIÓN OPTIMIZADA
@@ -6079,7 +6262,7 @@ export const useStore = create(persist((set, get) => ({
                 // 3. BATCH UPDATE de lotes
                 const lotUpdatePromises = lotsToUpdate.map(l =>
                     tx.execute({
-                        sql: `UPDATE product_lots SET quantity = quantity - ? WHERE id = ?`,
+                        sql: `UPDATE product_lots SET quantity = ROUND(quantity - ?, 3) WHERE id = ?`,
                         args: [l.deduct, l.id]
                     })
                 );
@@ -6278,6 +6461,65 @@ export const useStore = create(persist((set, get) => ({
                 if (sale.paymentMethod === 'Crédito' && sale.client?.id) {
                     get()._syncClientDebt(sale.client.id);
                 }
+
+                // ============================================
+                // FASE 6: EMISIÓN DTE SII (NON-BLOCKING)
+                // ============================================
+                setTimeout(async () => {
+                    try {
+                        const siiConfigRes = await turso.execute({
+                            sql: 'SELECT auto_emit, is_active FROM sii_config WHERE company_id = ?',
+                            args: [activeCompanyId]
+                        });
+                        const siiCfg = siiConfigRes.rows[0];
+                        if (siiCfg && Number(siiCfg.auto_emit) === 1 && Number(siiCfg.is_active) === 1) {
+                            // Use tipoDte from sale data (set in POS), fallback to auto-detect
+                            const tipoDte = sale.tipoDte != null ? sale.tipoDte : ((sale.client?.rut && sale.client.rut.trim()) ? 33 : 39);
+                            // Skip SII emission for Nota de Venta (tipo 0)
+                            if (tipoDte === 0) {
+                                console.log('📝 Nota de Venta — sin emisión SII');
+                                return;
+                            }
+                            const body = {
+                                sale_id: saleId,
+                                tipo_dte: tipoDte,
+                            };
+                            if ((tipoDte === 33 || tipoDte === 34) && sale.invoiceData) {
+                                body.rut_receptor = sale.invoiceData.rut_receptor;
+                                body.razon_social_receptor = sale.invoiceData.razon_social_receptor;
+                                body.giro_receptor = sale.invoiceData.giro_receptor;
+                                body.dir_receptor = sale.invoiceData.dir_receptor;
+                                body.comuna_receptor = sale.invoiceData.comuna_receptor;
+                                body.ciudad_receptor = sale.invoiceData.ciudad_receptor;
+                                if (sale.invoiceData.formaPago) {
+                                    body.forma_pago = sale.invoiceData.formaPago;
+                                    if (sale.invoiceData.diasCredito) {
+                                        body.dias_credito = sale.invoiceData.diasCredito;
+                                    }
+                                }
+                            } else if (tipoDte === 33 && sale.client) {
+                                body.rut_receptor = sale.client.rut;
+                                body.razon_social_receptor = sale.client.name || sale.client.razon_social || 'Sin Razón Social';
+                            }
+                            const emitRes = await fetch('/api/sii/emit', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'x-company-id': activeCompanyId,
+                                },
+                                body: JSON.stringify(body),
+                            });
+                            const emitData = await emitRes.json();
+                            if (emitRes.ok && emitData.success) {
+                                console.log(`📄 DTE emitido: Tipo ${tipoDte}, Folio ${emitData.folio}, TrackID ${emitData.track_id}`);
+                            } else {
+                                console.warn('⚠️ DTE emission failed:', emitData.error || emitData);
+                            }
+                        }
+                    } catch (siiErr) {
+                        console.warn('⚠️ SII auto-emit error (non-blocking):', siiErr.message);
+                    }
+                }, 200);
 
                 return { success: true, saleId, creditWarning: sale._creditWarning || null };
 
