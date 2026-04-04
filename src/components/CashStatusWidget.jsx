@@ -49,7 +49,7 @@ const CashStatusWidget = () => {
                 openingTime: cashRegister.opening_time,
                 closingTime: new Date().toISOString(),
                 openingAmount: cashRegister.opening_amount,
-                salesBreakdown: registerStats.salesBreakdown || { cash: registerStats.sales, card: 0, transfer: 0, total: registerStats.sales },
+                salesBreakdown: registerStats.salesBreakdown || { cash: registerStats.sales, card: 0, transfer: 0, credit: 0, total: registerStats.sales },
                 movementsIn: registerStats.movements_in,
                 movementsOut: registerStats.movements_out,
                 expectedBalance: registerStats.balance,

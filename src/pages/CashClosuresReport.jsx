@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useStore } from '../store/useStore';
 import { format, isValid } from 'date-fns';
-import { Search, Eye, Filter, X } from 'lucide-react';
+import { Search, Eye, Calendar, Users, User, Check, ChevronDown, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 // Helper for safe date formatting
@@ -10,6 +10,74 @@ const safeFormat = (dateString, fmt) => {
     const d = new Date(dateString);
     if (!isValid(d)) return '-';
     return format(d, fmt);
+};
+
+// Vendor Selector 3D
+const ClosureVendorSelector = ({ value, onChange, users }) => {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+
+    useEffect(() => {
+        const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    const selectedLabel = value || 'Todos';
+    const colors = ['#00f0ff', '#a855f7', '#22c55e', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6'];
+    const getColor = (i) => colors[i % colors.length];
+    const getInitials = (name) => name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+
+    return (
+        <div ref={ref} style={{ position: 'relative', minWidth: 220 }}>
+            <button
+                onClick={() => setOpen(!open)}
+                style={{
+                    width: '100%', padding: '10px 14px', borderRadius: 12,
+                    border: '1px solid ' + (open ? 'rgba(0,240,255,0.5)' : 'rgba(255,255,255,0.08)'),
+                    background: 'linear-gradient(145deg, rgba(15,15,45,0.9), rgba(20,20,60,0.7))',
+                    boxShadow: open ? '0 0 20px rgba(0,240,255,0.15), inset 0 1px 0 rgba(255,255,255,0.05)' : '0 4px 15px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05)',
+                    color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.85rem',
+                }}
+            >
+                {value ? (
+                    <span style={{ width: 28, height: 28, borderRadius: 8, background: `linear-gradient(135deg, ${getColor(users.indexOf(value))}, ${getColor(users.indexOf(value))}88)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, flexShrink: 0, boxShadow: `0 2px 8px ${getColor(users.indexOf(value))}40` }}>{getInitials(value)}</span>
+                ) : (
+                    <span style={{ width: 28, height: 28, borderRadius: 8, background: 'linear-gradient(135deg, rgba(0,240,255,0.2), rgba(0,240,255,0.05))', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Users size={14} style={{ color: '#00f0ff' }} /></span>
+                )}
+                <span style={{ flex: 1, textAlign: 'left', fontWeight: 500 }}>{selectedLabel}</span>
+                <ChevronDown size={16} style={{ color: 'rgba(255,255,255,0.4)', transition: 'transform 0.25s', transform: open ? 'rotate(180deg)' : 'rotate(0)' }} />
+            </button>
+            {open && (
+                <div style={{
+                    position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 50, borderRadius: 14,
+                    border: '1px solid rgba(0,240,255,0.15)', background: 'linear-gradient(165deg, rgba(12,12,40,0.98), rgba(8,8,30,0.98))',
+                    backdropFilter: 'blur(24px)', boxShadow: '0 12px 40px rgba(0,0,0,0.5), 0 0 30px rgba(0,240,255,0.08)', padding: 6, maxHeight: 280, overflowY: 'auto',
+                    animation: 'vendorDropIn 0.2s ease-out',
+                }}>
+                    {[{ val: '', label: 'Todos' }, ...users.map(u => ({ val: u, label: u }))].map((opt, i) => {
+                        const isSelected = opt.val === value;
+                        return (
+                            <button key={opt.val} onClick={() => { onChange(opt.val); setOpen(false); }}
+                                style={{ width: '100%', padding: '9px 12px', borderRadius: 10, border: 'none', background: isSelected ? 'rgba(0,240,255,0.1)' : 'transparent', color: isSelected ? '#00f0ff' : '#e2e8f0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.85rem', marginBottom: 2 }}
+                                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = isSelected ? 'rgba(0,240,255,0.1)' : 'transparent'; }}
+                            >
+                                {opt.val ? (
+                                    <span style={{ width: 30, height: 30, borderRadius: 8, background: `linear-gradient(135deg, ${getColor(i - 1)}, ${getColor(i - 1)}66)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, color: '#fff', boxShadow: `0 2px 8px ${getColor(i - 1)}30` }}>{getInitials(opt.label)}</span>
+                                ) : (
+                                    <span style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(135deg, rgba(0,240,255,0.2), rgba(0,240,255,0.05))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Users size={14} style={{ color: '#00f0ff' }} /></span>
+                                )}
+                                <span style={{ flex: 1, textAlign: 'left', fontWeight: isSelected ? 600 : 400 }}>{opt.label}</span>
+                                {isSelected && <Check size={16} style={{ color: '#00f0ff' }} />}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+            <style>{`@keyframes vendorDropIn { from { opacity: 0; transform: translateY(-8px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }`}</style>
+        </div>
+    );
 };
 
 const CashClosuresReport = () => {
@@ -23,8 +91,9 @@ const CashClosuresReport = () => {
     const [showFilters, setShowFilters] = useState(false);
     const [filterUser, setFilterUser] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterStartDate, setFilterStartDate] = useState('');
-    const [filterEndDate, setFilterEndDate] = useState('');
+    const [dateRange, setDateRange] = useState('today');
+    const [startDate, setStartDate] = useState(() => new Date().toLocaleDateString('en-CA'));
+    const [endDate, setEndDate] = useState(() => new Date().toLocaleDateString('en-CA'));
 
     // Modal state
     const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -33,11 +102,26 @@ const CashClosuresReport = () => {
 
     const observer = useRef();
 
+    const setDefaultDates = (range) => {
+        const today = new Date();
+        const end = today.toLocaleDateString('en-CA');
+        let start;
+        switch (range) {
+            case 'today': start = end; break;
+            case 'week': { const d = new Date(today); d.setDate(d.getDate() - 7); start = d.toLocaleDateString('en-CA'); break; }
+            case 'month': { const d = new Date(today); d.setMonth(d.getMonth() - 1); start = d.toLocaleDateString('en-CA'); break; }
+            case 'all': start = ''; break;
+            default: return;
+        }
+        setStartDate(start);
+        setEndDate(range === 'all' ? '' : end);
+    };
+
     const loadData = async (currentOffset, isReset = false) => {
         if (isLoading) return;
         try {
             setIsLoading(true);
-            const data = await fetchClosedRegisters(LIMIT, currentOffset);
+            const data = await fetchClosedRegisters(LIMIT, currentOffset, startDate || undefined, endDate || undefined);
 
             if (isReset) {
                 setClosures(Array.isArray(data) ? data : []);
@@ -60,11 +144,13 @@ const CashClosuresReport = () => {
         }
     };
 
-    // Initial load
+    // Initial load & reload on date change
     useEffect(() => {
+        setOffset(0);
+        setHasMore(true);
         loadData(0, true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [startDate, endDate]);
 
     const lastClosureRef = useCallback(node => {
         if (isLoading) return;
@@ -115,29 +201,19 @@ const CashClosuresReport = () => {
 
                 const matchesUser = filterUser ? String(c.user_name) === String(filterUser) : true;
 
-                let matchesDate = true;
-                if (filterStartDate && c.closing_time) {
-                    const closeDate = new Date(c.closing_time);
-                    matchesDate = matchesDate && isValid(closeDate) && closeDate >= new Date(filterStartDate);
-                }
-                if (filterEndDate && c.closing_time) {
-                    const closeDate = new Date(c.closing_time);
-                    matchesDate = matchesDate && isValid(closeDate) && closeDate <= new Date(filterEndDate);
-                }
-
-                return matchesSearch && matchesUser && matchesDate;
+                return matchesSearch && matchesUser;
             } catch (error) {
                 console.error("Filter error:", error);
                 return false;
             }
         });
-    }, [closures, searchTerm, filterUser, filterStartDate, filterEndDate]);
+    }, [closures, searchTerm, filterUser]);
 
     const clearFilters = () => {
         setFilterUser('');
-        setFilterStartDate('');
-        setFilterEndDate('');
         setSearchTerm('');
+        setDateRange('today');
+        setDefaultDates('today');
     };
 
     return (
@@ -150,8 +226,56 @@ const CashClosuresReport = () => {
             </div>
 
             {/* Filter Bar */}
-            <div className="space-y-4">
-                <div className="glass-card p-4 flex gap-4">
+            <div className="glass-card p-4 space-y-3" style={{ position: 'relative', zIndex: 40 }}>
+                {/* Date filters */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+                    <Calendar size={16} style={{ color: 'var(--color-text-muted)' }} />
+                    {[
+                        { key: 'today', label: 'Hoy' },
+                        { key: 'week', label: 'Semana' },
+                        { key: 'month', label: 'Mes' },
+                        { key: 'all', label: 'Todo' },
+                        { key: 'custom', label: 'Personalizado' }
+                    ].map(opt => (
+                        <button
+                            key={opt.key}
+                            onClick={() => { setDateRange(opt.key); if (opt.key !== 'custom') setDefaultDates(opt.key); }}
+                            style={{
+                                padding: '5px 12px',
+                                borderRadius: 8,
+                                border: dateRange === opt.key ? '1px solid var(--primary, #00f0ff)' : '1px solid var(--border, #1e293b)',
+                                background: dateRange === opt.key ? 'rgba(0,240,255,0.15)' : 'transparent',
+                                color: dateRange === opt.key ? 'var(--primary, #00f0ff)' : 'var(--color-text-muted)',
+                                cursor: 'pointer',
+                                fontSize: '0.8rem',
+                                fontWeight: dateRange === opt.key ? 600 : 400
+                            }}
+                        >
+                            {opt.label}
+                        </button>
+                    ))}
+                    {dateRange === 'custom' && (
+                        <>
+                            <input
+                                type="date"
+                                className="glass-input"
+                                value={startDate}
+                                onChange={e => setStartDate(e.target.value)}
+                                style={{ padding: '5px 8px', fontSize: '0.85rem' }}
+                            />
+                            <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+                            <input
+                                type="date"
+                                className="glass-input"
+                                value={endDate}
+                                onChange={e => setEndDate(e.target.value)}
+                                style={{ padding: '5px 8px', fontSize: '0.85rem' }}
+                            />
+                        </>
+                    )}
+                </div>
+                {/* Search + vendor filter */}
+                <div className="flex gap-4">
                     <div className="relative flex-1">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={20} />
                         <input
@@ -162,62 +286,12 @@ const CashClosuresReport = () => {
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
-                    <button
-                        onClick={() => setShowFilters(!showFilters)}
-                        className={cn(
-                            "btn-secondary flex items-center gap-2 transition-all",
-                            showFilters ? "bg-[var(--color-primary)] text-black" : ""
-                        )}
-                    >
-                        <Filter size={18} />
-                        {showFilters ? 'Ocultar Filtros' : 'Filtrar'}
-                    </button>
+                    <ClosureVendorSelector
+                        value={filterUser}
+                        onChange={setFilterUser}
+                        users={uniqueUsers}
+                    />
                 </div>
-
-                {/* Expanded Filters */}
-                {showFilters && (
-                    <div className="glass-card p-4 grid grid-cols-1 md:grid-cols-4 gap-4 animate-in fade-in slide-in-from-top-2">
-                        <div className="space-y-1">
-                            <label className="text-xs text-[var(--color-text-muted)]">Vendedor</label>
-                            <select
-                                className="glass-input w-full [&>option]:bg-[#0f0f2d] [&>option]:text-white"
-                                value={filterUser}
-                                onChange={(e) => setFilterUser(e.target.value)}
-                            >
-                                <option value="">Todos los vendedores</option>
-                                {uniqueUsers.map(user => (
-                                    <option key={user} value={user}>{user}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-xs text-[var(--color-text-muted)]">Desde (Fecha/Hora)</label>
-                            <input
-                                type="datetime-local"
-                                className="glass-input w-full"
-                                value={filterStartDate}
-                                onChange={(e) => setFilterStartDate(e.target.value)}
-                            />
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-xs text-[var(--color-text-muted)]">Hasta (Fecha/Hora)</label>
-                            <input
-                                type="datetime-local"
-                                className="glass-input w-full"
-                                value={filterEndDate}
-                                onChange={(e) => setFilterEndDate(e.target.value)}
-                            />
-                        </div>
-                        <div className="flex items-end">
-                            <button
-                                onClick={clearFilters}
-                                className="w-full btn-ghost border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                            >
-                                Limpiar Filtros
-                            </button>
-                        </div>
-                    </div>
-                )}
             </div>
 
             {/* Table */}
@@ -347,6 +421,9 @@ const CashClosuresReport = () => {
                                             <div className="flex justify-between"><span>Efectivo</span> <span>${Number(reportDetails.salesBreakdown?.cash || 0).toFixed(2)}</span></div>
                                             <div className="flex justify-between"><span>Tarjeta</span> <span>${Number(reportDetails.salesBreakdown?.card || 0).toFixed(2)}</span></div>
                                             <div className="flex justify-between"><span>Transferencia</span> <span>${Number(reportDetails.salesBreakdown?.transfer || 0).toFixed(2)}</span></div>
+                                            {(reportDetails.salesBreakdown?.credit || 0) > 0 && (
+                                                <div className="flex justify-between"><span>Crédito</span> <span>${Number(reportDetails.salesBreakdown.credit).toFixed(2)}</span></div>
+                                            )}
                                         </div>
 
                                         {(reportDetails.movements?.in > 0 || reportDetails.movements?.out > 0) && (

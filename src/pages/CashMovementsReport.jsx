@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useStore } from '../store/useStore';
-import { Search, Filter, ArrowUpCircle, ArrowDownCircle, ChevronDown, ChevronRight, User } from 'lucide-react';
+import { Search, Filter, ArrowUpCircle, ArrowDownCircle, ChevronDown, ChevronRight, User, Calendar, Check, Users } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -9,6 +9,162 @@ import { formatCurrency } from '../utils/formatCurrency';
 const safeFormat = (dateString, fmt, timezone) => {
     if (!dateString) return '-';
     return formatInCompanyTime(dateString, timezone, fmt);
+};
+
+// Custom 3D Vendor Selector
+const VendorSelector = ({ value, onChange, users }) => {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+
+    useEffect(() => {
+        const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    const selectedLabel = value ? users.find(u => u === value) || value : 'Todos';
+    const allOptions = [{ value: '', label: 'Todos', icon: Users }, ...users.map(u => ({ value: u, label: u, icon: User }))];
+
+    const colors = ['#00f0ff', '#a855f7', '#22c55e', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6'];
+    const getColor = (i) => colors[i % colors.length];
+    const getInitials = (name) => name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+
+    return (
+        <div ref={ref} style={{ position: 'relative', minWidth: 220 }}>
+            {/* Trigger Button */}
+            <button
+                onClick={() => setOpen(!open)}
+                style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: 12,
+                    border: '1px solid ' + (open ? 'rgba(0,240,255,0.5)' : 'rgba(255,255,255,0.08)'),
+                    background: 'linear-gradient(145deg, rgba(15,15,45,0.9), rgba(20,20,60,0.7))',
+                    boxShadow: open
+                        ? '0 0 20px rgba(0,240,255,0.15), inset 0 1px 0 rgba(255,255,255,0.05)'
+                        : '0 4px 15px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 3px rgba(0,0,0,0.2)',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    transition: 'all 0.25s ease',
+                    fontSize: '0.85rem',
+                    transform: open ? 'translateY(0)' : 'translateY(0)',
+                }}
+                onMouseEnter={e => { if (!open) e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 10px rgba(0,240,255,0.1)'; }}
+                onMouseLeave={e => { if (!open) e.currentTarget.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05), 0 1px 3px rgba(0,0,0,0.2)'; }}
+            >
+                {value ? (
+                    <span style={{
+                        width: 28, height: 28, borderRadius: 8,
+                        background: `linear-gradient(135deg, ${getColor(users.indexOf(value))}, ${getColor(users.indexOf(value))}88)`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '0.7rem', fontWeight: 700, flexShrink: 0,
+                        boxShadow: `0 2px 8px ${getColor(users.indexOf(value))}40`
+                    }}>
+                        {getInitials(value)}
+                    </span>
+                ) : (
+                    <span style={{
+                        width: 28, height: 28, borderRadius: 8,
+                        background: 'linear-gradient(135deg, rgba(0,240,255,0.2), rgba(0,240,255,0.05))',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0
+                    }}>
+                        <Users size={14} style={{ color: '#00f0ff' }} />
+                    </span>
+                )}
+                <span style={{ flex: 1, textAlign: 'left', fontWeight: 500 }}>{selectedLabel}</span>
+                <ChevronDown size={16} style={{
+                    color: 'rgba(255,255,255,0.4)',
+                    transition: 'transform 0.25s ease',
+                    transform: open ? 'rotate(180deg)' : 'rotate(0)'
+                }} />
+            </button>
+
+            {/* Dropdown */}
+            {open && (
+                <div style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 6px)',
+                    left: 0,
+                    right: 0,
+                    zIndex: 50,
+                    borderRadius: 14,
+                    border: '1px solid rgba(0,240,255,0.15)',
+                    background: 'linear-gradient(165deg, rgba(12,12,40,0.98), rgba(8,8,30,0.98))',
+                    backdropFilter: 'blur(24px)',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.5), 0 0 30px rgba(0,240,255,0.08), inset 0 1px 0 rgba(255,255,255,0.05)',
+                    padding: '6px',
+                    maxHeight: 280,
+                    overflowY: 'auto',
+                    animation: 'vendorDropIn 0.2s ease-out',
+                }}>
+                    {allOptions.map((opt, i) => {
+                        const isSelected = opt.value === value;
+                        const colorIdx = i - 1;
+                        return (
+                            <button
+                                key={opt.value}
+                                onClick={() => { onChange(opt.value); setOpen(false); }}
+                                style={{
+                                    width: '100%',
+                                    padding: '9px 12px',
+                                    borderRadius: 10,
+                                    border: 'none',
+                                    background: isSelected
+                                        ? 'linear-gradient(135deg, rgba(0,240,255,0.12), rgba(0,240,255,0.04))'
+                                        : 'transparent',
+                                    color: isSelected ? '#00f0ff' : '#e2e8f0',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 10,
+                                    fontSize: '0.85rem',
+                                    transition: 'all 0.15s ease',
+                                    marginBottom: 2,
+                                }}
+                                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                            >
+                                {opt.value ? (
+                                    <span style={{
+                                        width: 30, height: 30, borderRadius: 8,
+                                        background: `linear-gradient(135deg, ${getColor(colorIdx)}, ${getColor(colorIdx)}66)`,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: '0.7rem', fontWeight: 700, flexShrink: 0,
+                                        boxShadow: `0 2px 8px ${getColor(colorIdx)}30`,
+                                        color: '#fff'
+                                    }}>
+                                        {getInitials(opt.label)}
+                                    </span>
+                                ) : (
+                                    <span style={{
+                                        width: 30, height: 30, borderRadius: 8,
+                                        background: 'linear-gradient(135deg, rgba(0,240,255,0.2), rgba(0,240,255,0.05))',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        flexShrink: 0
+                                    }}>
+                                        <Users size={14} style={{ color: '#00f0ff' }} />
+                                    </span>
+                                )}
+                                <span style={{ flex: 1, textAlign: 'left', fontWeight: isSelected ? 600 : 400 }}>{opt.label}</span>
+                                {isSelected && <Check size={16} style={{ color: '#00f0ff', flexShrink: 0 }} />}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+
+            <style>{`
+                @keyframes vendorDropIn {
+                    from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+                    to { opacity: 1; transform: translateY(0) scale(1); }
+                }
+            `}</style>
+        </div>
+    );
 };
 
 const CashMovementsReport = () => {
@@ -25,14 +181,47 @@ const CashMovementsReport = () => {
     const [filterUser, setFilterUser] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [showFilters, setShowFilters] = useState(false);
+    const [dateRange, setDateRange] = useState('today');
+    const [startDate, setStartDate] = useState(() => new Date().toLocaleDateString('en-CA'));
+    const [endDate, setEndDate] = useState(() => new Date().toLocaleDateString('en-CA'));
 
     const observer = useRef();
+
+    const setDefaultDates = (range) => {
+        const today = new Date();
+        const end = today.toLocaleDateString('en-CA');
+        let start;
+        switch (range) {
+            case 'today':
+                start = end;
+                break;
+            case 'week': {
+                const d = new Date(today);
+                d.setDate(d.getDate() - 7);
+                start = d.toLocaleDateString('en-CA');
+                break;
+            }
+            case 'month': {
+                const d = new Date(today);
+                d.setMonth(d.getMonth() - 1);
+                start = d.toLocaleDateString('en-CA');
+                break;
+            }
+            case 'all':
+                start = '';
+                break;
+            default:
+                return;
+        }
+        setStartDate(start);
+        setEndDate(range === 'all' ? '' : end);
+    };
 
     const loadData = async (currentOffset, isReset = false) => {
         if (isLoading) return;
         try {
             setIsLoading(true);
-            const data = await fetchCashMovements(LIMIT, currentOffset);
+            const data = await fetchCashMovements(LIMIT, currentOffset, startDate || undefined, endDate || undefined);
 
             // Determine how many registers we actually fetched
             // Since our backend fetches registers and then their movements,
@@ -62,9 +251,11 @@ const CashMovementsReport = () => {
     };
 
     useEffect(() => {
+        setOffset(0);
+        setHasMore(true);
         loadData(0, true);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [startDate, endDate]);
 
     const lastGroupRef = useCallback(node => {
         if (isLoading) return;
@@ -160,7 +351,56 @@ const CashMovementsReport = () => {
             </div>
 
             {/* Filter Bar */}
-            <div className="glass-card p-4 flex gap-4">
+            <div className="glass-card p-4 space-y-3" style={{ position: 'relative', zIndex: 40 }}>
+                {/* Date filters */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+                    <Calendar size={16} style={{ color: 'var(--color-text-muted)' }} />
+                    {[
+                        { key: 'today', label: 'Hoy' },
+                        { key: 'week', label: 'Semana' },
+                        { key: 'month', label: 'Mes' },
+                        { key: 'all', label: 'Todo' },
+                        { key: 'custom', label: 'Personalizado' }
+                    ].map(opt => (
+                        <button
+                            key={opt.key}
+                            onClick={() => { setDateRange(opt.key); if (opt.key !== 'custom') setDefaultDates(opt.key); }}
+                            style={{
+                                padding: '5px 12px',
+                                borderRadius: 8,
+                                border: dateRange === opt.key ? '1px solid var(--primary, #00f0ff)' : '1px solid var(--border, #1e293b)',
+                                background: dateRange === opt.key ? 'rgba(0,240,255,0.15)' : 'transparent',
+                                color: dateRange === opt.key ? 'var(--primary, #00f0ff)' : 'var(--color-text-muted)',
+                                cursor: 'pointer',
+                                fontSize: '0.8rem',
+                                fontWeight: dateRange === opt.key ? 600 : 400
+                            }}
+                        >
+                            {opt.label}
+                        </button>
+                    ))}
+                    {dateRange === 'custom' && (
+                        <>
+                            <input
+                                type="date"
+                                className="glass-input"
+                                value={startDate}
+                                onChange={e => setStartDate(e.target.value)}
+                                style={{ padding: '5px 8px', fontSize: '0.85rem' }}
+                            />
+                            <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+                            <input
+                                type="date"
+                                className="glass-input"
+                                value={endDate}
+                                onChange={e => setEndDate(e.target.value)}
+                                style={{ padding: '5px 8px', fontSize: '0.85rem' }}
+                            />
+                        </>
+                    )}
+                </div>
+                {/* Search + vendor filter */}
+                <div className="flex gap-4">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={20} />
                     <input
@@ -171,16 +411,12 @@ const CashMovementsReport = () => {
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
-                <select
-                    className="glass-input w-48 [&>option]:bg-[#0f0f2d] [&>option]:text-white"
+                <VendorSelector
                     value={filterUser}
-                    onChange={(e) => setFilterUser(e.target.value)}
-                >
-                    <option value="">Todos los vendedores</option>
-                    {uniqueUsers.map(user => (
-                        <option key={user} value={user}>{user}</option>
-                    ))}
-                </select>
+                    onChange={setFilterUser}
+                    users={uniqueUsers}
+                />
+                </div>
             </div>
 
             <div className="space-y-4">

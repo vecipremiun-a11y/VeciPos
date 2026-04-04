@@ -4306,12 +4306,13 @@ export const useStore = create(persist((set, get) => ({
                     'dashboard.view', 'dashboard.view_sales', 'dashboard.view_profits',
                     'sales.view', 'sales.view_details', 'sales.export',
                     'clients.view', 'clients.view_account',
-                    'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.export',
+                    'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.sales_analytics', 'reports.export',
                     'products.view', 'products.view_cost',
                     'taxes.view',
                     'combos.view',
                     'inventory_control.view',
-                    'alerts.view'
+                    'alerts.view',
+                    'sii.view', 'sii.folios'
                 ]
             };
 
@@ -4384,18 +4385,19 @@ export const useStore = create(persist((set, get) => ({
                     'inventory_control.view', 'inventory_control.create', 'inventory_control.manage',
                     'alerts.view', 'alerts.manage'
                 ],
-                // Supervisor: Reports, View Only, Alerts
+                // Supervisor: Reports, View Only, Alerts, SII
                 'Supervisor': [
                     'dashboard.view', 'dashboard.view_sales', 'dashboard.view_profits',
                     'sales.view', 'sales.view_details', 'sales.export',
                     'clients.view', 'clients.view_account',
-                    'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.export',
+                    'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.sales_analytics', 'reports.export',
                     'products.view', 'products.view_cost',
                     'taxes.view',
                     'personal.view', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.absences', 'personal.reports',
                     'combos.view',
                     'inventory_control.view',
-                    'alerts.view'
+                    'alerts.view',
+                    'sii.view', 'sii.folios'
                 ]
             };
 
@@ -4414,14 +4416,15 @@ export const useStore = create(persist((set, get) => ({
                 'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.delete', 'preorders.complete',
                 'production.view', 'production.manage',
                 'supplier_orders.view', 'supplier_orders.create', 'supplier_orders.edit', 'supplier_orders.receive', 'supplier_orders.delete',
-                'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.export',
+                'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.sales_analytics', 'reports.export',
                 'users.view', 'users.create', 'users.edit', 'users.delete', 'users.manage',
                 'settings.view', 'settings.company', 'settings.receipts', 'settings.payments', 'settings.system', 'settings.manage_permissions',
                 'taxes.view', 'taxes.create', 'taxes.edit', 'taxes.delete',
                 'personal.view', 'personal.manage', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.absences', 'personal.payroll', 'personal.vacations', 'personal.reports',
                 'combos.view', 'combos.create', 'combos.edit', 'combos.delete',
                 'inventory_control.view', 'inventory_control.create', 'inventory_control.manage',
-                'alerts.view', 'alerts.manage'
+                'alerts.view', 'alerts.manage',
+                'sii.view', 'sii.folios'
             ];
 
             // Generate Inserts
@@ -7226,6 +7229,7 @@ export const useStore = create(persist((set, get) => ({
                             SUM(CASE WHEN payment_method = 'Efectivo' THEN total ELSE 0 END) as cash_total,
                             SUM(CASE WHEN payment_method = 'Tarjeta' THEN total ELSE 0 END) as card_total,
                             SUM(CASE WHEN payment_method = 'Transferencia' THEN total ELSE 0 END) as transfer_total,
+                            SUM(CASE WHEN payment_method = 'Crédito' THEN total ELSE 0 END) as credit_total,
                             SUM(total) as total_sales_amount
                           FROM sales 
                           WHERE user_id = ? 
@@ -7259,6 +7263,7 @@ export const useStore = create(persist((set, get) => ({
                 cash_total: 0,
                 card_total: 0,
                 transfer_total: 0,
+                credit_total: 0,
                 total_sales_amount: 0
             };
 
@@ -7267,6 +7272,7 @@ export const useStore = create(persist((set, get) => ({
                 cash: cashSalesTotal,
                 card: parseFloat(salesStats.card_total) || 0,
                 transfer: parseFloat(salesStats.transfer_total) || 0,
+                credit: parseFloat(salesStats.credit_total) || 0,
                 total: parseFloat(salesStats.total_sales_amount) || 0
             };
 
@@ -7381,28 +7387,29 @@ export const useStore = create(persist((set, get) => ({
     },
 
     // Historical Reports
-    fetchClosedRegisters: async (limit = 20, offset = 0) => {
+    fetchClosedRegisters: async (limit = 20, offset = 0, startDate, endDate) => {
         try {
-            const { activeCompanyId } = get();
+            const { activeCompanyId, currentCompanyTimezone } = get();
 
-            // Get total count first (optional but good for UI)
-            /* 
-            const countResult = await turso.execute({
-                sql: "SELECT COUNT(*) as total FROM cash_registers WHERE status = 'closed' AND company_id = ?",
-                args: [activeCompanyId]
-            });
-            const totalCount = countResult.rows[0].total; 
-            */
-
-            const result = await turso.execute({
-                sql: `SELECT cr.*, u.name as user_name 
+            let sql = `SELECT cr.*, u.name as user_name 
                       FROM cash_registers cr 
                       LEFT JOIN users u ON cr.user_id = u.id 
-                      WHERE cr.status = 'closed' AND cr.company_id = ?
-                      ORDER BY cr.closing_time DESC
-                      LIMIT ? OFFSET ?`,
-                args: [activeCompanyId, limit, offset]
-            });
+                      WHERE cr.status = 'closed' AND cr.company_id = ?`;
+            const args = [activeCompanyId];
+            if (startDate) {
+                const utcStart = getStartFromDateString(startDate, currentCompanyTimezone).toISOString();
+                sql += ' AND cr.closing_time >= ?';
+                args.push(utcStart);
+            }
+            if (endDate) {
+                const utcEnd = getEndFromDateString(endDate, currentCompanyTimezone).toISOString();
+                sql += ' AND cr.closing_time <= ?';
+                args.push(utcEnd);
+            }
+            sql += ' ORDER BY cr.closing_time DESC LIMIT ? OFFSET ?';
+            args.push(limit, offset);
+
+            const result = await turso.execute({ sql, args });
 
             return result.rows;
         } catch (e) {
@@ -7425,20 +7432,32 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    fetchCashMovements: async (limit = 20, offset = 0) => {
+    fetchCashMovements: async (limit = 20, offset = 0, startDate, endDate) => {
         try {
-            const { activeCompanyId } = get();
+            const { activeCompanyId, currentCompanyTimezone } = get();
             console.log(`Fetching cash movements (limit: ${limit}, offset: ${offset}) for company:`, activeCompanyId);
 
             // 1. Fetch Registers (Paginated)
-            const registersRes = await turso.execute({
-                sql: `SELECT cr.*, u.name as user_name 
+            let regSql = `SELECT cr.*, u.name as user_name 
                       FROM cash_registers cr 
                       LEFT JOIN users u ON cr.user_id = u.id 
-                      WHERE cr.company_id = ? 
-                      ORDER BY cr.opening_time DESC 
-                      LIMIT ? OFFSET ?`,
-                args: [activeCompanyId, limit, offset]
+                      WHERE cr.company_id = ?`;
+            const regArgs = [activeCompanyId];
+            if (startDate) {
+                const utcStart = getStartFromDateString(startDate, currentCompanyTimezone).toISOString();
+                regSql += ' AND cr.opening_time >= ?';
+                regArgs.push(utcStart);
+            }
+            if (endDate) {
+                const utcEnd = getEndFromDateString(endDate, currentCompanyTimezone).toISOString();
+                regSql += ' AND cr.opening_time <= ?';
+                regArgs.push(utcEnd);
+            }
+            regSql += ' ORDER BY cr.opening_time DESC LIMIT ? OFFSET ?';
+            regArgs.push(limit, offset);
+            const registersRes = await turso.execute({
+                sql: regSql,
+                args: regArgs
             });
 
             const registers = registersRes.rows;
@@ -7527,15 +7546,17 @@ export const useStore = create(persist((set, get) => ({
             });
 
             let cashSalesTotal = 0;
-            const salesBreakdown = { cash: 0, card: 0, transfer: 0, total: 0 };
+            const salesBreakdown = { cash: 0, card: 0, transfer: 0, credit: 0, total: 0 };
 
             salesRes.rows.forEach(sale => {
+                if (sale.status === 'cancelled') return;
                 const total = parseFloat(sale.total);
                 salesBreakdown.total += total;
 
                 let cashPart = 0;
                 let cardPart = 0;
                 let transferPart = 0;
+                let creditPart = 0;
 
                 if (sale.payment_method === 'Efectivo') {
                     cashPart = total;
@@ -7543,6 +7564,8 @@ export const useStore = create(persist((set, get) => ({
                     cardPart = total;
                 } else if (sale.payment_method === 'Transferencia') {
                     transferPart = total;
+                } else if (sale.payment_method === 'Crédito') {
+                    creditPart = total;
                 } else if (sale.payment_method === 'Mixto' && sale.payment_details) {
                     try {
                         const details = JSON.parse(sale.payment_details);
@@ -7561,6 +7584,7 @@ export const useStore = create(persist((set, get) => ({
                 salesBreakdown.cash += cashPart;
                 salesBreakdown.card += cardPart;
                 salesBreakdown.transfer += transferPart;
+                salesBreakdown.credit += creditPart;
 
                 if (cashPart > 0) {
                     cashSalesTotal += cashPart;
@@ -8975,6 +8999,112 @@ export const useStore = create(persist((set, get) => ({
             return { success: true, products: result.rows };
         } catch (e) {
             console.error('Error getting best margin products:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getSalesByPaymentMethod: async (startDate, endDate, companyId, userId) => {
+        try {
+            const cid = companyId || get().activeCompanyId;
+            const tz = get().currentCompanyTimezone;
+            const utcStart = getStartFromDateString(startDate, tz).toISOString();
+            const utcEnd = getEndFromDateString(endDate, tz).toISOString();
+            let sql = `SELECT payment_method, COUNT(*) as count, SUM(total) as amount
+                       FROM sales
+                       WHERE company_id = ? AND date >= ? AND date <= ? AND status != 'cancelled'`;
+            const args = [cid, utcStart, utcEnd];
+            if (userId) {
+                sql += ' AND user_id = ?';
+                args.push(userId);
+            }
+            sql += ' GROUP BY payment_method ORDER BY amount DESC';
+            const result = await turso.execute({ sql, args });
+            const totalAmount = result.rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+            const totalCount = result.rows.reduce((s, r) => s + (Number(r.count) || 0), 0);
+            const methods = result.rows.map(r => ({
+                method: r.payment_method || 'Otro',
+                amount: Number(r.amount) || 0,
+                count: Number(r.count) || 0,
+                percentage: totalAmount > 0 ? ((Number(r.amount) || 0) / totalAmount) * 100 : 0
+            }));
+            return { success: true, methods, totalAmount, totalCount };
+        } catch (e) {
+            console.error('Error getting sales by payment method:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getVendorTopProducts: async (startDate, endDate, userId, companyId, limit = 10) => {
+        try {
+            const cid = companyId || get().activeCompanyId;
+            const tz = get().currentCompanyTimezone;
+            const utcStart = getStartFromDateString(startDate, tz).toISOString();
+            const utcEnd = getEndFromDateString(endDate, tz).toISOString();
+            const result = await turso.execute({
+                sql: `SELECT items FROM sales
+                      WHERE company_id = ? AND date >= ? AND date <= ? AND status != 'cancelled' AND user_id = ?`,
+                args: [cid, utcStart, utcEnd, userId]
+            });
+            const productMap = {};
+            for (const row of result.rows) {
+                try {
+                    const items = JSON.parse(row.items || '[]');
+                    for (const item of items) {
+                        const key = item.id || item.name;
+                        if (!productMap[key]) {
+                            productMap[key] = { name: item.name, quantity: 0, amount: 0 };
+                        }
+                        productMap[key].quantity += Number(item.qty || item.quantity || 0);
+                        productMap[key].amount += Number(item.qty || item.quantity || 0) * Number(item.price || 0);
+                    }
+                } catch {}
+            }
+            const products = Object.values(productMap)
+                .sort((a, b) => b.quantity - a.quantity)
+                .slice(0, limit);
+            return { success: true, products };
+        } catch (e) {
+            console.error('Error getting vendor top products:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    getVendorSalesSummary: async (startDate, endDate, companyId) => {
+        try {
+            const cid = companyId || get().activeCompanyId;
+            const tz = get().currentCompanyTimezone;
+            const utcStart = getStartFromDateString(startDate, tz).toISOString();
+            const utcEnd = getEndFromDateString(endDate, tz).toISOString();
+            const result = await turso.execute({
+                sql: `SELECT s.user_id, u.name as user_name,
+                        COUNT(*) as total_sales,
+                        SUM(s.total) as total_amount,
+                        SUM(CASE WHEN s.payment_method = 'Efectivo' THEN s.total ELSE 0 END) as cash,
+                        SUM(CASE WHEN s.payment_method = 'Tarjeta' THEN s.total ELSE 0 END) as card,
+                        SUM(CASE WHEN s.payment_method = 'Transferencia' THEN s.total ELSE 0 END) as transfer,
+                        SUM(CASE WHEN s.payment_method = 'Mixto' THEN s.total ELSE 0 END) as mixed,
+                        SUM(CASE WHEN s.payment_method = 'Crédito' THEN s.total ELSE 0 END) as credit
+                      FROM sales s
+                      LEFT JOIN users u ON s.user_id = u.id
+                      WHERE s.company_id = ? AND s.date >= ? AND s.date <= ? AND s.status != 'cancelled'
+                      GROUP BY s.user_id
+                      ORDER BY total_amount DESC`,
+                args: [cid, utcStart, utcEnd]
+            });
+            const vendors = result.rows.map(r => ({
+                user_id: r.user_id,
+                user_name: r.user_name || 'Sin nombre',
+                total_sales: Number(r.total_sales) || 0,
+                total_amount: Number(r.total_amount) || 0,
+                cash: Number(r.cash) || 0,
+                card: Number(r.card) || 0,
+                transfer: Number(r.transfer) || 0,
+                mixed: Number(r.mixed) || 0,
+                credit: Number(r.credit) || 0
+            }));
+            return { success: true, vendors };
+        } catch (e) {
+            console.error('Error getting vendor sales summary:', e);
             return { success: false, error: e.message };
         }
     },
@@ -10489,6 +10619,22 @@ export const useStore = create(persist((set, get) => ({
             return { success: true };
         } catch (e) {
             console.error("Error deleting shift:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deleteShiftByDate: async (userId, shiftDate) => {
+        try {
+            const { activeCompanyId } = get();
+            await turso.execute({
+                sql: "DELETE FROM work_shifts WHERE user_id = ? AND shift_date = ? AND company_id = ?",
+                args: [userId, shiftDate, activeCompanyId]
+            });
+            const { workShifts } = get();
+            set({ workShifts: workShifts.filter(s => !(String(s.user_id) === String(userId) && s.shift_date === shiftDate)) });
+            return { success: true };
+        } catch (e) {
+            console.error("Error deleting shift by date:", e);
             return { success: false, error: e.message };
         }
     },

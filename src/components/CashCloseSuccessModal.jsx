@@ -42,7 +42,7 @@ const CashCloseSuccessModal = ({ isOpen, onClose, data, onSendWhatsApp }) => {
 *RESUMEN DEL TURNO:*
 *Ventas en efectivo:* ${formatCurrency(salesBreakdown?.cash || 0, currentCurrency)}
 *Ventas tarjetas:* ${formatCurrency(salesBreakdown?.card || 0, currentCurrency)}
-*Ventas transfer:* ${formatCurrency(salesBreakdown?.transfer || 0, currentCurrency)}
+*Ventas transfer:* ${formatCurrency(salesBreakdown?.transfer || 0, currentCurrency)}${salesBreakdown?.credit ? `\n*Ventas crédito:* ${formatCurrency(salesBreakdown.credit, currentCurrency)}` : ''}
 *Total Ventas:* ${formatCurrency(salesBreakdown?.total || 0, currentCurrency)}
 
 *Ingresos adicionales:* ${formatCurrency(movementsIn, currentCurrency)}

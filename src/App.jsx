@@ -44,6 +44,7 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminCompanies from './pages/admin/AdminCompanies';
 import SupportInbox from './pages/admin/SupportInbox';
 import ProfitReport from './pages/admin/ProfitReport';
+import SalesAnalytics from './pages/reports/SalesAnalytics';
 
 import React, { useEffect } from 'react';
 import { useStore } from './store/useStore';
@@ -215,8 +216,8 @@ function App() {
           <Route path="inventory/reconciliation" element={<ProtectedPage permission="products.adjust_stock"><InventoryReconciliation /></ProtectedPage>} />
           <Route path="inventory/control" element={<ProtectedPage permission="inventory_control.view"><InventoryControl /></ProtectedPage>} />
           <Route path="inventory/combos" element={<ProtectedPage permission="combos.view"><ProductCombos /></ProtectedPage>} />
-          <Route path="documentos-sii" element={<ProtectedPage permission="settings.view"><DocumentosSII /></ProtectedPage>} />
-          <Route path="sii/folios" element={<ProtectedPage permission="settings.view"><FolioSettings /></ProtectedPage>} />
+          <Route path="documentos-sii" element={<ProtectedPage permission="sii.view"><DocumentosSII /></ProtectedPage>} />
+          <Route path="sii/folios" element={<ProtectedPage permission="sii.folios"><FolioSettings /></ProtectedPage>} />
 
           {/* Reports */}
           <Route path="reports" element={<ProtectedPage permission="reports.sales"><Reports /></ProtectedPage>} />
@@ -225,6 +226,7 @@ function App() {
           <Route path="reports/movements" element={<ProtectedPage permission="reports.movements"><CashMovementsReport /></ProtectedPage>} />
           <Route path="reports/invoice-payments" element={<ProtectedPage permission="reports.invoice_payments"><InvoicePaymentsReport /></ProtectedPage>} />
           <Route path="reports/profit" element={<ProtectedPage permission="reports.profit"><ProfitReport /></ProtectedPage>} />
+          <Route path="reports/sales-analytics" element={<ProtectedPage permission="reports.sales_analytics"><SalesAnalytics /></ProtectedPage>} />
 
           <Route path="settings" element={<ProtectedPage permission="settings.view"><Settings /></ProtectedPage>} />
         </Route>

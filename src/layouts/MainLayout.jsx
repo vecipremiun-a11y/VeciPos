@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
@@ -18,6 +18,7 @@ const MainLayout = () => {
     const location = useLocation();
 
     const [openSubmenu, setOpenSubmenu] = useState(null);
+    const [openSubgroup, setOpenSubgroup] = useState(null);
 
     // Handle Resize
     React.useEffect(() => {
@@ -82,12 +83,23 @@ const MainLayout = () => {
             label: 'Reportes',
             moduleKey: 'reports',
             subItems: [
-                { icon: FileText, label: 'Ventas', path: '/reports', permission: 'reports.sales' },
+                {
+                    icon: ShoppingCart, label: 'Ventas', isSubgroup: true,
+                    children: [
+                        { icon: FileText, label: 'Venta de Productos', path: '/reports', permission: 'reports.sales' },
+                        { icon: TrendingUp, label: 'Utilidad', path: '/reports/profit', permission: 'reports.profit' },
+                        { icon: PieChartIcon, label: 'Análisis de Ventas', path: '/reports/sales-analytics', permission: 'reports.sales_analytics' },
+                    ]
+                },
                 { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', permission: 'reports.expiring' },
-                { icon: DollarSign, label: 'Cierre de Caja', path: '/reports/closures', permission: 'reports.closures' },
-                { icon: ArrowLeftRight, label: 'Movimientos de Caja', path: '/reports/movements', permission: 'reports.movements' },
+                {
+                    icon: DollarSign, label: 'Cajas', isSubgroup: true,
+                    children: [
+                        { icon: DollarSign, label: 'Cierre de Caja', path: '/reports/closures', permission: 'reports.closures' },
+                        { icon: ArrowLeftRight, label: 'Movimientos de Caja', path: '/reports/movements', permission: 'reports.movements' },
+                    ]
+                },
                 { icon: Receipt, label: 'Pagos Facturas', path: '/reports/invoice-payments', permission: 'reports.invoice_payments' },
-                { icon: TrendingUp, label: 'Utilidad', path: '/reports/profit', permission: 'reports.profit' }
             ]
         },
         {
@@ -95,8 +107,8 @@ const MainLayout = () => {
             label: 'Documentos SII',
             moduleKey: 'sii',
             subItems: [
-                { icon: FileText, label: 'Documentos', path: '/documentos-sii', permission: 'settings.view' },
-                { icon: Settings, label: 'Activar Folios', path: '/sii/folios', permission: 'settings.view' },
+                { icon: FileText, label: 'Documentos', path: '/documentos-sii', permission: 'sii.view' },
+                { icon: Settings, label: 'Activar Folios', path: '/sii/folios', permission: 'sii.folios' },
             ]
         },
         { icon: Briefcase, label: 'Personal', path: '/personal', permission: 'personal.view', moduleKey: 'personal' },
@@ -107,7 +119,17 @@ const MainLayout = () => {
     const navItems = allNavItems.filter(item => {
         // If item has subItems, check if AT LEAST ONE subItem is allowed
         if (item.subItems) {
-            const visibleSubItems = item.subItems.filter(sub => can(sub.permission));
+            const visibleSubItems = item.subItems.filter(sub => {
+                if (sub.isSubgroup) {
+                    const visibleChildren = sub.children.filter(c => can(c.permission));
+                    if (visibleChildren.length > 0) {
+                        sub.children = visibleChildren;
+                        return true;
+                    }
+                    return false;
+                }
+                return can(sub.permission);
+            });
             if (visibleSubItems.length > 0) {
                 item.subItems = visibleSubItems; // Only show allowed subitems
                 return true;
@@ -205,7 +227,11 @@ const MainLayout = () => {
                             }
 
                             const isExpanded = openSubmenu === item.label;
-                            const isActiveParent = item.subItems.some(sub => location.pathname === sub.path);
+                            const isActiveParent = item.subItems.some(sub => 
+                                sub.isSubgroup 
+                                    ? sub.children.some(c => location.pathname === c.path)
+                                    : location.pathname === sub.path
+                            );
 
                             return (
                                 <div key={item.label} className="space-y-1">
@@ -237,7 +263,56 @@ const MainLayout = () => {
                                         "overflow-hidden transition-all duration-300 space-y-1",
                                         isExpanded && isSidebarOpen ? "max-h-[600px] opacity-100" : "max-h-0 opacity-0"
                                     )}>
-                                        {item.subItems.map(subItem => (
+                                        {item.subItems.map(subItem => {
+                                        if (subItem.isSubgroup) {
+                                            const isSubExpanded = openSubgroup === subItem.label;
+                                            const isSubActive = subItem.children.some(c => location.pathname === c.path);
+                                            return (
+                                                <div key={subItem.label} className="space-y-0.5">
+                                                    <button
+                                                        onClick={() => setOpenSubgroup(prev => prev === subItem.label ? null : subItem.label)}
+                                                        className={cn(
+                                                            "w-full flex items-center justify-between px-3 py-2 rounded-lg transition-all duration-200 pl-11 text-left",
+                                                            isSubActive || isSubExpanded
+                                                                ? "text-[var(--color-text)] font-medium"
+                                                                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                                                        )}
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <subItem.icon size={16} />
+                                                            <span className="text-sm">{subItem.label}</span>
+                                                        </div>
+                                                        <ChevronDown
+                                                            size={14}
+                                                            className={cn("transition-transform duration-200", isSubExpanded ? "rotate-180" : "")}
+                                                        />
+                                                    </button>
+                                                    <div className={cn(
+                                                        "overflow-hidden transition-all duration-200 space-y-0.5",
+                                                        isSubExpanded ? "max-h-[200px] opacity-100" : "max-h-0 opacity-0"
+                                                    )}>
+                                                        {subItem.children.map(child => (
+                                                            <NavLink
+                                                                key={child.path}
+                                                                to={child.path}
+                                                                end
+                                                                onClick={() => isMobile && setIsSidebarOpen(false)}
+                                                                className={({ isActive }) => cn(
+                                                                    "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 pl-[60px]",
+                                                                    isActive
+                                                                        ? "text-[var(--color-primary)] font-bold"
+                                                                        : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                                                                )}
+                                                            >
+                                                                <child.icon size={14} />
+                                                                <span className="text-sm">{child.label}</span>
+                                                            </NavLink>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        }
+                                        return (
                                             <NavLink
                                                 key={subItem.path}
                                                 to={subItem.path}
@@ -253,7 +328,8 @@ const MainLayout = () => {
                                                 <subItem.icon size={16} />
                                                 <span className="text-sm">{subItem.label}</span>
                                             </NavLink>
-                                        ))}
+                                        );
+                                    })}
                                     </div>
                                 </div>
                             );

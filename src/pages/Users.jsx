@@ -56,7 +56,8 @@ const Users = () => {
         const admins = users.filter(u => u.role === 'Administrador').length;
         const sellers = users.filter(u => u.role === 'Vendedor').length;
         const warehouse = users.filter(u => u.role === 'Bodeguero').length;
-        return { total, admins, sellers, warehouse };
+        const supervisors = users.filter(u => u.role === 'Supervisor').length;
+        return { total, admins, sellers, warehouse, supervisors };
     }, [users]);
 
     // Filtered and sorted users
@@ -172,6 +173,8 @@ const Users = () => {
                 return 'bg-green-500/20 text-green-400 border-green-500/30';
             case 'Bodeguero':
                 return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+            case 'Supervisor':
+                return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
             default:
                 return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
         }
@@ -235,6 +238,15 @@ const Users = () => {
                     <div>
                         <p className="text-[var(--color-text-muted)] text-xs uppercase tracking-wider">Bodegueros</p>
                         <p className="text-2xl font-bold text-[var(--color-text)]">{stats.warehouse}</p>
+                    </div>
+                </div>
+                <div className="glass-card p-4 flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-yellow-500/20 flex items-center justify-center">
+                        <ClipboardList className="text-yellow-400" size={24} />
+                    </div>
+                    <div>
+                        <p className="text-[var(--color-text-muted)] text-xs uppercase tracking-wider">Supervisores</p>
+                        <p className="text-2xl font-bold text-[var(--color-text)]">{stats.supervisors}</p>
                     </div>
                 </div>
             </div>
@@ -569,6 +581,7 @@ const Users = () => {
                                     >
                                         <option value="Vendedor">Vendedor</option>
                                         <option value="Bodeguero">Bodeguero</option>
+                                        <option value="Supervisor">Supervisor</option>
                                         <option value="Administrador">Administrador</option>
                                     </select>
                                 </div>

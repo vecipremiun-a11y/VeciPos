@@ -197,6 +197,7 @@ export const ALL_PERMISSIONS = [
             { id: 'reports.movements', label: 'Ver Movimientos de Caja' },
             { id: 'reports.invoice_payments', label: 'Ver Pagos de Facturas' },
             { id: 'reports.profit', label: 'Ver Reporte de Utilidades' },
+            { id: 'reports.sales_analytics', label: 'Ver Análisis de Ventas' },
             { id: 'reports.export', label: 'Exportar Reportes' },
         ]
     },
@@ -213,6 +214,14 @@ export const ALL_PERMISSIONS = [
             { id: 'personal.payroll', label: 'Ver/Gestionar Pagos y Nómina' },
             { id: 'personal.vacations', label: 'Ver/Gestionar Vacaciones' },
             { id: 'personal.reports', label: 'Ver Reportes de Personal' },
+        ]
+    },
+    {
+        id: 'sii',
+        label: 'Documentos SII',
+        permissions: [
+            { id: 'sii.view', label: 'Ver Documentos SII' },
+            { id: 'sii.folios', label: 'Gestionar Folios' },
         ]
     },
     {
