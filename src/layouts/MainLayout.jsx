@@ -13,7 +13,7 @@ const MainLayout = () => {
     // Helper to check window width strictly for initial state (avoid hydration mismatch if SSR, but this is SPA)
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
     const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile); // Closed by default on mobile, open on desktop
-    const { currentUser, logout, inventoryAdjustmentMode } = useStore();
+    const { currentUser, logout, inventoryAdjustmentMode, fetchRolePermissions } = useStore();
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -33,6 +33,14 @@ const MainLayout = () => {
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, []);
+
+    // Refresh permissions periodically to pick up admin changes
+    React.useEffect(() => {
+        const interval = setInterval(() => {
+            fetchRolePermissions();
+        }, 30000); // every 30 seconds
+        return () => clearInterval(interval);
+    }, [fetchRolePermissions]);
 
     const { can } = usePermissions();
     const { isModuleLocked } = useCompanyFeatures();

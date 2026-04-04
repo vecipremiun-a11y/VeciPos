@@ -3670,6 +3670,16 @@ export const useStore = create(persist((set, get) => ({
 
             const activeCompany = userCompanies.find(c => c.id === activeCompanyId);
 
+            // Sync user_companies.role if it differs from users.role (fixes desync from old bug)
+            if (activeCompany.role !== user.role && user.role !== 'super_admin' && user.role !== 'owner') {
+                console.log(`🔄 Syncing user_companies.role: ${activeCompany.role} → ${user.role}`);
+                await turso.execute({
+                    sql: "UPDATE user_companies SET role = ? WHERE user_id = ? AND company_id = ?",
+                    args: [user.role, user.id, activeCompanyId]
+                });
+                activeCompany.role = user.role;
+            }
+
             // --- VERIFICACIÓN DE SUSCRIPCIÓN ---
             // Solo para admin/users normales (Super Admin bypass?)
             // Asumimos que super_admin tiene rol 'super_admin' en users table o company role.
