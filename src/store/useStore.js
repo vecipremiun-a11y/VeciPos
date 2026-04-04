@@ -3935,6 +3935,12 @@ export const useStore = create(persist((set, get) => ({
                 });
             }
 
+            // Sync role in user_companies table (permissions use this role)
+            await turso.execute({
+                sql: "UPDATE user_companies SET role = ? WHERE user_id = ? AND company_id = ?",
+                args: [updatedUser.role, id, activeCompanyId]
+            });
+
             set((state) => ({
                 users: state.users.map(u => u.id === id ? { ...u, ...updatedUser } : u)
             }));
