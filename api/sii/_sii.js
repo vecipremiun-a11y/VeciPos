@@ -312,7 +312,13 @@ export async function enviarDTE(dte, siiConfig, cert, tipoDte) {
     envio.generar();
 
     const enviador = new EnviadorSII(cert, ambiente);
-    const resultado = await enviador.enviarDteSoap(envio);
+
+    let resultado;
+    if (tipoDte === 39 || tipoDte === 41) {
+        resultado = await enviador.enviar(envio, siiConfig.rut_emisor, siiConfig.rut_emisor);
+    } else {
+        resultado = await enviador.enviarDteSoap(envio);
+    }
 
     return resultado;
 }
@@ -323,10 +329,7 @@ export async function consultarEstado(trackId, siiConfig, cert) {
     const ambiente = siiConfig.ambiente || 'certificacion';
     const enviador = new EnviadorSII(cert, ambiente);
 
-    const estado = await enviador.consultarEstadoEnvio({
-        trackId,
-        rutEmisor: siiConfig.rut_emisor,
-    });
+    const estado = await enviador.consultarEstado(trackId, siiConfig.rut_emisor);
 
     return estado;
 }

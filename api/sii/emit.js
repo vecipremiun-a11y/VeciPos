@@ -150,6 +150,9 @@ export default async function handler(req, res) {
             siiResponse = JSON.stringify(envioResult);
 
             console.log(`📄 DTE ${tipoDte} Folio ${folio} enviado. TrackID: ${trackId}`);
+            if (!trackId) {
+                console.error(`⚠️ SII respuesta sin TrackID:`, JSON.stringify(envioResult, null, 2));
+            }
         } catch (sendErr) {
             console.error(`❌ Error enviando DTE al SII:`, sendErr);
             estado = 'error';

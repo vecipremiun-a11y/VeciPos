@@ -6512,6 +6512,19 @@ export const useStore = create(persist((set, get) => ({
                             const emitData = await emitRes.json();
                             if (emitRes.ok && emitData.success) {
                                 console.log(`📄 DTE emitido: Tipo ${tipoDte}, Folio ${emitData.folio}, TrackID ${emitData.track_id}`);
+                                // Auto-check status after 15s
+                                if (emitData.track_id) {
+                                    setTimeout(async () => {
+                                        try {
+                                            await fetch(`/api/sii/status?track_id=${encodeURIComponent(emitData.track_id)}`, {
+                                                headers: { 'x-company-id': activeCompanyId },
+                                            });
+                                            console.log('✅ Auto-check estado DTE completado');
+                                        } catch (e) {
+                                            console.warn('⚠️ Auto-check estado DTE falló:', e.message);
+                                        }
+                                    }, 15000);
+                                }
                             } else {
                                 console.warn('⚠️ DTE emission failed:', emitData.error || emitData);
                             }

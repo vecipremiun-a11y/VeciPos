@@ -53,7 +53,7 @@ export default async function handler(req, res) {
             rutEmisor: siiConfig.rut_emisor,
             pfxPath: tmpPfxPath,
             pfxPassword,
-            baseDir: path.resolve(process.cwd()),
+            baseDir: os.tmpdir(),
         });
 
         // Intentar con la cantidad solicitada, luego reducir si el SII limita

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../store/useStore';
 import { turso } from '../lib/turso';
 import { formatCurrency } from '../utils/formatCurrency';
-import { formatInCompanyTime } from '../lib/dateHelpers';
+import { formatInCompanyTime, toUTC } from '../lib/dateHelpers';
 import {
     FileText, Receipt, CheckCircle2, Clock, AlertTriangle, XCircle,
     Search, Calendar, RefreshCw, Filter, ChevronDown, ChevronUp,
@@ -24,6 +24,7 @@ const DocumentosSII = () => {
     const [stats, setStats] = useState({ total: 0, accepted: 0, rejected: 0, pending: 0, totalAmount: 0 });
     const [selectedDte, setSelectedDte] = useState(null);
     const [checkingStatus, setCheckingStatus] = useState(null);
+    const [retrying, setRetrying] = useState(null);
 
     const fetchDtes = async () => {
         if (!activeCompanyId) return;
@@ -35,13 +36,16 @@ const DocumentosSII = () => {
                         WHERE d.company_id = ?`;
             const args = [activeCompanyId];
 
+            const tz = currentCompanyTimezone || 'America/Santiago';
             if (dateFrom) {
-                sql += ` AND DATE(d.created_at) >= ?`;
-                args.push(dateFrom);
+                const startUtc = toUTC(new Date(`${dateFrom}T00:00:00`), tz).toISOString();
+                sql += ` AND d.created_at >= ?`;
+                args.push(startUtc);
             }
             if (dateTo) {
-                sql += ` AND DATE(d.created_at) <= ?`;
-                args.push(dateTo);
+                const endUtc = toUTC(new Date(`${dateTo}T23:59:59`), tz).toISOString();
+                sql += ` AND d.created_at <= ?`;
+                args.push(endUtc);
             }
             if (tipoFilter) {
                 sql += ` AND d.tipo_dte = ?`;
@@ -73,9 +77,44 @@ const DocumentosSII = () => {
         }
     };
 
+    const [autoChecked, setAutoChecked] = useState(false);
+
     useEffect(() => {
         fetchDtes();
+        setAutoChecked(false);
     }, [activeCompanyId, dateFrom, dateTo, tipoFilter, statusFilter]);
+
+    // Auto-check pending/sent DTEs on page load
+    useEffect(() => {
+        if (autoChecked || !dtes.length || !activeCompanyId) return;
+        const pendingDtes = dtes.filter(d => (d.status === 'sent' || d.status === 'pending') && d.track_id);
+        if (!pendingDtes.length) return;
+
+        setAutoChecked(true);
+        let cancelled = false;
+        const checkPending = async () => {
+            let updated = false;
+            for (const dte of pendingDtes) {
+                if (cancelled) break;
+                try {
+                    const resp = await fetch(`/api/sii/status?track_id=${encodeURIComponent(dte.track_id)}`, {
+                        headers: { 'x-company-id': activeCompanyId },
+                    });
+                    const data = await resp.json();
+                    if (resp.ok && data.estado && data.estado !== data.estado_anterior) {
+                        console.log(`✅ DTE ${dte.folio}: ${data.estado_anterior} → ${data.estado}`);
+                        updated = true;
+                    }
+                } catch (e) {
+                    console.warn(`Auto-check DTE ${dte.folio} falló:`, e.message);
+                }
+            }
+            if (!cancelled && updated) fetchDtes();
+        };
+        checkPending();
+
+        return () => { cancelled = true; };
+    }, [dtes, autoChecked]);
 
     const filteredDtes = useMemo(() => {
         if (!searchFolio) return dtes;
@@ -100,6 +139,49 @@ const DocumentosSII = () => {
             console.error('Error checking DTE status:', e);
         } finally {
             setCheckingStatus(null);
+        }
+    };
+
+    const handleRetry = async (dte) => {
+        setRetrying(dte.id);
+        try {
+            // Eliminar el DTE con error para poder reemitir
+            await turso.execute({
+                sql: `DELETE FROM sii_dtes WHERE id = ? AND company_id = ? AND estado = 'error'`,
+                args: [dte.id, activeCompanyId]
+            });
+            // Re-emitir
+            const resp = await fetch('/api/sii/emit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-company-id': activeCompanyId,
+                },
+                body: JSON.stringify({
+                    sale_id: dte.sale_id,
+                    tipo_dte: Number(dte.tipo),
+                }),
+            });
+            const data = await resp.json();
+            if (data.success) {
+                console.log('DTE reemitido exitosamente:', data);
+            } else {
+                console.error('Error reemitiendo DTE:', data.error);
+            }
+            fetchDtes();
+        } catch (e) {
+            console.error('Error en reintento:', e);
+        } finally {
+            setRetrying(null);
+        }
+    };
+
+    const parseSiiResponse = (responseStr) => {
+        if (!responseStr) return null;
+        try {
+            return JSON.parse(responseStr);
+        } catch {
+            return { raw: responseStr };
         }
     };
 
@@ -318,16 +400,28 @@ const DocumentosSII = () => {
                                                 {dte.track_id ? dte.track_id.slice(0, 12) + '...' : '-'}
                                             </td>
                                             <td className="px-4 py-3">
-                                                {(dte.status === 'sent' || dte.status === 'pending') && (
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); handleCheckStatus(dte); }}
-                                                        disabled={checkingStatus === dte.id}
-                                                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 border border-yellow-500/20 transition-all disabled:opacity-50"
-                                                    >
-                                                        <RefreshCw size={12} className={checkingStatus === dte.id ? 'animate-spin' : ''} />
-                                                        Consultar
-                                                    </button>
-                                                )}
+                                                <div className="flex gap-1">
+                                                    {(dte.status === 'sent' || dte.status === 'pending') && (
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); handleCheckStatus(dte); }}
+                                                            disabled={checkingStatus === dte.id}
+                                                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 border border-yellow-500/20 transition-all disabled:opacity-50"
+                                                        >
+                                                            <RefreshCw size={12} className={checkingStatus === dte.id ? 'animate-spin' : ''} />
+                                                            Consultar
+                                                        </button>
+                                                    )}
+                                                    {dte.status === 'error' && (
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); handleRetry(dte); }}
+                                                            disabled={retrying === dte.id}
+                                                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 border border-orange-500/20 transition-all disabled:opacity-50"
+                                                        >
+                                                            <RefreshCw size={12} className={retrying === dte.id ? 'animate-spin' : ''} />
+                                                            Reintentar
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -441,7 +535,31 @@ const DocumentosSII = () => {
                                 {formatInCompanyTime(selectedDte.created_at, currentCompanyTimezone, 'dd/MM/yyyy HH:mm:ss')}
                             </div>
                         </div>
+                        {selectedDte.sii_response && (
+                            <div className="col-span-2 md:col-span-4">
+                                <span className="text-xs text-gray-400">Respuesta SII</span>
+                                <div className="mt-1 p-3 rounded-lg bg-white/5 border border-white/10 font-mono text-xs text-gray-300 break-all whitespace-pre-wrap">
+                                    {(() => {
+                                        const parsed = parseSiiResponse(selectedDte.sii_response);
+                                        if (parsed?.error) return <span className="text-red-400">{parsed.error}</span>;
+                                        return JSON.stringify(parsed, null, 2);
+                                    })()}
+                                </div>
+                            </div>
+                        )}
                     </div>
+                    {selectedDte.status === 'error' && (
+                        <div className="mt-4 pt-4 border-t border-[var(--glass-border)]">
+                            <button
+                                onClick={() => handleRetry(selectedDte)}
+                                disabled={retrying === selectedDte.id}
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 border border-orange-500/30 transition-all disabled:opacity-50"
+                            >
+                                <RefreshCw size={16} className={retrying === selectedDte.id ? 'animate-spin' : ''} />
+                                Reintentar envío al SII
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
