@@ -19,34 +19,34 @@ const shiftTypeStyles = {
     morning: {
         label: 'Mañana',
         icon: Sunrise,
-        chip: 'bg-amber-400/20 text-amber-300 border-amber-400/40',
-        card: 'bg-gradient-to-br from-amber-500/20 via-amber-600/10 to-yellow-700/5 border-amber-400/30 shadow-[0_4px_15px_rgba(245,158,11,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
-        text: 'text-amber-200',
-        glow: 'hover:shadow-[0_6px_20px_rgba(245,158,11,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
+        chip: 'bg-amber-500/25 text-amber-700 dark:text-amber-300 border-amber-500/50',
+        card: 'bg-gradient-to-br from-amber-100 via-amber-50 to-yellow-50 dark:from-amber-500/20 dark:via-amber-600/10 dark:to-yellow-700/5 border-amber-400 dark:border-amber-400/30 shadow-[0_4px_15px_rgba(245,158,11,0.2),inset_0_1px_0_rgba(255,255,255,0.5)] dark:shadow-[0_4px_15px_rgba(245,158,11,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
+        text: 'text-amber-700 dark:text-amber-200',
+        glow: 'hover:shadow-[0_6px_20px_rgba(245,158,11,0.3),inset_0_1px_0_rgba(255,255,255,0.6)] dark:hover:shadow-[0_6px_20px_rgba(245,158,11,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
     },
     afternoon: {
         label: 'Tarde',
         icon: Sunset,
-        chip: 'bg-orange-400/20 text-orange-300 border-orange-400/40',
-        card: 'bg-gradient-to-br from-orange-500/20 via-rose-600/10 to-red-700/5 border-orange-400/30 shadow-[0_4px_15px_rgba(249,115,22,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
-        text: 'text-orange-200',
-        glow: 'hover:shadow-[0_6px_20px_rgba(249,115,22,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
+        chip: 'bg-orange-500/25 text-orange-700 dark:text-orange-300 border-orange-500/50',
+        card: 'bg-gradient-to-br from-orange-100 via-orange-50 to-rose-50 dark:from-orange-500/20 dark:via-rose-600/10 dark:to-red-700/5 border-orange-400 dark:border-orange-400/30 shadow-[0_4px_15px_rgba(249,115,22,0.2),inset_0_1px_0_rgba(255,255,255,0.5)] dark:shadow-[0_4px_15px_rgba(249,115,22,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
+        text: 'text-orange-700 dark:text-orange-200',
+        glow: 'hover:shadow-[0_6px_20px_rgba(249,115,22,0.3),inset_0_1px_0_rgba(255,255,255,0.6)] dark:hover:shadow-[0_6px_20px_rgba(249,115,22,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
     },
     night: {
         label: 'Noche',
         icon: MoonStar,
-        chip: 'bg-indigo-400/20 text-indigo-300 border-indigo-400/40',
-        card: 'bg-gradient-to-br from-indigo-500/20 via-purple-600/10 to-violet-700/5 border-indigo-400/30 shadow-[0_4px_15px_rgba(99,102,241,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
-        text: 'text-indigo-200',
-        glow: 'hover:shadow-[0_6px_20px_rgba(99,102,241,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
+        chip: 'bg-indigo-500/25 text-indigo-700 dark:text-indigo-300 border-indigo-500/50',
+        card: 'bg-gradient-to-br from-indigo-100 via-indigo-50 to-violet-50 dark:from-indigo-500/20 dark:via-purple-600/10 dark:to-violet-700/5 border-indigo-400 dark:border-indigo-400/30 shadow-[0_4px_15px_rgba(99,102,241,0.2),inset_0_1px_0_rgba(255,255,255,0.5)] dark:shadow-[0_4px_15px_rgba(99,102,241,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
+        text: 'text-indigo-700 dark:text-indigo-200',
+        glow: 'hover:shadow-[0_6px_20px_rgba(99,102,241,0.3),inset_0_1px_0_rgba(255,255,255,0.6)] dark:hover:shadow-[0_6px_20px_rgba(99,102,241,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
     },
     custom: {
         label: 'Turno',
         icon: MoveHorizontal,
-        chip: 'bg-cyan-400/20 text-cyan-300 border-cyan-400/40',
-        card: 'bg-gradient-to-br from-cyan-500/20 via-blue-600/10 to-blue-700/5 border-cyan-400/30 shadow-[0_4px_15px_rgba(6,182,212,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
-        text: 'text-cyan-200',
-        glow: 'hover:shadow-[0_6px_20px_rgba(6,182,212,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
+        chip: 'bg-cyan-500/25 text-cyan-700 dark:text-cyan-300 border-cyan-500/50',
+        card: 'bg-gradient-to-br from-cyan-100 via-cyan-50 to-blue-50 dark:from-cyan-500/20 dark:via-blue-600/10 dark:to-blue-700/5 border-cyan-400 dark:border-cyan-400/30 shadow-[0_4px_15px_rgba(6,182,212,0.2),inset_0_1px_0_rgba(255,255,255,0.5)] dark:shadow-[0_4px_15px_rgba(6,182,212,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
+        text: 'text-cyan-700 dark:text-cyan-200',
+        glow: 'hover:shadow-[0_6px_20px_rgba(6,182,212,0.3),inset_0_1px_0_rgba(255,255,255,0.6)] dark:hover:shadow-[0_6px_20px_rgba(6,182,212,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
     }
 };
 
@@ -352,7 +352,7 @@ const ShiftCalendar = () => {
                                                                 <span className={cn("text-sm font-bold tracking-wide", shiftMeta.text)}>
                                                                     {format(new Date(shift.start_time), 'HH:mm')}
                                                                 </span>
-                                                                <span className="text-[10px] opacity-60 font-medium">
+                                                                <span className="text-[10px] text-gray-600 dark:text-white/60 font-medium">
                                                                     {format(new Date(shift.end_time), 'HH:mm')}
                                                                 </span>
 
@@ -361,7 +361,7 @@ const ShiftCalendar = () => {
                                                                     draggable
                                                                     onDragStart={(e) => handleDragStart(e, shift, user.id, dateStr)}
                                                                     onClick={(e) => e.stopPropagation()}
-                                                                    className="text-[8px] mt-1 px-2 py-0.5 rounded-full border border-white/10 text-white/40 hover:text-white/70 hover:border-white/20 transition-colors backdrop-blur-sm"
+                                                                    className="text-[8px] mt-1 px-2 py-0.5 rounded-full border border-gray-300 dark:border-white/10 text-gray-500 dark:text-white/40 hover:text-gray-700 dark:hover:text-white/70 hover:border-gray-400 dark:hover:border-white/20 transition-colors"
                                                                     title="Arrastra para mover/intercambiar"
                                                                 >
                                                                     Arrastrar
@@ -369,7 +369,7 @@ const ShiftCalendar = () => {
                                                             </>
                                                         )}
 
-                                                        <span className="text-[9px] opacity-60 mt-1 font-mono">
+                                                        <span className="text-[9px] text-gray-500 dark:text-white/50 mt-1 font-mono">
                                                             Real: {firstEntry ? format(new Date(firstEntry.recorded_at), 'HH:mm') : '--:--'} / {displayExit ? format(new Date(displayExit.recorded_at), 'HH:mm') : '--:--'}
                                                         </span>
                                                     </>
