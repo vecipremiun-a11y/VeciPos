@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../../store/useStore';
 import { format, isSameDay, startOfDay, endOfDay, startOfWeek, endOfWeek } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { UserCheck, UserX, AlertCircle, Clock, Search, MoreVertical, LogOut, FileWarning } from 'lucide-react';
+import { UserCheck, UserX, AlertCircle, Clock, Search, MoreVertical, LogOut, FileWarning, Coffee, CalendarOff } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 
 const DailyPanel = () => {
@@ -10,14 +10,26 @@ const DailyPanel = () => {
         staffMembers,
         attendanceToday,
         workShifts,
+        laborAbsences,
         pendingCorrections,
         fetchStaffMembers,
         fetchAttendanceToday,
         fetchShifts,
+        fetchAbsences,
         fetchPendingCorrections,
         registerManualAttendance,
         createAbsence
     } = useStore();
+
+    const ABSENCE_LABELS = {
+        medical: 'Licencia Médica',
+        vacation: 'Vacaciones',
+        permission: 'Permiso',
+        administrative: 'Día Administrativo',
+        unjustified: 'Inasist. Injustificada',
+        unpaid_leave: 'Permiso S/Goce',
+        other: 'Otro'
+    };
 
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -26,6 +38,7 @@ const DailyPanel = () => {
         const loadData = async () => {
             setLoading(true);
             const now = new Date();
+            const todayStr = format(now, 'yyyy-MM-dd');
             // Fetch shifts for current week to find today's shift
             const start = startOfWeek(now, { weekStartsOn: 1 });
             const end = endOfWeek(now, { weekStartsOn: 1 });
@@ -34,7 +47,8 @@ const DailyPanel = () => {
                 fetchStaffMembers(),
                 fetchAttendanceToday(),
                 fetchPendingCorrections(),
-                fetchShifts(start.toISOString(), end.toISOString())
+                fetchShifts(start.toISOString(), end.toISOString()),
+                fetchAbsences(todayStr, todayStr)
             ]);
             setLoading(false);
         };
@@ -53,20 +67,27 @@ const DailyPanel = () => {
             .map(user => {
                 const attendance = attendanceToday.find(a => a.user_id === user.id);
 
-                // Find shift for today
-                // shifts are usually stored flat or by day? 
-                // The store has `workShifts` array. We need to check structure.
-                // Assuming workShifts has { user_id, start_time, end_time } where start_time is full ISO or just time?
-                // Phase 2 createShift uses ISO strings for start/end.
                 const shift = workShifts.find(s =>
                     s.user_id === user.id &&
                     s.start_time.startsWith(todayStr)
                 );
 
+                // Check if this user has an absence for today
+                const absence = laborAbsences?.find(a => a.user_id === user.id);
+
                 let status = 'absent';
+                let absenceType = null;
+
                 if (attendance) {
                     if (attendance.check_out) status = 'completed';
                     else status = 'inside';
+                } else if (shift && shift.notes === 'LIBRE') {
+                    // Day off / descanso
+                    status = 'day_off';
+                } else if (absence) {
+                    // Has a registered absence (permiso, vacaciones, licencia, etc.)
+                    status = 'absence';
+                    absenceType = absence.type;
                 } else if (!shift) {
                     status = 'no_shift';
                 }
@@ -75,16 +96,20 @@ const DailyPanel = () => {
                     user,
                     attendance,
                     shift,
+                    absence,
+                    absenceType,
                     status
                 };
             });
-    }, [staffMembers, attendanceToday, workShifts, searchTerm]);
+    }, [staffMembers, attendanceToday, workShifts, laborAbsences, searchTerm]);
 
     const stats = useMemo(() => {
         return {
             inside: dailyRows.filter(r => r.status === 'inside').length,
             absent: dailyRows.filter(r => r.status === 'absent').length,
             completed: dailyRows.filter(r => r.status === 'completed').length,
+            day_off: dailyRows.filter(r => r.status === 'day_off').length,
+            absence: dailyRows.filter(r => r.status === 'absence').length,
             corrections: pendingCorrections.length
         };
     }, [dailyRows, pendingCorrections]);
@@ -101,7 +126,7 @@ const DailyPanel = () => {
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Stats Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
                 <div className="glass-card p-4 flex items-center gap-4 bg-green-500/5 border-green-500/20">
                     <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
                         <UserCheck className="text-green-400" size={20} />
@@ -118,6 +143,24 @@ const DailyPanel = () => {
                     <div>
                         <p className="text-[var(--color-text-muted)] text-xs uppercase font-bold">Ausentes</p>
                         <p className="text-2xl font-bold text-[var(--color-text)]">{stats.absent}</p>
+                    </div>
+                </div>
+                <div className="glass-card p-4 flex items-center gap-4 bg-cyan-500/5 border-cyan-500/20">
+                    <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                        <Coffee className="text-cyan-400" size={20} />
+                    </div>
+                    <div>
+                        <p className="text-[var(--color-text-muted)] text-xs uppercase font-bold">Descanso</p>
+                        <p className="text-2xl font-bold text-[var(--color-text)]">{stats.day_off}</p>
+                    </div>
+                </div>
+                <div className="glass-card p-4 flex items-center gap-4 bg-amber-500/5 border-amber-500/20">
+                    <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
+                        <CalendarOff className="text-amber-400" size={20} />
+                    </div>
+                    <div>
+                        <p className="text-[var(--color-text-muted)] text-xs uppercase font-bold">Con Permiso</p>
+                        <p className="text-2xl font-bold text-[var(--color-text)]">{stats.absence}</p>
                     </div>
                 </div>
                 <div className="glass-card p-4 flex items-center gap-4">
@@ -177,9 +220,13 @@ const DailyPanel = () => {
                                     </td>
                                     <td className="px-6 py-4 text-sm">
                                         {row.shift ? (
-                                            <span className="text-[var(--color-text)]">
-                                                {row.shift.start_time && !isNaN(new Date(row.shift.start_time)) ? format(new Date(row.shift.start_time), 'HH:mm') : '--:--'} - {row.shift.end_time && !isNaN(new Date(row.shift.end_time)) ? format(new Date(row.shift.end_time), 'HH:mm') : '--:--'}
-                                            </span>
+                                            row.shift.notes === 'LIBRE' ? (
+                                                <span className="text-cyan-400 text-xs italic">Descanso</span>
+                                            ) : (
+                                                <span className="text-[var(--color-text)]">
+                                                    {row.shift.start_time && !isNaN(new Date(row.shift.start_time)) ? format(new Date(row.shift.start_time), 'HH:mm') : '--:--'} - {row.shift.end_time && !isNaN(new Date(row.shift.end_time)) ? format(new Date(row.shift.end_time), 'HH:mm') : '--:--'}
+                                                </span>
+                                            )
                                         ) : (
                                             <span className="text-[var(--color-text-muted)] text-xs italic">Sin turno</span>
                                         )}
@@ -196,12 +243,16 @@ const DailyPanel = () => {
                                             row.status === 'inside' && "bg-green-500/20 text-green-400 border-green-500/30",
                                             row.status === 'absent' && "bg-red-500/20 text-red-400 border-red-500/30",
                                             row.status === 'completed' && "bg-blue-500/20 text-blue-400 border-blue-500/30",
-                                            row.status === 'no_shift' && "bg-gray-500/20 text-gray-400 border-gray-500/30"
+                                            row.status === 'no_shift' && "bg-gray-500/20 text-gray-400 border-gray-500/30",
+                                            row.status === 'day_off' && "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
+                                            row.status === 'absence' && "bg-amber-500/20 text-amber-400 border-amber-500/30"
                                         )}>
                                             {row.status === 'inside' && 'En Turno'}
                                             {row.status === 'absent' && 'Ausente'}
                                             {row.status === 'completed' && 'Completado'}
                                             {row.status === 'no_shift' && 'Sin Turno'}
+                                            {row.status === 'day_off' && 'Descanso'}
+                                            {row.status === 'absence' && (ABSENCE_LABELS[row.absenceType] || 'Ausencia')}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 text-right">

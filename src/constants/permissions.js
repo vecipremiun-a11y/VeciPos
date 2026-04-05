@@ -213,8 +213,12 @@ export const ALL_PERMISSIONS = [
             { id: 'personal.edit_past_shifts', label: 'Editar turnos pasados (Admin)' },
             { id: 'personal.absences', label: 'Ver/Gestionar Ausencias' },
             { id: 'personal.payroll', label: 'Ver/Gestionar Pagos y Nómina' },
+            { id: 'personal.payroll_close', label: 'Cerrar Periodos de Nómina' },
+            { id: 'personal.payroll_config', label: 'Configurar Reglas de Nómina' },
+            { id: 'personal.advances', label: 'Gestionar Adelantos' },
             { id: 'personal.vacations', label: 'Ver/Gestionar Vacaciones' },
             { id: 'personal.reports', label: 'Ver Reportes de Personal' },
+            { id: 'personal.edit_pay', label: 'Editar Tipo y Montos de Pago' },
         ]
     },
     {

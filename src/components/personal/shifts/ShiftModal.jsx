@@ -7,7 +7,8 @@ const SHIFT_TEMPLATES = {
     morning: { label: 'Manana', start: '07:00', end: '15:00' },
     afternoon: { label: 'Tarde', start: '15:00', end: '23:00' },
     night: { label: 'Noche', start: '23:00', end: '07:00' },
-    custom: { label: 'Personalizado', start: '09:00', end: '18:00' }
+    custom: { label: 'Personalizado', start: '09:00', end: '18:00' },
+    dayoff: { label: 'Libre / Descanso', start: '00:00', end: '00:00' }
 };
 
 const DAY_OPTIONS = [
@@ -48,7 +49,17 @@ const timeFromIso = (isoDate) => {
     return format(date, 'HH:mm');
 };
 
-const buildShiftPayload = (shiftDate, userId, startTime, endTime) => {
+const buildShiftPayload = (shiftDate, userId, startTime, endTime, isDayOff = false) => {
+    if (isDayOff) {
+        return {
+            user_id: userId,
+            shift_date: shiftDate,
+            start_time: `${shiftDate}T00:00:00`,
+            end_time: `${shiftDate}T00:00:00`,
+            notes: 'LIBRE'
+        };
+    }
+
     const startISO = `${shiftDate}T${startTime}:00`;
 
     const endBase = new Date(`${shiftDate}T${endTime}:00`);
@@ -75,6 +86,7 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
     const [date, setDate] = useState(selectedDate || format(new Date(), 'yyyy-MM-dd'));
     const [startTime, setStartTime] = useState('09:00');
     const [endTime, setEndTime] = useState('18:00');
+    const [isDayOff, setIsDayOff] = useState(false);
     const [scheduleMode, setScheduleMode] = useState('fixed'); // single | fixed
     const [repeatWeeks, setRepeatWeeks] = useState(52);
     const [weeklyConfig, setWeeklyConfig] = useState(buildDefaultWeeklyConfig());
@@ -83,8 +95,10 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
         if (shiftData) {
             setUserId(shiftData.user_id);
             setDate(shiftData.start_time.split('T')[0]);
-            setStartTime(timeFromIso(shiftData.start_time));
-            setEndTime(timeFromIso(shiftData.end_time));
+            const isShiftDayOff = shiftData.notes === 'LIBRE' || (timeFromIso(shiftData.start_time) === '00:00' && timeFromIso(shiftData.end_time) === '00:00');
+            setIsDayOff(isShiftDayOff);
+            setStartTime(isShiftDayOff ? '00:00' : timeFromIso(shiftData.start_time));
+            setEndTime(isShiftDayOff ? '00:00' : timeFromIso(shiftData.end_time));
             setScheduleMode('single');
             setWeeklyConfig(buildDefaultWeeklyConfig());
         } else {
@@ -93,6 +107,7 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
             if (selectedDate) setDate(selectedDate);
             setStartTime('09:00');
             setEndTime('18:00');
+            setIsDayOff(false);
             setScheduleMode('fixed');
             setRepeatWeeks(52);
             setWeeklyConfig(buildDefaultWeeklyConfig());
@@ -166,8 +181,9 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
                     const shiftDay = addDays(weekDate, dayOffset);
                     const shiftDate = format(shiftDay, 'yyyy-MM-dd');
 
+                    const isDayOffDay = dayConfig.template === 'dayoff';
                     const result = await createShift(
-                        buildShiftPayload(shiftDate, userId, dayConfig.start, dayConfig.end)
+                        buildShiftPayload(shiftDate, userId, dayConfig.start, dayConfig.end, isDayOffDay)
                     );
 
                     if (result.success) {
@@ -182,7 +198,7 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
             onClose();
             alert(`Horario guardado. Turnos generados: ${successCount}${failedCount > 0 ? ` | Fallidos: ${failedCount}` : ''}`);
         } else {
-            const result = await createShift(buildShiftPayload(date, userId, startTime, endTime));
+            const result = await createShift(buildShiftPayload(date, userId, startTime, endTime, isDayOff));
 
             if (result.success) {
                 onSuccess();
@@ -287,26 +303,46 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
                     </div>
 
                     {(shiftData || scheduleMode === 'single') && (
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Inicio</label>
-                                <input
-                                    type="time"
-                                    className="glass-input w-full"
-                                    value={startTime}
-                                    onChange={e => setStartTime(e.target.value)}
-                                />
+                        <>
+                            <div className="flex items-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsDayOff(!isDayOff)}
+                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                                        isDayOff
+                                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+                                            : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                                    }`}
+                                >
+                                    ☕ Libre / Descanso
+                                </button>
+                                {isDayOff && (
+                                    <span className="text-xs text-emerald-600 dark:text-emerald-400">Este día no trabaja</span>
+                                )}
                             </div>
-                            <div>
-                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Fin</label>
-                                <input
-                                    type="time"
-                                    className="glass-input w-full"
-                                    value={endTime}
-                                    onChange={e => setEndTime(e.target.value)}
-                                />
-                            </div>
-                        </div>
+                            {!isDayOff && (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Inicio</label>
+                                        <input
+                                            type="time"
+                                            className="glass-input w-full"
+                                            value={startTime}
+                                            onChange={e => setStartTime(e.target.value)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Fin</label>
+                                        <input
+                                            type="time"
+                                            className="glass-input w-full"
+                                            value={endTime}
+                                            onChange={e => setEndTime(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     )}
 
                     {!shiftData && scheduleMode === 'fixed' && (
@@ -337,6 +373,7 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
                                                         <option value="morning">Manana 07:00-15:00</option>
                                                         <option value="afternoon">Tarde 15:00-23:00</option>
                                                         <option value="night">Noche 23:00-07:00</option>
+                                                        <option value="dayoff">☕ Libre / Descanso</option>
                                                         <option value="custom">Personalizado</option>
                                                     </select>
                                                 </div>

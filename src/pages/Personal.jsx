@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Briefcase, Clock, Calendar, DollarSign, FileText, Umbrella, CheckSquare, Maximize2 } from 'lucide-react';
+import { Briefcase, Clock, Calendar, DollarSign, FileText, Umbrella, CheckSquare, Maximize2, Settings } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 import DailyPanel from '../components/personal/attendance/DailyPanel';
@@ -12,7 +12,8 @@ import AbsencesList from '../components/personal/absences/AbsencesList';
 import PayrollDashboard from '../components/personal/payroll/PayrollDashboard';
 import VacationRequests from '../components/personal/vacations/VacationRequests';
 import VacationBalances from '../components/personal/vacations/VacationBalances';
-import ReportsDashboard from '../components/personal/reports/ReportsDashboard'; // Import new component
+import ReportsDashboard from '../components/personal/reports/ReportsDashboard';
+import PayrollConfig from '../components/personal/payroll/PayrollConfig'; // Import new component
 
 const Personal = () => {
     const navigate = useNavigate();
@@ -27,7 +28,8 @@ const Personal = () => {
         { id: 'absences', label: 'Ausencias', icon: FileText },
         { id: 'payroll', label: 'Pagos', icon: DollarSign },
         { id: 'vacations', label: 'Vacaciones', icon: Umbrella },
-        { id: 'reports', label: 'Reportes', icon: FileText }
+{ id: 'reports', label: 'Reportes', icon: FileText },
+          { id: 'config', label: 'Configuración', icon: Settings }
     ];
 
     return (
@@ -102,6 +104,7 @@ const Personal = () => {
                 )}
 
                 {activeTab === 'reports' && <ReportsDashboard />}
+                {activeTab === 'config' && <PayrollConfig />}
             </div>
         </div>
     );

@@ -393,7 +393,7 @@ const MainLayout = () => {
 
             {/* Main Content Area */}
             <main className="flex-1 flex flex-col overflow-hidden bg-[var(--color-background)] relative">
-                <header className="h-16 glass border-b border-[var(--glass-border)] flex justify-between items-center px-4 md:px-6 z-10 shrink-0">
+                <header className="h-16 glass border-b border-[var(--glass-border)] flex justify-between items-center px-4 md:px-6 z-30 shrink-0 relative">
                     <div className="flex items-center gap-4">
                         {isMobile && (
                             <button
@@ -420,8 +420,9 @@ const MainLayout = () => {
                                         {activeItem?.label || 'Bienvenido'}
                                     </h2>
                                     {inventoryAdjustmentMode && location.pathname === '/pos' && (
-                                        <span className="bg-yellow-500/20 border border-yellow-500/30 text-yellow-500 px-2 py-0.5 rounded text-[10px] lg:text-xs font-bold animate-pulse whitespace-nowrap">
-                                            ⚠️ AJUSTE INVENTARIO
+                                        <span className="bg-yellow-500/20 border border-yellow-500/30 text-yellow-500 px-2 py-0.5 rounded text-[10px] lg:text-xs font-bold animate-pulse whitespace-nowrap" title="Ajuste Inventario">
+                                            <span className="hidden sm:inline">⚠️ AJUSTE INVENTARIO</span>
+                                            <span className="sm:hidden">⚠️</span>
                                         </span>
                                     )}
                                 </div>

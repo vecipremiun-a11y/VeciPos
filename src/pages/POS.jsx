@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect as useEffectReact } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift, FileText, Receipt } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift, FileText, Receipt, ScanBarcode } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
@@ -223,6 +223,56 @@ const POS = () => {
 
     useBarcodeScanner(handleBarcodeScan);
 
+    const [showCameraScanner, setShowCameraScanner] = useState(false);
+    const scannerRef = useRef(null);
+    const scannerContainerId = 'barcode-camera-reader';
+
+    // Camera barcode scanner using html5-qrcode
+    useEffectReact(() => {
+        if (!showCameraScanner) return;
+        let html5QrCode = null;
+
+        const startScanner = async () => {
+            const { Html5Qrcode } = await import('html5-qrcode');
+            html5QrCode = new Html5Qrcode(scannerContainerId);
+            scannerRef.current = html5QrCode;
+
+            try {
+                await html5QrCode.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 280, height: 150 }, aspectRatio: 1.0 },
+                    async (decodedText) => {
+                        // Found a barcode
+                        html5QrCode.stop().catch(() => {});
+                        scannerRef.current = null;
+                        setShowCameraScanner(false);
+
+                        const product = await getProductByBarcode(decodedText);
+                        if (product) {
+                            addToCart(product);
+                        } else {
+                            searchProducts(decodedText);
+                            setSearchTerm(decodedText);
+                        }
+                    },
+                    () => {} // ignore scan errors (no match yet)
+                );
+            } catch (err) {
+                console.error('Error starting camera scanner:', err);
+                setShowCameraScanner(false);
+            }
+        };
+
+        startScanner();
+
+        return () => {
+            if (scannerRef.current) {
+                scannerRef.current.stop().catch(() => {});
+                scannerRef.current = null;
+            }
+        };
+    }, [showCameraScanner]);
+
     // Use stored categories for the filter list. 
     const categoryList = ['Todos', ...storedCategories
         .filter(c => c.status === 'active' && c.showInPos !== false)
@@ -409,6 +459,27 @@ const POS = () => {
             {can('pos.open_register') && (
                 <CashOpeningModal isOpen={!cashRegister && !!currentUser} />
             )}
+
+            {/* Camera Barcode Scanner Modal */}
+            {showCameraScanner && (
+                <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4" onClick={() => setShowCameraScanner(false)}>
+                    <div className="bg-[var(--color-surface)] rounded-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-4 border-b border-[var(--glass-border)]">
+                            <h3 className="font-bold text-[var(--color-text)] flex items-center gap-2">
+                                <ScanBarcode size={20} className="text-[var(--color-primary)]" />
+                                Escanear Producto
+                            </h3>
+                            <button onClick={() => setShowCameraScanner(false)} className="p-1 rounded-lg hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-4">
+                            <div id={scannerContainerId} className="w-full rounded-xl overflow-hidden" />
+                            <p className="text-center text-xs text-[var(--color-text-muted)] mt-3">Apunta la cámara al código de barras del producto</p>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* SaleSuccessModal moved to bottom */}
 
             {/* Left Side: Product Grid */}
@@ -437,7 +508,7 @@ const POS = () => {
                 </div>
 
                 {/* Search & Categories - Compact on Mobile */}
-                <div className="glass-card p-2 lg:p-4 space-y-2 lg:space-y-4 shrink-0 relative z-10">
+                <div className="glass-card p-2 lg:p-4 space-y-2 lg:space-y-4 shrink-0 relative z-0">
                     <div className="flex gap-2 lg:gap-4">
                         <div className="relative flex-1">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
@@ -460,6 +531,13 @@ const POS = () => {
                                 }}
                             />
                         </div>
+                        <button
+                            onClick={() => setShowCameraScanner(true)}
+                            className="lg:hidden w-10 h-10 shrink-0 rounded-xl bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 flex items-center justify-center text-[var(--color-primary)] hover:bg-[var(--color-primary)]/20 active:scale-95 transition-all"
+                            title="Escanear código de barras"
+                        >
+                            <ScanBarcode size={20} />
+                        </button>
                         <CashStatusWidget />
                     </div>
 

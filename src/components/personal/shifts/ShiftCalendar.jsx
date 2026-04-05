@@ -2,12 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
 import { format, startOfWeek, endOfWeek, addWeeks, subWeeks, addDays, isSameDay } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Plus, Sunrise, Sunset, MoonStar, MoveHorizontal, Lock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Sunrise, Sunset, MoonStar, MoveHorizontal, Lock, Coffee, CheckCircle2, Clock, XCircle, AlertTriangle } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import ShiftModal from './ShiftModal';
+import { ABSENCE_TYPES } from '../absences/AbsenceModal';
 
 const getShiftType = (shift) => {
     if (!shift?.start_time) return 'custom';
+    // Day off detection
+    if (shift.notes === 'LIBRE' || (shift.start_time.includes('T00:00') && shift.end_time.includes('T00:00'))) return 'dayoff';
     const startHour = new Date(shift.start_time).getHours();
 
     if (startHour >= 6 && startHour < 14) return 'morning';
@@ -47,6 +50,14 @@ const shiftTypeStyles = {
         card: 'bg-gradient-to-br from-cyan-100 via-cyan-50 to-blue-50 dark:from-cyan-500/25 dark:via-teal-500/15 dark:to-cyan-600/5 border-cyan-400 dark:border-cyan-400/40 shadow-[0_4px_15px_rgba(6,182,212,0.2),inset_0_1px_0_rgba(255,255,255,0.5)] dark:shadow-[0_4px_15px_rgba(6,182,212,0.2),inset_0_1px_0_rgba(255,255,255,0.08)]',
         text: 'text-cyan-700 dark:text-cyan-300',
         glow: 'hover:shadow-[0_6px_20px_rgba(6,182,212,0.3),inset_0_1px_0_rgba(255,255,255,0.6)] dark:hover:shadow-[0_6px_20px_rgba(6,182,212,0.35),inset_0_1px_0_rgba(255,255,255,0.1)]',
+    },
+    dayoff: {
+        label: 'Libre',
+        icon: Coffee,
+        chip: 'bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border-emerald-500/50',
+        card: 'bg-gradient-to-br from-emerald-100 via-green-50 to-emerald-50 dark:from-emerald-500/20 dark:via-green-500/10 dark:to-emerald-600/5 border-emerald-400 dark:border-emerald-400/40 shadow-[0_4px_15px_rgba(16,185,129,0.15),inset_0_1px_0_rgba(255,255,255,0.5)] dark:shadow-[0_4px_15px_rgba(16,185,129,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
+        text: 'text-emerald-700 dark:text-emerald-300',
+        glow: 'hover:shadow-[0_6px_20px_rgba(16,185,129,0.25),inset_0_1px_0_rgba(255,255,255,0.6)] dark:hover:shadow-[0_6px_20px_rgba(16,185,129,0.3),inset_0_1px_0_rgba(255,255,255,0.1)]',
     }
 };
 
@@ -79,6 +90,7 @@ const ShiftCalendar = () => {
         workShifts,
         fetchShifts,
         fetchAttendanceByRangeRaw,
+        fetchAbsences,
         createShift,
         deleteShift,
         staffMembers,
@@ -91,6 +103,7 @@ const ShiftCalendar = () => {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [loading, setLoading] = useState(false);
     const [attendanceRange, setAttendanceRange] = useState([]);
+    const [absencesRange, setAbsencesRange] = useState([]);
     const [dragData, setDragData] = useState(null);
 
     // Modal State
@@ -117,12 +130,14 @@ const ShiftCalendar = () => {
         const startDate = format(weekStart, 'yyyy-MM-dd');
         const endDate = format(weekEnd, 'yyyy-MM-dd');
 
-        const [, attendance] = await Promise.all([
+        const [, attendance, absences] = await Promise.all([
             fetchShifts(startDate, endDate),
-            fetchAttendanceByRangeRaw(startDate, endDate)
+            fetchAttendanceByRangeRaw(startDate, endDate),
+            fetchAbsences(startDate, endDate)
         ]);
 
         setAttendanceRange(attendance || []);
+        setAbsencesRange(absences || []);
         setLoading(false);
     };
 
@@ -348,6 +363,12 @@ const ShiftCalendar = () => {
                                     const realSchedule = firstEntry || displayExit;
                                     const hasRealAttendance = !!(firstEntry || displayExit);
                                     const shiftType = getShiftType(shift);
+
+                                    // Absence for this user on this date
+                                    const absence = absencesRange.find(a =>
+                                        a.user_id === user.id && a.absence_date === dateStr
+                                    );
+                                    const absenceMeta = absence ? ABSENCE_TYPES.find(t => t.value === absence.type) : null;
                                     const shiftMeta = shiftTypeStyles[shiftType] || shiftTypeStyles.custom;
                                     const ShiftTypeIcon = shiftMeta.icon;
 
@@ -365,6 +386,36 @@ const ShiftCalendar = () => {
                                             : isPast;
 
                                     const isDraggable = !!shift && !isLocked && isFuture;
+
+                                    // --- Attendance status ---
+                                    const isDayOff = shiftType === 'dayoff';
+                                    let attendanceStatus = null; // null = no status (future / no shift)
+                                    if (absence && absence.status === 'approved') {
+                                        attendanceStatus = 'justified'; // approved absence overrides any check
+                                    } else if (isDayOff) {
+                                        attendanceStatus = 'dayoff';
+                                    } else if (shift && (isPast || isToday)) {
+                                        if (firstEntry && displayExit) {
+                                            const entryTime = new Date(firstEntry.recorded_at);
+                                            const shiftStart = new Date(shift.start_time);
+                                            attendanceStatus = (entryTime - shiftStart) > 5 * 60 * 1000 ? 'late' : 'present';
+                                        } else if (firstEntry && !displayExit) {
+                                            attendanceStatus = 'incomplete';
+                                        } else if (!firstEntry && isPast) {
+                                            attendanceStatus = absence ? 'justified' : 'absent';
+                                        }
+                                    }
+
+                                    const statusConfig = {
+                                        present:    { icon: CheckCircle2,   label: 'Asistió',      color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/15' },
+                                        late:       { icon: Clock,          label: 'Atraso',       color: 'text-amber-600 dark:text-amber-400',     bg: 'bg-amber-500/15' },
+                                        absent:     { icon: XCircle,        label: 'Falta',        color: 'text-red-600 dark:text-red-400',         bg: 'bg-red-500/15' },
+                                        incomplete: { icon: AlertTriangle,  label: 'Incompleto',   color: 'text-orange-600 dark:text-orange-400',   bg: 'bg-orange-500/15' },
+                                        dayoff:     { icon: Coffee,         label: 'Descanso',     color: 'text-gray-500 dark:text-gray-400',       bg: 'bg-gray-500/10' },
+                                        justified:  { icon: CheckCircle2,   label: absenceMeta?.label || 'Ausencia', color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-500/15' },
+                                    };
+                                    const statusMeta = attendanceStatus ? statusConfig[attendanceStatus] : null;
+                                    const StatusIcon = statusMeta?.icon;
 
                                     // Tooltip
                                     const cellTitle = canEditPast && (isPast || hasRealAttendance)
@@ -404,7 +455,9 @@ const ShiftCalendar = () => {
                                                             "bg-gradient-to-br from-emerald-500/15 to-teal-600/5 border-emerald-400/25 text-emerald-300 py-2 px-1 shadow-[0_4px_12px_rgba(16,185,129,0.1)]",
                                                             isLocked ? "opacity-50 grayscale cursor-not-allowed" : "hover:shadow-[0_6px_18px_rgba(16,185,129,0.2)]"
                                                         )
-                                                        : "hover:bg-[var(--glass-bg)] hover:border-[var(--glass-border)] border-transparent py-2 px-1 min-h-[80px] cursor-pointer"
+                                                        : absence
+                                                            ? "bg-gradient-to-br from-purple-500/10 to-violet-500/5 border-purple-400/30 py-2 px-1 cursor-pointer"
+                                                            : "hover:bg-[var(--glass-bg)] hover:border-[var(--glass-border)] border-transparent py-2 px-1 min-h-[80px] cursor-pointer"
                                             )}>
                                                 {/* Lock icon for locked shifts */}
                                                 {isLocked && shift && (
@@ -422,19 +475,55 @@ const ShiftCalendar = () => {
                                                                     {shiftMeta.label}
                                                                 </span>
 
-                                                                <span className={cn("text-sm font-bold tracking-wide", shiftMeta.text)}>
-                                                                    {format(new Date(shift.start_time), 'HH:mm')}
-                                                                </span>
-                                                                <span className="text-[10px] text-gray-600 dark:text-white/60 font-medium">
-                                                                    {format(new Date(shift.end_time), 'HH:mm')}
-                                                                </span>
+                                                                {shiftType === 'dayoff' ? (
+                                                                    <span className={cn("text-xs font-medium mt-0.5", shiftMeta.text)}>☕ Descanso</span>
+                                                                ) : (
+                                                                    <>
+                                                                        <span className={cn("text-sm font-bold tracking-wide", shiftMeta.text)}>
+                                                                            {format(new Date(shift.start_time), 'HH:mm')}
+                                                                        </span>
+                                                                        <span className="text-[10px] text-gray-600 dark:text-white/60 font-medium">
+                                                                            {format(new Date(shift.end_time), 'HH:mm')}
+                                                                        </span>
+                                                                    </>
+                                                                )}
                                                             </>
                                                         )}
 
-                                                        <span className="text-[9px] text-gray-500 dark:text-white/50 mt-1 font-mono">
-                                                            Real: {firstEntry ? format(new Date(firstEntry.recorded_at), 'HH:mm') : '--:--'} / {displayExit ? format(new Date(displayExit.recorded_at), 'HH:mm') : '--:--'}
-                                                        </span>
+                                                        {shiftType !== 'dayoff' && (
+                                                            <span className="text-[9px] text-gray-500 dark:text-white/50 mt-1 font-mono">
+                                                                Real: {firstEntry ? format(new Date(firstEntry.recorded_at), 'HH:mm') : '--:--'} / {displayExit ? format(new Date(displayExit.recorded_at), 'HH:mm') : '--:--'}
+                                                            </span>
+                                                        )}
+
+                                                        {/* Attendance status badge */}
+                                                        {statusMeta && (
+                                                            <span className={cn(
+                                                                "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-bold leading-none mt-1",
+                                                                statusMeta.bg, statusMeta.color
+                                                            )}>
+                                                                <StatusIcon size={8} />
+                                                                {statusMeta.label}
+                                                                {attendanceStatus === 'late' && firstEntry && (
+                                                                    <span className="font-mono ml-0.5">
+                                                                        {format(new Date(firstEntry.recorded_at), 'HH:mm')}
+                                                                    </span>
+                                                                )}
+                                                            </span>
+                                                        )}
                                                     </>
+                                                ) : absence ? (
+                                                    <div className="flex flex-col items-center gap-1 py-1">
+                                                        <span className="text-lg">{absenceMeta?.emoji || '📋'}</span>
+                                                        <span className={cn("text-[9px] font-bold leading-tight text-center", absenceMeta ? absenceMeta.color.split(' ')[1] || 'text-purple-600 dark:text-purple-400' : '')}>
+                                                            {absenceMeta?.label || 'Ausencia'}
+                                                        </span>
+                                                        {absence.half_day ? (
+                                                            <span className="text-[8px] text-[var(--color-text-muted)]">½ {absence.half_day_period === 'morning' ? 'AM' : 'PM'}</span>
+                                                        ) : absence.hours ? (
+                                                            <span className="text-[8px] text-[var(--color-text-muted)]">{absence.hours}h</span>
+                                                        ) : null}
+                                                    </div>
                                                 ) : (
                                                     <Plus className="text-[var(--color-text-muted)] opacity-0 hover:opacity-100 transition-opacity" size={14} />
                                                 )}

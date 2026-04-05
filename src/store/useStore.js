@@ -695,6 +695,19 @@ export const useStore = create(persist((set, get) => ({
                     await turso.execute("CREATE INDEX IF NOT EXISTS idx_absences_company_date ON labor_absences(company_id, absence_date)");
                     await turso.execute("CREATE INDEX IF NOT EXISTS idx_absences_user ON labor_absences(user_id, absence_date)");
 
+                    // Migration: add half_day, half_day_period, hours, group_id columns
+                    try {
+                        await turso.execute("ALTER TABLE labor_absences ADD COLUMN half_day INTEGER DEFAULT 0");
+                        await turso.execute("ALTER TABLE labor_absences ADD COLUMN half_day_period TEXT DEFAULT NULL"); // 'morning' | 'afternoon'
+                        await turso.execute("ALTER TABLE labor_absences ADD COLUMN hours REAL DEFAULT NULL");
+                        await turso.execute("ALTER TABLE labor_absences ADD COLUMN group_id TEXT DEFAULT NULL"); // groups multi-day absences
+                    } catch (_) { /* columns already exist */ }
+
+                    // Migration: pay_hourly_rate for mixed pay type
+                    try {
+                        await turso.execute("ALTER TABLE users ADD COLUMN pay_hourly_rate REAL DEFAULT 0");
+                    } catch (_) { /* column already exists */ }
+
                     // Configuración de Personal por empresa
                     await turso.execute(`
                         CREATE TABLE IF NOT EXISTS personal_config (
@@ -706,6 +719,22 @@ export const useStore = create(persist((set, get) => ({
                             updated_at TEXT
                         )
                     `);
+
+                    // Migration: payroll config columns in personal_config
+                    try {
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN late_discount_enabled INTEGER DEFAULT 0");
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN late_discount_per_minute REAL DEFAULT 0");
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN absence_discount_enabled INTEGER DEFAULT 1");
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN vacation_paid INTEGER DEFAULT 1");
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN medical_paid INTEGER DEFAULT 1");
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN permission_paid INTEGER DEFAULT 0");
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN bonus_punctuality_enabled INTEGER DEFAULT 0");
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN bonus_punctuality_amount REAL DEFAULT 0");
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN bonus_attendance_enabled INTEGER DEFAULT 0");
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN bonus_attendance_amount REAL DEFAULT 0");
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN working_days_per_month INTEGER DEFAULT 30");
+                        await turso.execute("ALTER TABLE personal_config ADD COLUMN working_hours_per_day REAL DEFAULT 8");
+                    } catch (_) { /* columns already exist */ }
 
                     // Adelantos/anticipos
                     await turso.execute(`
@@ -10802,7 +10831,6 @@ export const useStore = create(persist((set, get) => ({
     fetchAbsences: async (startDate, endDate, userId = null) => {
         const { activeCompanyId } = get();
         try {
-            // Alias absence_date as start_date/end_date for UI compatibility (schema is single day currently)
             let sql = `SELECT la.*, la.absence_date as start_date, la.absence_date as end_date, u.username, u.name 
                        FROM labor_absences la
                        JOIN users u ON la.user_id = u.id
@@ -10814,6 +10842,7 @@ export const useStore = create(persist((set, get) => ({
                 args.push(userId);
             }
 
+            sql += ' ORDER BY la.absence_date DESC';
             const result = await turso.execute({ sql, args });
             set({ laborAbsences: result.rows });
             return result.rows;
@@ -10823,36 +10852,79 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    createAbsence: async (data, createdBy) => {
-        const { activeCompanyId, currentUser } = get();
+    createAbsence: async (data) => {
+        const { activeCompanyId, currentUser, fetchAttendanceByRangeRaw } = get();
         try {
             const createdByUser = currentUser ? currentUser.username : 'System';
-            // Handle schema mismatch: Table has absence_date, UI sends start/end range. Use start_date.
-            const absenceDate = data.absence_date || data.start_date || new Date().toISOString().split('T')[0];
+            const startDate = data.start_date || data.absence_date || new Date().toISOString().split('T')[0];
+            const endDate = data.end_date || startDate;
             const notes = data.notes || data.reason || '';
+            const halfDay = data.half_day ? 1 : 0;
+            const halfDayPeriod = data.half_day ? (data.half_day_period || 'morning') : null;
+            const hours = data.hours || null;
+            const groupId = `abs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-            // If range is different, maybe append to notes?
-            let finalNotes = notes;
-            if (data.start_date && data.end_date && data.start_date !== data.end_date) {
-                finalNotes = `${notes} (Rango: ${data.start_date} al ${data.end_date})`;
+            // Generate all dates in range
+            const dates = [];
+            let current = new Date(`${startDate}T12:00:00`);
+            const end = new Date(`${endDate}T12:00:00`);
+            while (current <= end) {
+                dates.push(current.toISOString().split('T')[0]);
+                current.setDate(current.getDate() + 1);
             }
 
-            await turso.execute({
+            if (!dates.length) return { success: false, error: 'Rango de fechas inválido' };
+
+            // Validation: check for existing absences on those dates
+            const existingCheck = await turso.execute({
+                sql: `SELECT absence_date FROM labor_absences WHERE company_id = ? AND user_id = ? AND absence_date IN (${dates.map(() => '?').join(',')})`,
+                args: [activeCompanyId, data.user_id, ...dates]
+            });
+            if (existingCheck.rows.length > 0) {
+                const dupes = existingCheck.rows.map(r => r.absence_date).join(', ');
+                return { success: false, error: `Ya existe ausencia en: ${dupes}` };
+            }
+
+            // Validation: check days with real attendance (block if already clocked in on non-half-day)
+            if (!halfDay) {
+                const attendance = await fetchAttendanceByRangeRaw(startDate, endDate);
+                const attendedDates = attendance
+                    .filter(a => String(a.user_id) === String(data.user_id) && a.type === 'entry')
+                    .map(a => a.date);
+                const uniqueAttended = [...new Set(attendedDates)];
+                if (uniqueAttended.length > 0) {
+                    return { success: false, error: `No se puede registrar ausencia completa en días con asistencia: ${uniqueAttended.join(', ')}` };
+                }
+            }
+
+            // Insert one record per day
+            const queries = dates.map(d => ({
                 sql: `INSERT INTO labor_absences 
-                      (company_id, user_id, absence_date, type, status, notes, approved_by, created_at) 
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                      (company_id, user_id, absence_date, type, status, notes, approved_by, created_at, half_day, half_day_period, hours, group_id) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 args: [
                     activeCompanyId,
                     data.user_id,
-                    absenceDate,
+                    d,
                     data.type,
-                    'approved',
-                    finalNotes,
-                    createdByUser, // Using variable directly, createdBy arg might be undefined if called with 1 arg
-                    new Date().toISOString()
+                    data.status || 'approved',
+                    notes,
+                    createdByUser,
+                    new Date().toISOString(),
+                    halfDay,
+                    halfDayPeriod,
+                    hours,
+                    groupId
                 ]
-            });
-            return { success: true };
+            }));
+
+            // Batch insert
+            const CHUNK = 50;
+            for (let i = 0; i < queries.length; i += CHUNK) {
+                await turso.batch(queries.slice(i, i + CHUNK));
+            }
+
+            return { success: true, count: dates.length, groupId };
         } catch (e) {
             console.error("Error creating absence:", e);
             return { success: false, error: e.message };
@@ -10871,6 +10943,23 @@ export const useStore = create(persist((set, get) => ({
             return { success: true };
         } catch (e) {
             console.error("Error deleting absence:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deleteAbsenceGroup: async (groupId) => {
+        try {
+            if (!groupId) return { success: false, error: 'No group_id' };
+            const { activeCompanyId } = get();
+            await turso.execute({
+                sql: "DELETE FROM labor_absences WHERE group_id = ? AND company_id = ?",
+                args: [groupId, activeCompanyId]
+            });
+            const { laborAbsences } = get();
+            set({ laborAbsences: laborAbsences.filter(a => a.group_id !== groupId) });
+            return { success: true };
+        } catch (e) {
+            console.error("Error deleting absence group:", e);
             return { success: false, error: e.message };
         }
     },
@@ -10908,14 +10997,32 @@ export const useStore = create(persist((set, get) => ({
     updatePersonalConfig: async (data) => {
         const { activeCompanyId } = get();
         try {
+            const fields = [
+                'late_tolerance_minutes', 'kiosk_device_label',
+                'late_discount_enabled', 'late_discount_per_minute',
+                'absence_discount_enabled', 'vacation_paid', 'medical_paid', 'permission_paid',
+                'bonus_punctuality_enabled', 'bonus_punctuality_amount',
+                'bonus_attendance_enabled', 'bonus_attendance_amount',
+                'working_days_per_month', 'working_hours_per_day'
+            ];
+            const setClauses = [];
+            const args = [];
+            for (const f of fields) {
+                if (data[f] !== undefined) {
+                    setClauses.push(`${f} = ?`);
+                    args.push(data[f]);
+                }
+            }
+            if (setClauses.length === 0) return { success: true };
+            setClauses.push('updated_at = ?');
+            args.push(new Date().toISOString());
+            args.push(activeCompanyId);
+
             await turso.execute({
-                sql: `UPDATE personal_config 
-                      SET late_tolerance_minutes = ?, kiosk_device_label = ?, updated_at = ? 
-                      WHERE company_id = ?`,
-                args: [data.late_tolerance_minutes, data.kiosk_device_label, new Date().toISOString(), activeCompanyId]
+                sql: `UPDATE personal_config SET ${setClauses.join(', ')} WHERE company_id = ?`,
+                args
             });
 
-            // Actualizar local
             set({ personalConfig: { ...get().personalConfig, ...data } });
             return { success: true };
         } catch (e) {
@@ -11042,85 +11149,192 @@ export const useStore = create(persist((set, get) => ({
     },
 
     calculatePeriod: async (userId, periodStart, periodEnd) => {
-        // Esta función NO guarda en DB, solo retorna el objeto calculado para previsualización
         const { activeCompanyId } = get();
         try {
-            // 1. Obtener User + Config
+            // 1. User + Config
             const userRes = await turso.execute("SELECT * FROM users WHERE id = ?", [userId]);
             const user = userRes.rows[0];
-            const config = await get().fetchPersonalConfig(); // ensure config loaded
+            const config = await get().fetchPersonalConfig();
             const tolerance = config?.late_tolerance_minutes || 10;
+            const workingDaysMonth = config?.working_days_per_month || 30;
+            const workingHoursDay = config?.working_hours_per_day || 8;
 
-            // 2. Obtener Asistencia en rango (raw, sin agrupar)
+            // 2. Attendance, Shifts, Absences
             const attendance = await get().fetchAttendanceByRangeRaw(periodStart, periodEnd, userId);
+            const shifts = await get().fetchShifts(periodStart, periodEnd, userId);
+            const absencesData = await get().fetchAbsences(periodStart, periodEnd, userId);
 
-            // 3. Procesar Asistencia (Cálculo simple por ahora)
-            // Agrupar por fecha
+            const shiftsMap = {};
+            shifts.forEach(s => {
+                if (s.notes !== 'LIBRE') shiftsMap[s.shift_date] = s;
+            });
+
+            const absencesMap = {};
+            (absencesData || []).forEach(a => { absencesMap[a.absence_date] = a; });
+
             const daysMap = {};
             attendance.forEach(r => {
                 if (!daysMap[r.date]) daysMap[r.date] = [];
                 daysMap[r.date].push(r);
             });
 
+            // 3. Process each shift day
             let hoursWorked = 0;
             let lateCount = 0;
             let lateMinutes = 0;
             let daysWorked = 0;
+            let daysAbsent = 0;
+            let daysVacation = 0;
+            let daysMedical = 0;
+            let daysPermission = 0;
+            let daysUnjustified = 0;
+            const detailDays = [];
 
-            // Iterar días en rango? no, solo iterar donde hubo asistencia
-            // Para "Días Ausente" necesitaríamos saber el horario esperado (turnos).
-            // Por simplicidad en Fase 1: usar días con asistencia como trabajados.
+            const shiftDates = Object.keys(shiftsMap).sort();
+            for (const dateStr of shiftDates) {
+                const shift = shiftsMap[dateStr];
+                const records = (daysMap[dateStr] || []).sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+                const absence = absencesMap[dateStr];
 
-            // Si hay turnos, comparamos.
-            const shifts = await get().fetchShifts(periodStart, periodEnd, userId);
-            const shiftsMap = {};
-            shifts.forEach(s => shiftsMap[s.shift_date] = s);
+                let dayStatus = 'absent';
+                let dayHours = 0;
+                let dayLateMin = 0;
 
-            // Calcular días trabajados y horas
-            for (const dateStr of Object.keys(daysMap)) {
-                // Ordenar asc
-                const records = daysMap[dateStr].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
-
-                // Buscar pares Entrada/Salida
+                // Find entry/exit pairs
                 let entryTime = null;
-
-                records.forEach(r => {
+                for (const r of records) {
                     if (r.type === 'entry') {
                         entryTime = new Date(r.recorded_at);
-
-                        // Check atraso si hay turno
-                        if (shiftsMap[dateStr]) {
-                            const shiftStart = new Date(`${dateStr}T${shiftsMap[dateStr].start_time}`);
-                            const diffMins = (entryTime - shiftStart) / (1000 * 60); // min
-                            if (diffMins > tolerance) {
-                                lateCount++;
-                                lateMinutes += Math.floor(diffMins);
-                            }
+                        // Late check
+                        const shiftStartStr = shift.start_time.includes('T') ? shift.start_time : `${dateStr}T${shift.start_time}`;
+                        const shiftStart = new Date(shiftStartStr);
+                        const diffMins = (entryTime - shiftStart) / (1000 * 60);
+                        if (diffMins > tolerance) {
+                            dayLateMin = Math.floor(diffMins);
                         }
-
                     } else if (r.type === 'exit' && entryTime) {
                         const exitTime = new Date(r.recorded_at);
-                        const diffHrs = (exitTime - entryTime) / (1000 * 60 * 60);
-                        hoursWorked += diffHrs;
-                        entryTime = null; // reset for next pair (lunch?)
+                        dayHours += (exitTime - entryTime) / (1000 * 60 * 60);
+                        entryTime = null;
                     }
-                });
-                daysWorked++;
+                }
+
+                if (dayHours > 0) {
+                    dayStatus = dayLateMin > 0 ? 'late' : 'present';
+                    hoursWorked += dayHours;
+                    daysWorked++;
+                    if (dayLateMin > 0) {
+                        lateCount++;
+                        lateMinutes += dayLateMin;
+                    }
+                } else if (absence) {
+                    const aType = absence.type;
+                    if (aType === 'vacation') { dayStatus = 'vacation'; daysVacation++; }
+                    else if (aType === 'medical') { dayStatus = 'medical'; daysMedical++; }
+                    else if (aType === 'permission') { dayStatus = 'permission'; daysPermission++; }
+                    else if (aType === 'unjustified') { dayStatus = 'unjustified'; daysUnjustified++; daysAbsent++; }
+                    else { dayStatus = 'absence_other'; daysAbsent++; }
+                } else {
+                    // Past date with no attendance and no absence = unjustified absence
+                    const today = new Date().toISOString().slice(0, 10);
+                    if (dateStr < today) {
+                        dayStatus = 'unjustified';
+                        daysUnjustified++;
+                        daysAbsent++;
+                    }
+                }
+
+                detailDays.push({ date: dateStr, status: dayStatus, hours: +dayHours.toFixed(2), lateMin: dayLateMin, absence: absence?.type || null });
             }
 
-            // Calcular monto (Base Proporcional o Fijo)
+            // Also count attendance on days without shifts
+            for (const dateStr of Object.keys(daysMap)) {
+                if (!shiftsMap[dateStr]) {
+                    const records = daysMap[dateStr].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+                    let entryTime = null;
+                    let dayHours = 0;
+                    for (const r of records) {
+                        if (r.type === 'entry') entryTime = new Date(r.recorded_at);
+                        else if (r.type === 'exit' && entryTime) {
+                            dayHours += (new Date(r.recorded_at) - entryTime) / (1000 * 60 * 60);
+                            entryTime = null;
+                        }
+                    }
+                    if (dayHours > 0) {
+                        hoursWorked += dayHours;
+                        daysWorked++;
+                        detailDays.push({ date: dateStr, status: 'extra', hours: +dayHours.toFixed(2), lateMin: 0, absence: null });
+                    }
+                }
+            }
+
+            // 4. Calculate base amount
             let baseAmount = 0;
-            if (user.pay_type === 'monthly') {
-                baseAmount = user.pay_base_amount || 0; // Se asume mensual completo
-                // Podría ajustarse por días trabajados si es ingreso reciente
-            } else if (user.pay_type === 'hourly') {
-                baseAmount = (user.pay_base_amount || 0) * hoursWorked;
-            } else if (user.pay_type === 'daily') {
-                baseAmount = (user.pay_base_amount || 0) * daysWorked;
+            const payType = user.pay_type || 'monthly';
+            const baseRate = user.pay_base_amount || 0;
+            const hourlyRate = user.pay_hourly_rate || 0;
+            const valorDia = workingDaysMonth > 0 ? baseRate / workingDaysMonth : 0;
+            const valorMinuto = valorDia / (workingHoursDay * 60);
+
+            if (payType === 'monthly') {
+                baseAmount = baseRate;
+            } else if (payType === 'hourly') {
+                baseAmount = baseRate * hoursWorked;
+            } else if (payType === 'weekly') {
+                // weeks in period
+                const msInRange = new Date(periodEnd) - new Date(periodStart);
+                const weeksInRange = Math.max(1, Math.round(msInRange / (7 * 24 * 60 * 60 * 1000)));
+                baseAmount = baseRate * weeksInRange;
+            } else if (payType === 'biweekly') {
+                baseAmount = baseRate; // biweekly rate is set directly per quincena
+            } else if (payType === 'mixed') {
+                baseAmount = baseRate + (hourlyRate * hoursWorked);
             }
 
-            // Buscar Adelantos pendientes
-            // Solo aquellos con status 'pending' y fecha <= periodEnd
+            // 5. Discounts
+            let autoDiscounts = 0;
+            let discountDetails = [];
+
+            // Absence discount (unjustified only)
+            if (config?.absence_discount_enabled && daysUnjustified > 0) {
+                const absDsc = valorDia * daysUnjustified;
+                autoDiscounts += absDsc;
+                discountDetails.push({ label: `Faltas injustificadas (${daysUnjustified}d)`, amount: absDsc });
+            }
+
+            // Late discount
+            if (config?.late_discount_enabled && lateMinutes > 0) {
+                const lateDsc = (config.late_discount_per_minute || 0) * lateMinutes;
+                autoDiscounts += lateDsc;
+                discountDetails.push({ label: `Atrasos (${lateCount}x, ${lateMinutes}min)`, amount: lateDsc });
+            }
+
+            // 6. Paid absences (vacation, medical, permission)
+            let paidAbsenceAmount = 0;
+            if (config?.vacation_paid && daysVacation > 0) {
+                paidAbsenceAmount += valorDia * daysVacation;
+            }
+            if (config?.medical_paid && daysMedical > 0) {
+                paidAbsenceAmount += valorDia * daysMedical;
+            }
+            if (config?.permission_paid && daysPermission > 0) {
+                paidAbsenceAmount += valorDia * daysPermission;
+            }
+
+            // 7. Automatic bonuses
+            let autoBonuses = 0;
+            let bonusDetails = [];
+
+            if (config?.bonus_punctuality_enabled && lateCount === 0 && daysWorked > 0) {
+                autoBonuses += config.bonus_punctuality_amount || 0;
+                bonusDetails.push({ label: 'Bono puntualidad', amount: config.bonus_punctuality_amount || 0 });
+            }
+            if (config?.bonus_attendance_enabled && daysUnjustified === 0 && daysWorked > 0) {
+                autoBonuses += config.bonus_attendance_amount || 0;
+                bonusDetails.push({ label: 'Bono asistencia completa', amount: config.bonus_attendance_amount || 0 });
+            }
+
+            // 8. Advances
             const advRes = await turso.execute({
                 sql: `SELECT SUM(amount) as total FROM salary_advances 
                       WHERE company_id = ? AND user_id = ? AND status = 'pending' AND advance_date <= ?`,
@@ -11128,27 +11342,38 @@ export const useStore = create(persist((set, get) => ({
             });
             const advancesTotal = advRes.rows[0].total || 0;
 
-            // Calcular Total
-            const totalToPay = baseAmount
-                + (user.pay_fixed_bonus || 0)
-                - (user.pay_fixed_discount || 0)
-                - advancesTotal;
+            // 9. Final calculation
+            const totalBonuses = autoBonuses + (user.pay_fixed_bonus || 0);
+            const totalDiscounts = autoDiscounts + (user.pay_fixed_discount || 0);
+            const totalToPay = baseAmount + paidAbsenceAmount + totalBonuses - totalDiscounts - advancesTotal;
 
-            // Retornar estructura
             return {
                 user_id: userId,
                 period_start: periodStart,
                 period_end: periodEnd,
-                hours_worked: hoursWorked.toFixed(2),
-                days_absent: 0, // TODO: comparar con turnos totales
+                pay_type: payType,
+                hours_worked: +hoursWorked.toFixed(2),
+                days_worked: daysWorked,
+                days_absent: daysAbsent,
+                days_vacation: daysVacation,
+                days_medical: daysMedical,
+                days_permission: daysPermission,
+                days_unjustified: daysUnjustified,
+                total_shifts: shiftDates.length,
                 late_count: lateCount,
                 late_minutes: lateMinutes,
                 extra_hours: 0,
+                base_amount: +baseAmount.toFixed(0),
+                paid_absence_amount: +paidAbsenceAmount.toFixed(0),
+                auto_bonuses: +autoBonuses.toFixed(0),
                 manual_bonus: user.pay_fixed_bonus || 0,
+                auto_discounts: +autoDiscounts.toFixed(0),
                 manual_discount: user.pay_fixed_discount || 0,
                 advances_discounted: advancesTotal,
-                base_amount: baseAmount,
-                total_to_pay: totalToPay
+                total_to_pay: +totalToPay.toFixed(0),
+                bonus_details: bonusDetails,
+                discount_details: discountDetails,
+                detail_days: detailDays
             };
 
         } catch (e) {
