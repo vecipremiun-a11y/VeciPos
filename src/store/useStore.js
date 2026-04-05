@@ -10266,10 +10266,39 @@ export const useStore = create(persist((set, get) => ({
                       FROM attendance_records ar
                       JOIN users u ON ar.user_id = u.id
                       WHERE ar.company_id = ? AND ar.date = ?
-                      ORDER BY ar.recorded_at DESC`,
+                      ORDER BY ar.recorded_at ASC`,
                 args: [activeCompanyId, today]
             });
-            set({ attendanceToday: result.rows });
+
+            // Group by user_id and pair entry/exit
+            const grouped = {};
+            for (const row of result.rows) {
+                const key = row.user_id;
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        id: row.id,
+                        user_id: row.user_id,
+                        username: row.username,
+                        name: row.name,
+                        date: row.date,
+                        check_in: null,
+                        check_out: null,
+                        branch: row.branch || null,
+                        notes: row.notes || null,
+                        source: row.source,
+                    };
+                }
+                if (row.type === 'entry' && !grouped[key].check_in) {
+                    grouped[key].check_in = row.recorded_at;
+                    if (row.branch) grouped[key].branch = row.branch;
+                }
+                if (row.type === 'exit') {
+                    grouped[key].check_out = row.recorded_at;
+                }
+                if (row.notes) grouped[key].notes = row.notes;
+            }
+
+            set({ attendanceToday: Object.values(grouped) });
         } catch (e) {
             console.error("Error fetching attendance today:", e);
         }
@@ -10292,9 +10321,61 @@ export const useStore = create(persist((set, get) => ({
             sql += ` ORDER BY ar.date DESC, ar.recorded_at DESC`;
 
             const result = await turso.execute({ sql, args });
-            return result.rows;
+            const rows = result.rows;
+
+            // Group by user_id + date and pair entry/exit into single records
+            const grouped = {};
+            for (const row of rows) {
+                const key = `${row.user_id}_${row.date}`;
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        id: row.id,
+                        user_id: row.user_id,
+                        username: row.username,
+                        name: row.name,
+                        date: row.date,
+                        check_in: null,
+                        check_out: null,
+                        branch: row.branch || null,
+                        notes: row.notes || null,
+                        source: row.source,
+                    };
+                }
+                if (row.type === 'entry' && !grouped[key].check_in) {
+                    grouped[key].check_in = row.recorded_at;
+                    if (row.branch) grouped[key].branch = row.branch;
+                }
+                if (row.type === 'exit' && !grouped[key].check_out) {
+                    grouped[key].check_out = row.recorded_at;
+                }
+                if (row.notes) grouped[key].notes = row.notes;
+            }
+
+            // Convert to array sorted by date desc
+            return Object.values(grouped).sort((a, b) => b.date.localeCompare(a.date));
         } catch (e) {
             console.error("Error fetching attendance range:", e);
+            throw e;
+        }
+    },
+
+    fetchAttendanceByRangeRaw: async (startDate, endDate, userId = null) => {
+        const { activeCompanyId } = get();
+        try {
+            let sql = `SELECT ar.*, u.username, u.name 
+                       FROM attendance_records ar
+                       JOIN users u ON ar.user_id = u.id
+                       WHERE ar.company_id = ? AND ar.date BETWEEN ? AND ?`;
+            const args = [activeCompanyId, startDate, endDate];
+            if (userId) {
+                sql += ` AND ar.user_id = ?`;
+                args.push(userId);
+            }
+            sql += ` ORDER BY ar.date DESC, ar.recorded_at DESC`;
+            const result = await turso.execute({ sql, args });
+            return result.rows;
+        } catch (e) {
+            console.error("Error fetching raw attendance range:", e);
             throw e;
         }
     },
@@ -10967,8 +11048,8 @@ export const useStore = create(persist((set, get) => ({
             const config = await get().fetchPersonalConfig(); // ensure config loaded
             const tolerance = config?.late_tolerance_minutes || 10;
 
-            // 2. Obtener Asistencia en rango
-            const attendance = await get().fetchAttendanceByRange(periodStart, periodEnd, userId);
+            // 2. Obtener Asistencia en rango (raw, sin agrupar)
+            const attendance = await get().fetchAttendanceByRangeRaw(periodStart, periodEnd, userId);
 
             // 3. Procesar Asistencia (Cálculo simple por ahora)
             // Agrupar por fecha
