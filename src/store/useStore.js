@@ -10258,8 +10258,9 @@ export const useStore = create(persist((set, get) => ({
     // --- 2. Asistencia ---
 
     fetchAttendanceToday: async () => {
-        const { activeCompanyId } = get();
-        const today = new Date().toISOString().split('T')[0];
+        const { activeCompanyId, currentCompanyTimezone } = get();
+        // Use local date in company timezone, not UTC
+        const today = formatInCompanyTime(new Date(), currentCompanyTimezone, 'yyyy-MM-dd');
         try {
             const result = await turso.execute({
                 sql: `SELECT ar.*, u.username, u.name 
@@ -10381,10 +10382,11 @@ export const useStore = create(persist((set, get) => ({
     },
 
     markAttendance: async (userId, type, deviceLabel, branch) => {
-        const { activeCompanyId } = get();
+        const { activeCompanyId, currentCompanyTimezone } = get();
         const now = new Date();
         const recordedAt = now.toISOString();
-        const date = recordedAt.split('T')[0];
+        // Use local date in company timezone, not UTC
+        const date = formatInCompanyTime(now, currentCompanyTimezone, 'yyyy-MM-dd');
 
         try {
             // Lógica automática: verificar último estado
@@ -10436,8 +10438,9 @@ export const useStore = create(persist((set, get) => ({
     },
 
     registerManualAttendance: async (userId, type, datetime, notes, recordedBy) => {
-        const { activeCompanyId } = get();
-        const date = datetime.split('T')[0];
+        const { activeCompanyId, currentCompanyTimezone } = get();
+        // Use local date in company timezone
+        const date = formatInCompanyTime(new Date(datetime), currentCompanyTimezone, 'yyyy-MM-dd');
 
         try {
             await turso.execute({
@@ -10456,8 +10459,8 @@ export const useStore = create(persist((set, get) => ({
     },
 
     getAttendanceStatus: async (userId) => {
-        const { activeCompanyId } = get();
-        const today = new Date().toISOString().split('T')[0];
+        const { activeCompanyId, currentCompanyTimezone } = get();
+        const today = formatInCompanyTime(new Date(), currentCompanyTimezone, 'yyyy-MM-dd');
         try {
             const result = await turso.execute({
                 sql: `SELECT type FROM attendance_records 
