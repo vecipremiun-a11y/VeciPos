@@ -17,24 +17,36 @@ const getShiftType = (shift) => {
 
 const shiftTypeStyles = {
     morning: {
-        label: 'Manana',
+        label: 'Mañana',
         icon: Sunrise,
-        chip: 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+        chip: 'bg-amber-400/20 text-amber-300 border-amber-400/40',
+        card: 'bg-gradient-to-br from-amber-500/20 via-amber-600/10 to-yellow-700/5 border-amber-400/30 shadow-[0_4px_15px_rgba(245,158,11,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
+        text: 'text-amber-200',
+        glow: 'hover:shadow-[0_6px_20px_rgba(245,158,11,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
     },
     afternoon: {
         label: 'Tarde',
         icon: Sunset,
-        chip: 'bg-orange-500/15 text-orange-300 border-orange-500/30'
+        chip: 'bg-orange-400/20 text-orange-300 border-orange-400/40',
+        card: 'bg-gradient-to-br from-orange-500/20 via-rose-600/10 to-red-700/5 border-orange-400/30 shadow-[0_4px_15px_rgba(249,115,22,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
+        text: 'text-orange-200',
+        glow: 'hover:shadow-[0_6px_20px_rgba(249,115,22,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
     },
     night: {
         label: 'Noche',
         icon: MoonStar,
-        chip: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+        chip: 'bg-indigo-400/20 text-indigo-300 border-indigo-400/40',
+        card: 'bg-gradient-to-br from-indigo-500/20 via-purple-600/10 to-violet-700/5 border-indigo-400/30 shadow-[0_4px_15px_rgba(99,102,241,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
+        text: 'text-indigo-200',
+        glow: 'hover:shadow-[0_6px_20px_rgba(99,102,241,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
     },
     custom: {
         label: 'Turno',
         icon: MoveHorizontal,
-        chip: 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+        chip: 'bg-cyan-400/20 text-cyan-300 border-cyan-400/40',
+        card: 'bg-gradient-to-br from-cyan-500/20 via-blue-600/10 to-blue-700/5 border-cyan-400/30 shadow-[0_4px_15px_rgba(6,182,212,0.15),inset_0_1px_0_rgba(255,255,255,0.08)]',
+        text: 'text-cyan-200',
+        glow: 'hover:shadow-[0_6px_20px_rgba(6,182,212,0.25),inset_0_1px_0_rgba(255,255,255,0.1)]',
     }
 };
 
@@ -312,35 +324,35 @@ const ShiftCalendar = () => {
                                     return (
                                         <td
                                             key={day.toISOString()}
-                                            className="p-1 border-l border-[var(--glass-border)] relative h-16"
+                                            className="p-1 border-l border-[var(--glass-border)] relative"
                                             onDragOver={(e) => e.preventDefault()}
                                             onDrop={(e) => handleDrop(e, user.id, dateStr)}
                                             onClick={() => handleCellClick(user, day)}
                                         >
                                             <div className={cn(
-                                                "w-full h-full rounded-lg flex flex-col items-center justify-center cursor-pointer transition-all border border-transparent",
+                                                "w-full rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all duration-300 border",
                                                 shift
-                                                    ? "bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 border-blue-500/20"
+                                                    ? cn(shiftMeta.card, shiftMeta.glow, "py-2 px-1")
                                                     : realSchedule
-                                                        ? "bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border-amber-500/20"
-                                                        : "hover:bg-[var(--glass-bg)] hover:border-[var(--glass-border)]"
+                                                        ? "bg-gradient-to-br from-emerald-500/15 to-teal-600/5 border-emerald-400/25 text-emerald-300 py-2 px-1 shadow-[0_4px_12px_rgba(16,185,129,0.1)] hover:shadow-[0_6px_18px_rgba(16,185,129,0.2)]"
+                                                        : "hover:bg-[var(--glass-bg)] hover:border-[var(--glass-border)] border-transparent py-2 px-1 min-h-[80px]"
                                             )}>
                                                 {shift || realSchedule ? (
                                                     <>
                                                         {shift && (
                                                             <>
                                                                 <span className={cn(
-                                                                    "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] leading-none mb-0.5",
+                                                                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[9px] font-semibold leading-none mb-1 backdrop-blur-sm",
                                                                     shiftMeta.chip
                                                                 )}>
                                                                     <ShiftTypeIcon size={10} />
                                                                     {shiftMeta.label}
                                                                 </span>
 
-                                                                <span className="text-xs font-bold">
+                                                                <span className={cn("text-sm font-bold tracking-wide", shiftMeta.text)}>
                                                                     {format(new Date(shift.start_time), 'HH:mm')}
                                                                 </span>
-                                                                <span className="text-[10px] opacity-70">
+                                                                <span className="text-[10px] opacity-60 font-medium">
                                                                     {format(new Date(shift.end_time), 'HH:mm')}
                                                                 </span>
 
@@ -349,7 +361,7 @@ const ShiftCalendar = () => {
                                                                     draggable
                                                                     onDragStart={(e) => handleDragStart(e, shift, user.id, dateStr)}
                                                                     onClick={(e) => e.stopPropagation()}
-                                                                    className="text-[9px] mt-1 px-1.5 py-0.5 rounded border border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                                                                    className="text-[8px] mt-1 px-2 py-0.5 rounded-full border border-white/10 text-white/40 hover:text-white/70 hover:border-white/20 transition-colors backdrop-blur-sm"
                                                                     title="Arrastra para mover/intercambiar"
                                                                 >
                                                                     Arrastrar
@@ -357,7 +369,7 @@ const ShiftCalendar = () => {
                                                             </>
                                                         )}
 
-                                                        <span className="text-[10px] opacity-80 mt-0.5">
+                                                        <span className="text-[9px] opacity-60 mt-1 font-mono">
                                                             Real: {firstEntry ? format(new Date(firstEntry.recorded_at), 'HH:mm') : '--:--'} / {displayExit ? format(new Date(displayExit.recorded_at), 'HH:mm') : '--:--'}
                                                         </span>
                                                     </>
