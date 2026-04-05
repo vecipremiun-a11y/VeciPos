@@ -4436,7 +4436,7 @@ export const useStore = create(persist((set, get) => ({
                 'users.view', 'users.create', 'users.edit', 'users.delete', 'users.manage',
                 'settings.view', 'settings.company', 'settings.receipts', 'settings.payments', 'settings.system', 'settings.manage_permissions',
                 'taxes.view', 'taxes.create', 'taxes.edit', 'taxes.delete',
-                'personal.view', 'personal.manage', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.absences', 'personal.payroll', 'personal.vacations', 'personal.reports',
+                'personal.view', 'personal.manage', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.edit_past_shifts', 'personal.absences', 'personal.payroll', 'personal.vacations', 'personal.reports',
                 'combos.view', 'combos.create', 'combos.edit', 'combos.delete',
                 'inventory_control.view', 'inventory_control.create', 'inventory_control.manage',
                 'alerts.view', 'alerts.manage',

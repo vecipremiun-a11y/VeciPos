@@ -210,6 +210,7 @@ export const ALL_PERMISSIONS = [
             { id: 'personal.attendance', label: 'Ver/Gestionar Asistencia' },
             { id: 'personal.corrections', label: 'Ver/Gestionar Correcciones' },
             { id: 'personal.shifts', label: 'Ver/Gestionar Turnos' },
+            { id: 'personal.edit_past_shifts', label: 'Editar turnos pasados (Admin)' },
             { id: 'personal.absences', label: 'Ver/Gestionar Ausencias' },
             { id: 'personal.payroll', label: 'Ver/Gestionar Pagos y Nómina' },
             { id: 'personal.vacations', label: 'Ver/Gestionar Vacaciones' },

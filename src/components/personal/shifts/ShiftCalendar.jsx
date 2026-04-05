@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
 import { format, startOfWeek, endOfWeek, addWeeks, subWeeks, addDays, isSameDay } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Plus, Sunrise, Sunset, MoonStar, MoveHorizontal } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Sunrise, Sunset, MoonStar, MoveHorizontal, Lock } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import ShiftModal from './ShiftModal';
 
@@ -82,8 +82,11 @@ const ShiftCalendar = () => {
         createShift,
         deleteShift,
         staffMembers,
-        fetchStaffMembers
+        fetchStaffMembers,
+        hasPermission
     } = useStore();
+
+    const canEditPast = hasPermission('personal.edit_past_shifts');
 
     const [currentDate, setCurrentDate] = useState(new Date());
     const [loading, setLoading] = useState(false);
@@ -95,6 +98,7 @@ const ShiftCalendar = () => {
     const [selectedShift, setSelectedShift] = useState(null);
     const [modalUser, setModalUser] = useState(null);
     const [modalDate, setModalDate] = useState(null);
+    const [modalLockInfo, setModalLockInfo] = useState({ isLocked: false, isPast: false, isToday: false, hasRealAttendance: false });
 
     const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
     const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
@@ -132,9 +136,26 @@ const ShiftCalendar = () => {
             s.shift_date === dateStr
         );
 
+        // Compute lock info for modal
+        const today = format(new Date(), 'yyyy-MM-dd');
+        const isPast = dateStr < today;
+        const isToday = dateStr === today;
+
+        const attendanceDay = attendanceRange.filter(a =>
+            a.user_id === user.id && a.date === dateStr
+        );
+        const hasRealAttendance = attendanceDay.some(a => a.type === 'entry' || a.type === 'exit');
+
+        const isLocked = canEditPast
+            ? false
+            : hasRealAttendance
+                ? true
+                : isPast;
+
         setSelectedShift(shift || null);
         setModalUser(user.id);
         setModalDate(dateStr);
+        setModalLockInfo({ isLocked, isPast, isToday, hasRealAttendance });
         setIsModalOpen(true);
     };
 
@@ -152,6 +173,14 @@ const ShiftCalendar = () => {
         e.stopPropagation();
 
         if (!dragData) return;
+
+        // Block drops on past dates and today (unless admin override)
+        const today = format(new Date(), 'yyyy-MM-dd');
+        if (targetDate <= today && !canEditPast) {
+            setDragData(null);
+            return;
+        }
+
         const { sourceShiftId, sourceUserId, sourceDate } = dragData;
 
         if (sourceUserId === targetUserId && sourceDate === targetDate) {
@@ -317,9 +346,34 @@ const ShiftCalendar = () => {
                                     const displayExit = lastExit || overnightExit;
 
                                     const realSchedule = firstEntry || displayExit;
+                                    const hasRealAttendance = !!(firstEntry || displayExit);
                                     const shiftType = getShiftType(shift);
                                     const shiftMeta = shiftTypeStyles[shiftType] || shiftTypeStyles.custom;
                                     const ShiftTypeIcon = shiftMeta.icon;
+
+                                    // Lock logic
+                                    const today = format(new Date(), 'yyyy-MM-dd');
+                                    const isPast = dateStr < today;
+                                    const isToday = dateStr === today;
+                                    const isFuture = dateStr > today;
+
+                                    // PRO rule: real attendance = always locked (unless admin)
+                                    const isLocked = canEditPast
+                                        ? false
+                                        : hasRealAttendance
+                                            ? true
+                                            : isPast;
+
+                                    const isDraggable = !!shift && !isLocked && isFuture;
+
+                                    // Tooltip
+                                    const cellTitle = canEditPast && (isPast || hasRealAttendance)
+                                        ? '✏️ Edición habilitada por permisos de admin'
+                                        : isPast && isLocked
+                                            ? '🔒 Turno bloqueado (fecha pasada)'
+                                            : isToday && hasRealAttendance && isLocked
+                                                ? '🔒 No editable, ya tiene asistencia'
+                                                : '';
 
                                     return (
                                         <td
@@ -330,16 +384,32 @@ const ShiftCalendar = () => {
                                             onClick={() => handleCellClick(user, day)}
                                         >
                                             <div
-                                                draggable={!!shift}
-                                                onDragStart={(e) => shift && handleDragStart(e, shift, user.id, dateStr)}
+                                                draggable={isDraggable}
+                                                onDragStart={(e) => isDraggable && handleDragStart(e, shift, user.id, dateStr)}
+                                                title={cellTitle}
                                                 className={cn(
-                                                "w-full rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all duration-300 border",
+                                                "w-full rounded-xl flex flex-col items-center justify-center transition-all duration-300 border relative",
+                                                // Today ring
+                                                isToday && "ring-2 ring-yellow-400/60",
                                                 shift
-                                                    ? cn(shiftMeta.card, shiftMeta.glow, "py-2 px-1 cursor-grab active:cursor-grabbing")
+                                                    ? cn(
+                                                        shiftMeta.card,
+                                                        isLocked
+                                                            ? "opacity-50 grayscale cursor-not-allowed"
+                                                            : cn(shiftMeta.glow, isFuture ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"),
+                                                        "py-2 px-1"
+                                                    )
                                                     : realSchedule
-                                                        ? "bg-gradient-to-br from-emerald-500/15 to-teal-600/5 border-emerald-400/25 text-emerald-300 py-2 px-1 shadow-[0_4px_12px_rgba(16,185,129,0.1)] hover:shadow-[0_6px_18px_rgba(16,185,129,0.2)]"
-                                                        : "hover:bg-[var(--glass-bg)] hover:border-[var(--glass-border)] border-transparent py-2 px-1 min-h-[80px]"
+                                                        ? cn(
+                                                            "bg-gradient-to-br from-emerald-500/15 to-teal-600/5 border-emerald-400/25 text-emerald-300 py-2 px-1 shadow-[0_4px_12px_rgba(16,185,129,0.1)]",
+                                                            isLocked ? "opacity-50 grayscale cursor-not-allowed" : "hover:shadow-[0_6px_18px_rgba(16,185,129,0.2)]"
+                                                        )
+                                                        : "hover:bg-[var(--glass-bg)] hover:border-[var(--glass-border)] border-transparent py-2 px-1 min-h-[80px] cursor-pointer"
                                             )}>
+                                                {/* Lock icon for locked shifts */}
+                                                {isLocked && shift && (
+                                                    <Lock size={10} className="absolute top-1 right-1 text-gray-400 dark:text-white/30" />
+                                                )}
                                                 {shift || realSchedule ? (
                                                     <>
                                                         {shift && (
@@ -394,6 +464,10 @@ const ShiftCalendar = () => {
                 selectedDate={modalDate}
                 selectedUser={modalUser}
                 onSuccess={loadShifts}
+                isLocked={modalLockInfo.isLocked}
+                isPast={modalLockInfo.isPast}
+                isToday={modalLockInfo.isToday}
+                hasRealAttendance={modalLockInfo.hasRealAttendance}
             />
         </div>
     );

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
-import { X, Save, Trash2 } from 'lucide-react';
+import { X, Save, Trash2, Lock } from 'lucide-react';
 import { format, startOfWeek, addWeeks, addDays } from 'date-fns';
 
 const SHIFT_TEMPLATES = {
@@ -66,7 +66,7 @@ const buildShiftPayload = (shiftDate, userId, startTime, endTime) => {
     };
 };
 
-const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, onSuccess }) => {
+const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, onSuccess, isLocked = false, isPast = false, isToday = false, hasRealAttendance = false }) => {
     const { createShift, deleteShift, deleteShiftByDate, staffMembers } = useStore();
     const [loading, setLoading] = useState(false);
 
@@ -215,14 +215,27 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
             <div className="glass-card w-full max-w-md p-0 flex flex-col">
                 <div className="p-4 border-b border-[var(--glass-border)] flex justify-between items-center">
                     <h2 className="text-lg font-bold text-[var(--color-text)]">
-                        {shiftData ? 'Editar Turno' : 'Nuevo Turno'}
+                        {isLocked ? 'Turno (Solo Lectura)' : shiftData ? 'Editar Turno' : 'Nuevo Turno'}
                     </h2>
                     <button onClick={onClose} className="p-1 hover:bg-[var(--glass-bg)] rounded-full transition-colors">
                         <X size={20} className="text-[var(--color-text-muted)]" />
                     </button>
                 </div>
 
-                <form id="shift-form" onSubmit={handleSubmit} className="p-6 space-y-4">
+                {isLocked && (
+                    <div className="mx-4 mt-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs">
+                        <Lock size={14} className="flex-shrink-0" />
+                        <span>
+                            {hasRealAttendance
+                                ? 'Este turno tiene asistencia registrada y no se puede modificar.'
+                                : isPast
+                                    ? 'Este turno está bloqueado porque su fecha ya pasó.'
+                                    : 'Este turno no se puede modificar.'}
+                        </span>
+                    </div>
+                )}
+
+                <form id="shift-form" onSubmit={handleSubmit} className={`p-6 space-y-4${isLocked ? ' pointer-events-none opacity-60' : ''}`}>
                     {!shiftData && (
                         <div>
                             <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Modo de Asignacion</label>
@@ -369,7 +382,7 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
                 </form>
 
                 <div className="p-4 border-t border-[var(--glass-border)] flex justify-between gap-3">
-                    {shiftData && (
+                    {shiftData && !isLocked && (
                         <button
                             type="button"
                             onClick={handleDelete}
@@ -384,17 +397,19 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
                             onClick={onClose}
                             className="px-4 py-2 rounded-xl text-[var(--color-text)] bg-[var(--glass-bg)] hover:bg-[var(--color-surface-hover)] border border-[var(--glass-border)] transition-colors"
                         >
-                            Cancelar
+                            {isLocked ? 'Cerrar' : 'Cancelar'}
                         </button>
-                        <button
-                            type="submit"
-                            form="shift-form"
-                            disabled={loading || !userId}
-                            className="px-4 py-2 rounded-xl font-bold bg-[var(--color-primary)] text-black hover:bg-cyan-400 transition-colors flex items-center gap-2"
-                        >
-                            <Save size={18} />
-                            {loading ? 'Guardando...' : 'Guardar'}
-                        </button>
+                        {!isLocked && (
+                            <button
+                                type="submit"
+                                form="shift-form"
+                                disabled={loading || !userId}
+                                className="px-4 py-2 rounded-xl font-bold bg-[var(--color-primary)] text-black hover:bg-cyan-400 transition-colors flex items-center gap-2"
+                            >
+                                <Save size={18} />
+                                {loading ? 'Guardando...' : 'Guardar'}
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
