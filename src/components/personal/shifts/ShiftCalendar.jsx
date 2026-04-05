@@ -329,10 +329,13 @@ const ShiftCalendar = () => {
                                             onDrop={(e) => handleDrop(e, user.id, dateStr)}
                                             onClick={() => handleCellClick(user, day)}
                                         >
-                                            <div className={cn(
+                                            <div
+                                                draggable={!!shift}
+                                                onDragStart={(e) => shift && handleDragStart(e, shift, user.id, dateStr)}
+                                                className={cn(
                                                 "w-full rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all duration-300 border",
                                                 shift
-                                                    ? cn(shiftMeta.card, shiftMeta.glow, "py-2 px-1")
+                                                    ? cn(shiftMeta.card, shiftMeta.glow, "py-2 px-1 cursor-grab active:cursor-grabbing")
                                                     : realSchedule
                                                         ? "bg-gradient-to-br from-emerald-500/15 to-teal-600/5 border-emerald-400/25 text-emerald-300 py-2 px-1 shadow-[0_4px_12px_rgba(16,185,129,0.1)] hover:shadow-[0_6px_18px_rgba(16,185,129,0.2)]"
                                                         : "hover:bg-[var(--glass-bg)] hover:border-[var(--glass-border)] border-transparent py-2 px-1 min-h-[80px]"
@@ -355,17 +358,6 @@ const ShiftCalendar = () => {
                                                                 <span className="text-[10px] text-gray-600 dark:text-white/60 font-medium">
                                                                     {format(new Date(shift.end_time), 'HH:mm')}
                                                                 </span>
-
-                                                                <button
-                                                                    type="button"
-                                                                    draggable
-                                                                    onDragStart={(e) => handleDragStart(e, shift, user.id, dateStr)}
-                                                                    onClick={(e) => e.stopPropagation()}
-                                                                    className="text-[8px] mt-1 px-2 py-0.5 rounded-full border border-gray-300 dark:border-white/10 text-gray-500 dark:text-white/40 hover:text-gray-700 dark:hover:text-white/70 hover:border-gray-400 dark:hover:border-white/20 transition-colors"
-                                                                    title="Arrastra para mover/intercambiar"
-                                                                >
-                                                                    Arrastrar
-                                                                </button>
                                                             </>
                                                         )}
 
