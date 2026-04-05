@@ -66,7 +66,7 @@ const ShiftCalendar = () => {
     const {
         workShifts,
         fetchShifts,
-        fetchAttendanceByRange,
+        fetchAttendanceByRangeRaw,
         createShift,
         deleteShift,
         staffMembers,
@@ -103,7 +103,7 @@ const ShiftCalendar = () => {
 
         const [, attendance] = await Promise.all([
             fetchShifts(startDate, endDate),
-            fetchAttendanceByRange(startDate, endDate)
+            fetchAttendanceByRangeRaw(startDate, endDate)
         ]);
 
         setAttendanceRange(attendance || []);
