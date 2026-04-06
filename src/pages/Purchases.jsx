@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus, Edit, X, ArrowLeft, Paperclip } from 'lucide-react';
+import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus, Edit, X, ArrowLeft, Paperclip, ScanBarcode } from 'lucide-react';
 import ProductModal from '../components/ProductModal';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -9,6 +9,32 @@ const Purchases = () => {
     const { can } = usePermissions();
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
     const [isMobileDetailsOpen, setIsMobileDetailsOpen] = useState(false);
+    const [showCameraScanner, setShowCameraScanner] = useState(false);
+    const scannerRef = useRef(null);
+    const scannerContainerId = 'purchases-barcode-scanner';
+
+    useEffect(() => {
+        if (!showCameraScanner) return;
+        let scanner = null;
+        (async () => {
+            const { Html5Qrcode } = await import('html5-qrcode');
+            scanner = new Html5Qrcode(scannerContainerId);
+            scannerRef.current = scanner;
+            await scanner.start(
+                { facingMode: 'environment' },
+                { fps: 10, qrbox: { width: 250, height: 150 } },
+                (decoded) => {
+                    setSearchTerm(decoded);
+                    setShowCameraScanner(false);
+                },
+                () => {}
+            );
+        })().catch(() => {});
+        return () => {
+            if (scanner && scanner.isScanning) scanner.stop().catch(() => {});
+            scannerRef.current = null;
+        };
+    }, [showCameraScanner]);
 
     // Left Column: Product Entry
     const [searchTerm, setSearchTerm] = useState('');
@@ -294,6 +320,13 @@ const Purchases = () => {
 
                     {/* Search */}
                     <div className="relative mb-4 flex gap-2">
+                        <button
+                            onClick={() => setShowCameraScanner(true)}
+                            className="lg:hidden glass p-3 rounded-xl text-[var(--color-primary)] border border-[var(--glass-border)]"
+                            title="Escanear código"
+                        >
+                            <ScanBarcode size={20} />
+                        </button>
                         <div className="relative flex-1">
                             <input
                                 type="text"
@@ -987,6 +1020,20 @@ const Purchases = () => {
                 onClose={() => setIsProductModalOpen(false)}
                 onSave={handleSaveNewProduct}
             />
+
+            {showCameraScanner && (
+                <div className="fixed inset-0 bg-black/70 z-[200] flex items-center justify-center p-4">
+                    <div className="bg-[var(--color-surface)] rounded-2xl w-full max-w-sm overflow-hidden">
+                        <div className="flex items-center justify-between p-4 border-b border-[var(--glass-border)]">
+                            <h3 className="font-bold text-[var(--color-text)]">Escanear Código</h3>
+                            <button onClick={() => setShowCameraScanner(false)} className="text-[var(--color-text-muted)]">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div id={scannerContainerId} className="w-full" />
+                    </div>
+                </div>
+            )}
         </>
     );
 };

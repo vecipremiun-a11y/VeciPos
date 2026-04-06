@@ -70,6 +70,11 @@ const FolioSettings = () => {
     };
 
     const toggleDte = (tipo) => {
+        // Block activating DTE types without folios (except Nota de Venta)
+        if (!enabledDtes.includes(tipo) && tipo !== 0 && !folioInfo[tipo]) {
+            alert(`No puedes activar ${DTE_TYPES.find(d => d.tipo === tipo)?.label || 'este tipo'} porque no tienes folios (CAF) cargados. Sube los folios primero desde Documentos SII.`);
+            return;
+        }
         setEnabledDtes(prev => {
             if (prev.includes(tipo)) {
                 // Don't allow disabling all
@@ -89,6 +94,15 @@ const FolioSettings = () => {
     const handleSave = async () => {
         setSaving(true);
         try {
+            // Strip DTE types without folios (safety check)
+            const validDtes = enabledDtes.filter(tipo => tipo === 0 || !!folioInfo[tipo]);
+            if (validDtes.length === 0) validDtes.push(0);
+            setEnabledDtes(validDtes);
+            if (!validDtes.includes(defaultDte)) {
+                setDefaultDte(validDtes[0]);
+            }
+            const saveDefault = validDtes.includes(defaultDte) ? defaultDte : validDtes[0];
+
             // Try to add the column if it doesn't exist (safe ALTER)
             try {
                 await turso.execute(`ALTER TABLE sii_config ADD COLUMN enabled_dtes TEXT DEFAULT '[]'`);
@@ -99,7 +113,7 @@ const FolioSettings = () => {
 
             await turso.execute({
                 sql: 'UPDATE sii_config SET enabled_dtes = ?, default_dte = ? WHERE company_id = ?',
-                args: [JSON.stringify(enabledDtes), defaultDte, activeCompanyId]
+                args: [JSON.stringify(validDtes), saveDefault, activeCompanyId]
             });
             setSaved(true);
             setTimeout(() => setSaved(false), 3000);
@@ -130,6 +144,7 @@ const FolioSettings = () => {
                 {DTE_TYPES.map(({ tipo, label, icon: Icon, color, description }) => {
                     const enabled = enabledDtes.includes(tipo);
                     const folio = folioInfo[tipo];
+                    const canActivate = tipo === 0 || !!folio;
                     const colorMap = {
                         green: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', shadow: 'shadow-green-500/10' },
                         blue: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400', shadow: 'shadow-blue-500/10' },
@@ -166,8 +181,8 @@ const FolioSettings = () => {
                                             </p>
                                         )}
                                         {!folio && tipo !== 0 && (
-                                            <p className="text-xs text-amber-400 mt-1 flex items-center gap-1">
-                                                <Info size={12} /> Sin folios cargados (CAF)
+                                            <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                                                <Info size={12} /> Sin folios cargados (CAF) — no se puede activar
                                             </p>
                                         )}
                                         {tipo === 0 && (
@@ -177,8 +192,9 @@ const FolioSettings = () => {
                                 </div>
                                 <button
                                     onClick={() => toggleDte(tipo)}
-                                    className="flex-shrink-0 transition-transform hover:scale-110"
-                                    title={enabled ? 'Desactivar' : 'Activar'}
+                                    disabled={!canActivate && !enabled}
+                                    className={`flex-shrink-0 transition-transform ${canActivate || enabled ? 'hover:scale-110' : 'opacity-30 cursor-not-allowed'}`}
+                                    title={!canActivate && !enabled ? 'Necesitas cargar folios (CAF) primero' : enabled ? 'Desactivar' : 'Activar'}
                                 >
                                     {enabled ? (
                                         <ToggleRight size={40} className={c.text} />

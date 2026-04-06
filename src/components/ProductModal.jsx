@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, ArrowLeft, Trash2, Plus, Bell } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, ArrowLeft, Trash2, Plus, Bell, ScanBarcode } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { usePermissions } from '../hooks/usePermissions';
@@ -9,6 +9,48 @@ import { formatCurrency } from '../utils/formatCurrency';
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
     const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, saveAlertSettings } = useStore();
     const { can } = usePermissions();
+    const [showSkuScanner, setShowSkuScanner] = useState(false);
+    const skuScannerRef = useRef(null);
+    const skuScannerContainerId = 'sku-barcode-reader';
+
+    // Camera barcode scanner for SKU
+    useEffect(() => {
+        if (!showSkuScanner) return;
+        let html5QrCode = null;
+
+        const startScanner = async () => {
+            const { Html5Qrcode } = await import('html5-qrcode');
+            html5QrCode = new Html5Qrcode(skuScannerContainerId);
+            skuScannerRef.current = html5QrCode;
+
+            try {
+                await html5QrCode.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 280, height: 150 }, aspectRatio: 1.0 },
+                    (decodedText) => {
+                        html5QrCode.stop().catch(() => {});
+                        skuScannerRef.current = null;
+                        setShowSkuScanner(false);
+                        setFormData(prev => ({ ...prev, sku: decodedText }));
+                    },
+                    () => {}
+                );
+            } catch (err) {
+                console.error('Error starting SKU scanner:', err);
+                setShowSkuScanner(false);
+            }
+        };
+
+        startScanner();
+
+        return () => {
+            if (skuScannerRef.current) {
+                skuScannerRef.current.stop().catch(() => {});
+                skuScannerRef.current = null;
+            }
+        };
+    }, [showSkuScanner]);
+
     const [formData, setFormData] = useState({
         name: '',
         price: '',
@@ -287,16 +329,47 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm text-gray-400 mb-1">SKU / Código</label>
-                            <input
-                                type="text"
-                                name="sku"
-                                value={formData.sku || ''}
-                                onChange={handleChange}
-                                className="glass-input w-full"
-                                required
-                            />
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    name="sku"
+                                    value={formData.sku || ''}
+                                    onChange={handleChange}
+                                    className="glass-input w-full"
+                                    required
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowSkuScanner(true)}
+                                    className="lg:hidden w-10 h-10 shrink-0 rounded-xl bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 flex items-center justify-center text-[var(--color-primary)] hover:bg-[var(--color-primary)]/20 active:scale-95 transition-all"
+                                    title="Escanear código de barras"
+                                >
+                                    <ScanBarcode size={18} />
+                                </button>
+                            </div>
                         </div>
                     </div>
+
+                    {/* Camera Scanner Modal for SKU */}
+                    {showSkuScanner && (
+                        <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4" onClick={() => setShowSkuScanner(false)}>
+                            <div className="bg-[var(--color-surface)] rounded-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center justify-between p-4 border-b border-[var(--glass-border)]">
+                                    <h3 className="font-bold text-[var(--color-text)] flex items-center gap-2">
+                                        <ScanBarcode size={20} className="text-[var(--color-primary)]" />
+                                        Escanear SKU
+                                    </h3>
+                                    <button type="button" onClick={() => setShowSkuScanner(false)} className="p-1 rounded-lg hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]">
+                                        <X size={20} />
+                                    </button>
+                                </div>
+                                <div className="p-4">
+                                    <div id={skuScannerContainerId} className="w-full rounded-xl overflow-hidden" />
+                                    <p className="text-center text-xs text-[var(--color-text-muted)] mt-3">Apunta la cámara al código de barras</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>

@@ -1,6 +1,6 @@
 
-import React, { useState } from 'react';
-import { Search, Plus, Edit, Trash2, Filter, Loader } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Search, Plus, Edit, Trash2, Filter, Loader, ScanBarcode, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import ProductModal from '../components/ProductModal';
 import OptimizedImage from '../components/OptimizedImage';
@@ -25,6 +25,9 @@ const Inventory = () => {
     // --- PRODUCTS STATE ---
     const [searchTerm, setSearchTerm] = useState('');
     const [localSearchTerm, setLocalSearchTerm] = useState('');
+    const [showCameraScanner, setShowCameraScanner] = useState(false);
+    const scannerRef = useRef(null);
+    const scannerContainerId = 'inventory-barcode-reader';
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState(null);
 
@@ -52,6 +55,45 @@ const Inventory = () => {
         }, 1000);
         return () => clearTimeout(delayDebounceFn);
     }, [localSearchTerm]);
+
+    // Camera barcode scanner
+    useEffect(() => {
+        if (!showCameraScanner) return;
+        let html5QrCode = null;
+
+        const startScanner = async () => {
+            const { Html5Qrcode } = await import('html5-qrcode');
+            html5QrCode = new Html5Qrcode(scannerContainerId);
+            scannerRef.current = html5QrCode;
+
+            try {
+                await html5QrCode.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 280, height: 150 }, aspectRatio: 1.0 },
+                    (decodedText) => {
+                        html5QrCode.stop().catch(() => {});
+                        scannerRef.current = null;
+                        setShowCameraScanner(false);
+                        setLocalSearchTerm(decodedText);
+                        setSearchTerm(decodedText);
+                    },
+                    () => {}
+                );
+            } catch (err) {
+                console.error('Error starting camera scanner:', err);
+                setShowCameraScanner(false);
+            }
+        };
+
+        startScanner();
+
+        return () => {
+            if (scannerRef.current) {
+                scannerRef.current.stop().catch(() => {});
+                scannerRef.current = null;
+            }
+        };
+    }, [showCameraScanner]);
 
     // Load Products when search/filters change
     React.useEffect(() => {
@@ -181,6 +223,26 @@ const Inventory = () => {
 
     return (
         <div className="space-y-6 min-h-[calc(100vh-6rem)] flex flex-col">
+            {/* Camera Barcode Scanner Modal */}
+            {showCameraScanner && (
+                <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4" onClick={() => setShowCameraScanner(false)}>
+                    <div className="bg-[var(--color-surface)] rounded-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-4 border-b border-[var(--glass-border)]">
+                            <h3 className="font-bold text-[var(--color-text)] flex items-center gap-2">
+                                <ScanBarcode size={20} className="text-[var(--color-primary)]" />
+                                Buscar Producto
+                            </h3>
+                            <button onClick={() => setShowCameraScanner(false)} className="p-1 rounded-lg hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-4">
+                            <div id={scannerContainerId} className="w-full rounded-xl overflow-hidden" />
+                            <p className="text-center text-xs text-[var(--color-text-muted)] mt-3">Apunta la cámara al código de barras del producto</p>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* Header - Compact on Mobile */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4 shrink-0">
                 <div>
@@ -200,15 +262,24 @@ const Inventory = () => {
 
                 {/* Filters & Search - Compact on Mobile */}
                 <div className="glass-card p-3 lg:p-4 flex flex-col md:flex-row gap-3 lg:gap-4 items-center mb-3 lg:mb-4 shrink-0">
-                    <div className="relative flex-1 w-full">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
-                        <input
-                            type="text"
-                            placeholder="Buscar por nombre, SKU o categoría..."
-                            className="glass-input !pl-10 w-full text-sm lg:text-base"
-                            value={localSearchTerm}
-                            onChange={(e) => setLocalSearchTerm(e.target.value)}
-                        />
+                    <div className="relative flex-1 w-full flex gap-2">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
+                            <input
+                                type="text"
+                                placeholder="Buscar por nombre, SKU o categoría..."
+                                className="glass-input !pl-10 w-full text-sm lg:text-base"
+                                value={localSearchTerm}
+                                onChange={(e) => setLocalSearchTerm(e.target.value)}
+                            />
+                        </div>
+                        <button
+                            onClick={() => setShowCameraScanner(true)}
+                            className="lg:hidden w-10 h-10 shrink-0 rounded-xl bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 flex items-center justify-center text-[var(--color-primary)] hover:bg-[var(--color-primary)]/20 active:scale-95 transition-all"
+                            title="Escanear código de barras"
+                        >
+                            <ScanBarcode size={20} />
+                        </button>
                     </div>
                     <button
                         onClick={() => setShowFilters(!showFilters)}
