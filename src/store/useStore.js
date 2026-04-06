@@ -280,7 +280,14 @@ export const useStore = create(persist((set, get) => ({
                     ON products(company_id, category, name, sku)
                 `);
 
-                // 5. Para ventas con status
+                // 5. Para productos encargables
+                // Usado en: getPreorderableProducts() - filtrar por sale_mode
+                await turso.execute(`
+                    CREATE INDEX IF NOT EXISTS idx_products_preorder 
+                    ON products(company_id, sale_mode, category, name)
+                `);
+
+                // 6. Para ventas con status
                 // Usado en: queries que filtran por status (cancelled, completed)
                 await turso.execute(`
                     CREATE INDEX IF NOT EXISTS idx_sales_status 
@@ -4565,7 +4572,7 @@ export const useStore = create(persist((set, get) => ({
                 args: [activeCompanyId, currentUser?.id, 'CREATE', 'PRODUCT', JSON.stringify({ name: product.name, sku: product.sku }), new Date().toISOString()]
             });
 
-            set((state) => ({ products: [...state.products, newProduct].sort((a, b) => a.name.localeCompare(b.name)) }));
+            set((state) => ({ products: [...state.products, newProduct].sort((a, b) => a.name.localeCompare(b.name)), _preorderCache: { key: '', products: [], ts: 0 } }));
 
             // POS -> Tienda: sincronizar producto nuevo si tiene SKU
             try {
@@ -4717,7 +4724,8 @@ export const useStore = create(persist((set, get) => ({
             });
 
             set((state) => ({
-                products: state.products.map((p) => p.id === id ? { ...p, ...updatedProduct } : p)
+                products: state.products.map((p) => p.id === id ? { ...p, ...updatedProduct } : p),
+                _preorderCache: { key: '', products: [], ts: 0 }
             }));
 
             // Save alert config if provided
@@ -4971,7 +4979,8 @@ export const useStore = create(persist((set, get) => ({
             }
 
             set((state) => ({
-                products: state.products.filter((p) => p.id !== id)
+                products: state.products.filter((p) => p.id !== id),
+                _preorderCache: { key: '', products: [], ts: 0 }
             }));
             return { success: true };
         } catch (e) {
@@ -9508,6 +9517,7 @@ export const useStore = create(persist((set, get) => ({
 
     preorders: [],
     preorderCart: [],
+    _preorderCache: { key: '', products: [], ts: 0 },
 
     addToPreorderCart: (product) => {
         set(state => {
@@ -9787,9 +9797,17 @@ export const useStore = create(persist((set, get) => ({
     },
 
     getPreorderableProducts: async (searchTerm = '', category = 'Todos') => {
-        const { activeCompanyId } = get();
+        const { activeCompanyId, _preorderCache } = get();
+        const cacheKey = `${activeCompanyId}|${searchTerm}|${category}`;
+        if (_preorderCache.key === cacheKey && Date.now() - _preorderCache.ts < 30000) {
+            return { success: true, products: _preorderCache.products };
+        }
         try {
-            let sql = `SELECT * FROM products WHERE company_id = ? AND sale_mode IN ('preorder_only', 'both')`;
+            let sql = `SELECT id, name, sku, price, cost, image, category, unit,
+                sale_mode, is_offer, offer_price, allow_item_notes, price_ranges,
+                preorder_unit, preorder_billing_unit, preorder_price_per_kg,
+                preorder_gram_per_unit, preorder_use_base_price
+                FROM products WHERE company_id = ? AND sale_mode IN ('preorder_only', 'both')`;
             const args = [activeCompanyId];
 
             if (searchTerm) {
@@ -9804,17 +9822,19 @@ export const useStore = create(persist((set, get) => ({
             sql += ' ORDER BY name ASC LIMIT 50';
 
             const result = await turso.execute({ sql, args });
-            // Parse price_ranges for each product
             const products = result.rows.map(p => ({
                 ...p,
                 price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
             }));
+            set({ _preorderCache: { key: cacheKey, products, ts: Date.now() } });
             return { success: true, products };
         } catch (e) {
             console.error('Error fetching preorderable products:', e);
             return { success: false, error: e.message };
         }
     },
+
+    invalidatePreorderCache: () => set({ _preorderCache: { key: '', products: [], ts: 0 } }),
 
     getPreorderReports: async (startDate, endDate) => {
         const { activeCompanyId } = get();
