@@ -48,6 +48,7 @@ export function loadCAF(cafXml) {
 
 export function buildBoleta(saleData, siiConfig, folio, caf) {
     const items = saleData.items || [];
+    const tz = saleData.timezone;
     const taxRate = 0.19; // IVA Chile 19%
 
     // Calcular totales — aplicar descuento por item
@@ -89,7 +90,7 @@ export function buildBoleta(saleData, siiConfig, folio, caf) {
             IdDoc: {
                 TipoDTE: 39,
                 Folio: folio,
-                FchEmis: fechaChile(),
+                FchEmis: fechaEmpresa(tz),
                 IndServicio: 3, // Boleta de venta
             },
             Emisor: {
@@ -124,6 +125,7 @@ export function buildBoleta(saleData, siiConfig, folio, caf) {
 
 export function buildFactura(saleData, siiConfig, folio, caf) {
     const items = saleData.items || [];
+    const tz = saleData.timezone;
     const taxRate = 0.19;
 
     let montoTotal = 0;
@@ -168,7 +170,7 @@ export function buildFactura(saleData, siiConfig, folio, caf) {
             IdDoc: {
                 TipoDTE: 33,
                 Folio: folio,
-                FchEmis: fechaChile(),
+                FchEmis: fechaEmpresa(tz),
             },
             Emisor: {
                 RUTEmisor: siiConfig.rut_emisor,
@@ -202,7 +204,7 @@ export function buildFactura(saleData, siiConfig, folio, caf) {
     if (saleData.forma_pago === 'credito') {
         dteData.Encabezado.IdDoc.FmaPago = 2;
         if (saleData.dias_credito) {
-            const fchVenc = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Santiago' }));
+            const fchVenc = new Date(new Date().toLocaleString('en-US', { timeZone: tz || 'America/Santiago' }));
             fchVenc.setDate(fchVenc.getDate() + parseInt(saleData.dias_credito));
             dteData.Encabezado.IdDoc.FchVenc = fchVenc.toLocaleDateString('en-CA');
         }
@@ -220,6 +222,7 @@ export function buildFactura(saleData, siiConfig, folio, caf) {
 
 export function buildFacturaExenta(saleData, siiConfig, folio, caf) {
     const items = saleData.items || [];
+    const tz = saleData.timezone;
 
     let montoTotal = 0;
     const detalles = items.map((item, idx) => {
@@ -245,7 +248,7 @@ export function buildFacturaExenta(saleData, siiConfig, folio, caf) {
             IdDoc: {
                 TipoDTE: 34,
                 Folio: folio,
-                FchEmis: fechaChile(),
+                FchEmis: fechaEmpresa(tz),
             },
             Emisor: {
                 RUTEmisor: siiConfig.rut_emisor,
@@ -276,7 +279,7 @@ export function buildFacturaExenta(saleData, siiConfig, folio, caf) {
     if (saleData.forma_pago === 'credito') {
         dteData.Encabezado.IdDoc.FmaPago = 2;
         if (saleData.dias_credito) {
-            const fchVenc = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Santiago' }));
+            const fchVenc = new Date(new Date().toLocaleString('en-US', { timeZone: tz || 'America/Santiago' }));
             fchVenc.setDate(fchVenc.getDate() + parseInt(saleData.dias_credito));
             dteData.Encabezado.IdDoc.FchVenc = fchVenc.toLocaleDateString('en-CA');
         }
@@ -355,9 +358,9 @@ export function generarRCOF(boletas, siiConfig, cert) {
 
 // ─── Helpers ───
 
-// Fecha actual en zona horaria Chile (America/Santiago)
-function fechaChile() {
-    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+// Fecha actual en zona horaria de la empresa
+function fechaEmpresa(tz) {
+    return new Date().toLocaleDateString('en-CA', { timeZone: tz || 'America/Santiago' });
 }
 
 // @devlas/dte-sii sanitiza XML internamente, aquí solo limpiamos texto

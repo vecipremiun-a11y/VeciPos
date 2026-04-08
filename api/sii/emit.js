@@ -56,6 +56,13 @@ export default async function handler(req, res) {
 
         const siiConfig = configRes.rows[0];
 
+        // Load company timezone
+        const companyRes = await turso.execute({
+            sql: 'SELECT timezone FROM companies WHERE id = ?',
+            args: [companyId]
+        });
+        const companyTimezone = companyRes.rows[0]?.timezone || 'America/Santiago';
+
         if (!siiConfig.is_active) {
             return res.status(400).json({ error: 'Facturación electrónica no está activa para esta empresa' });
         }
@@ -113,6 +120,7 @@ export default async function handler(req, res) {
         const saleData = {
             items,
             total: sale.total,
+            timezone: companyTimezone,
             rut_receptor: rut_receptor || '66666666-6',
             razon_social_receptor: razon_social_receptor || 'CLIENTE',
             giro_receptor: giro_receptor || '',
