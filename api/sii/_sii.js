@@ -107,8 +107,9 @@ export function buildBoleta(saleData, siiConfig, folio, caf) {
                 RznSocRecep: sanitizeText(saleData.razon_social_receptor || 'CLIENTE'),
             },
             Totales: {
+                ...(montoNeto > 0 ? { MntNeto: montoNeto } : {}),
                 ...(montoExento > 0 ? { MntExe: montoExento } : {}),
-                ...(montoNeto > 0 ? { MntNeto: montoNeto, TasaIVA: 19, IVA: montoIva } : {}),
+                ...(montoNeto > 0 ? { IVA: montoIva } : {}),
                 MntTotal: montoTotal,
             },
         },
@@ -190,8 +191,8 @@ export function buildFactura(saleData, siiConfig, folio, caf) {
                 CiudadRecep: sanitizeText(saleData.ciudad_receptor || ''),
             },
             Totales: {
-                ...(montoExento > 0 ? { MntExe: montoExento } : {}),
                 MntNeto: montoNeto,
+                ...(montoExento > 0 ? { MntExe: montoExento } : {}),
                 TasaIVA: 19,
                 IVA: montoIva,
                 MntTotal: montoTotal,

@@ -12,8 +12,8 @@ const DTE_TYPES = [
 
 const FolioSettings = () => {
     const { activeCompanyId } = useStore();
-    const [enabledDtes, setEnabledDtes] = useState([0, 39, 33, 34]);
-    const [defaultDte, setDefaultDte] = useState(39);
+    const [enabledDtes, setEnabledDtes] = useState([0]);
+    const [defaultDte, setDefaultDte] = useState(0);
     const [folioInfo, setFolioInfo] = useState({});
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -37,12 +37,20 @@ const FolioSettings = () => {
                     try {
                         setEnabledDtes(JSON.parse(configResult.rows[0].enabled_dtes));
                     } catch {
-                        setEnabledDtes([0, 39, 33, 34]);
+                        setEnabledDtes([0]);
                     }
+                } else {
+                    setEnabledDtes([0]);
                 }
                 if (configResult.rows[0].default_dte != null) {
                     setDefaultDte(Number(configResult.rows[0].default_dte));
+                } else {
+                    setDefaultDte(0);
                 }
+            } else {
+                // No sii_config row for this company — only Nota de Venta
+                setEnabledDtes([0]);
+                setDefaultDte(0);
             }
 
             // Load folio availability info
@@ -111,9 +119,12 @@ const FolioSettings = () => {
                 await turso.execute(`ALTER TABLE sii_config ADD COLUMN default_dte INTEGER DEFAULT 39`);
             } catch { /* column already exists */ }
 
+            // UPSERT: insert if no sii_config row exists, update if it does
             await turso.execute({
-                sql: 'UPDATE sii_config SET enabled_dtes = ?, default_dte = ? WHERE company_id = ?',
-                args: [JSON.stringify(validDtes), saveDefault, activeCompanyId]
+                sql: `INSERT INTO sii_config (company_id, enabled_dtes, default_dte, created_at, updated_at)
+                      VALUES (?, ?, ?, datetime('now'), datetime('now'))
+                      ON CONFLICT(company_id) DO UPDATE SET enabled_dtes = excluded.enabled_dtes, default_dte = excluded.default_dte, updated_at = excluded.updated_at`,
+                args: [activeCompanyId, JSON.stringify(validDtes), saveDefault]
             });
             setSaved(true);
             setTimeout(() => setSaved(false), 3000);
