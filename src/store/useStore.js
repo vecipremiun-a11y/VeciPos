@@ -6215,14 +6215,15 @@ export const useStore = create(persist((set, get) => ({
                     productsToMarkPending.push(item.id);
                 }
 
-                // Preparar datos del item
+                // Preparar datos del item (discountPercent para DTE SII)
                 itemsToProcess.push({
                     id: item.id,
                     name: item.name,
                     quantity,
                     price,
                     cost,
-                    tax_rate: parseFloat(item.tax_rate) || 0
+                    tax_rate: parseFloat(item.tax_rate) || 0,
+                    discountPercent: parseFloat(item.discountPercent) || 0
                 });
 
                 // Preparar UPDATE de producto

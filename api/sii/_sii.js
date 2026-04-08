@@ -50,13 +50,15 @@ export function buildBoleta(saleData, siiConfig, folio, caf) {
     const items = saleData.items || [];
     const taxRate = 0.19; // IVA Chile 19%
 
-    // Calcular totales
+    // Calcular totales — aplicar descuento por item
     let montoTotal = 0;
     const detalles = items.map((item, idx) => {
         const qty = parseFloat(item.quantity) || 1;
         const priceWithTax = parseFloat(item.price) || 0;
+        const discount = parseFloat(item.discountPercent) || 0;
+        const effectivePrice = discount > 0 ? Math.round(priceWithTax * (1 - discount / 100)) : Math.round(priceWithTax);
         const itemTaxRate = parseFloat(item.tax_rate) || 0;
-        const montoItem = Math.round(priceWithTax * qty);
+        const montoItem = effectivePrice * qty;
         montoTotal += montoItem;
 
         const detail = {
@@ -64,7 +66,7 @@ export function buildBoleta(saleData, siiConfig, folio, caf) {
             ...(itemTaxRate === 0 ? { IndExe: 1 } : {}),
             NmbItem: sanitizeText(item.name),
             QtyItem: qty,
-            PrcItem: Math.round(priceWithTax),
+            PrcItem: effectivePrice,
             MontoItem: montoItem,
         };
 
@@ -72,20 +74,14 @@ export function buildBoleta(saleData, siiConfig, folio, caf) {
     });
 
     // Calcular IVA
-    const itemsAfectos = items.filter(i => (parseFloat(i.tax_rate) || 0) > 0);
-    const montoAfecto = itemsAfectos.reduce((sum, i) => {
-        const qty = parseFloat(i.quantity) || 1;
-        const price = parseFloat(i.price) || 0;
-        return sum + Math.round(price * qty);
+    const afectoTotal = detalles.reduce((sum, d, i) => {
+        return (parseFloat(items[i].tax_rate) || 0) > 0 ? sum + d.MontoItem : sum;
     }, 0);
-    const montoNeto = Math.round(montoAfecto / (1 + taxRate));
-    const montoIva = montoAfecto - montoNeto;
+    const montoNeto = Math.round(afectoTotal / (1 + taxRate));
+    const montoIva = afectoTotal - montoNeto;
 
-    const itemsExentos = items.filter(i => (parseFloat(i.tax_rate) || 0) === 0);
-    const montoExento = itemsExentos.reduce((sum, i) => {
-        const qty = parseFloat(i.quantity) || 1;
-        const price = parseFloat(i.price) || 0;
-        return sum + Math.round(price * qty);
+    const montoExento = detalles.reduce((sum, d, i) => {
+        return (parseFloat(items[i].tax_rate) || 0) === 0 ? sum + d.MontoItem : sum;
     }, 0);
 
     const dteData = {
@@ -93,7 +89,7 @@ export function buildBoleta(saleData, siiConfig, folio, caf) {
             IdDoc: {
                 TipoDTE: 39,
                 Folio: folio,
-                FchEmis: new Date().toISOString().split('T')[0],
+                FchEmis: fechaChile(),
                 IndServicio: 3, // Boleta de venta
             },
             Emisor: {
@@ -134,12 +130,14 @@ export function buildFactura(saleData, siiConfig, folio, caf) {
     const detalles = items.map((item, idx) => {
         const qty = parseFloat(item.quantity) || 1;
         const priceWithTax = parseFloat(item.price) || 0;
+        const discount = parseFloat(item.discountPercent) || 0;
+        const effectivePrice = discount > 0 ? priceWithTax * (1 - discount / 100) : priceWithTax;
         const itemTaxRate = parseFloat(item.tax_rate) || 0;
 
         // Factura: precios netos
         const priceNeto = itemTaxRate > 0
-            ? Math.round(priceWithTax / (1 + taxRate))
-            : Math.round(priceWithTax);
+            ? Math.round(effectivePrice / (1 + taxRate))
+            : Math.round(effectivePrice);
 
         const montoItem = priceNeto * qty;
 
@@ -170,7 +168,7 @@ export function buildFactura(saleData, siiConfig, folio, caf) {
             IdDoc: {
                 TipoDTE: 33,
                 Folio: folio,
-                FchEmis: new Date().toISOString().split('T')[0],
+                FchEmis: fechaChile(),
             },
             Emisor: {
                 RUTEmisor: siiConfig.rut_emisor,
@@ -204,9 +202,9 @@ export function buildFactura(saleData, siiConfig, folio, caf) {
     if (saleData.forma_pago === 'credito') {
         dteData.Encabezado.IdDoc.FmaPago = 2;
         if (saleData.dias_credito) {
-            const fchVenc = new Date();
+            const fchVenc = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Santiago' }));
             fchVenc.setDate(fchVenc.getDate() + parseInt(saleData.dias_credito));
-            dteData.Encabezado.IdDoc.FchVenc = fchVenc.toISOString().split('T')[0];
+            dteData.Encabezado.IdDoc.FchVenc = fchVenc.toLocaleDateString('en-CA');
         }
     } else {
         dteData.Encabezado.IdDoc.FmaPago = 1;
@@ -226,7 +224,9 @@ export function buildFacturaExenta(saleData, siiConfig, folio, caf) {
     let montoTotal = 0;
     const detalles = items.map((item, idx) => {
         const qty = parseFloat(item.quantity) || 1;
-        const price = Math.round(parseFloat(item.price) || 0);
+        const rawPrice = parseFloat(item.price) || 0;
+        const discount = parseFloat(item.discountPercent) || 0;
+        const price = discount > 0 ? Math.round(rawPrice * (1 - discount / 100)) : Math.round(rawPrice);
         const montoItem = price * qty;
         montoTotal += montoItem;
 
@@ -245,7 +245,7 @@ export function buildFacturaExenta(saleData, siiConfig, folio, caf) {
             IdDoc: {
                 TipoDTE: 34,
                 Folio: folio,
-                FchEmis: new Date().toISOString().split('T')[0],
+                FchEmis: fechaChile(),
             },
             Emisor: {
                 RUTEmisor: siiConfig.rut_emisor,
@@ -276,9 +276,9 @@ export function buildFacturaExenta(saleData, siiConfig, folio, caf) {
     if (saleData.forma_pago === 'credito') {
         dteData.Encabezado.IdDoc.FmaPago = 2;
         if (saleData.dias_credito) {
-            const fchVenc = new Date();
+            const fchVenc = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Santiago' }));
             fchVenc.setDate(fchVenc.getDate() + parseInt(saleData.dias_credito));
-            dteData.Encabezado.IdDoc.FchVenc = fchVenc.toISOString().split('T')[0];
+            dteData.Encabezado.IdDoc.FchVenc = fchVenc.toLocaleDateString('en-CA');
         }
     } else {
         dteData.Encabezado.IdDoc.FmaPago = 1;
@@ -355,14 +355,17 @@ export function generarRCOF(boletas, siiConfig, cert) {
 
 // ─── Helpers ───
 
-function sanitizeText(text) {
+// Fecha actual en zona horaria Chile (America/Santiago)
+function fechaChile() {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
+}
+
+// @devlas/dte-sii sanitiza XML internamente, aquí solo limpiamos texto
+function sanitizeText(text, maxLen = 80) {
     if (!text) return '';
     return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
         .replace(/'/g, '')
         .normalize('NFC')
-        .substring(0, 100);
+        .trim()
+        .substring(0, maxLen);
 }
