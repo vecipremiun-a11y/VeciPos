@@ -59,7 +59,7 @@ export function buildBoleta(saleData, siiConfig, folio, caf) {
         const discount = parseFloat(item.discountPercent) || 0;
         const effectivePrice = discount > 0 ? Math.round(priceWithTax * (1 - discount / 100)) : Math.round(priceWithTax);
         const itemTaxRate = parseFloat(item.tax_rate) || 0;
-        const montoItem = effectivePrice * qty;
+        const montoItem = Math.round(effectivePrice * qty);
         montoTotal += montoItem;
 
         const detail = {
@@ -142,7 +142,7 @@ export function buildFactura(saleData, siiConfig, folio, caf) {
             ? Math.round(effectivePrice / (1 + taxRate))
             : Math.round(effectivePrice);
 
-        const montoItem = priceNeto * qty;
+        const montoItem = Math.round(priceNeto * qty);
 
         const detail = {
             NroLinDet: idx + 1,
@@ -231,7 +231,7 @@ export function buildFacturaExenta(saleData, siiConfig, folio, caf) {
         const rawPrice = parseFloat(item.price) || 0;
         const discount = parseFloat(item.discountPercent) || 0;
         const price = discount > 0 ? Math.round(rawPrice * (1 - discount / 100)) : Math.round(rawPrice);
-        const montoItem = price * qty;
+        const montoItem = Math.round(price * qty);
         montoTotal += montoItem;
 
         return {
