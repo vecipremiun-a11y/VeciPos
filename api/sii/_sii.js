@@ -299,6 +299,9 @@ export function buildFacturaExenta(saleData, siiConfig, folio, caf) {
 export async function enviarDTE(dte, siiConfig, cert, tipoDte) {
     const ambiente = siiConfig.ambiente || 'certificacion';
 
+    // RutEnvia debe ser el RUT del certificado (persona que firma), no necesariamente el emisor
+    const rutEnvia = cert.rut || siiConfig.rut_emisor;
+
     let envio;
     if (tipoDte === 39 || tipoDte === 41) {
         envio = new EnvioBOLETA({ certificado: cert });
@@ -309,17 +312,25 @@ export async function enviarDTE(dte, siiConfig, cert, tipoDte) {
     envio.agregar(dte);
     envio.setCaratula({
         RutEmisor: siiConfig.rut_emisor,
-        RutEnvia: siiConfig.rut_emisor,
+        RutEnvia: rutEnvia,
         FchResol: siiConfig.sii_resolution_date || '2014-08-22',
         NroResol: parseInt(siiConfig.sii_resolution_number) || 0,
     });
     envio.generar();
 
+    // FIX: La librería envía boletas como UTF-8 (Buffer.from(xml,'utf-8'))
+    // pero declara encoding="ISO-8859-1". Si hay caracteres no-ASCII (ñ,á,é...),
+    // el SII interpreta bytes incorrectamente y la verificación de firma falla.
+    // La declaración XML NO forma parte del contenido firmado, así que es seguro cambiarla.
+    if ((tipoDte === 39 || tipoDte === 41) && envio.xml) {
+        envio.xml = envio.xml.replace('encoding="ISO-8859-1"', 'encoding="UTF-8"');
+    }
+
     const enviador = new EnviadorSII(cert, ambiente);
 
     let resultado;
     if (tipoDte === 39 || tipoDte === 41) {
-        resultado = await enviador.enviar(envio, siiConfig.rut_emisor, siiConfig.rut_emisor);
+        resultado = await enviador.enviar(envio, siiConfig.rut_emisor, rutEnvia);
     } else {
         resultado = await enviador.enviarDteSoap(envio);
     }

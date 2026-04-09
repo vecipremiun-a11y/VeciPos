@@ -971,6 +971,18 @@ export const useStore = create(persist((set, get) => ({
                 console.warn('Migration 16 (credit management) error:', e);
             }
 
+            // === Migration 17: Partial payments support ===
+            try {
+                const salesInfo17 = await turso.execute(`PRAGMA table_info(sales)`);
+                const hasAmountPaid = salesInfo17.rows.some(col => col.name === 'amount_paid');
+                if (!hasAmountPaid) {
+                    console.log('Adding amount_paid to sales for partial payments...');
+                    await turso.execute(`ALTER TABLE sales ADD COLUMN amount_paid REAL DEFAULT 0`);
+                }
+            } catch (e) {
+                console.warn('Migration 17 (partial payments) error:', e);
+            }
+
             console.log("SaaS Migrations Completed.");
 
         } catch (e) {
@@ -2209,9 +2221,19 @@ export const useStore = create(persist((set, get) => ({
         try {
             const { activeCompanyId } = get();
             if (!clientId || !activeCompanyId) return;
+
+            // Check if amount_paid column exists
+            let debtFormula = 'total';
+            try {
+                const cols = await turso.execute(`PRAGMA table_info(sales)`);
+                if (cols.rows.some(c => c.name === 'amount_paid')) {
+                    debtFormula = 'total - COALESCE(amount_paid, 0)';
+                }
+            } catch (_) {}
+
             const res = await turso.execute({
                 sql: `SELECT 
-                        COALESCE(SUM(total), 0) as total_debt,
+                        COALESCE(SUM(${debtFormula}), 0) as total_debt,
                         COUNT(*) as pending_count,
                         COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') THEN 1 END) as overdue_count
                       FROM sales
@@ -2246,9 +2268,18 @@ export const useStore = create(persist((set, get) => ({
             const clientData = get().clients.find(c => c.id === clientId);
             if (!clientData) return null;
 
+            // Check if amount_paid column exists
+            let debtFormula = 'total';
+            try {
+                const cols = await turso.execute(`PRAGMA table_info(sales)`);
+                if (cols.rows.some(c => c.name === 'amount_paid')) {
+                    debtFormula = 'total - COALESCE(amount_paid, 0)';
+                }
+            } catch (_) {}
+
             const result = await turso.execute({
                 sql: `SELECT 
-                        COALESCE(SUM(total), 0) as total_debt,
+                        COALESCE(SUM(${debtFormula}), 0) as total_debt,
                         COUNT(*) as pending_count,
                         MIN(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') AND status NOT IN ('paid','cancelled') THEN payment_due_date END) as oldest_overdue_date,
                         COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') AND status NOT IN ('paid','cancelled') THEN 1 END) as overdue_count,
@@ -6992,24 +7023,52 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    registerClientPayment: async (client, amount, salesIds, paymentMethod) => {
+    registerClientPayment: async (client, amount, distributionOrSalesIds, paymentMethod) => {
         try {
             const { currentUser, sales, products } = get();
 
+            // Ensure amount_paid column exists (migration may not have run yet)
+            try {
+                const salesCols = await turso.execute(`PRAGMA table_info(sales)`);
+                if (!salesCols.rows.some(c => c.name === 'amount_paid')) {
+                    await turso.execute(`ALTER TABLE sales ADD COLUMN amount_paid REAL DEFAULT 0`);
+                }
+            } catch (_) { /* column likely already exists */ }
+
+            // Support both old format (array of IDs) and new format (distribution array)
+            let distribution;
+            if (Array.isArray(distributionOrSalesIds) && distributionOrSalesIds.length > 0 && typeof distributionOrSalesIds[0] === 'object') {
+                // New format: [{ saleId, amount, fullyPaid, newTotalPaid }]
+                distribution = distributionOrSalesIds;
+            } else {
+                // Legacy format: array of sale IDs (mark all as fully paid)
+                distribution = distributionOrSalesIds.map(id => {
+                    const sale = sales.find(s => s.id === id);
+                    return { saleId: id, amount: sale ? parseFloat(sale.total) : 0, fullyPaid: true, newTotalPaid: sale ? parseFloat(sale.total) : 0 };
+                });
+            }
+
+            const fullyPaidCount = distribution.filter(d => d.fullyPaid).length;
+            const partialCount = distribution.filter(d => !d.fullyPaid).length;
+            const totalBoletas = distribution.length;
+
             // 1. Create a "Payment" Sale entry (So it appears in daily cash register)
+            let summaryDetail = `${totalBoletas} boleta${totalBoletas > 1 ? 's' : ''}`;
+            if (partialCount > 0) summaryDetail += ` (${partialCount} parcial)`;
+
             const paymentSale = {
                 date: getNowInCompanyTime(get().currentCompanyTimezone).toISOString(),
                 total: amount,
                 summary: `Abono de Cliente: ${client.name}`,
                 items: JSON.stringify([{
                     id: 'payment-adj',
-                    name: `Abono / Pago de Deuda(${salesIds.length} boletas)`,
+                    name: `Abono / Pago de Deuda (${summaryDetail})`,
                     price: amount,
                     quantity: 1,
                     unit: 'Und'
                 }]),
                 payment_method: paymentMethod,
-                payment_details: JSON.stringify({ amount: amount, change: 0, type: 'debt_payment' }),
+                payment_details: JSON.stringify({ amount: amount, change: 0, type: 'debt_payment', distribution }),
                 user_id: currentUser ? currentUser.id : null,
                 status: 'completed',
                 has_negative_stock: 0,
@@ -7036,21 +7095,37 @@ export const useStore = create(persist((set, get) => ({
                 }
             ];
 
-            // 2. Update the status of the Paid Sales
-            salesIds.forEach(id => {
-                queries.push({
-                    sql: "UPDATE sales SET status = 'paid' WHERE id = ?",
-                    args: [Number(id)]
-                });
+            // 2. Update each sale: amount_paid and status
+            distribution.forEach(d => {
+                if (d.fullyPaid) {
+                    queries.push({
+                        sql: "UPDATE sales SET status = 'paid', amount_paid = total WHERE id = ?",
+                        args: [Number(d.saleId)]
+                    });
+                } else {
+                    queries.push({
+                        sql: "UPDATE sales SET amount_paid = ?, status = CASE WHEN ? >= total THEN 'paid' ELSE status END WHERE id = ?",
+                        args: [d.newTotalPaid, d.newTotalPaid, Number(d.saleId)]
+                    });
+                }
             });
 
             await turso.batch(queries);
 
             // 3. Update Local State
+            const distributionMap = new Map(distribution.map(d => [d.saleId, d]));
             set(state => ({
                 sales: [
-                    { ...paymentSale, id: Date.now(), items: JSON.parse(paymentSale.items), paymentDetails: JSON.parse(paymentSale.payment_details) }, // Add the new "payment" sale
-                    ...state.sales.map(s => salesIds.includes(s.id) ? { ...s, status: 'paid' } : s) // Mark old ones as paid
+                    { ...paymentSale, id: Date.now(), items: JSON.parse(paymentSale.items), paymentDetails: JSON.parse(paymentSale.payment_details) },
+                    ...state.sales.map(s => {
+                        const d = distributionMap.get(s.id);
+                        if (!d) return s;
+                        return {
+                            ...s,
+                            status: d.fullyPaid ? 'paid' : s.status,
+                            amount_paid: d.newTotalPaid
+                        };
+                    })
                 ]
             }));
 

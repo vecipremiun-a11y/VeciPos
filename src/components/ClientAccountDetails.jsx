@@ -54,7 +54,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
     const pendingSales = rawClientSales.filter(s =>
         s.payment_method === 'Crédito' && s.status !== 'paid' && s.status !== 'cancelled'
     );
-    const totalDebt = pendingSales.reduce((sum, sale) => sum + parseFloat(sale.total), 0);
+    const totalDebt = pendingSales.reduce((sum, sale) => sum + parseFloat(sale.total) - parseFloat(sale.amount_paid || 0), 0);
 
     // Credit status info
     const creditLimit = parseFloat(client.credit_limit || 0);
@@ -93,10 +93,13 @@ const ClientAccountDetails = ({ client, onBack }) => {
         return true;
     });
 
-    const handlePaymentConfirm = async (selectedSalesIds, amount, paymentMethod) => {
-        const result = await registerClientPayment(client, amount, selectedSalesIds, paymentMethod);
+    const handlePaymentConfirm = async (distribution, amount, paymentMethod) => {
+        const result = await registerClientPayment(client, amount, distribution, paymentMethod);
         if (result.success) {
             setIsPaymentModalOpen(false);
+            // Reload client sales to reflect partial payments
+            const updatedSales = await fetchClientSales(client.id);
+            setRawClientSales(updatedSales);
         } else {
             alert("Error al procesar el abono: " + result.error);
         }
@@ -425,6 +428,11 @@ const ClientAccountDetails = ({ client, onBack }) => {
                                                     DEUDA PAGADA
                                                 </span>
                                             )}
+                                            {sale.payment_method === 'Crédito' && sale.status !== 'paid' && sale.status !== 'cancelled' && parseFloat(sale.amount_paid || 0) > 0 && (
+                                                <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                                                    ABONO PARCIAL: {formatCurrency(parseFloat(sale.amount_paid), currentCurrency)} / {formatCurrency(parseFloat(sale.total), currentCurrency)}
+                                                </span>
+                                            )}
                                             {sale.status === 'cancelled' && (
                                                 <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
                                                     ANULADO
@@ -475,6 +483,9 @@ const ClientAccountDetails = ({ client, onBack }) => {
                                                 const isAbono = sale.status === 'completed' && sale.summary?.includes('Abono');
                                                 const isPaid = sale.status === 'paid';
                                                 const isCancelled = sale.status === 'cancelled';
+                                                const hasPartialPayment = parseFloat(sale.amount_paid || 0) > 0 && !isPaid && !isCancelled;
+                                                const saleTotal = Math.abs(parseFloat(sale.total));
+                                                const remaining = saleTotal - parseFloat(sale.amount_paid || 0);
 
                                                 let colorClass = 'text-red-400'; // Default negative/debt
                                                 let sign = '-';
@@ -486,13 +497,19 @@ const ClientAccountDetails = ({ client, onBack }) => {
                                                     sign = '+';
                                                 } else if (isPaid) {
                                                     colorClass = 'text-green-400'; // Debt settled
-                                                    // sign stays '-' because it was a cost, but now green to show it's okay
                                                 }
 
                                                 return (
-                                                    <span className={`font-bold text-sm ${colorClass}`}>
-                                                        {sign}{formatCurrency(Math.abs(parseFloat(sale.total)), currentCurrency)}
-                                                    </span>
+                                                    <div className="text-right">
+                                                        <span className={`font-bold text-sm ${colorClass}`}>
+                                                            {sign}{formatCurrency(saleTotal, currentCurrency)}
+                                                        </span>
+                                                        {hasPartialPayment && (
+                                                            <p className="text-[10px] text-yellow-400/80 mt-0.5">
+                                                                Resta: {formatCurrency(remaining, currentCurrency)}
+                                                            </p>
+                                                        )}
+                                                    </div>
                                                 );
                                             })()}
                                         </td>
