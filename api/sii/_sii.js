@@ -1,6 +1,8 @@
 import { Certificado, CAF, DTE, EnvioDTE, EnvioBOLETA, EnviadorSII } from '@devlas/dte-sii';
 import ConsumoFolio from '@devlas/dte-sii/ConsumoFolio.js';
 import crypto from 'crypto';
+import https from 'https';
+import FormData from 'form-data';
 
 const ENCRYPTION_KEY = process.env.SII_ENCRYPTION_KEY || 'poskem-sii-default-key-change-me!'; // 32 chars
 
@@ -318,24 +320,97 @@ export async function enviarDTE(dte, siiConfig, cert, tipoDte) {
     });
     envio.generar();
 
-    // FIX: La librería envía boletas como UTF-8 (Buffer.from(xml,'utf-8'))
-    // pero declara encoding="ISO-8859-1". Si hay caracteres no-ASCII (ñ,á,é...),
-    // el SII interpreta bytes incorrectamente y la verificación de firma falla.
-    // La declaración XML NO forma parte del contenido firmado, así que es seguro cambiarla.
-    if ((tipoDte === 39 || tipoDte === 41) && envio.xml) {
-        envio.xml = envio.xml.replace('encoding="ISO-8859-1"', 'encoding="UTF-8"');
-    }
-
     const enviador = new EnviadorSII(cert, ambiente);
 
     let resultado;
     if (tipoDte === 39 || tipoDte === 41) {
-        resultado = await enviador.enviar(envio, siiConfig.rut_emisor, rutEnvia);
+        // FIX: La librería usa Buffer.from(xml,'utf-8') para boletas REST,
+        // pero el SII exige ISO-8859-1. Enviamos nosotros con encoding correcto.
+        resultado = await _enviarBoletaLatin1(enviador, envio, siiConfig.rut_emisor, rutEnvia);
     } else {
         resultado = await enviador.enviarDteSoap(envio);
     }
 
     return resultado;
+}
+
+// ─── Envío de boletas con encoding ISO-8859-1 correcto ───
+
+async function _enviarBoletaLatin1(enviador, envio, rutEmisor, rutEnvia) {
+    // Obtener token de autenticación
+    if (!enviador.token) {
+        await enviador.getToken();
+    }
+
+    let xml = envio.getXML();
+    if (!xml) throw new Error('No se pudo generar el XML del EnvioBOLETA');
+
+    if (!xml.startsWith('<?xml')) {
+        xml = '<?xml version="1.0" encoding="ISO-8859-1"?>\n' + xml;
+    }
+
+    const [rutSenderStr, dvSender] = rutEnvia.split('-');
+    const [rutCompanyStr, dvCompany] = rutEmisor.split('-');
+    const rutSender = parseInt(rutSenderStr.replace(/\./g, ''), 10);
+    const rutCompany = parseInt(rutCompanyStr.replace(/\./g, ''), 10);
+
+    const formData = new FormData();
+    formData.append('rutSender', rutSender.toString());
+    formData.append('dvSender', dvSender.toUpperCase());
+    formData.append('rutCompany', rutCompany.toString());
+    formData.append('dvCompany', dvCompany.toUpperCase());
+
+    // KEY FIX: Usar 'latin1' para que los bytes coincidan con encoding="ISO-8859-1"
+    const xmlBuffer = Buffer.from(xml, 'latin1');
+    formData.append('archivo', xmlBuffer, {
+        filename: 'EnvioBOLETA.xml',
+        contentType: 'application/xml',
+    });
+
+    const url = enviador.urls[enviador.ambiente].envio;
+    const urlObj = new URL(url);
+    const formBuffer = formData.getBuffer();
+    const formHeaders = formData.getHeaders();
+
+    console.log(`📤 Enviando boleta al SII (latin1): ${url}, ${xmlBuffer.length} bytes`);
+
+    const response = await new Promise((resolve, reject) => {
+        const req = https.request({
+            hostname: urlObj.hostname,
+            path: urlObj.pathname,
+            method: 'POST',
+            headers: {
+                ...formHeaders,
+                'Content-Length': formBuffer.length,
+                'User-Agent': 'Mozilla/4.0 ( compatible; PROG 1.0; Windows NT)',
+                'Accept': 'application/json',
+                'Cookie': `TOKEN=${enviador.token}`,
+            },
+        }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => resolve({ text: data, status: res.statusCode }));
+        });
+        req.on('error', reject);
+        req.write(formBuffer);
+        req.end();
+    });
+
+    console.log(`📥 SII HTTP ${response.status}:`, response.text);
+
+    // Parse response
+    if (response.status !== 200) {
+        return { ok: false, status: response.status, trackId: null, mensaje: `Error HTTP ${response.status}`, respuesta: response.text };
+    }
+    try {
+        const json = JSON.parse(response.text);
+        if (json.trackid) {
+            return { ok: true, trackId: json.trackid.toString(), TRACKID: json.trackid.toString(), estado: json.estado };
+        }
+        return { ok: false, trackId: null, mensaje: json.descripcion || 'Sin trackid', respuesta: response.text };
+    } catch {
+        return { ok: false, trackId: null, mensaje: 'Respuesta no JSON', respuesta: response.text };
+    }
 }
 
 // ─── Consultar estado ───
