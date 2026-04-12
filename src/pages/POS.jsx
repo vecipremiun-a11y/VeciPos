@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect as useEffectReact } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift, FileText, Receipt, ScanBarcode } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift, FileText, Receipt, ScanBarcode, Package } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
@@ -12,6 +12,8 @@ import ClientSearchWidget from '../components/ClientSearchWidget';
 import OptimizedImage from '../components/OptimizedImage';
 import SuspendedSalesModal from '../components/SuspendedSalesModal';
 import InvoiceDataModal from '../components/InvoiceDataModal';
+import PreventaSuccessModal from '../components/PreventaSuccessModal';
+import PreventasListModal from '../components/PreventasListModal';
 import { usePermissions } from '../hooks/usePermissions';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 import { turso } from '../lib/turso';
@@ -90,6 +92,12 @@ const POS = () => {
         suspendSale,
         suspendedSalesCount,
         updateSuspendedCount,
+        // Preventas
+        createPreventa,
+        fetchPreventaByCode,
+        completePreventa,
+        pendingPreventasCount,
+        updatePreventasCount,
         // Multi-Cart
         carts,
         activeCartId,
@@ -190,14 +198,19 @@ const POS = () => {
     const [lastSaleDetails, setLastSaleDetails] = useState(null);
     const [isLoadingProducts, setIsLoadingProducts] = useState(true);
     const [showSuspendedModal, setShowSuspendedModal] = useState(false);
+    const [showPreventasListModal, setShowPreventasListModal] = useState(false);
+    const [showPreventaSuccessModal, setShowPreventaSuccessModal] = useState(false);
+    const [lastPreventaData, setLastPreventaData] = useState(null);
+    const [activePreventaCode, setActivePreventaCode] = useState(null);
     const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
     const [showTotalsDetail, setShowTotalsDetail] = useState(false);
     const { can } = usePermissions();
 
-    // Cargar contador de ventas suspendidas
+    // Cargar contador de ventas suspendidas y preventas
     React.useEffect(() => {
         updateSuspendedCount();
-    }, [updateSuspendedCount]);
+        updatePreventasCount();
+    }, [updateSuspendedCount, updatePreventasCount]);
 
     // NUEVO: Precargar productos al montar el componente
     React.useEffect(() => {
@@ -219,6 +232,31 @@ const POS = () => {
 
         console.log("🔍 Escaneado:", scannedCode);
 
+        // Detect preventa codes (start with PV)
+        if (scannedCode.toUpperCase().startsWith('PV')) {
+            try {
+                const preventa = await fetchPreventaByCode(scannedCode.toUpperCase());
+                if (preventa) {
+                    clearCart();
+                    preventa.items.forEach(item => {
+                        addToCart({
+                            id: item.id, name: item.name, price: item.price,
+                            cost: item.cost || 0, quantity: item.quantity,
+                            tax_rate: item.tax_rate || 0, image: item.image || null,
+                            sku: item.sku || '', stock: item.stock || 0
+                        });
+                    });
+                    if (preventa.client_data) setPosSelectedClient(preventa.client_data);
+                    // Store the preventa code so completePreventa is called on sale
+                    // We'll use a ref since this is an async callback
+                    setActivePreventaCode(preventa.code);
+                    return;
+                }
+            } catch (e) {
+                console.error('Error loading preventa:', e);
+            }
+        }
+
         // Direct Server-Side Lookup (User Request: "search from server not local")
         try {
             const product = await getProductByBarcode(scannedCode);
@@ -234,7 +272,7 @@ const POS = () => {
         } catch (error) {
             console.error("Error scanning:", error);
         }
-    }, [addToCart, searchProducts, getProductByBarcode]);
+    }, [addToCart, searchProducts, getProductByBarcode, fetchPreventaByCode, clearCart, setPosSelectedClient]);
 
     useBarcodeScanner(handleBarcodeScan);
 
@@ -351,11 +389,19 @@ const POS = () => {
         setPendingInvoiceData(null);
 
         // Ejecutar venta en background (no bloquea UI)
+        // If this cart came from a preventa, complete it
+        const preventaCode = activePreventaCode;
+        if (preventaCode) {
+            setActivePreventaCode(null);
+        }
+
         addSale(saleData).then(result => {
             if (!result.success) {
                 // Si falla (raro), cerrar modal y mostrar error
                 setIsSuccessModalOpen(false);
                 alert(`Error al procesar la venta: ${result.error}`);
+            } else if (preventaCode) {
+                completePreventa(preventaCode, result.saleId);
             }
         });
     };
@@ -364,6 +410,72 @@ const POS = () => {
         clearCart();
         setIsSuccessModalOpen(false);
         setLastSaleDetails(null);
+    };
+
+    // ── Preventas ──
+
+    const handleCreatePreventa = async () => {
+        if (cart.length === 0) return;
+        const result = await createPreventa(cart, posSelectedClient, finalTotal);
+        if (result.success) {
+            // Get company info for ticket (prefer preventa-specific config, fallback to receipt config)
+            let companyInfo = { name: 'POSKEM', phone: '', address: '', headerMessage: '', footerMessage: '', format: '80mm' };
+            try {
+                const res = await turso.execute({ sql: `SELECT name, receipt_business_name, receipt_phone, receipt_address,
+                    preventa_business_name, preventa_address, preventa_phone, 
+                    preventa_header_message, preventa_footer_message,
+                    preventa_show_phone, preventa_show_address, preventa_format
+                    FROM companies WHERE id = ?`, args: [activeCompanyId] });
+                if (res.rows.length > 0) {
+                    const r = res.rows[0];
+                    companyInfo = {
+                        name: r.preventa_business_name || r.receipt_business_name || r.name || 'POSKEM',
+                        phone: (r.preventa_show_phone !== 0) ? (r.preventa_phone || r.receipt_phone || '') : '',
+                        address: (r.preventa_show_address !== 0) ? (r.preventa_address || r.receipt_address || '') : '',
+                        headerMessage: r.preventa_header_message || '',
+                        footerMessage: r.preventa_footer_message || '',
+                        format: r.preventa_format || '80mm'
+                    };
+                }
+            } catch {}
+
+            setLastPreventaData({
+                code: result.code,
+                items: [...cart],
+                total: finalTotal,
+                companyName: companyInfo.name,
+                companyPhone: companyInfo.phone,
+                companyAddress: companyInfo.address,
+                headerMessage: companyInfo.headerMessage,
+                footerMessage: companyInfo.footerMessage,
+                format: companyInfo.format
+            });
+            setShowPreventaSuccessModal(true);
+            clearCart();
+        } else {
+            alert('Error al crear preventa: ' + (result.error || 'desconocido'));
+        }
+    };
+
+    const handleLoadPreventa = (preventa) => {
+        clearCart();
+        preventa.items.forEach(item => {
+            addToCart({
+                id: item.id,
+                name: item.name,
+                price: item.price,
+                cost: item.cost || 0,
+                quantity: item.quantity,
+                tax_rate: item.tax_rate || 0,
+                image: item.image || null,
+                sku: item.sku || '',
+                stock: item.stock || 0
+            });
+        });
+        if (preventa.client_data) {
+            setPosSelectedClient(preventa.client_data);
+        }
+        setActivePreventaCode(preventa.code);
     };
 
     const handleCategoryChange = async (category) => {
@@ -968,6 +1080,38 @@ const POS = () => {
                     )}
 
                     <div className="flex gap-2">
+                        {/* Botón Preventa: carrito lleno = crear, carrito vacío = recuperar */}
+                        {can('pos.preventa') && (
+                            <button
+                                onClick={() => {
+                                    if (cart.length > 0) {
+                                        handleCreatePreventa();
+                                    } else {
+                                        setShowPreventasListModal(true);
+                                    }
+                                }}
+                                disabled={cart.length === 0 && pendingPreventasCount === 0}
+                                className={`flex-1 py-3 rounded-xl font-bold flex items-center justify-center gap-1 transition-all text-sm relative ${cart.length > 0
+                                    ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                                    : pendingPreventasCount > 0
+                                        ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                                        : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                }`}
+                            >
+                                {cart.length > 0 ? (
+                                    <>
+                                        <Package size={16} />
+                                        Preventa
+                                    </>
+                                ) : (
+                                    <>
+                                        <Package size={16} />
+                                        Recuperar {pendingPreventasCount > 0 ? `(${pendingPreventasCount})` : ''}
+                                    </>
+                                )}
+                            </button>
+                        )}
+
                         {can('pos.sell') && (
                             <button disabled={cart.length === 0} onClick={handleCheckoutClick} className="btn-primary flex-1 flex items-center justify-center gap-2 py-3 rounded-xl">
 
@@ -1168,17 +1312,41 @@ const POS = () => {
                                         {formatCurrency(finalTotal, currentCurrency)}
                                     </span>
                                 </div>
-                                <button
-                                    onClick={() => {
-                                        setIsMobileCartOpen(false);
-                                        handleCheckoutClick();
-                                    }}
-                                    disabled={cart.length === 0}
-                                    className="w-full btn-primary py-4 rounded-xl text-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
-                                >
-                                    <Banknote size={24} />
-                                    Cobrar
-                                </button>
+                                {can('pos.preventa') && (
+                                    <button
+                                        onClick={() => {
+                                            setIsMobileCartOpen(false);
+                                            if (cart.length > 0) {
+                                                handleCreatePreventa();
+                                            } else {
+                                                setShowPreventasListModal(true);
+                                            }
+                                        }}
+                                        disabled={cart.length === 0 && pendingPreventasCount === 0}
+                                        className={`w-full py-4 rounded-xl text-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50 ${cart.length > 0
+                                            ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                                            : pendingPreventasCount > 0
+                                                ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                                                : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                        }`}
+                                    >
+                                        <Package size={24} />
+                                        {cart.length > 0 ? 'Preventa' : `Recuperar ${pendingPreventasCount > 0 ? `(${pendingPreventasCount})` : ''}`}
+                                    </button>
+                                )}
+                                {can('pos.sell') && (
+                                    <button
+                                        onClick={() => {
+                                            setIsMobileCartOpen(false);
+                                            handleCheckoutClick();
+                                        }}
+                                        disabled={cart.length === 0}
+                                        className="w-full btn-primary py-4 rounded-xl text-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+                                    >
+                                        <Banknote size={24} />
+                                        Cobrar
+                                    </button>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -1189,6 +1357,18 @@ const POS = () => {
             <SuspendedSalesModal
                 isOpen={showSuspendedModal}
                 onClose={() => setShowSuspendedModal(false)}
+            />
+
+            <PreventasListModal
+                isOpen={showPreventasListModal}
+                onClose={() => setShowPreventasListModal(false)}
+                onLoadPreventa={handleLoadPreventa}
+            />
+
+            <PreventaSuccessModal
+                isOpen={showPreventaSuccessModal}
+                onClose={() => { setShowPreventaSuccessModal(false); setLastPreventaData(null); }}
+                preventaData={lastPreventaData}
             />
 
             <InvoiceDataModal

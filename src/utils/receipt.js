@@ -17,52 +17,60 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
         show_email: false
     };
 
+    const fmt = config.format || '58mm';
+    const pdfWidth = fmt === 'a4' ? 210 : (fmt === '80mm' ? 80 : 58);
+    const pdfFormat = fmt === 'a4' ? 'a4' : [pdfWidth, 200];
+    const centerX = pdfWidth / 2;
+    const rightX = pdfWidth - 2;
+    const maxTextWidth = pdfWidth - 4;
+    const separator = fmt === 'a4' ? '─'.repeat(80) : '--------------------------------';
+
     const doc = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
-        format: [58, 200] // 58mm width
+        format: pdfFormat
     });
 
     // Setup font styles
     doc.setFont('courier', 'bold');
-    doc.setFontSize(10);
+    doc.setFontSize(fmt === 'a4' ? 14 : 10);
 
-    let yPos = 10;
+    let yPos = fmt === 'a4' ? 20 : 10;
 
     // Header - Nombre del Negocio
-    doc.text(config.business_name || 'VECI', 29, yPos, { align: 'center' });
+    doc.text(config.business_name || 'VECI', centerX, yPos, { align: 'center' });
     yPos += 5;
 
     // Dirección
     doc.setFont('courier', 'normal');
-    doc.setFontSize(8);
-    doc.text(config.address || 'Sotomayor 1460-A', 29, yPos, { align: 'center' });
+    doc.setFontSize(fmt === 'a4' ? 10 : 8);
+    doc.text(config.address || 'Sotomayor 1460-A', centerX, yPos, { align: 'center' });
     yPos += 4;
 
     // RUT/NIT (si está configurado y habilitado)
     if (config.show_tax_id && config.tax_id) {
-        doc.text(`RUT: ${config.tax_id}`, 29, yPos, { align: 'center' });
+        doc.text(`RUT: ${config.tax_id}`, centerX, yPos, { align: 'center' });
         yPos += 4;
     }
 
     // Teléfono (si está configurado y habilitado)
     if (config.show_phone && config.phone) {
-        doc.text(`Tel: ${config.phone}`, 29, yPos, { align: 'center' });
+        doc.text(`Tel: ${config.phone}`, centerX, yPos, { align: 'center' });
         yPos += 4;
     }
 
     // Email (si está configurado y habilitado)
     if (config.show_email && config.email) {
-        doc.text(config.email, 29, yPos, { align: 'center' });
+        doc.text(config.email, centerX, yPos, { align: 'center' });
         yPos += 4;
     }
 
     // Mensaje cabecera personalizado (si existe)
     if (config.header_message) {
         yPos += 2;
-        const headerLines = doc.splitTextToSize(config.header_message, 54);
+        const headerLines = doc.splitTextToSize(config.header_message, maxTextWidth);
         headerLines.forEach(line => {
-            doc.text(line, 29, yPos, { align: 'center' });
+            doc.text(line, centerX, yPos, { align: 'center' });
             yPos += 3;
         });
     }
@@ -73,14 +81,14 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
     const date = new Date(saleDetails.date || Date.now()).toLocaleString('es-CL');
     const ticketId = saleDetails.id ? `T-${String(saleDetails.id).slice(-6)}` : `T-${Date.now().toString().slice(-6)}`;
 
-    doc.setFontSize(7);
+    doc.setFontSize(fmt === 'a4' ? 9 : 7);
     // DTE folio (if SII electronic invoicing is active)
     if (saleDetails.dte_folio) {
         const dteLabel = saleDetails.dte_tipo === 33 ? 'Factura Electrónica' : 'Boleta Electrónica';
         doc.setFont('courier', 'bold');
-        doc.text(`${dteLabel}`, 29, yPos, { align: 'center' });
+        doc.text(`${dteLabel}`, centerX, yPos, { align: 'center' });
         yPos += 3;
-        doc.text(`Folio N° ${saleDetails.dte_folio}`, 29, yPos, { align: 'center' });
+        doc.text(`Folio N° ${saleDetails.dte_folio}`, centerX, yPos, { align: 'center' });
         yPos += 4;
         doc.setFont('courier', 'normal');
     }
@@ -91,30 +99,30 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
     doc.text(`Vend: ${sellerName}`, 2, yPos);
     yPos += 4;
 
-    doc.text('--------------------------------', 2, yPos);
+    doc.text(separator, 2, yPos);
     yPos += 5;
 
     // Items
     doc.setFont('courier', 'bold');
     doc.text('DESCRIPCIÓN', 2, yPos);
-    doc.text('TOTAL', 56, yPos, { align: 'right' });
+    doc.text('TOTAL', rightX, yPos, { align: 'right' });
     yPos += 4;
     doc.setFont('courier', 'normal');
-    doc.text('--------------------------------', 2, yPos);
+    doc.text(separator, 2, yPos);
     yPos += 4;
 
     const items = saleDetails.items || [];
     items.forEach(item => {
-        const splitName = doc.splitTextToSize(item.name, 54);
+        const splitName = doc.splitTextToSize(item.name, maxTextWidth);
         doc.text(splitName, 2, yPos);
         yPos += splitName.length * 3;
 
         doc.text(`${item.quantity} x ${formatCurrency(item.price, currencyCode)}`, 2, yPos);
-        doc.text(`${formatCurrency(item.price * item.quantity, currencyCode)}`, 56, yPos, { align: 'right' });
+        doc.text(`${formatCurrency(item.price * item.quantity, currencyCode)}`, rightX, yPos, { align: 'right' });
         yPos += 5;
     });
 
-    doc.text('--------------------------------', 2, yPos);
+    doc.text(separator, 2, yPos);
     yPos += 5;
 
     // Totals
@@ -124,40 +132,40 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
     const change = saleDetails.paymentDetails?.change || 0;
 
     doc.setFont('courier', 'bold');
-    doc.setFontSize(10);
+    doc.setFontSize(fmt === 'a4' ? 14 : 10);
     doc.text('TOTAL', 2, yPos);
-    doc.text(`${formatCurrency(saleDetails.total, currencyCode)}`, 56, yPos, { align: 'right' });
+    doc.text(`${formatCurrency(saleDetails.total, currencyCode)}`, rightX, yPos, { align: 'right' });
     yPos += 6;
 
     if (saleDetails.status === 'cancelled') {
         doc.setTextColor(255, 0, 0);
-        doc.text('ANULADA', 29, yPos, { align: 'center' });
+        doc.text('ANULADA', centerX, yPos, { align: 'center' });
         doc.setTextColor(0, 0, 0);
         yPos += 6;
     }
 
     doc.setFont('courier', 'normal');
-    doc.setFontSize(8);
+    doc.setFontSize(fmt === 'a4' ? 10 : 8);
     doc.text('Medio Pago:', 2, yPos);
-    doc.text(paymentLabel, 56, yPos, { align: 'right' });
+    doc.text(paymentLabel, rightX, yPos, { align: 'right' });
     yPos += 5;
 
     if (isCash) {
         doc.text('Pagó con:', 2, yPos);
-        doc.text(`${formatCurrency(amountPaid, currencyCode)}`, 56, yPos, { align: 'right' });
+        doc.text(`${formatCurrency(amountPaid, currencyCode)}`, rightX, yPos, { align: 'right' });
         yPos += 5;
         doc.text('Vuelto:', 2, yPos);
-        doc.text(`${formatCurrency(change, currencyCode)}`, 56, yPos, { align: 'right' });
+        doc.text(`${formatCurrency(change, currencyCode)}`, rightX, yPos, { align: 'right' });
         yPos += 5;
     }
 
     // Footer personalizado
     yPos += 10;
-    doc.setFontSize(8);
+    doc.setFontSize(fmt === 'a4' ? 10 : 8);
     const footerMessage = config.footer_message || '¡GRACIAS POR SU COMPRA!\nVuelva pronto';
     const footerLines = footerMessage.split('\n');
     footerLines.forEach(line => {
-        doc.text(line, 29, yPos, { align: 'center' });
+        doc.text(line, centerX, yPos, { align: 'center' });
         yPos += 5;
     });
 
@@ -165,12 +173,13 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
     if (timbreImg) {
         yPos += 5;
         doc.setFontSize(6);
-        doc.text('Timbre Electrónico SII', 29, yPos, { align: 'center' });
+        doc.text('Timbre Electrónico SII', centerX, yPos, { align: 'center' });
         yPos += 3;
-        doc.addImage(timbreImg, 'PNG', 2, yPos, 54, 18);
+        const timbreWidth = Math.min(maxTextWidth, 54);
+        doc.addImage(timbreImg, 'PNG', 2, yPos, timbreWidth, 18);
         yPos += 20;
         doc.setFontSize(5);
-        doc.text('Res. Ex. SII - Documento tributario electrónico', 29, yPos, { align: 'center' });
+        doc.text('Res. Ex. SII - Documento tributario electrónico', centerX, yPos, { align: 'center' });
         yPos += 4;
     }
 

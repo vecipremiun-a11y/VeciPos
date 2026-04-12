@@ -116,7 +116,8 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                             receipt_footer_message as footer_message,
                             receipt_show_tax_id as show_tax_id,
                             receipt_show_phone as show_phone,
-                            receipt_show_email as show_email
+                            receipt_show_email as show_email,
+                            receipt_format as format
                           FROM companies WHERE id = ?`,
                     args: [activeCompanyId]
                 });
@@ -133,7 +134,8 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                         footer_message: data.footer_message || '¡GRACIAS POR SU COMPRA!\nVuelva pronto',
                         show_tax_id: data.show_tax_id === 1,
                         show_phone: data.show_phone === 1,
-                        show_email: data.show_email === 1
+                        show_email: data.show_email === 1,
+                        format: data.format || '58mm'
                     });
                 }
             } catch (e) {
@@ -147,51 +149,57 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
     if (!isOpen || !saleDetails) return null;
 
     const generatePDF = () => {
+        const fmt = receiptConfig.format || '58mm';
+        const pdfWidth = fmt === 'a4' ? 210 : (fmt === '80mm' ? 80 : 58);
+        const pdfFormat = fmt === 'a4' ? 'a4' : [pdfWidth, 200];
+        const centerX = pdfWidth / 2;
+        const maxTextWidth = pdfWidth - 4;
+
         const doc = new jsPDF({
             orientation: 'portrait',
             unit: 'mm',
-            format: [58, 200]
+            format: pdfFormat
         });
 
         doc.setFont('courier', 'bold');
-        doc.setFontSize(10);
+        doc.setFontSize(fmt === 'a4' ? 14 : 10);
 
-        let yPos = 10;
+        let yPos = fmt === 'a4' ? 20 : 10;
 
         // Header - Nombre del Negocio
-        doc.text(receiptConfig.business_name, 29, yPos, { align: 'center' });
+        doc.text(receiptConfig.business_name, centerX, yPos, { align: 'center' });
         yPos += 5;
 
         // Dirección
         doc.setFont('courier', 'normal');
-        doc.setFontSize(8);
-        doc.text(receiptConfig.address, 29, yPos, { align: 'center' });
+        doc.setFontSize(fmt === 'a4' ? 10 : 8);
+        doc.text(receiptConfig.address, centerX, yPos, { align: 'center' });
         yPos += 4;
 
         // RUT/NIT (si está configurado y habilitado)
         if (receiptConfig.show_tax_id && receiptConfig.tax_id) {
-            doc.text(`RUT: ${receiptConfig.tax_id}`, 29, yPos, { align: 'center' });
+            doc.text(`RUT: ${receiptConfig.tax_id}`, centerX, yPos, { align: 'center' });
             yPos += 4;
         }
 
         // Teléfono
         if (receiptConfig.show_phone && receiptConfig.phone) {
-            doc.text(`Tel: ${receiptConfig.phone}`, 29, yPos, { align: 'center' });
+            doc.text(`Tel: ${receiptConfig.phone}`, centerX, yPos, { align: 'center' });
             yPos += 4;
         }
 
         // Email
         if (receiptConfig.show_email && receiptConfig.email) {
-            doc.text(receiptConfig.email, 29, yPos, { align: 'center' });
+            doc.text(receiptConfig.email, centerX, yPos, { align: 'center' });
             yPos += 4;
         }
 
         // Mensaje cabecera
         if (receiptConfig.header_message) {
             yPos += 2;
-            const headerLines = doc.splitTextToSize(receiptConfig.header_message, 54);
+            const headerLines = doc.splitTextToSize(receiptConfig.header_message, maxTextWidth);
             headerLines.forEach(line => {
-                doc.text(line, 29, yPos, { align: 'center' });
+                doc.text(line, centerX, yPos, { align: 'center' });
                 yPos += 3;
             });
         }
@@ -204,11 +212,11 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
 
         const dteLabel = saleDetails.tipoDte === 33 ? 'FACTURA ELECTRÓNICA' : 'BOLETA ELECTRÓNICA';
 
-        doc.setFontSize(7);
+        doc.setFontSize(fmt === 'a4' ? 9 : 7);
         if (dteInfo?.folio) {
-            doc.text(`${dteLabel}`, 29, yPos, { align: 'center' });
+            doc.text(`${dteLabel}`, centerX, yPos, { align: 'center' });
             yPos += 4;
-            doc.text(`Folio: ${dteInfo.folio}`, 29, yPos, { align: 'center' });
+            doc.text(`Folio: ${dteInfo.folio}`, centerX, yPos, { align: 'center' });
             yPos += 4;
         } else {
             doc.text(`Boleta: ${ticketId}`, 2, yPos);
@@ -216,34 +224,35 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         }
         doc.text(`Fecha: ${date}`, 2, yPos);
         yPos += 4;
-        doc.text(`Fecha: ${date}`, 2, yPos);
-        yPos += 4;
         doc.text(`Vend: ${sellerName}`, 2, yPos);
         yPos += 4;
 
-        doc.text('--------------------------------', 2, yPos);
+        const separator = fmt === 'a4' ? '─'.repeat(80) : '--------------------------------';
+        const rightX = pdfWidth - 2;
+
+        doc.text(separator, 2, yPos);
         yPos += 5;
 
         // Items
         doc.setFont('courier', 'bold');
         doc.text('DESCRIPCIÓN', 2, yPos);
-        doc.text('TOTAL', 56, yPos, { align: 'right' });
+        doc.text('TOTAL', rightX, yPos, { align: 'right' });
         yPos += 4;
         doc.setFont('courier', 'normal');
-        doc.text('--------------------------------', 2, yPos);
+        doc.text(separator, 2, yPos);
         yPos += 4;
 
         saleDetails.items.forEach(item => {
-            const splitName = doc.splitTextToSize(item.name, 54);
+            const splitName = doc.splitTextToSize(item.name, maxTextWidth);
             doc.text(splitName, 2, yPos);
             yPos += splitName.length * 3;
 
             doc.text(`${item.quantity} x ${formatCurrency(item.price, currentCurrency)}`, 2, yPos);
-            doc.text(`${formatCurrency(item.price * item.quantity, currentCurrency)}`, 56, yPos, { align: 'right' });
+            doc.text(`${formatCurrency(item.price * item.quantity, currentCurrency)}`, rightX, yPos, { align: 'right' });
             yPos += 5;
         });
 
-        doc.text('--------------------------------', 2, yPos);
+        doc.text(separator, 2, yPos);
         yPos += 5;
 
         // Totals
@@ -253,32 +262,32 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         const change = saleDetails.paymentDetails?.change || 0;
 
         doc.setFont('courier', 'bold');
-        doc.setFontSize(10);
+        doc.setFontSize(fmt === 'a4' ? 14 : 10);
         doc.text('TOTAL', 2, yPos);
-        doc.text(`${formatCurrency(saleDetails.total, currentCurrency)}`, 56, yPos, { align: 'right' });
+        doc.text(`${formatCurrency(saleDetails.total, currentCurrency)}`, rightX, yPos, { align: 'right' });
         yPos += 6;
 
         doc.setFont('courier', 'normal');
-        doc.setFontSize(8);
+        doc.setFontSize(fmt === 'a4' ? 10 : 8);
         doc.text('Medio Pago:', 2, yPos);
-        doc.text(paymentLabel, 56, yPos, { align: 'right' });
+        doc.text(paymentLabel, rightX, yPos, { align: 'right' });
         yPos += 5;
 
         if (isCash) {
             doc.text('Pagó con:', 2, yPos);
-            doc.text(`${formatCurrency(Number(amountPaid), currentCurrency)}`, 56, yPos, { align: 'right' });
+            doc.text(`${formatCurrency(Number(amountPaid), currentCurrency)}`, rightX, yPos, { align: 'right' });
             yPos += 5;
             doc.text('Vuelto:', 2, yPos);
-            doc.text(`${formatCurrency(Number(change), currentCurrency)}`, 56, yPos, { align: 'right' });
+            doc.text(`${formatCurrency(Number(change), currentCurrency)}`, rightX, yPos, { align: 'right' });
             yPos += 5;
         }
 
         // Footer personalizado
         yPos += 10;
-        doc.setFontSize(8);
+        doc.setFontSize(fmt === 'a4' ? 10 : 8);
         const footerLines = receiptConfig.footer_message.split('\n');
         footerLines.forEach(line => {
-            doc.text(line, 29, yPos, { align: 'center' });
+            doc.text(line, centerX, yPos, { align: 'center' });
             yPos += 5;
         });
 
@@ -286,12 +295,13 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         if (timbreImg) {
             yPos += 5;
             doc.setFontSize(6);
-            doc.text('Timbre Electrónico SII', 29, yPos, { align: 'center' });
+            doc.text('Timbre Electrónico SII', centerX, yPos, { align: 'center' });
             yPos += 3;
-            doc.addImage(timbreImg, 'PNG', 2, yPos, 54, 18);
+            const timbreWidth = Math.min(maxTextWidth, 54);
+            doc.addImage(timbreImg, 'PNG', 2, yPos, timbreWidth, 18);
             yPos += 20;
             doc.setFontSize(5);
-            doc.text('Res. Ex. SII - Documento tributario electrónico', 29, yPos, { align: 'center' });
+            doc.text('Res. Ex. SII - Documento tributario electrónico', centerX, yPos, { align: 'center' });
             yPos += 4;
         }
 
@@ -380,7 +390,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         window.open(`https://wa.me/${fullNumber}?text=${encodedMessage}`, '_blank');
     };
     const handlePrint = () => {
-        const printWindow = window.open('', '', 'width=300,height=600');
+        const printWindow = window.open('', '', 'width=400,height=700');
         const sellerName = seller?.name || 'Vendedor';
         const date = new Date().toLocaleString('es-CL');
         const ticketId = `T-${Date.now().toString().slice(-6)}`;
@@ -392,18 +402,32 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         const isCash = ['cash', 'efectivo', 'Efectivo'].includes(saleDetails.paymentMethod);
         const paymentLabel = isCash ? 'Efectivo' : saleDetails.paymentMethod;
 
+        const fmt = receiptConfig.format || '58mm';
+        const isA4 = fmt === 'a4';
+        const is80 = fmt === '80mm';
+        const pageSize = isA4 ? 'A4' : `${fmt} auto`;
+        const pageMargin = isA4 ? '15mm' : '0';
+        const bodyWidth = isA4 ? '190mm' : fmt;
+        const bodyFont = isA4 ? '14px' : '12px';
+        const headerFontSize = isA4 ? '24px' : (is80 ? '20px' : '18px');
+        const addrFontSize = isA4 ? '13px' : '11px';
+        const metaFontSize = isA4 ? '12px' : '10px';
+        const descFontSize = isA4 ? '12px' : '10px';
+        const itemFontSize = isA4 ? '13px' : '12px';
+        const totalFontSize = isA4 ? '18px' : '14px';
+        const footerFontSize = isA4 ? '13px' : '11px';
+
         printWindow.document.write(`
             <html>
                 <head>
                     <title>Ticket de Venta</title>
                     <style>
-                        @page { margin: 0; }
+                        @page { size: ${pageSize}; margin: ${pageMargin}; }
                         body { 
                             font-family: 'Courier New', monospace; 
-                            width: 58mm; 
-                            margin: 0; 
-                            padding: 5px; 
-                            font-size: 12px;
+                            width: ${bodyWidth}; 
+                            ${isA4 ? 'max-width: 190mm; margin: 0 auto; padding: 10mm;' : 'margin: 0; padding: 5px;'}
+                            font-size: ${bodyFont};
                             line-height: 1.2;
                         }
                         .text-center { text-align: center; }
@@ -424,21 +448,21 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                             justify-content: space-between; 
                         }
                         .totals { margin-top: 10px; }
-                        .footer { margin-top: 20px; font-size: 10px; }
+                        .footer { margin-top: 20px; font-size: ${footerFontSize}; }
                     </style>
                 </head>
                 <body>
                     <div class="header text-center">
-                        <h1 style="margin: 0; font-size: 18px; font-weight: bold;">${receiptConfig.business_name}</h1>
-                        <p style="margin: 5px 0; font-size: 11px;">${receiptConfig.address}</p>
-                        ${receiptConfig.show_tax_id && receiptConfig.tax_id ? `<p style="margin: 2px 0; font-size: 10px;">RUT: ${receiptConfig.tax_id}</p>` : ''}
-                        ${receiptConfig.show_phone && receiptConfig.phone ? `<p style="margin: 2px 0; font-size: 10px;">Tel: ${receiptConfig.phone}</p>` : ''}
-                        ${receiptConfig.show_email && receiptConfig.email ? `<p style="margin: 2px 0; font-size: 10px;">${receiptConfig.email}</p>` : ''}
-                        ${receiptConfig.header_message ? `<p style="margin: 10px 0; font-size: 10px; font-style: italic;">${receiptConfig.header_message}</p>` : ''}
+                        <h1 style="margin: 0; font-size: ${headerFontSize}; font-weight: bold;">${receiptConfig.business_name}</h1>
+                        <p style="margin: 5px 0; font-size: ${addrFontSize};">${receiptConfig.address}</p>
+                        ${receiptConfig.show_tax_id && receiptConfig.tax_id ? `<p style="margin: 2px 0; font-size: ${metaFontSize};">RUT: ${receiptConfig.tax_id}</p>` : ''}
+                        ${receiptConfig.show_phone && receiptConfig.phone ? `<p style="margin: 2px 0; font-size: ${metaFontSize};">Tel: ${receiptConfig.phone}</p>` : ''}
+                        ${receiptConfig.show_email && receiptConfig.email ? `<p style="margin: 2px 0; font-size: ${metaFontSize};">${receiptConfig.email}</p>` : ''}
+                        ${receiptConfig.header_message ? `<p style="margin: 10px 0; font-size: ${metaFontSize}; font-style: italic;">${receiptConfig.header_message}</p>` : ''}
                         <br/>
-                        <div style="font-size: 10px; text-align: left;">
+                        <div style="font-size: ${metaFontSize}; text-align: left;">
                             ${dteInfo?.folio 
-                                ? `<div style="text-align: center; font-weight: bold; font-size: 11px;">${saleDetails.tipoDte === 33 ? 'FACTURA ELECTRÓNICA' : 'BOLETA ELECTRÓNICA'}</div>
+                                ? `<div style="text-align: center; font-weight: bold; font-size: ${addrFontSize};">${saleDetails.tipoDte === 33 ? 'FACTURA ELECTRÓNICA' : 'BOLETA ELECTRÓNICA'}</div>
                                    <div style="text-align: center;">Folio: ${dteInfo.folio}</div>`
                                 : `<div>Boleta: ${ticketId}</div>`
                             }
@@ -449,14 +473,14 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
 
                     <div class="separator"></div>
 
-                    <div style="font-size: 10px; font-weight: bold; display: flex; justify-content: space-between;">
+                    <div style="font-size: ${descFontSize}; font-weight: bold; display: flex; justify-content: space-between;">
                         <span>DESCRIPCIÓN</span>
                         <span> TOTAL</span>
                     </div>
                     <div class="separator"></div>
 
                     ${saleDetails.items.map(item => `
-                        <div class="item">
+                        <div class="item" style="font-size: ${itemFontSize};">
                             <div class="item-name">${item.name}</div>
                             <div class="item-details">
                                 <span>${item.quantity} x ${formatCurrency(item.price, currentCurrency)}</span>
@@ -468,7 +492,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                     <div class="separator"></div>
                     
                     <div class="totals">
-                        <div style="display: flex; justify-content: space-between; font-size: 14px;" class="bold">
+                        <div style="display: flex; justify-content: space-between; font-size: ${totalFontSize};" class="bold">
                             <span>TOTAL</span>
                             <span>${formatCurrency(saleDetails.total, currentCurrency)}</span>
                         </div>
@@ -490,14 +514,14 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                     </div>
                     
                     <div class="footer text-center">
-                        <div style="margin-top: 20px; text-align: center; font-size: 11px;">
+                        <div style="margin-top: 20px; text-align: center;">
                             ${receiptConfig.footer_message.split('\n').map(line => `<div style="margin: 3px 0;">${line}</div>`).join('')}
                         </div>
                     </div>
                     ${timbreImg ? `
                     <div style="text-align:center; margin-top:15px; padding-top:10px; border-top:1px dashed #ccc;">
                         <div style="font-size:8px; font-weight:bold; margin-bottom:5px;">Timbre Electrónico SII</div>
-                        <img src="${timbreImg}" style="width:100%; max-width:220px;" />
+                        <img src="${timbreImg}" style="width:100%; max-width:${isA4 ? '300px' : '220px'};" />
                         <div style="font-size:7px; margin-top:3px;">Res. Ex. SII - Documento tributario electrónico</div>
                     </div>
                     ` : ''}

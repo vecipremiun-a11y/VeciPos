@@ -262,9 +262,11 @@ const PermissionsSettings = () => {
                                                         <div className="text-[var(--color-text)] font-medium text-sm">
                                                             {perm.label}
                                                         </div>
-                                                        <div className="text-[var(--color-text-muted)] text-xs font-mono opacity-50 mt-0.5">
-                                                            {perm.id}
-                                                        </div>
+                                                        {perm.desc && (
+                                                            <div className="text-[var(--color-text-muted)] text-xs mt-0.5">
+                                                                {perm.desc}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <ToggleSwitch
                                                         enabled={granted}
@@ -373,7 +375,7 @@ const PermissionsSettings = () => {
                             ¿Estás seguro de eliminar el rol <span className="font-bold">{showDeleteModal.role_name}</span>?
                         </p>
                         <p className="text-sm text-[var(--color-text-muted)] bg-red-500/10 p-3 rounded-lg border border-red-500/20">
-                            ⚠️ Los usuarios asignados a este rol serán movidos automáticamente al rol <strong>Vendedor</strong>.
+                            ⚠️ Los usuarios asignados a este rol serán movidos automáticamente al rol <strong>Caja</strong>.
                         </p>
                         <div className="flex gap-3 pt-2">
                             <button onClick={() => setShowDeleteModal(null)} className="flex-1 py-2 text-[var(--color-text-muted)] hover:bg-[var(--glass-border)] rounded-lg transition-colors">

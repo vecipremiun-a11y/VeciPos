@@ -5,14 +5,15 @@ import { cn } from '../lib/utils';
 import { usePermissions } from '../hooks/usePermissions';
 
 const Users = () => {
-    const { users, currentUser, addUser, deleteUser, updateUser, activeCompanyId } = useStore();
+    const { users, currentUser, addUser, deleteUser, updateUser, activeCompanyId, fetchCompanyRoles } = useStore();
     const { can } = usePermissions();
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
     const [activeTab, setActiveTab] = useState('general'); // 'general' | 'labor'
+    const [companyRoles, setCompanyRoles] = useState([]);
     const [formData, setFormData] = useState({
-        name: '', username: '', role: 'Vendedor', password: '', email: '',
+        name: '', username: '', role: 'Caja', password: '', email: '',
         // Labor Profile
         has_labor_profile: false,
         labor_position: '',
@@ -46,6 +47,15 @@ const Users = () => {
     if (!can('users.view')) {
         return <div className="text-center p-10 text-red-500">Acceso Denegado. Se requieren permisos de Administrador o Gestión de Usuarios.</div>;
     }
+
+    // Load company roles for dropdown
+    React.useEffect(() => {
+        if (activeCompanyId && fetchCompanyRoles) {
+            fetchCompanyRoles().then(roles => {
+                if (roles && roles.length > 0) setCompanyRoles(roles);
+            });
+        }
+    }, [activeCompanyId, fetchCompanyRoles]);
 
     // DEBUG (Removed - Moved down)
 
@@ -135,7 +145,7 @@ const Users = () => {
         } else {
             setEditingUser(null);
             setFormData({
-                name: '', username: '', role: 'Vendedor', password: '', email: '',
+                name: '', username: '', role: 'Caja', password: '', email: '',
                 has_labor_profile: false,
                 labor_position: '', labor_branch: '', labor_start_date: '',
                 labor_status: 'active', labor_pin: '',
@@ -169,8 +179,10 @@ const Users = () => {
         switch (role) {
             case 'Administrador':
                 return 'bg-purple-500/20 text-purple-400 border-purple-500/30';
-            case 'Vendedor':
+            case 'Caja':
                 return 'bg-green-500/20 text-green-400 border-green-500/30';
+            case 'Vendedor':
+                return 'bg-violet-500/20 text-violet-400 border-violet-500/30';
             case 'Bodeguero':
                 return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
             case 'Supervisor':
@@ -579,10 +591,14 @@ const Users = () => {
                                         value={formData.role}
                                         onChange={e => setFormData({ ...formData, role: e.target.value })}
                                     >
+                                        <option value="Administrador">Administrador</option>
+                                        <option value="Caja">Caja</option>
                                         <option value="Vendedor">Vendedor</option>
                                         <option value="Bodeguero">Bodeguero</option>
                                         <option value="Supervisor">Supervisor</option>
-                                        <option value="Administrador">Administrador</option>
+                                        {companyRoles.filter(r => !['Administrador','Caja','Vendedor','Bodeguero','Supervisor'].includes(r.role_name)).map(r => (
+                                            <option key={r.role_name} value={r.role_name}>{r.role_name}</option>
+                                        ))}
                                     </select>
                                 </div>
                             </div>

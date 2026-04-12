@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../store/useStore';
 import { turso } from '../../lib/turso';
-import { FileText, Eye, Save, Building2 } from 'lucide-react';
+import { FileText, Eye, Save, Building2, Package } from 'lucide-react';
 
 const ReceiptSettings = ({ companyInfo }) => {
     const { activeCompanyId } = useStore();
+    const [activeTab, setActiveTab] = useState('boleta');
     const [receiptConfig, setReceiptConfig] = useState({
         business_name: '',
         address: '',
@@ -15,9 +16,21 @@ const ReceiptSettings = ({ companyInfo }) => {
         footer_message: '',
         show_tax_id: true,
         show_phone: true,
-        show_email: true
+        show_email: true,
+        format: '58mm'
+    });
+    const [preventaConfig, setPreventaConfig] = useState({
+        business_name: '',
+        address: '',
+        phone: '',
+        header_message: '',
+        footer_message: '',
+        show_phone: true,
+        show_address: true,
+        format: '80mm'
     });
     const [isSavingReceipt, setIsSavingReceipt] = useState(false);
+    const [isSavingPreventa, setIsSavingPreventa] = useState(false);
     const [showPreview, setShowPreview] = useState(false);
 
     // Cargar configuración de boletas
@@ -35,7 +48,8 @@ const ReceiptSettings = ({ companyInfo }) => {
                             receipt_footer_message,
                             receipt_show_tax_id,
                             receipt_show_phone,
-                            receipt_show_email
+                            receipt_show_email,
+                            receipt_format
                           FROM companies WHERE id = ?`,
                     args: [activeCompanyId]
                 });
@@ -52,7 +66,8 @@ const ReceiptSettings = ({ companyInfo }) => {
                         footer_message: data.receipt_footer_message || '',
                         show_tax_id: data.receipt_show_tax_id === 1,
                         show_phone: data.receipt_show_phone === 1,
-                        show_email: data.receipt_show_email === 1
+                        show_email: data.receipt_show_email === 1,
+                        format: data.receipt_format || '58mm'
                     });
                 }
             } catch (e) {
@@ -60,8 +75,43 @@ const ReceiptSettings = ({ companyInfo }) => {
             }
         };
 
+        const loadPreventaConfig = async () => {
+            try {
+                const result = await turso.execute({
+                    sql: `SELECT 
+                            preventa_business_name,
+                            preventa_address,
+                            preventa_phone,
+                            preventa_header_message,
+                            preventa_footer_message,
+                            preventa_show_phone,
+                            preventa_show_address,
+                            preventa_format
+                          FROM companies WHERE id = ?`,
+                    args: [activeCompanyId]
+                });
+                if (result.rows.length > 0) {
+                    const data = result.rows[0];
+                    setPreventaConfig({
+                        business_name: data.preventa_business_name || '',
+                        address: data.preventa_address || '',
+                        phone: data.preventa_phone || '',
+                        header_message: data.preventa_header_message || '',
+                        footer_message: data.preventa_footer_message || '',
+                        show_phone: data.preventa_show_phone !== 0,
+                        show_address: data.preventa_show_address !== 0,
+                        format: data.preventa_format || '80mm'
+                    });
+                }
+            } catch (e) {
+                // Columns may not exist yet
+                console.warn('Preventa config not available yet:', e.message);
+            }
+        };
+
         if (activeCompanyId) {
             loadReceiptConfig();
+            loadPreventaConfig();
         }
     }, [activeCompanyId]);
 
@@ -79,7 +129,8 @@ const ReceiptSettings = ({ companyInfo }) => {
                         receipt_footer_message = ?,
                         receipt_show_tax_id = ?,
                         receipt_show_phone = ?,
-                        receipt_show_email = ?
+                        receipt_show_email = ?,
+                        receipt_format = ?
                       WHERE id = ?`,
                 args: [
                     receiptConfig.business_name,
@@ -92,6 +143,7 @@ const ReceiptSettings = ({ companyInfo }) => {
                     receiptConfig.show_tax_id ? 1 : 0,
                     receiptConfig.show_phone ? 1 : 0,
                     receiptConfig.show_email ? 1 : 0,
+                    receiptConfig.format,
                     activeCompanyId
                 ]
             });
@@ -104,8 +156,70 @@ const ReceiptSettings = ({ companyInfo }) => {
         }
     };
 
+    const handleSavePreventaConfig = async () => {
+        setIsSavingPreventa(true);
+        try {
+            await turso.execute({
+                sql: `UPDATE companies SET 
+                        preventa_business_name = ?,
+                        preventa_address = ?,
+                        preventa_phone = ?,
+                        preventa_header_message = ?,
+                        preventa_footer_message = ?,
+                        preventa_show_phone = ?,
+                        preventa_show_address = ?,
+                        preventa_format = ?
+                      WHERE id = ?`,
+                args: [
+                    preventaConfig.business_name,
+                    preventaConfig.address,
+                    preventaConfig.phone,
+                    preventaConfig.header_message,
+                    preventaConfig.footer_message,
+                    preventaConfig.show_phone ? 1 : 0,
+                    preventaConfig.show_address ? 1 : 0,
+                    preventaConfig.format,
+                    activeCompanyId
+                ]
+            });
+            alert('✅ Configuración de preventa guardada correctamente');
+        } catch (e) {
+            console.error('Error saving preventa config:', e);
+            alert('❌ Error al guardar configuración');
+        } finally {
+            setIsSavingPreventa(false);
+        }
+    };
+
     return (
         <div className="glass-card border border-blue-500/30">
+            {/* Tabs */}
+            <div className="flex gap-1 mb-6 bg-[var(--glass-bg)] rounded-xl p-1 border border-[var(--glass-border)]">
+                <button
+                    onClick={() => { setActiveTab('boleta'); setShowPreview(false); }}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-bold text-sm transition-all ${activeTab === 'boleta'
+                        ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                        : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-white/5'
+                    }`}
+                >
+                    <FileText size={16} />
+                    Boleta
+                </button>
+                <button
+                    onClick={() => { setActiveTab('preventa'); setShowPreview(false); }}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-bold text-sm transition-all ${activeTab === 'preventa'
+                        ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                        : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-white/5'
+                    }`}
+                >
+                    <Package size={16} />
+                    Preventa
+                </button>
+            </div>
+
+            {/* ===== TAB BOLETA ===== */}
+            {activeTab === 'boleta' && (
+                <>
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
                     <div className="p-2 bg-blue-500/20 rounded-lg">
@@ -113,7 +227,7 @@ const ReceiptSettings = ({ companyInfo }) => {
                     </div>
                     <div>
                         <h2 className="text-xl font-bold text-blue-400">Configuración de Boletas</h2>
-                        <p className="text-sm text-[var(--color-text-muted)]">Personaliza los datos que aparecen en tus boletas de venta (58mm)</p>
+                        <p className="text-sm text-[var(--color-text-muted)]">Personaliza los datos que aparecen en tus boletas de venta</p>
                     </div>
                 </div>
                 <button
@@ -123,6 +237,26 @@ const ReceiptSettings = ({ companyInfo }) => {
                     <Eye size={16} />
                     {showPreview ? 'Ocultar' : 'Vista Previa'}
                 </button>
+            </div>
+
+            {/* Selector de formato */}
+            <div className="mb-6">
+                <label className="block text-sm font-medium text-[var(--color-text)] mb-2">Formato de impresión</label>
+                <div className="flex gap-2">
+                    {[{ value: '58mm', label: '58mm', desc: 'Térmica angosta' }, { value: '80mm', label: '80mm', desc: 'Térmica ancha' }, { value: 'a4', label: 'A4', desc: 'Carta / Hoja completa' }].map(opt => (
+                        <button
+                            key={opt.value}
+                            onClick={() => setReceiptConfig({ ...receiptConfig, format: opt.value })}
+                            className={`flex-1 py-2.5 px-3 rounded-lg text-center transition-all border ${receiptConfig.format === opt.value
+                                ? 'bg-blue-500/20 text-blue-400 border-blue-500/50 font-bold'
+                                : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)] hover:border-blue-500/30'
+                            }`}
+                        >
+                            <div className="text-sm font-bold">{opt.label}</div>
+                            <div className="text-[10px] opacity-70">{opt.desc}</div>
+                        </button>
+                    ))}
+                </div>
             </div>
 
             {companyInfo && (
@@ -367,11 +501,250 @@ const ReceiptSettings = ({ companyInfo }) => {
                             )}
                         </div>
                         <p className="text-center text-xs text-[var(--color-text-muted)] mt-4">
-                            Vista previa aproximada • Formato 58mm
+                            Vista previa aproximada • Formato {receiptConfig.format === 'a4' ? 'A4' : receiptConfig.format}
                         </p>
                     </div>
                 )}
             </div>
+                </>
+            )}
+
+            {/* ===== TAB PREVENTA ===== */}
+            {activeTab === 'preventa' && (
+                <>
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-purple-500/20 rounded-lg">
+                                <Package className="text-purple-400" size={24} />
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-bold text-purple-400">Configuración de Preventa</h2>
+                                <p className="text-sm text-[var(--color-text-muted)]">Personaliza los datos que aparecen en el ticket de preventa</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setShowPreview(!showPreview)}
+                            className="btn-secondary flex items-center gap-2"
+                        >
+                            <Eye size={16} />
+                            {showPreview ? 'Ocultar' : 'Vista Previa'}
+                        </button>
+                    </div>
+
+                    {/* Selector de formato */}
+                    <div className="mb-6">
+                        <label className="block text-sm font-medium text-[var(--color-text)] mb-2">Formato de impresión</label>
+                        <div className="flex gap-2">
+                            {[{ value: '58mm', label: '58mm', desc: 'Térmica angosta' }, { value: '80mm', label: '80mm', desc: 'Térmica ancha' }, { value: 'a4', label: 'A4', desc: 'Carta / Hoja completa' }].map(opt => (
+                                <button
+                                    key={opt.value}
+                                    onClick={() => setPreventaConfig({ ...preventaConfig, format: opt.value })}
+                                    className={`flex-1 py-2.5 px-3 rounded-lg text-center transition-all border ${preventaConfig.format === opt.value
+                                        ? 'bg-purple-500/20 text-purple-400 border-purple-500/50 font-bold'
+                                        : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)] hover:border-purple-500/30'
+                                    }`}
+                                >
+                                    <div className="text-sm font-bold">{opt.label}</div>
+                                    <div className="text-[10px] opacity-70">{opt.desc}</div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {companyInfo && (
+                        <div className="mb-4">
+                            <button
+                                onClick={() => {
+                                    setPreventaConfig({
+                                        ...preventaConfig,
+                                        business_name: companyInfo.legal_name || '',
+                                        address: companyInfo.full_address || '',
+                                        phone: companyInfo.phone_main || ''
+                                    });
+                                }}
+                                className="btn-secondary flex items-center gap-2 text-sm"
+                            >
+                                <Building2 size={14} />
+                                Copiar desde Información de Empresa
+                            </button>
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* FORMULARIO PREVENTA */}
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
+                                    Nombre del Negocio *
+                                </label>
+                                <input
+                                    type="text"
+                                    value={preventaConfig.business_name}
+                                    onChange={(e) => setPreventaConfig({ ...preventaConfig, business_name: e.target.value })}
+                                    placeholder="Ej: VECI - Minimarket"
+                                    className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-[var(--color-text)] mb-2 flex items-center justify-between">
+                                    <span>Dirección</span>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={preventaConfig.show_address}
+                                            onChange={(e) => setPreventaConfig({ ...preventaConfig, show_address: e.target.checked })}
+                                            className="w-4 h-4"
+                                        />
+                                        <span className="text-xs text-[var(--color-text-muted)]">Mostrar</span>
+                                    </label>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={preventaConfig.address}
+                                    onChange={(e) => setPreventaConfig({ ...preventaConfig, address: e.target.value })}
+                                    placeholder="Ej: Sotomayor 1460-A, Iquique"
+                                    className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-[var(--color-text)] mb-2 flex items-center justify-between">
+                                    <span>Teléfono / Celular</span>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={preventaConfig.show_phone}
+                                            onChange={(e) => setPreventaConfig({ ...preventaConfig, show_phone: e.target.checked })}
+                                            className="w-4 h-4"
+                                        />
+                                        <span className="text-xs text-[var(--color-text-muted)]">Mostrar</span>
+                                    </label>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={preventaConfig.phone}
+                                    onChange={(e) => setPreventaConfig({ ...preventaConfig, phone: e.target.value })}
+                                    placeholder="Ej: +56 9 1234 5678"
+                                    className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
+                                    Mensaje Cabecera (Opcional)
+                                </label>
+                                <textarea
+                                    value={preventaConfig.header_message}
+                                    onChange={(e) => setPreventaConfig({ ...preventaConfig, header_message: e.target.value })}
+                                    placeholder="Ej: ¡Gracias por su preferencia!"
+                                    rows={2}
+                                    className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] resize-none"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
+                                    Mensaje Pie (Opcional)
+                                </label>
+                                <textarea
+                                    value={preventaConfig.footer_message}
+                                    onChange={(e) => setPreventaConfig({ ...preventaConfig, footer_message: e.target.value })}
+                                    placeholder="Ej: Presentar este ticket en caja • www.minegocio.cl"
+                                    rows={2}
+                                    className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] resize-none"
+                                />
+                            </div>
+
+                            <button
+                                onClick={handleSavePreventaConfig}
+                                disabled={isSavingPreventa || !preventaConfig.business_name}
+                                className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <Save size={16} />
+                                {isSavingPreventa ? 'Guardando...' : 'Guardar Configuración'}
+                            </button>
+                        </div>
+
+                        {/* VISTA PREVIA PREVENTA */}
+                        {showPreview && (
+                            <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg p-4">
+                                <div className="bg-white text-black p-4 rounded font-sans text-xs max-w-[280px] mx-auto shadow-lg">
+                                    <div className="text-center border-b-2 border-black pb-2 mb-2">
+                                        <div className="font-black text-base tracking-wide">{preventaConfig.business_name || 'NOMBRE NEGOCIO'}</div>
+                                        <div className="bg-black text-white font-black text-lg tracking-[3px] inline-block px-3 py-0.5 my-1">PREVENTA</div>
+                                        {preventaConfig.show_address && preventaConfig.address && (
+                                            <div className="text-[9px] text-gray-500">{preventaConfig.address}</div>
+                                        )}
+                                        {preventaConfig.show_phone && preventaConfig.phone && (
+                                            <div className="text-[9px] text-gray-500">Tel: {preventaConfig.phone}</div>
+                                        )}
+                                        {preventaConfig.header_message && (
+                                            <div className="text-[9px] mt-1 italic text-gray-600">{preventaConfig.header_message}</div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex justify-between text-[9px] border-b border-dashed border-gray-400 pb-1 mb-2">
+                                        <div><b>Atendido por:</b> Diana</div>
+                                        <div><b>Fecha:</b> {new Date().toLocaleDateString('es-CL')} {new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}</div>
+                                    </div>
+
+                                    <div className="font-black text-[11px] tracking-wide border-b border-black pb-0.5 mb-1">DETALLE DE PRODUCTOS</div>
+                                    <table className="w-full text-[10px] mb-1">
+                                        <thead>
+                                            <tr className="border-b border-gray-300">
+                                                <th className="text-left py-0.5 font-bold text-[8px] text-gray-500">PRODUCTO</th>
+                                                <th className="text-right py-0.5 font-bold text-[8px] text-gray-500">CANT.</th>
+                                                <th className="text-right py-0.5 font-bold text-[8px] text-gray-500">PRECIO</th>
+                                                <th className="text-right py-0.5 font-bold text-[8px] text-gray-500">SUBTOTAL</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr className="border-b border-dotted border-gray-200">
+                                                <td className="py-1 font-bold">Coca Cola 1.5L</td>
+                                                <td className="text-right py-1 font-semibold">2</td>
+                                                <td className="text-right py-1 text-gray-500">$1.500</td>
+                                                <td className="text-right py-1 font-bold">$3.000</td>
+                                            </tr>
+                                            <tr className="border-b border-dotted border-gray-200">
+                                                <td className="py-1 font-bold">Pan Molde</td>
+                                                <td className="text-right py-1 font-semibold">1</td>
+                                                <td className="text-right py-1 text-gray-500">$2.200</td>
+                                                <td className="text-right py-1 font-bold">$2.200</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+
+                                    <div className="border-t-2 border-black pt-1 mb-2">
+                                        <div className="flex justify-between items-center">
+                                            <span className="font-black text-sm">TOTAL A PAGAR</span>
+                                            <span className="font-black text-lg">$5.200</span>
+                                        </div>
+                                        <div className="text-[8px] text-gray-400">3 artículos</div>
+                                    </div>
+
+                                    <div className="text-center border-t border-dashed border-gray-400 pt-2 mb-1">
+                                        <div className="bg-gray-200 h-10 flex items-center justify-center text-[8px] text-gray-400 rounded">
+                                            [ Código de barras ]
+                                        </div>
+                                        <div className="font-bold text-[10px] tracking-[2px] mt-1">PV26041113003985</div>
+                                    </div>
+
+                                    <div className="text-center text-[9px] font-bold border-t border-dashed border-gray-400 pt-1 mt-1">
+                                        {preventaConfig.footer_message || 'Presentar este ticket en caja para pago'}
+                                    </div>
+                                    <div className="text-center text-[7px] text-gray-400 mt-0.5">
+                                        Este documento no es válido como boleta o factura
+                                    </div>
+                                </div>
+                                <p className="text-center text-xs text-[var(--color-text-muted)] mt-4">
+                                    Vista previa aproximada • Formato {preventaConfig.format === 'a4' ? 'A4' : preventaConfig.format}
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </>
+            )}
         </div>
     );
 };

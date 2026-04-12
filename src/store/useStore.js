@@ -983,6 +983,103 @@ export const useStore = create(persist((set, get) => ({
                 console.warn('Migration 17 (partial payments) error:', e);
             }
 
+            // === Migration 18: Preventas + Renombrar Vendedor → Caja ===
+            try {
+                // 18a: Crear tabla preventas
+                await turso.execute(`CREATE TABLE IF NOT EXISTS preventas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id TEXT NOT NULL,
+                    code TEXT NOT NULL,
+                    items TEXT NOT NULL,
+                    client_data TEXT,
+                    total REAL NOT NULL DEFAULT 0,
+                    created_by INTEGER,
+                    created_by_name TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    completed_by INTEGER,
+                    completed_at TEXT,
+                    sale_id INTEGER,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(company_id, code)
+                )`);
+
+                // 18b: Renombrar rol "Vendedor" → "Caja" en permisos y asignaciones
+                const hasOldVendedor = await turso.execute(`SELECT COUNT(*) as c FROM role_permissions WHERE role = 'Vendedor' LIMIT 1`);
+                if (Number(hasOldVendedor.rows[0]?.c) > 0) {
+                    // Check that 'Caja' role doesn't already exist to avoid conflicts
+                    const hasCaja = await turso.execute(`SELECT COUNT(*) as c FROM role_permissions WHERE role = 'Caja' LIMIT 1`);
+                    if (Number(hasCaja.rows[0]?.c) === 0) {
+                        console.log('Renaming role Vendedor → Caja...');
+                        await turso.execute(`UPDATE role_permissions SET role = 'Caja' WHERE role = 'Vendedor'`);
+                        await turso.execute(`UPDATE user_companies SET role = 'Caja' WHERE role = 'Vendedor'`);
+                    }
+                }
+
+                // 18c: Seed new "Vendedor" role permissions for existing companies
+                // (Only if the new Vendedor doesn't exist yet in role_permissions)
+                const hasNewVendedor = await turso.execute(`SELECT COUNT(*) as c FROM role_permissions WHERE role = 'Vendedor' LIMIT 1`);
+                if (Number(hasNewVendedor.rows[0]?.c) === 0) {
+                    // Get all companies that have role_permissions
+                    const companies = await turso.execute(`SELECT DISTINCT company_id FROM role_permissions`);
+                    const vendedorPerms = [
+                        'dashboard.view', 'pos.access', 'pos.preventa',
+                        'clients.view', 'clients.create',
+                        'personal.view', 'personal.attendance',
+                        'alerts.view'
+                    ];
+                    for (const row of companies.rows) {
+                        for (const p of vendedorPerms) {
+                            await turso.execute({
+                                sql: `INSERT OR IGNORE INTO role_permissions (company_id, role, permission, granted) VALUES (?, 'Vendedor', ?, 1)`,
+                                args: [row.company_id, p]
+                            });
+                        }
+                    }
+                    // Also add pos.scan_preventa to Caja for existing companies
+                    for (const row of companies.rows) {
+                        await turso.execute({
+                            sql: `INSERT OR IGNORE INTO role_permissions (company_id, role, permission, granted) VALUES (?, 'Caja', 'pos.scan_preventa', 1)`,
+                            args: [row.company_id]
+                        });
+                    }
+                }
+            } catch (e) {
+                console.warn('Migration 18 (preventas + roles) error:', e);
+            }
+
+            // === Migration 19: Preventa ticket config columns ===
+            try {
+                const compInfo19 = await turso.execute(`PRAGMA table_info(companies)`);
+                const cols19 = compInfo19.rows.map(c => c.name);
+                if (!cols19.includes('preventa_business_name')) {
+                    console.log('Adding preventa config columns to companies...');
+                    await turso.execute(`ALTER TABLE companies ADD COLUMN preventa_business_name TEXT DEFAULT ''`);
+                    await turso.execute(`ALTER TABLE companies ADD COLUMN preventa_address TEXT DEFAULT ''`);
+                    await turso.execute(`ALTER TABLE companies ADD COLUMN preventa_phone TEXT DEFAULT ''`);
+                    await turso.execute(`ALTER TABLE companies ADD COLUMN preventa_header_message TEXT DEFAULT ''`);
+                    await turso.execute(`ALTER TABLE companies ADD COLUMN preventa_footer_message TEXT DEFAULT ''`);
+                    await turso.execute(`ALTER TABLE companies ADD COLUMN preventa_show_phone INTEGER DEFAULT 1`);
+                    await turso.execute(`ALTER TABLE companies ADD COLUMN preventa_show_address INTEGER DEFAULT 1`);
+                    console.log('✅ Preventa config columns added');
+                }
+            } catch (e) {
+                console.warn('Migration 19 (preventa config) error:', e);
+            }
+
+            // === Migration 20: Print format columns ===
+            try {
+                const compInfo20 = await turso.execute(`PRAGMA table_info(companies)`);
+                const cols20 = compInfo20.rows.map(c => c.name);
+                if (!cols20.includes('receipt_format')) {
+                    console.log('Adding print format columns to companies...');
+                    await turso.execute(`ALTER TABLE companies ADD COLUMN receipt_format TEXT DEFAULT '58mm'`);
+                    await turso.execute(`ALTER TABLE companies ADD COLUMN preventa_format TEXT DEFAULT '80mm'`);
+                    console.log('✅ Print format columns added');
+                }
+            } catch (e) {
+                console.warn('Migration 20 (print format) error:', e);
+            }
+
             console.log("SaaS Migrations Completed.");
 
         } catch (e) {
@@ -4179,7 +4276,8 @@ export const useStore = create(persist((set, get) => ({
 
             // 2. Define System Roles
             const systemRoles = [
-                { role_name: 'Vendedor', is_system: 1, color: '#10b981', description: 'Rol base para ventas' },
+                { role_name: 'Caja', is_system: 1, color: '#10b981', description: 'Caja registradora - cobros y pagos' },
+                { role_name: 'Vendedor', is_system: 1, color: '#8b5cf6', description: 'Vendedor - crea preventas' },
                 { role_name: 'Bodeguero', is_system: 1, color: '#f59e0b', description: 'Gestión de inventario' },
                 { role_name: 'Supervisor', is_system: 1, color: '#3b82f6', description: 'Acceso a reportes y supervisión' }
             ];
@@ -4284,7 +4382,7 @@ export const useStore = create(persist((set, get) => ({
 
             // 2. Reassign users -> 'Vendedor'
             await turso.execute({
-                sql: "UPDATE user_companies SET role = 'Vendedor' WHERE company_id = ? AND role = ?",
+                sql: "UPDATE user_companies SET role = 'Caja' WHERE company_id = ? AND role = ?",
                 args: [activeCompanyId, roleName]
             });
 
@@ -4361,14 +4459,21 @@ export const useStore = create(persist((set, get) => ({
             // Let's grab the PERMS definitions from setupDefaultPermissions logic
             // Copy-pasting the definition for safety and isolation
             const PERMS = {
-                'Vendedor': [
+                'Caja': [
                     'dashboard.view', 'dashboard.view_sales',
-                    'pos.access', 'pos.sell', 'pos.discount', 'pos.open_register', 'pos.close_register', 'pos.cash_in', 'pos.cash_out', 'pos.suspend_sale', 'pos.recover_sale',
+                    'pos.access', 'pos.sell', 'pos.discount', 'pos.open_register', 'pos.close_register', 'pos.cash_in', 'pos.cash_out', 'pos.suspend_sale', 'pos.recover_sale', 'pos.preventa',
                     'sales.view', 'sales.view_details',
                     'clients.view', 'clients.create', 'clients.view_account',
                     'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.complete',
                     'production.view', 'production.manage',
                     'personal.view', 'personal.attendance', 'personal.corrections',
+                    'alerts.view'
+                ],
+                'Vendedor': [
+                    'dashboard.view',
+                    'pos.access', 'pos.preventa',
+                    'clients.view', 'clients.create',
+                    'personal.view', 'personal.attendance',
                     'alerts.view'
                 ],
                 'Bodeguero': [
@@ -4431,7 +4536,7 @@ export const useStore = create(persist((set, get) => ({
         if (!activeCompanyId) return;
 
         try {
-            const ROLES = ['Vendedor', 'Bodeguero', 'Supervisor']; // Admin is handled by code bypass or seeded separately
+            const ROLES = ['Caja', 'Vendedor', 'Bodeguero', 'Supervisor']; // Admin is handled by code bypass or seeded separately
             const check = await turso.execute({
                 sql: "SELECT COUNT(*) as count FROM role_permissions WHERE company_id = ?",
                 args: [activeCompanyId]
@@ -4443,14 +4548,22 @@ export const useStore = create(persist((set, get) => ({
 
             // DEFINICIÓN DE PERMISOS
             const PERMS = {
-                // Vendedor: POS, Clients, Preorders, View Sales
-                'Vendedor': [
+                // Caja: POS completo, cobros, suspender, escanear preventas
+                'Caja': [
                     'dashboard.view', 'dashboard.view_sales',
-                    'pos.access', 'pos.sell', 'pos.discount', 'pos.open_register', 'pos.close_register', 'pos.cash_in', 'pos.cash_out', 'pos.suspend_sale', 'pos.recover_sale',
+                    'pos.access', 'pos.sell', 'pos.discount', 'pos.open_register', 'pos.close_register', 'pos.cash_in', 'pos.cash_out', 'pos.suspend_sale', 'pos.recover_sale', 'pos.preventa',
                     'sales.view', 'sales.view_details',
                     'clients.view', 'clients.create', 'clients.view_account',
                     'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.complete',
                     'personal.view', 'personal.attendance', 'personal.corrections',
+                    'alerts.view'
+                ],
+                // Vendedor: solo POS + preventas, sin caja ni cobros
+                'Vendedor': [
+                    'dashboard.view',
+                    'pos.access', 'pos.preventa',
+                    'clients.view', 'clients.create',
+                    'personal.view', 'personal.attendance',
                     'alerts.view'
                 ],
                 // Bodeguero: Inventory, Orders, Combos, Control, Alerts
@@ -4487,7 +4600,7 @@ export const useStore = create(persist((set, get) => ({
             const queries = [];
             const ALL_KNOWN_PERMISSIONS = [
                 'dashboard.view', 'dashboard.view_sales', 'dashboard.view_profits',
-                'pos.access', 'pos.sell', 'pos.discount', 'pos.cancel_sale', 'pos.open_register', 'pos.close_register', 'pos.cash_in', 'pos.cash_out', 'pos.suspend_sale', 'pos.recover_sale',
+                'pos.access', 'pos.sell', 'pos.discount', 'pos.open_register', 'pos.close_register', 'pos.cash_in', 'pos.cash_out', 'pos.suspend_sale', 'pos.recover_sale', 'pos.preventa',
                 'sales.view', 'sales.cancel', 'sales.export', 'sales.view_details',
                 'products.view', 'products.create', 'products.edit', 'products.delete', 'products.adjust_stock', 'products.import', 'products.export', 'products.view_cost',
                 'categories.view', 'categories.create', 'categories.edit', 'categories.delete',
@@ -5444,6 +5557,107 @@ export const useStore = create(persist((set, get) => ({
                 sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 args: ['system', currentUser.id, 'CREATE', 'COMPANY', JSON.stringify({ id, name, plan }), new Date().toISOString()]
             });
+
+            // 4. Seed default role permissions for new company (hardcoded defaults)
+            try {
+                const DEFAULT_PERMS = {
+                    'Caja': [
+                        'dashboard.view', 'dashboard.view_sales',
+                        'pos.access', 'pos.sell', 'pos.discount', 'pos.open_register', 'pos.close_register', 'pos.cash_in', 'pos.cash_out', 'pos.suspend_sale', 'pos.recover_sale', 'pos.preventa',
+                        'sales.view', 'sales.view_details',
+                        'clients.view', 'clients.create', 'clients.view_account',
+                        'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.complete',
+                        'personal.view', 'personal.attendance', 'personal.corrections',
+                        'alerts.view'
+                    ],
+                    'Vendedor': [
+                        'dashboard.view',
+                        'pos.access', 'pos.preventa',
+                        'clients.view', 'clients.create',
+                        'personal.view', 'personal.attendance',
+                        'alerts.view'
+                    ],
+                    'Bodeguero': [
+                        'dashboard.view',
+                        'products.view', 'products.create', 'products.edit', 'products.adjust_stock', 'products.import', 'products.export',
+                        'categories.view', 'categories.create', 'categories.edit',
+                        'suppliers.view', 'suppliers.create', 'suppliers.edit',
+                        'invoices.view', 'invoices.create',
+                        'purchases.view', 'purchases.create', 'purchases.edit',
+                        'product_profile.view',
+                        'supplier_orders.view', 'supplier_orders.create', 'supplier_orders.edit', 'supplier_orders.receive',
+                        'reports.expiring',
+                        'combos.view', 'combos.create', 'combos.edit', 'combos.delete',
+                        'inventory_control.view', 'inventory_control.create', 'inventory_control.manage',
+                        'alerts.view', 'alerts.manage'
+                    ],
+                    'Supervisor': [
+                        'dashboard.view', 'dashboard.view_sales', 'dashboard.view_profits',
+                        'sales.view', 'sales.view_details', 'sales.export',
+                        'clients.view', 'clients.view_account',
+                        'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.sales_analytics', 'reports.export',
+                        'products.view', 'products.view_cost',
+                        'taxes.view',
+                        'personal.view', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.absences', 'personal.reports',
+                        'combos.view',
+                        'inventory_control.view',
+                        'alerts.view',
+                        'sii.view', 'sii.folios'
+                    ]
+                };
+
+                const ALL_PERMS = [
+                    'dashboard.view', 'dashboard.view_sales', 'dashboard.view_profits',
+                    'pos.access', 'pos.sell', 'pos.discount', 'pos.open_register', 'pos.close_register', 'pos.cash_in', 'pos.cash_out', 'pos.suspend_sale', 'pos.recover_sale', 'pos.preventa',
+                    'sales.view', 'sales.cancel', 'sales.export', 'sales.view_details',
+                    'products.view', 'products.create', 'products.edit', 'products.delete', 'products.adjust_stock', 'products.import', 'products.export', 'products.view_cost',
+                    'categories.view', 'categories.create', 'categories.edit', 'categories.delete',
+                    'suppliers.view', 'suppliers.create', 'suppliers.edit', 'suppliers.delete',
+                    'invoices.view', 'invoices.create', 'invoices.edit', 'invoices.delete', 'invoices.pay',
+                    'purchases.view', 'purchases.create', 'purchases.edit', 'purchases.delete',
+                    'product_profile.view',
+                    'clients.view', 'clients.create', 'clients.edit', 'clients.delete', 'clients.view_account', 'clients.manage_payments',
+                    'preorders.view', 'preorders.create', 'preorders.edit', 'preorders.delete', 'preorders.complete',
+                    'production.view', 'production.manage',
+                    'supplier_orders.view', 'supplier_orders.create', 'supplier_orders.edit', 'supplier_orders.receive', 'supplier_orders.delete',
+                    'reports.sales', 'reports.expiring', 'reports.closures', 'reports.movements', 'reports.invoice_payments', 'reports.profit', 'reports.sales_analytics', 'reports.export',
+                    'users.view', 'users.create', 'users.edit', 'users.delete', 'users.manage',
+                    'settings.view', 'settings.company', 'settings.receipts', 'settings.payments', 'settings.system', 'settings.manage_permissions',
+                    'taxes.view', 'taxes.create', 'taxes.edit', 'taxes.delete',
+                    'personal.view', 'personal.manage', 'personal.attendance', 'personal.corrections', 'personal.shifts', 'personal.edit_past_shifts', 'personal.absences', 'personal.payroll', 'personal.vacations', 'personal.reports',
+                    'combos.view', 'combos.create', 'combos.edit', 'combos.delete',
+                    'inventory_control.view', 'inventory_control.create', 'inventory_control.manage',
+                    'alerts.view', 'alerts.manage',
+                    'sii.view', 'sii.folios'
+                ];
+
+                const queries = [];
+                const ROLES = ['Caja', 'Vendedor', 'Bodeguero', 'Supervisor'];
+                for (const role of ROLES) {
+                    const allowed = DEFAULT_PERMS[role] || [];
+                    for (const p of ALL_PERMS) {
+                        queries.push({
+                            sql: "INSERT OR IGNORE INTO role_permissions (company_id, role, permission, granted) VALUES (?, ?, ?, ?)",
+                            args: [id, role, p, allowed.includes(p) ? 1 : 0]
+                        });
+                    }
+                }
+                // Administrador gets everything
+                for (const p of ALL_PERMS) {
+                    queries.push({
+                        sql: "INSERT OR IGNORE INTO role_permissions (company_id, role, permission, granted) VALUES (?, ?, ?, ?)",
+                        args: [id, 'Administrador', p, 1]
+                    });
+                }
+
+                const CHUNK_SIZE = 50;
+                for (let i = 0; i < queries.length; i += CHUNK_SIZE) {
+                    await turso.batch(queries.slice(i, i + CHUNK_SIZE));
+                }
+                console.log(`✅ Seeded default role permissions for new company ${id}`);
+            } catch (permErr) {
+                console.warn('Could not seed permissions for new company:', permErr.message);
+            }
 
             // Refresh available companies
             await get().fetchUserCompanies(currentUser.id);
@@ -7988,7 +8202,148 @@ export const useStore = create(persist((set, get) => ({
     },
 
     // ============================================
-    // 🆕 FUNCIONES DE SUSCRIPCIÓN
+    // �️ FUNCIONES DE PREVENTAS
+    // ============================================
+
+    pendingPreventasCount: 0,
+
+    createPreventa: async (items, clientData, total) => {
+        try {
+            const { activeCompanyId, currentUser, currentCompanyTimezone } = get();
+            if (!activeCompanyId || !currentUser) throw new Error('No company/user');
+
+            // Ensure table exists (idempotent)
+            await turso.execute(`CREATE TABLE IF NOT EXISTS preventas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id TEXT NOT NULL,
+                code TEXT NOT NULL,
+                items TEXT NOT NULL,
+                client_data TEXT,
+                total REAL NOT NULL DEFAULT 0,
+                created_by INTEGER,
+                created_by_name TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                completed_by INTEGER,
+                completed_at TEXT,
+                sale_id INTEGER,
+                created_at TEXT NOT NULL,
+                UNIQUE(company_id, code)
+            )`);
+
+            const now = getNowInCompanyTime(currentCompanyTimezone);
+            const pad = (n) => String(n).padStart(2, '0');
+            const yy = String(now.getFullYear()).slice(-2);
+            const code = `PV${yy}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`;
+
+            await turso.execute({
+                sql: `INSERT INTO preventas (company_id, code, items, client_data, total, created_by, created_by_name, status, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+                args: [
+                    activeCompanyId,
+                    code,
+                    JSON.stringify(items),
+                    clientData ? JSON.stringify(clientData) : null,
+                    total,
+                    currentUser.id,
+                    currentUser.name || currentUser.username,
+                    now.toISOString()
+                ]
+            });
+
+            await get().updatePreventasCount();
+            return { success: true, code };
+        } catch (e) {
+            console.error('Error creating preventa:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    fetchPendingPreventas: async () => {
+        try {
+            const { activeCompanyId } = get();
+            const result = await turso.execute({
+                sql: `SELECT id, code, items, client_data, total, created_by_name, created_at
+                      FROM preventas
+                      WHERE company_id = ? AND status = 'pending'
+                      ORDER BY created_at DESC
+                      LIMIT 100`,
+                args: [activeCompanyId]
+            });
+            return result.rows.map(r => ({
+                ...r,
+                items: JSON.parse(r.items),
+                client_data: r.client_data ? JSON.parse(r.client_data) : null
+            }));
+        } catch (e) {
+            console.error('Error fetching preventas:', e);
+            return [];
+        }
+    },
+
+    fetchPreventaByCode: async (code) => {
+        try {
+            const { activeCompanyId } = get();
+            const result = await turso.execute({
+                sql: `SELECT id, code, items, client_data, total, created_by_name, created_at
+                      FROM preventas
+                      WHERE company_id = ? AND code = ? AND status = 'pending'`,
+                args: [activeCompanyId, code]
+            });
+            if (result.rows.length === 0) return null;
+            const r = result.rows[0];
+            return { ...r, items: JSON.parse(r.items), client_data: r.client_data ? JSON.parse(r.client_data) : null };
+        } catch (e) {
+            console.error('Error fetching preventa by code:', e);
+            return null;
+        }
+    },
+
+    completePreventa: async (code, saleId) => {
+        try {
+            const { activeCompanyId, currentUser, currentCompanyTimezone } = get();
+            const now = getNowInCompanyTime(currentCompanyTimezone).toISOString();
+            await turso.execute({
+                sql: `UPDATE preventas SET status = 'completed', completed_by = ?, completed_at = ?, sale_id = ? WHERE company_id = ? AND code = ?`,
+                args: [currentUser.id, now, saleId, activeCompanyId, code]
+            });
+            await get().updatePreventasCount();
+            return true;
+        } catch (e) {
+            console.error('Error completing preventa:', e);
+            return false;
+        }
+    },
+
+    cancelPreventa: async (code) => {
+        try {
+            const { activeCompanyId } = get();
+            await turso.execute({
+                sql: `UPDATE preventas SET status = 'cancelled' WHERE company_id = ? AND code = ?`,
+                args: [activeCompanyId, code]
+            });
+            await get().updatePreventasCount();
+            return true;
+        } catch (e) {
+            console.error('Error cancelling preventa:', e);
+            return false;
+        }
+    },
+
+    updatePreventasCount: async () => {
+        try {
+            const { activeCompanyId } = get();
+            const result = await turso.execute({
+                sql: `SELECT COUNT(*) as c FROM preventas WHERE company_id = ? AND status = 'pending'`,
+                args: [activeCompanyId]
+            });
+            set({ pendingPreventasCount: Number(result.rows[0].c) });
+        } catch (e) {
+            set({ pendingPreventasCount: 0 });
+        }
+    },
+
+    // ============================================
+    // �🆕 FUNCIONES DE SUSCRIPCIÓN
     // ============================================
 
     // Verificar estado de suscripción de una empresa
