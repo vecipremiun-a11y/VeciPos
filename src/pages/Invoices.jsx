@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { FileText, Trash2, ArrowLeft, Loader, Search, Calendar, DollarSign, CreditCard, Wallet, TrendingUp, AlertTriangle, ChevronDown, ChevronRight, X, Check, Eye, Paperclip } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { FileText, Trash2, Loader, Search, Calendar, DollarSign, CreditCard, Wallet, TrendingUp, AlertTriangle, ChevronDown, ChevronRight, X, Check, Eye, Paperclip } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { turso } from '../lib/turso';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
@@ -7,11 +7,10 @@ import { es } from 'date-fns/locale';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const Invoices = () => {
-    const { fetchPurchases, fetchPurchaseDetails, deletePurchase, activeCompanyId, suppliers, currentCurrency } = useStore();
-    const INVOICES_PAGE_SIZE = 15;
+    const { fetchPurchaseDetails, deletePurchase, activeCompanyId, suppliers, currentCurrency } = useStore();
+    const INVOICES_PAGE_SIZE = 20;
 
     const [invoices, setInvoices] = useState([]);
-    const [allInvoicesForMetrics, setAllInvoicesForMetrics] = useState([]);
     const [invoiceView, setInvoiceView] = useState('list');
     const [activeTab, setActiveTab] = useState('invoices'); // 'invoices' | 'payables'
     const [selectedInvoice, setSelectedInvoice] = useState(null);
@@ -20,6 +19,11 @@ const Invoices = () => {
     const [offset, setOffset] = useState(0);
     const [hasMoreInvoices, setHasMoreInvoices] = useState(true);
 
+    // Stats from SQL aggregation
+    const [stats, setStats] = useState({ totalMes: 0, totalCredito: 0, totalContado: 0, cantidadFacturas: 0, countContado: 0, countCredito: 0 });
+    const [monthlyStats, setMonthlyStats] = useState([]);
+    const [pendingBySupplier, setPendingBySupplier] = useState([]);
+
     // Filtros
     const [dateFrom, setDateFrom] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
     const [dateTo, setDateTo] = useState(() => format(endOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -27,8 +31,12 @@ const Invoices = () => {
     const [supplierFilter, setSupplierFilter] = useState('');
     const [paymentTypeFilter, setPaymentTypeFilter] = useState('all');
     const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    const searchTimerRef = useRef(null);
+    const isLoadingRef = useRef(false);
 
     // Cuentas por pagar
+    const [selectedInvoices, setSelectedInvoices] = useState({}); // { [supplierId]: Set([invoiceId, ...]) }
     const [expandedSuppliers, setExpandedSuppliers] = useState({});
     const [paymentModal, setPaymentModal] = useState({ open: false, invoice: null, supplier: null });
     const [paymentAmount, setPaymentAmount] = useState('');
@@ -38,47 +46,166 @@ const Invoices = () => {
     const [paymentDocument, setPaymentDocument] = useState(null);
     const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
+    // Debounce search input
     useEffect(() => {
-        loadInvoices(0, true);
-        loadInvoicesForMetrics();
+        if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+        searchTimerRef.current = setTimeout(() => {
+            setDebouncedSearch(searchQuery);
+        }, 300);
+        return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+    }, [searchQuery]);
+
+    // Build SQL WHERE clause from current filters
+    const buildFilterClause = useCallback(() => {
+        const conditions = ['company_id = ?'];
+        const args = [activeCompanyId];
+        if (dateFrom) { conditions.push('date >= ?'); args.push(dateFrom); }
+        if (dateTo) { conditions.push('date <= ?'); args.push(dateTo); }
+        if (supplierFilter) { conditions.push('supplier_id = ?'); args.push(parseInt(supplierFilter)); }
+        if (paymentTypeFilter === 'cash') conditions.push('is_credit = 0');
+        if (paymentTypeFilter === 'credit') conditions.push('is_credit = 1');
+        if (debouncedSearch) {
+            conditions.push("(LOWER(COALESCE(invoice_number,'')) LIKE ? OR LOWER(COALESCE(supplier_name,'')) LIKE ?)");
+            const like = `%${debouncedSearch.toLowerCase()}%`;
+            args.push(like, like);
+        }
+        return { where: conditions.join(' AND '), args };
+    }, [activeCompanyId, dateFrom, dateTo, supplierFilter, paymentTypeFilter, debouncedSearch]);
+
+    // --- SQL-based data loaders ---
+
+    const loadStats = useCallback(async () => {
+        try {
+            const { where, args } = buildFilterClause();
+            const result = await turso.execute({
+                sql: `SELECT
+                        COUNT(*) as total_count,
+                        COALESCE(SUM(total), 0) as total_sum,
+                        COALESCE(SUM(CASE WHEN is_credit = 0 THEN total ELSE 0 END), 0) as contado_sum,
+                        COUNT(CASE WHEN is_credit = 0 THEN 1 END) as contado_count,
+                        COALESCE(SUM(CASE WHEN is_credit = 1 THEN total ELSE 0 END), 0) as credito_sum,
+                        COUNT(CASE WHEN is_credit = 1 THEN 1 END) as credito_count
+                      FROM purchases WHERE ${where}`,
+                args
+            });
+            const row = result.rows[0] || {};
+            setStats({
+                totalMes: row.total_sum || 0,
+                totalContado: row.contado_sum || 0,
+                totalCredito: row.credito_sum || 0,
+                cantidadFacturas: row.total_count || 0,
+                countContado: row.contado_count || 0,
+                countCredito: row.credito_count || 0
+            });
+        } catch (error) {
+            console.error('Error loading stats:', error);
+        }
+    }, [buildFilterClause]);
+
+    const loadMonthlyStats = useCallback(async () => {
+        try {
+            const sixMonthsAgo = format(startOfMonth(subMonths(new Date(), 5)), 'yyyy-MM-dd');
+            const result = await turso.execute({
+                sql: `SELECT
+                        strftime('%Y-%m', date) as month,
+                        COALESCE(SUM(total), 0) as total,
+                        COALESCE(SUM(CASE WHEN is_credit = 0 THEN total ELSE 0 END), 0) as cash,
+                        COALESCE(SUM(CASE WHEN is_credit = 1 THEN total ELSE 0 END), 0) as credit
+                      FROM purchases
+                      WHERE company_id = ? AND date >= ?
+                      GROUP BY strftime('%Y-%m', date)
+                      ORDER BY month`,
+                args: [activeCompanyId, sixMonthsAgo]
+            });
+            const dataMap = {};
+            (result.rows || []).forEach(r => { dataMap[r.month] = r; });
+            const months = [];
+            for (let i = 5; i >= 0; i--) {
+                const monthDate = subMonths(new Date(), i);
+                const key = format(monthDate, 'yyyy-MM');
+                const monthName = format(monthDate, 'MMM yyyy', { locale: es });
+                const row = dataMap[key];
+                months.push({ month: monthName, total: row?.total || 0, cash: row?.cash || 0, credit: row?.credit || 0 });
+            }
+            setMonthlyStats(months);
+        } catch (error) {
+            console.error('Error loading monthly stats:', error);
+            setMonthlyStats([]);
+        }
     }, [activeCompanyId]);
 
-    const loadInvoicesForMetrics = async () => {
+    const loadPendingInvoices = useCallback(async () => {
         try {
             const result = await turso.execute({
-                sql: `SELECT id, supplier_id, supplier_name, invoice_number, date, total, is_credit, status, amount_paid
+                sql: `SELECT id, supplier_id, supplier_name, invoice_number, date, expiry_date, total, is_credit, status, amount_paid
                       FROM purchases
-                      WHERE company_id = ?
-                      ORDER BY date DESC`,
+                      WHERE company_id = ? AND is_credit = 1 AND status != 'paid'
+                      ORDER BY supplier_name, date DESC`,
                 args: [activeCompanyId]
             });
-            setAllInvoicesForMetrics(result.rows || []);
+            const grouped = {};
+            (result.rows || []).forEach(inv => {
+                const key = inv.supplier_id || 'unknown';
+                if (!grouped[key]) {
+                    grouped[key] = { id: key, name: inv.supplier_name || 'Sin proveedor', invoices: [], total: 0, paid: 0 };
+                }
+                const balance = (inv.total || 0) - (inv.amount_paid || 0);
+                grouped[key].invoices.push({ ...inv, balance });
+                grouped[key].total += inv.total || 0;
+                grouped[key].paid += inv.amount_paid || 0;
+            });
+            setPendingBySupplier(Object.values(grouped).filter(s => s.total - s.paid > 0));
         } catch (error) {
-            console.error('Error loading invoices for metrics:', error);
-            setAllInvoicesForMetrics([]);
+            console.error('Error loading pending invoices:', error);
+            setPendingBySupplier([]);
         }
-    };
+    }, [activeCompanyId]);
 
-    const loadInvoices = async (currentOffset, reset = false) => {
-        if (isLoadingInvoices) return;
+    const loadInvoices = useCallback(async (currentOffset, reset = false) => {
+        if (isLoadingRef.current && !reset) return;
         if (!reset && !hasMoreInvoices) return;
 
+        isLoadingRef.current = true;
         setIsLoadingInvoices(true);
-        const fetched = await fetchPurchases(currentOffset, INVOICES_PAGE_SIZE);
-
-        if (reset) {
-            setInvoices(fetched);
-            setOffset(currentOffset + fetched.length);
-            setHasMoreInvoices(fetched.length === INVOICES_PAGE_SIZE);
-        } else {
-            setInvoices(prev => [...prev, ...fetched]);
-            setOffset(currentOffset + fetched.length);
-            if (fetched.length < INVOICES_PAGE_SIZE) {
-                setHasMoreInvoices(false);
+        try {
+            const { where, args } = buildFilterClause();
+            const result = await turso.execute({
+                sql: `SELECT id, supplier_id, supplier_name, invoice_number, date, total, is_credit, status, amount_paid
+                      FROM purchases WHERE ${where}
+                      ORDER BY date DESC
+                      LIMIT ? OFFSET ?`,
+                args: [...args, INVOICES_PAGE_SIZE, currentOffset]
+            });
+            const fetched = result.rows || [];
+            if (reset) {
+                setInvoices(fetched);
+                setOffset(currentOffset + fetched.length);
+                setHasMoreInvoices(fetched.length === INVOICES_PAGE_SIZE);
+            } else {
+                setInvoices(prev => [...prev, ...fetched]);
+                setOffset(currentOffset + fetched.length);
+                setHasMoreInvoices(fetched.length === INVOICES_PAGE_SIZE);
             }
+        } catch (error) {
+            console.error('Error loading invoices:', error);
         }
         setIsLoadingInvoices(false);
-    };
+        isLoadingRef.current = false;
+    }, [buildFilterClause, hasMoreInvoices]);
+
+    // Initial load
+    useEffect(() => {
+        loadInvoices(0, true);
+        loadStats();
+        loadMonthlyStats();
+        loadPendingInvoices();
+    }, [activeCompanyId]);
+
+    // Reload list + stats when filters change
+    useEffect(() => {
+        loadInvoices(0, true);
+        loadStats();
+    }, [dateFrom, dateTo, supplierFilter, paymentTypeFilter, debouncedSearch]);
 
     const handleInvoicesScroll = (e) => {
         if (invoiceView !== 'list') return;
@@ -92,78 +219,14 @@ const Invoices = () => {
         }
     };
 
-    const applyInvoiceFilters = (sourceInvoices) => {
-        return sourceInvoices.filter(inv => {
-            if (dateFrom && inv.date < dateFrom) return false;
-            if (dateTo && inv.date > dateTo) return false;
-            if (supplierFilter && inv.supplier_id !== parseInt(supplierFilter)) return false;
-            if (paymentTypeFilter === 'cash' && inv.is_credit) return false;
-            if (paymentTypeFilter === 'credit' && !inv.is_credit) return false;
-            if (searchQuery) {
-                const search = searchQuery.toLowerCase();
-                if (!String(inv.invoice_number || '').toLowerCase().includes(search) && !inv.supplier_name?.toLowerCase().includes(search)) return false;
-            }
-            return true;
-        });
-    };
-
-    // Filtrar facturas para métricas (dataset completo)
-    const filteredInvoices = useMemo(() => {
-        return applyInvoiceFilters(allInvoicesForMetrics);
-    }, [allInvoicesForMetrics, dateFrom, dateTo, supplierFilter, paymentTypeFilter, searchQuery]);
-
-    // Filtrar facturas visibles en tabla (dataset paginado)
-    const visibleInvoices = useMemo(() => {
-        return applyInvoiceFilters(invoices);
-    }, [invoices, dateFrom, dateTo, supplierFilter, paymentTypeFilter, searchQuery]);
-
-    // Calcular estadísticas
-    const stats = useMemo(() => {
-        const totalMes = filteredInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
-        const totalCredito = filteredInvoices.filter(inv => inv.is_credit).reduce((sum, inv) => sum + (inv.total || 0), 0);
-        const totalContado = filteredInvoices.filter(inv => !inv.is_credit).reduce((sum, inv) => sum + (inv.total || 0), 0);
-        return { totalMes, totalCredito, totalContado, cantidadFacturas: filteredInvoices.length };
-    }, [filteredInvoices]);
-
-    // Estadísticas por mes
-    const monthlyStats = useMemo(() => {
-        const months = [];
-        for (let i = 0; i < 6; i++) {
-            const monthDate = subMonths(new Date(), i);
-            const monthStart = format(startOfMonth(monthDate), 'yyyy-MM-dd');
-            const monthEnd = format(endOfMonth(monthDate), 'yyyy-MM-dd');
-            const monthName = format(monthDate, 'MMM yyyy', { locale: es });
-            const monthInvoices = allInvoicesForMetrics.filter(inv => inv.date >= monthStart && inv.date <= monthEnd);
-            months.push({
-                month: monthName,
-                total: monthInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0),
-                credit: monthInvoices.filter(inv => inv.is_credit).reduce((sum, inv) => sum + (inv.total || 0), 0),
-                cash: monthInvoices.filter(inv => !inv.is_credit).reduce((sum, inv) => sum + (inv.total || 0), 0)
-            });
-        }
-        return months.reverse();
-    }, [allInvoicesForMetrics]);
-
-    // Facturas pendientes por proveedor
-    const pendingBySupplier = useMemo(() => {
-        const pending = allInvoicesForMetrics.filter(inv => inv.is_credit && inv.status !== 'paid');
-        const grouped = {};
-        pending.forEach(inv => {
-            const key = inv.supplier_id || 'unknown';
-            if (!grouped[key]) {
-                grouped[key] = { id: key, name: inv.supplier_name || 'Sin proveedor', invoices: [], total: 0, paid: 0 };
-            }
-            const balance = (inv.total || 0) - (inv.amount_paid || 0);
-            grouped[key].invoices.push({ ...inv, balance });
-            grouped[key].total += inv.total || 0;
-            grouped[key].paid += inv.amount_paid || 0;
-        });
-        return Object.values(grouped).filter(s => s.total - s.paid > 0);
-    }, [allInvoicesForMetrics]);
-
     const totalPendingAmount = useMemo(() => {
         return pendingBySupplier.reduce((sum, s) => sum + (s.total - s.paid), 0);
     }, [pendingBySupplier]);
+
+    const monthlyAverage = useMemo(() => {
+        if (monthlyStats.length === 0) return 0;
+        return monthlyStats.reduce((s, m) => s + m.total, 0) / monthlyStats.length;
+    }, [monthlyStats]);
 
     const handleInvoiceClick = async (invoiceId) => {
         setIsLoadingDetails(true);
@@ -185,7 +248,8 @@ const Invoices = () => {
         if (window.confirm('¿Estás seguro de eliminar esta factura?')) {
             await deletePurchase(id);
             loadInvoices(0, true);
-            loadInvoicesForMetrics();
+            loadStats();
+            loadPendingInvoices();
             if (selectedInvoice?.id === id) handleBackToInvoices();
         }
     };
@@ -199,6 +263,61 @@ const Invoices = () => {
 
     const toggleSupplier = (id) => {
         setExpandedSuppliers(prev => ({ ...prev, [id]: !prev[id] }));
+    };
+
+    const toggleInvoiceSelection = (supplierId, invoiceId) => {
+        setSelectedInvoices(prev => {
+            const supplierSet = new Set(prev[supplierId] || []);
+            if (supplierSet.has(invoiceId)) {
+                supplierSet.delete(invoiceId);
+            } else {
+                supplierSet.add(invoiceId);
+            }
+            return { ...prev, [supplierId]: supplierSet };
+        });
+    };
+
+    const toggleAllInvoices = (supplier) => {
+        setSelectedInvoices(prev => {
+            const supplierSet = new Set(prev[supplier.id] || []);
+            const allSelected = supplier.invoices.every(inv => supplierSet.has(inv.id));
+            if (allSelected) {
+                return { ...prev, [supplier.id]: new Set() };
+            } else {
+                return { ...prev, [supplier.id]: new Set(supplier.invoices.map(inv => inv.id)) };
+            }
+        });
+    };
+
+    const getSelectedCount = (supplierId) => {
+        return selectedInvoices[supplierId]?.size || 0;
+    };
+
+    const getSelectedInvoices = (supplier) => {
+        const selected = selectedInvoices[supplier.id];
+        if (!selected || selected.size === 0) return [];
+        return supplier.invoices.filter(inv => selected.has(inv.id));
+    };
+
+    const getSelectedTotal = (supplier) => {
+        return getSelectedInvoices(supplier).reduce((sum, inv) => sum + inv.balance, 0);
+    };
+
+    const openPaymentForSelected = (supplier) => {
+        const selected = getSelectedInvoices(supplier);
+        if (selected.length === 0) return;
+        const filteredSupplier = {
+            ...supplier,
+            invoices: selected,
+            total: selected.reduce((s, inv) => s + (inv.total || 0), 0),
+            paid: selected.reduce((s, inv) => s + (inv.amount_paid || 0), 0)
+        };
+        setPaymentModal({ open: true, invoice: null, supplier: filteredSupplier });
+        setPaymentType('total');
+        setPaymentAmount('');
+        setPaymentMethod('efectivo');
+        setPaymentObservation('');
+        setPaymentDocument(null);
     };
 
     const openPaymentModal = (invoice, supplier, type = 'full') => {
@@ -242,7 +361,9 @@ const Invoices = () => {
             }
 
             await loadInvoices(0, true);
-            await loadInvoicesForMetrics();
+            await loadStats();
+            await loadPendingInvoices();
+            setSelectedInvoices({});
             closePaymentModal();
         } catch (error) {
             console.error('Error processing payment:', error);
@@ -297,9 +418,9 @@ const Invoices = () => {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
                 {[
                     { label: 'Compras Período', value: stats.totalMes, color: 'blue', icon: TrendingUp, sub: `${stats.cantidadFacturas} facturas` },
-                    { label: 'Compras Contado', value: stats.totalContado, color: 'green', icon: Wallet, sub: `${filteredInvoices.filter(i => !i.is_credit).length} facturas` },
-                    { label: 'Compras Crédito', value: stats.totalCredito, color: 'orange', icon: CreditCard, sub: `${filteredInvoices.filter(i => i.is_credit).length} facturas` },
-                    { label: 'Promedio Mensual', value: monthlyStats.reduce((s, m) => s + m.total, 0) / 6, color: 'purple', icon: DollarSign, sub: 'Últimos 6 meses' }
+                    { label: 'Compras Contado', value: stats.totalContado, color: 'green', icon: Wallet, sub: `${stats.countContado} facturas` },
+                    { label: 'Compras Crédito', value: stats.totalCredito, color: 'orange', icon: CreditCard, sub: `${stats.countCredito} facturas` },
+                    { label: 'Promedio Mensual', value: monthlyAverage, color: 'purple', icon: DollarSign, sub: 'Últimos 6 meses' }
                 ].map((s, i) => (
                     <div key={i} className="glass-card p-4">
                         <div className="flex items-center gap-3 mb-2">
@@ -375,9 +496,17 @@ const Invoices = () => {
                                             <p className="text-xs text-[var(--color-text-muted)]">Saldo pendiente</p>
                                             <p className="text-lg font-bold text-red-400">{formatCurrency(supplier.total - supplier.paid, currentCurrency)}</p>
                                         </div>
-                                        <button onClick={(e) => { e.stopPropagation(); openPaymentModal(null, supplier, 'total'); }} className="px-4 py-2 bg-green-500/20 text-green-400 rounded-lg text-sm font-semibold hover:bg-green-500/30">
-                                            Pagar Todo
-                                        </button>
+                                        {getSelectedCount(supplier.id) > 0 ? (
+                                            <button onClick={(e) => { e.stopPropagation(); openPaymentForSelected(supplier); }} className="px-4 py-2 bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded-lg text-sm font-semibold hover:bg-[var(--color-primary)]/30 flex items-center gap-2 transition-all">
+                                                <Check size={14} />
+                                                Pagar {getSelectedCount(supplier.id)} seleccionada{getSelectedCount(supplier.id) > 1 ? 's' : ''}
+                                                <span className="px-1.5 py-0.5 bg-white/10 rounded text-xs">{formatCurrency(getSelectedTotal(supplier), currentCurrency)}</span>
+                                            </button>
+                                        ) : (
+                                            <button onClick={(e) => { e.stopPropagation(); openPaymentModal(null, supplier, 'total'); }} className="px-4 py-2 bg-green-500/20 text-green-400 rounded-lg text-sm font-semibold hover:bg-green-500/30 transition-all">
+                                                Pagar Todo
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -387,6 +516,14 @@ const Invoices = () => {
                                         <table className="w-full text-sm">
                                             <thead className="text-[var(--color-text-muted)] text-xs uppercase">
                                                 <tr>
+                                                    <th className="px-4 py-2 text-center w-10">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={supplier.invoices.length > 0 && supplier.invoices.every(inv => selectedInvoices[supplier.id]?.has(inv.id))}
+                                                            onChange={(e) => { e.stopPropagation(); toggleAllInvoices(supplier); }}
+                                                            className="w-4 h-4 rounded border-[var(--glass-border)] bg-transparent accent-[var(--color-primary)] cursor-pointer"
+                                                        />
+                                                    </th>
                                                     <th className="px-4 py-2 text-left">N° Factura</th>
                                                     <th className="px-4 py-2 text-left">Fecha</th>
                                                     <th className="px-4 py-2 text-left">Vencimiento</th>
@@ -398,7 +535,16 @@ const Invoices = () => {
                                             </thead>
                                             <tbody className="divide-y divide-[var(--glass-border)]">
                                                 {supplier.invoices.map(inv => (
-                                                    <tr key={inv.id} onClick={() => handleInvoiceClick(inv.id)} className="hover:bg-white/5 cursor-pointer">
+                                                    <tr key={inv.id} onClick={() => handleInvoiceClick(inv.id)} className={`hover:bg-white/5 cursor-pointer transition-colors ${selectedInvoices[supplier.id]?.has(inv.id) ? 'bg-[var(--color-primary)]/5' : ''}`}>
+                                                        <td className="px-4 py-3 text-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedInvoices[supplier.id]?.has(inv.id) || false}
+                                                                onChange={() => toggleInvoiceSelection(supplier.id, inv.id)}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                className="w-4 h-4 rounded border-[var(--glass-border)] bg-transparent accent-[var(--color-primary)] cursor-pointer"
+                                                            />
+                                                        </td>
                                                         <td className="px-4 py-3 text-[var(--color-text)]">
                                                             <FileText size={14} className="inline mr-2 text-[var(--color-primary)]" />
                                                             {inv.invoice_number || 'S/N'}
@@ -481,7 +627,7 @@ const Invoices = () => {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-[var(--glass-border)]">
-                                            {filteredInvoices.map(inv => (
+                                            {invoices.map(inv => (
                                                 <tr key={inv.id} onClick={() => handleInvoiceClick(inv.id)} className="hover:bg-[var(--glass-bg)] cursor-pointer group">
                                                     <td className="px-6 py-4 text-[var(--color-text)] font-medium"><FileText size={16} className="inline mr-2 text-[var(--color-primary)]" />{inv.invoice_number || 'S/N'}</td>
                                                     <td className="px-6 py-4 text-[var(--color-text-muted)]">{inv.supplier_name || 'Desconocido'}</td>
@@ -507,14 +653,14 @@ const Invoices = () => {
                                         </div>
                                     )}
 
-                                    {!isLoadingInvoices && !hasMoreInvoices && filteredInvoices.length > 0 && (
+                                    {!isLoadingInvoices && !hasMoreInvoices && invoices.length > 0 && (
                                         <div className="py-4 text-center text-[var(--color-text-muted)] text-sm border-t border-[var(--glass-border)]">
                                             No hay más facturas para mostrar
                                         </div>
                                     )}
                                 </>
                             )}
-                            {filteredInvoices.length === 0 && !isLoadingInvoices && <div className="p-10 text-center text-[var(--color-text-muted)]">No se encontraron facturas.</div>}
+                            {invoices.length === 0 && !isLoadingInvoices && <div className="p-10 text-center text-[var(--color-text-muted)]">No se encontraron facturas.</div>}
                         </div>
                     )}
                 </div>

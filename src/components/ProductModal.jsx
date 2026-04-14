@@ -71,7 +71,8 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         preorder_billing_unit: 'unit',
         preorder_price_per_kg: '',
         preorder_gram_per_unit: '',
-        preorder_use_base_price: true
+        preorder_use_base_price: true,
+        units_per_box: ''
     });
     const [marginPercentage, setMarginPercentage] = useState('');
     const [alertConfig, setAlertConfig] = useState({
@@ -111,7 +112,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                 setFormData(prev => ({ ...prev, is_offer: productToEdit.is_offer === 1 || productToEdit.is_offer === true, offer_price: productToEdit.offer_price || '' }));
             }
         } else {
-            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0, is_offer: false, offer_price: '', sale_mode: 'sale_only', allow_item_notes: false, preorder_unit: '', preorder_billing_unit: 'unit', preorder_price_per_kg: '', preorder_gram_per_unit: '', preorder_use_base_price: true });
+            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0, is_offer: false, offer_price: '', sale_mode: 'sale_only', allow_item_notes: false, preorder_unit: '', preorder_billing_unit: 'unit', preorder_price_per_kg: '', preorder_gram_per_unit: '', preorder_use_base_price: true, units_per_box: '' });
             setMarginPercentage('');
             setAlertConfig({ is_active: false, min_stock: 5, critical_stock: 2, priority: 'normal', notify_system: true, notify_whatsapp: false, cooldown_hours: 6 });
         }
@@ -218,6 +219,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
             stock: Math.round(toNum(formData.stock) * 1000) / 1000,
             tax_rate: toNum(formData.tax_rate),
             offer_price: toNum(formData.offer_price),
+            units_per_box: parseInt(formData.units_per_box) || 0,
         };
         // Save alert settings in background (needs product ID, so we pass alertConfig for the caller to handle)
         dataToSave._alertConfig = alertConfig;
@@ -400,6 +402,24 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             </select>
                         </div>
                     </div>
+
+                    {/* Units per box - only for Und */}
+                    {(formData.unit === 'Und' || !formData.unit) && (
+                        <div className="bg-[#1a1a3d]/50 rounded-xl p-4 border border-white/5">
+                            <label className="block text-sm text-gray-400 mb-1">Unidades por Caja <span className="text-gray-500">(Opcional)</span></label>
+                            <input
+                                type="number"
+                                name="units_per_box"
+                                min="0"
+                                step="1"
+                                placeholder="Ej: 24"
+                                value={formData.units_per_box || ''}
+                                onChange={handleChange}
+                                className="glass-input w-full"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Cantidad de unidades que trae una caja. Se usa como referencia al hacer pedidos.</p>
+                        </div>
+                    )}
 
                     <div>
                         <label className="block text-sm text-gray-400 mb-1">Imagen (URL o Archivo)</label>

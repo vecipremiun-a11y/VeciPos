@@ -7,7 +7,7 @@ import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFrom
 let migrationsExecuted = false;
 let fetchInProgress = false;
 const DDL_CACHE_KEY = 'poskem_ddl_v';
-const DDL_TARGET = 18; // Increment when adding new migrations/DDL
+const DDL_TARGET = 20; // Increment when adding new migrations/DDL
 
 const safeJsonStringify = (value) => JSON.stringify(value, (_key, currentValue) => {
     if (typeof currentValue === 'bigint') {
@@ -163,7 +163,7 @@ export const useStore = create(persist((set, get) => ({
             // Check Schema Version
             const versionRes = await turso.execute("SELECT value FROM system_settings WHERE key = 'schema_version'");
             const currentVersion = versionRes.rows.length > 0 ? parseInt(versionRes.rows[0].value) : 0;
-            const TARGET_VERSION = 8;
+            const TARGET_VERSION = 9;
 
             if (currentVersion >= TARGET_VERSION) {
                 console.log("Schema is up to date (v" + currentVersion + ")");
@@ -285,6 +285,13 @@ export const useStore = create(persist((set, get) => ({
                 await turso.execute(`
                     CREATE INDEX IF NOT EXISTS idx_products_preorder 
                     ON products(company_id, sale_mode, category, name)
+                `);
+
+                // 5b. Para productos por proveedor
+                // Usado en: Orders - cargar productos del proveedor seleccionado
+                await turso.execute(`
+                    CREATE INDEX IF NOT EXISTS idx_products_supplier 
+                    ON products(company_id, supplier)
                 `);
 
                 // 6. Para ventas con status
@@ -845,6 +852,16 @@ export const useStore = create(persist((set, get) => ({
                     console.log('✅ Labor Management Phase 1 tables created');
                 } catch (e) {
                     console.warn('Migration error for Labor Management Phase 1:', e);
+                }
+            }
+
+            // Migration 9: Units per box (v9)
+            if (currentVersion < 9) {
+                console.log("Applying v9 (Units per box)...");
+                const prodInfo = await turso.execute("PRAGMA table_info(products)");
+                const prodCols = prodInfo.rows.map(r => r.name);
+                if (!prodCols.includes('units_per_box')) {
+                    await turso.execute("ALTER TABLE products ADD COLUMN units_per_box INTEGER DEFAULT 0");
                 }
             }
 
@@ -1933,32 +1950,29 @@ export const useStore = create(persist((set, get) => ({
 
             console.log('🏢 Loading data for company:', activeCompanyId);
 
-            // CHUNKED PARALLEL FETCH: 4 at a time to avoid saturating connection pool
+            // SINGLE BATCH FETCH: 1 HTTP round-trip for all metadata
             // ==========================================
             console.time('⏱️ BatchFetch');
-            const [productLotsRes, categoriesRes, suppliersRes, usersRes] = await Promise.all([
-                turso.execute({ sql: `SELECT pl.id, pl.product_id, pl.batch_number, pl.expiry_date, pl.quantity, pl.cost, pl.supplier_name, pl.created_at, pl.status, pl.company_id, p.name AS product_name, p.unit AS product_unit
+            const batchResults = await turso.batch([
+                { sql: `SELECT pl.id, pl.product_id, pl.batch_number, pl.expiry_date, pl.quantity, pl.cost, pl.supplier_name, pl.created_at, pl.status, pl.company_id, p.name AS product_name, p.unit AS product_unit
                           FROM product_lots pl
                           LEFT JOIN products p ON p.id = pl.product_id
                           WHERE pl.company_id = ? AND pl.quantity > 0 
                           ORDER BY pl.expiry_date ASC 
-                          LIMIT 200`, args: [activeCompanyId] }),
-                turso.execute({ sql: "SELECT * FROM categories WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] }),
-                turso.execute({ sql: "SELECT * FROM suppliers WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] }),
-                turso.execute({ sql: "SELECT * FROM users WHERE company_id = ?", args: [activeCompanyId] })
-            ]);
-            const [clientsRes, permissionsRes, taxesRes, modulesRes] = await Promise.all([
-                turso.execute({ sql: "SELECT * FROM clients WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] }),
-                turso.execute({ sql: "SELECT * FROM role_permissions WHERE company_id = ?", args: [activeCompanyId] }),
-                turso.execute({ sql: "SELECT * FROM tax_rates WHERE company_id = ?", args: [activeCompanyId] }),
-                turso.execute({ sql: "SELECT * FROM company_modules WHERE company_id = ?", args: [activeCompanyId] })
-            ]);
-            const [payConfigRes, payTerminalsRes, bankAccountsRes, companyConfigRes] = await Promise.all([
-                turso.execute({ sql: "SELECT * FROM payment_methods_config WHERE company_id = ?", args: [activeCompanyId] }),
-                turso.execute({ sql: "SELECT * FROM payment_terminals WHERE company_id = ? AND is_active = 1", args: [activeCompanyId] }),
-                turso.execute({ sql: "SELECT * FROM bank_accounts WHERE company_id = ? AND is_active = 1", args: [activeCompanyId] }),
-                turso.execute({ sql: "SELECT inventory_adjustment_mode, currency, credit_block_mode FROM companies WHERE id = ?", args: [activeCompanyId] })
-            ]);
+                          LIMIT 200`, args: [activeCompanyId] },
+                { sql: "SELECT * FROM categories WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
+                { sql: "SELECT * FROM suppliers WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
+                { sql: "SELECT * FROM users WHERE company_id = ?", args: [activeCompanyId] },
+                { sql: "SELECT * FROM clients WHERE company_id = ? ORDER BY name ASC", args: [activeCompanyId] },
+                { sql: "SELECT * FROM role_permissions WHERE company_id = ?", args: [activeCompanyId] },
+                { sql: "SELECT * FROM tax_rates WHERE company_id = ?", args: [activeCompanyId] },
+                { sql: "SELECT * FROM company_modules WHERE company_id = ?", args: [activeCompanyId] },
+                { sql: "SELECT * FROM payment_methods_config WHERE company_id = ?", args: [activeCompanyId] },
+                { sql: "SELECT * FROM payment_terminals WHERE company_id = ? AND is_active = 1", args: [activeCompanyId] },
+                { sql: "SELECT * FROM bank_accounts WHERE company_id = ? AND is_active = 1", args: [activeCompanyId] },
+                { sql: "SELECT inventory_adjustment_mode, currency, credit_block_mode FROM companies WHERE id = ?", args: [activeCompanyId] }
+            ], 'read');
+            const [productLotsRes, categoriesRes, suppliersRes, usersRes, clientsRes, permissionsRes, taxesRes, modulesRes, payConfigRes, payTerminalsRes, bankAccountsRes, companyConfigRes] = batchResults;
             console.timeEnd('⏱️ BatchFetch');
 
             console.log('👥 Loaded users:', usersRes.rows.length);
@@ -4665,7 +4679,7 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             const result = await turso.execute({
-                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes, preorder_unit, preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit, preorder_use_base_price) VALUES (?, ?, ROUND(?, 3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes, preorder_unit, preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit, preorder_use_base_price, units_per_box) VALUES (?, ?, ROUND(?, 3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
                     product.name,
                     product.price,
@@ -4688,7 +4702,8 @@ export const useStore = create(persist((set, get) => ({
                     product.preorder_billing_unit || 'unit',
                     product.preorder_price_per_kg || 0,
                     product.preorder_gram_per_unit || 0,
-                    product.preorder_use_base_price !== undefined ? (product.preorder_use_base_price ? 1 : 0) : 1
+                    product.preorder_use_base_price !== undefined ? (product.preorder_use_base_price ? 1 : 0) : 1,
+                    product.units_per_box || 0
                 ]
             });
             // Safely handle price_ranges for the local state update
@@ -4779,7 +4794,7 @@ export const useStore = create(persist((set, get) => ({
             const stockChanged = Math.abs(newStock - oldStock) >= 0.001;
 
             await turso.execute({
-                sql: "UPDATE products SET name=?, price=?, stock=ROUND(?, 3), category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=?, sale_mode=?, allow_item_notes=?, preorder_unit=?, preorder_billing_unit=?, preorder_price_per_kg=?, preorder_gram_per_unit=?, preorder_use_base_price=? WHERE id = ? AND company_id = ?",
+                sql: "UPDATE products SET name=?, price=?, stock=ROUND(?, 3), category=?, sku=?, image=?, cost=?, tax_rate=?, unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=?, sale_mode=?, allow_item_notes=?, preorder_unit=?, preorder_billing_unit=?, preorder_price_per_kg=?, preorder_gram_per_unit=?, preorder_use_base_price=?, units_per_box=? WHERE id = ? AND company_id = ?",
                 args: [
                     updatedProduct.name,
                     updatedProduct.price,
@@ -4802,6 +4817,7 @@ export const useStore = create(persist((set, get) => ({
                     updatedProduct.preorder_price_per_kg || 0,
                     updatedProduct.preorder_gram_per_unit || 0,
                     updatedProduct.preorder_use_base_price !== undefined ? (updatedProduct.preorder_use_base_price ? 1 : 0) : 1,
+                    updatedProduct.units_per_box || 0,
                     id,
                     activeCompanyId
                 ]
@@ -5875,19 +5891,23 @@ export const useStore = create(persist((set, get) => ({
 
     // Agregar nuevo carrito (máximo 3)
     addCart: () => {
-        const { carts, nextCartId } = get();
+        const { carts, nextCartId, activeCartId } = get();
 
         if (carts.length >= 3) {
             alert('Máximo 3 carritos simultáneos');
             return;
         }
 
+        // Inherit tipoDte from current active cart (respects user's default)
+        const activeCart = carts.find(c => c.id === activeCartId);
+        const inheritedDte = activeCart ? activeCart.tipoDte : 0;
+
         const newCart = {
             id: nextCartId,
             name: `Ticket ${carts.length + 1}`,
             items: [],
             client: null,
-            tipoDte: 39,
+            tipoDte: inheritedDte,
             createdAt: Date.now()
         };
 

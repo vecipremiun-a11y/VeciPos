@@ -1,15 +1,9 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { Search, Package, Truck, Box, AlertTriangle, TrendingDown, DollarSign, Barcode, Tag, Info, ChevronDown, Trash2, ArrowLeft } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { createClient } from '@libsql/client';
 import { formatCurrency } from '../utils/formatCurrency';
-
-// Create turso client
-const turso = createClient({
-    url: import.meta.env.VITE_TURSO_DATABASE_URL,
-    authToken: import.meta.env.VITE_TURSO_AUTH_TOKEN
-});
+import { turso } from '../lib/turso';
 
 const Orders = () => {
     const {
@@ -25,12 +19,15 @@ const Orders = () => {
     } = useStore();
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
     const [selectedSupplierId, setSelectedSupplierId] = useState('');
     const [filterLowStock, setFilterLowStock] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [supplierProducts, setSupplierProducts] = useState([]);
     const [productStats, setProductStats] = useState(null);
     const [loadingStats, setLoadingStats] = useState(false);
+    const supplierCacheRef = useRef({});
+    const searchTimerRef = useRef(null);
 
     // Order form states
     const [orderCost, setOrderCost] = useState('');
@@ -291,63 +288,83 @@ const Orders = () => {
         loadProductStats(product);
     };
 
-    // Load products when supplier is selected
-    const loadProductsBySupplier = async (supplierId) => {
-        if (!supplierId) {
+    // Debounce search
+    useEffect(() => {
+        if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+        searchTimerRef.current = setTimeout(() => {
+            setDebouncedSearch(searchTerm);
+        }, 300);
+        return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+    }, [searchTerm]);
+
+    // Search products in Turso (with supplier filter if selected)
+    useEffect(() => {
+        if (!activeCompanyId) return;
+        if (!debouncedSearch && !selectedSupplierId) {
             setSupplierProducts([]);
             return;
         }
 
-        const selectedSupplier = suppliers.find(s => s.id === Number(supplierId));
-        if (!selectedSupplier) return;
-
-        setIsLoading(true);
-        try {
-            const result = await turso.execute({
-                sql: "SELECT * FROM products WHERE company_id = ? AND supplier = ? ORDER BY stock ASC",
-                args: [activeCompanyId, selectedSupplier.name]
-            });
-
-            const products = result.rows.map(p => ({
-                ...p,
-                price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
-            }));
-
-            setSupplierProducts(products);
-        } catch (e) {
-            console.error("Error loading products by supplier:", e);
-            setSupplierProducts([]);
-        } finally {
-            setIsLoading(false);
+        const cacheKey = `${selectedSupplierId || 'all'}:${debouncedSearch || ''}:${filterLowStock}`;
+        if (supplierCacheRef.current[cacheKey]) {
+            setSupplierProducts(supplierCacheRef.current[cacheKey]);
+            return;
         }
-    };
 
-    // Handle supplier selection
+        let cancelled = false;
+        const search = async () => {
+            setIsLoading(true);
+            try {
+                const conditions = ['company_id = ?'];
+                const args = [activeCompanyId];
+
+                if (selectedSupplierId) {
+                    const sup = suppliers.find(s => s.id === Number(selectedSupplierId));
+                    if (sup) {
+                        conditions.push('supplier = ?');
+                        args.push(sup.name);
+                    }
+                }
+                if (debouncedSearch) {
+                    conditions.push("(LOWER(COALESCE(name,'')) LIKE ? OR LOWER(COALESCE(sku,'')) LIKE ?)");
+                    const like = `%${debouncedSearch.toLowerCase()}%`;
+                    args.push(like, like);
+                }
+                if (filterLowStock) {
+                    conditions.push('stock <= 5');
+                }
+
+                const result = await turso.execute({
+                    sql: `SELECT id, name, sku, price, cost, stock, tax_rate, unit, image, category, supplier, price_ranges
+                          FROM products WHERE ${conditions.join(' AND ')} ORDER BY stock ASC LIMIT 100`,
+                    args
+                });
+                if (!cancelled) {
+                    const rows = result.rows || [];
+                    supplierCacheRef.current[cacheKey] = rows;
+                    setSupplierProducts(rows);
+                }
+            } catch (e) {
+                console.error('Error searching products:', e);
+                if (!cancelled) setSupplierProducts([]);
+            } finally {
+                if (!cancelled) setIsLoading(false);
+            }
+        };
+        search();
+        return () => { cancelled = true; };
+    }, [debouncedSearch, selectedSupplierId, filterLowStock, activeCompanyId]);
+
+    // Handle supplier selection (filter, not load)
     const handleSupplierChange = (supplierId) => {
         setSelectedSupplierId(supplierId);
         setSelectedProduct(null);
-        setSearchTerm('');
-        loadProductsBySupplier(supplierId);
     };
 
-    // Filter products based on search and low stock filter
-    const filteredProducts = useMemo(() => {
-        return supplierProducts.filter(p => {
-            const matchesSearch = !searchTerm ||
-                p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                p.sku?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                p.barcode?.includes(searchTerm);
-
-            const matchesLowStock = !filterLowStock || (p.stock <= (p.min_stock || 5));
-
-            return matchesSearch && matchesLowStock;
-        });
-    }, [supplierProducts, searchTerm, filterLowStock]);
-
     // Count totals
-    const totalProducts = filteredProducts.length;
+    const totalProducts = supplierProducts.length;
     const totalSuppliers = suppliers.length;
-    const lowStockCount = supplierProducts.filter(p => p.stock <= (p.min_stock || 5)).length;
+    const lowStockCount = supplierProducts.filter(p => p.stock <= 5).length;
 
     // Get selected supplier info
     const selectedSupplier = suppliers.find(s => s.id === Number(selectedSupplierId));
@@ -443,25 +460,23 @@ const Orders = () => {
                             <ChevronDown size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] pointer-events-none" />
                         </div>
 
-                        {/* Search within supplier products */}
-                        {selectedSupplierId && (
-                            <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={16} />
-                                <input
-                                    type="text"
-                                    placeholder="Buscar en productos..."
-                                    className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg pl-9 pr-3 py-2 text-[var(--color-text)] text-sm focus:outline-none focus:border-[var(--color-primary)] transition-colors"
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                />
-                            </div>
-                        )}
+                        {/* Search products (always visible) */}
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={16} />
+                            <input
+                                type="text"
+                                placeholder="Buscar productos por nombre o SKU..."
+                                className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg pl-9 pr-3 py-2 text-[var(--color-text)] text-sm focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
                     </div>
 
                     {/* Products List Header */}
                     <div className="p-2 lg:p-3 border-b border-[var(--glass-border)] bg-black/20 font-semibold text-[var(--color-text-muted)] text-xs lg:text-sm flex justify-between items-center">
                         <span>Productos {selectedSupplier ? `de ${selectedSupplier.name}` : ''}</span>
-                        <span className="text-[var(--color-primary)]">{filteredProducts.length} productos</span>
+                        <span className="text-[var(--color-primary)]">{supplierProducts.length} productos</span>
                     </div>
 
                     {/* Products List */}
@@ -469,20 +484,21 @@ const Orders = () => {
                         {isLoading ? (
                             <div className="p-8 text-center text-[var(--color-text-muted)]">
                                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)] mx-auto mb-3"></div>
-                                <p className="text-sm">Cargando productos...</p>
+                                <p className="text-sm">Buscando productos...</p>
                             </div>
-                        ) : !selectedSupplierId ? (
+                        ) : !debouncedSearch && !selectedSupplierId ? (
                             <div className="p-8 text-center text-[var(--color-text-muted)]">
-                                <Truck size={48} className="mx-auto mb-3 opacity-20" />
-                                <p className="text-sm">Seleccione un proveedor para ver sus productos</p>
+                                <Search size={48} className="mx-auto mb-3 opacity-20" />
+                                <p className="text-sm">Escriba para buscar productos o seleccione un proveedor</p>
                             </div>
-                        ) : filteredProducts.length === 0 ? (
+                        ) : supplierProducts.length === 0 ? (
                             <div className="p-8 text-center text-[var(--color-text-muted)]">
                                 <Package size={48} className="mx-auto mb-3 opacity-20" />
                                 <p className="text-sm">No se encontraron productos</p>
                             </div>
                         ) : (
-                            filteredProducts.map(product => {
+                            <>
+                            {supplierProducts.map(product => {
                                 const isLowStock = product.stock <= (product.min_stock || 5);
                                 const isSelected = selectedProduct?.id === product.id;
 
@@ -527,7 +543,8 @@ const Orders = () => {
                                         </div>
                                     </div>
                                 );
-                            })
+                            })}
+                            </>
                         )}
                     </div>
 
