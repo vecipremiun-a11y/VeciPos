@@ -187,42 +187,44 @@ const Orders = () => {
 
         setLoadingStats(true);
         try {
-            // Get sales data for the last 30 days
+            // Use pre-calculated tables for fast stats (same as ProductProfile)
+            const today = new Date().toISOString().split('T')[0];
             const thirtyDaysAgo = new Date();
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
             const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
 
-            const result = await turso.execute({
-                sql: `SELECT 
-                    SUM(json_extract(sp.value, '$.quantity')) as total_quantity,
-                    COUNT(DISTINCT DATE(s.date)) as days_sold,
-                    MAX(DATE(s.date)) as last_sale_date
-                FROM sales s
-                JOIN json_each(s.items) AS sp ON CAST(json_extract(sp.value, '$.id') AS INTEGER) = ?
-                WHERE s.company_id = ? AND DATE(s.date) >= ?`,
-                args: [product.id, activeCompanyId, thirtyDaysAgoStr]
-            });
+            const [profitResult, statsResult, purchaseResult] = await Promise.all([
+                turso.execute({
+                    sql: `SELECT COALESCE(SUM(total_quantity), 0) as total_sold,
+                                 COUNT(DISTINCT day) as days_with_sales
+                          FROM product_daily_profit
+                          WHERE company_id = ? AND product_id = ? AND day >= ? AND day <= ?`,
+                    args: [activeCompanyId, product.id, thirtyDaysAgoStr, today]
+                }),
+                turso.execute({
+                    sql: `SELECT last_sale_date FROM product_movement_stats
+                          WHERE company_id = ? AND product_id = ?`,
+                    args: [activeCompanyId, product.id]
+                }),
+                // Get last two purchases to compare costs
+                turso.execute({
+                    sql: `SELECT 
+                        json_extract(item.value, '$.cost') as item_cost,
+                        json_extract(item.value, '$.supplier_code') as supplier_code,
+                        p.date
+                    FROM purchases p, json_each(p.items) as item
+                    WHERE p.company_id = ? 
+                        AND CAST(json_extract(item.value, '$.id') AS INTEGER) = ?
+                    ORDER BY p.date DESC
+                    LIMIT 2`,
+                    args: [activeCompanyId, product.id]
+                })
+            ]);
 
-            // Get last two purchases to compare costs
-            const purchaseResult = await turso.execute({
-                sql: `SELECT 
-                    json_extract(item.value, '$.cost') as item_cost,
-                    json_extract(item.value, '$.supplier_code') as supplier_code,
-                    p.date
-                FROM purchases p, json_each(p.items) as item
-                WHERE p.company_id = ? 
-                    AND CAST(json_extract(item.value, '$.id') AS INTEGER) = ?
-                ORDER BY p.date DESC
-                LIMIT 2`,
-                args: [activeCompanyId, product.id]
-            });
-
-            const data = result.rows[0];
-            const totalQuantity = Number(data?.total_quantity) || 0;
-            const daysSold = Number(data?.days_sold) || 0;
+            const totalSold30d = parseFloat(profitResult.rows[0]?.total_sold) || 0;
 
             // Calculate averages
-            const avgDailySales = daysSold > 0 ? totalQuantity / 30 : 0; // Based on 30 day period
+            const avgDailySales = totalSold30d / 30;
             const avgWeeklySales = avgDailySales * 7;
             const daysOfStock = avgDailySales > 0 ? Math.round(product.stock / avgDailySales) : 999;
 
@@ -254,7 +256,7 @@ const Orders = () => {
                 avgDailySales: avgDailySales.toFixed(1),
                 avgWeeklySales: avgWeeklySales.toFixed(1),
                 daysOfStock,
-                lastSaleDate: data?.last_sale_date || 'Sin ventas',
+                lastSaleDate: statsResult.rows[0]?.last_sale_date || 'Sin ventas',
                 velocity,
                 // Purchase data
                 lastPurchaseCost,

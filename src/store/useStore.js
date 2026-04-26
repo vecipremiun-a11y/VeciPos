@@ -7,7 +7,7 @@ import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFrom
 let migrationsExecuted = false;
 let fetchInProgress = false;
 const DDL_CACHE_KEY = 'poskem_ddl_v';
-const DDL_TARGET = 20; // Increment when adding new migrations/DDL
+const DDL_TARGET = 21; // Increment when adding new migrations/DDL
 
 const safeJsonStringify = (value) => JSON.stringify(value, (_key, currentValue) => {
     if (typeof currentValue === 'bigint') {
@@ -710,12 +710,10 @@ export const useStore = create(persist((set, get) => ({
                     await turso.execute("CREATE INDEX IF NOT EXISTS idx_absences_user ON labor_absences(user_id, absence_date)");
 
                     // Migration: add half_day, half_day_period, hours, group_id columns
-                    try {
-                        await turso.execute("ALTER TABLE labor_absences ADD COLUMN half_day INTEGER DEFAULT 0");
-                        await turso.execute("ALTER TABLE labor_absences ADD COLUMN half_day_period TEXT DEFAULT NULL"); // 'morning' | 'afternoon'
-                        await turso.execute("ALTER TABLE labor_absences ADD COLUMN hours REAL DEFAULT NULL");
-                        await turso.execute("ALTER TABLE labor_absences ADD COLUMN group_id TEXT DEFAULT NULL"); // groups multi-day absences
-                    } catch (_) { /* columns already exist */ }
+                    try { await turso.execute("ALTER TABLE labor_absences ADD COLUMN half_day INTEGER DEFAULT 0"); } catch (_) { /* already exists */ }
+                    try { await turso.execute("ALTER TABLE labor_absences ADD COLUMN half_day_period TEXT DEFAULT NULL"); } catch (_) { /* already exists */ }
+                    try { await turso.execute("ALTER TABLE labor_absences ADD COLUMN hours REAL DEFAULT NULL"); } catch (_) { /* already exists */ }
+                    try { await turso.execute("ALTER TABLE labor_absences ADD COLUMN group_id TEXT DEFAULT NULL"); } catch (_) { /* already exists */ }
 
                     // Migration: pay_hourly_rate for mixed pay type
                     try {
@@ -1500,6 +1498,12 @@ export const useStore = create(persist((set, get) => ({
                             console.warn('Fix initial_quantity migration skipped:', e.message);
                         }
                     }
+
+                    // ── Always-run DDL: add missing columns to labor_absences ──
+                    try { await turso.execute("ALTER TABLE labor_absences ADD COLUMN half_day INTEGER DEFAULT 0"); } catch (_) { /* already exists */ }
+                    try { await turso.execute("ALTER TABLE labor_absences ADD COLUMN half_day_period TEXT DEFAULT NULL"); } catch (_) { /* already exists */ }
+                    try { await turso.execute("ALTER TABLE labor_absences ADD COLUMN hours REAL DEFAULT NULL"); } catch (_) { /* already exists */ }
+                    try { await turso.execute("ALTER TABLE labor_absences ADD COLUMN group_id TEXT DEFAULT NULL"); } catch (_) { /* already exists */ }
 
                     // ── Always-run DDL for new tables (safe with IF NOT EXISTS) ──
                     try {
@@ -2301,6 +2305,35 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error("Fetch sales error", e);
             return 0;
+        }
+    },
+
+    /**
+     * Fetch full sales (with items) for reporting purposes.
+     * - Filters by company_id and date range in company timezone.
+     * - Excludes cancelled sales (status != 'cancelled').
+     * - Returns the array (does NOT mutate the `sales` state used by the history UI).
+     */
+    fetchSalesForReport: async (startDate, endDate) => {
+        try {
+            const { activeCompanyId, currentCompanyTimezone } = get();
+            if (!startDate || !endDate) return [];
+            const start = getStartFromDateString(startDate, currentCompanyTimezone).toISOString();
+            const end = getEndFromDateString(endDate, currentCompanyTimezone).toISOString();
+            const result = await turso.execute({
+                sql: `SELECT id, date, total, status, user_id, payment_method, client_name, client_id, items
+                      FROM sales
+                      WHERE company_id = ? AND date >= ? AND date <= ? AND status != 'cancelled'
+                      ORDER BY date DESC`,
+                args: [activeCompanyId, start, end]
+            });
+            return result.rows.map(s => ({
+                ...s,
+                paymentMethod: s.payment_method,
+            }));
+        } catch (e) {
+            console.error("fetchSalesForReport error", e);
+            return [];
         }
     },
 
@@ -5761,9 +5794,13 @@ export const useStore = create(persist((set, get) => ({
 
             await turso.batch(queries);
 
-            // Refetch lots or simulate (Optimistic)
-            const newLots = purchase.items.map(item => ({
-                id: `temp - ${Date.now()} - ${item.id}`, // Temp ID
+            // Refetch lots or simulate (Optimistic). Usamos UUID o id+random para evitar
+            // colisiones si addPurchase se invoca varias veces en el mismo tick.
+            const tempBase = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+            const newLots = purchase.items.map((item, idx) => ({
+                id: `temp-${tempBase}-${item.id}-${idx}`, // Temp ID único
                 product_id: item.id,
                 batch_number: item.batchNumber || '',
                 expiry_date: item.expiryDate || null,
@@ -5780,7 +5817,7 @@ export const useStore = create(persist((set, get) => ({
             // We need newPurchase object primarily for state update
             const newPurchase = {
                 ...purchase,
-                id: Date.now(),
+                id: purchaseId, // Usamos el ID real devuelto por la BD
                 status: 'completed',
                 userId: currentUser ? currentUser.id : null,
                 company_id: activeCompanyId
@@ -6396,7 +6433,15 @@ export const useStore = create(persist((set, get) => ({
                     for (const comp of (item.combo_items || [])) {
                         const compIdStr = String(comp.product_id);
                         const compProduct = productsMap.get(compIdStr);
-                        if (!compProduct) continue;
+                        if (!compProduct) {
+                            // 🛑 Componente faltante: la venta del combo NO puede quedar parcial.
+                            // Antes hacíamos `continue` y vendíamos el combo sin descontar stock.
+                            console.error(`❌ Combo ${item.name}: componente product_id=${comp.product_id} no encontrado en BD`);
+                            return {
+                                success: false,
+                                error: `Combo "${item.name}": componente faltante (id ${comp.product_id}). No se puede procesar la venta.`
+                            };
+                        }
 
                         const compDeduct = (parseFloat(comp.quantity) || 1) * quantity;
 
@@ -6780,9 +6825,14 @@ export const useStore = create(persist((set, get) => ({
                     get().checkInventoryAlerts(productIds);
                 }, 100);
 
-                // Sync client debt columns if credit sale
+                // Sync client debt columns if credit sale (await: el saldo del cliente DEBE
+                // quedar coherente antes de retornar para que la siguiente venta lo lea bien)
                 if (sale.paymentMethod === 'Crédito' && sale.client?.id) {
-                    get()._syncClientDebt(sale.client.id);
+                    try {
+                        await get()._syncClientDebt(sale.client.id);
+                    } catch (debtErr) {
+                        console.warn('⚠️ _syncClientDebt failed post-sale:', debtErr);
+                    }
                 }
 
                 // ============================================
@@ -6860,15 +6910,145 @@ export const useStore = create(persist((set, get) => ({
                 return { success: true, saleId, creditWarning: sale._creditWarning || null };
 
             } catch (error) {
-                // ROLLBACK COMPLETO
-                await tx.rollback();
+                // ROLLBACK COMPLETO de la transacción crítica
+                try { await tx.rollback(); } catch { /* tx ya pudo cerrarse */ }
                 console.error('❌ Sale failed, rolled back:', error);
+
+                // 🛟 FAILSAFE: encolar la venta en localStorage para reintento automático.
+                // Así NO perdemos la venta aunque haya caída de red / timeout de Turso.
+                // Para el cajero la venta sigue siendo "exitosa" — se sincroniza apenas vuelva la conexión.
+                try {
+                    const queued = get()._queueFailedSale(sale, error?.message || String(error));
+                    if (queued) {
+                        return {
+                            success: true,
+                            saleId: queued.tempId,
+                            queued: true,
+                            queueReason: error?.message || 'Sin conexión',
+                            creditWarning: sale._creditWarning || null,
+                        };
+                    }
+                } catch (qErr) {
+                    console.error('❌ Failed to queue sale for retry:', qErr);
+                }
+
                 return { success: false, error: error.message };
             }
 
         } catch (e) {
             console.error('❌ Sale error:', e);
+            // También intentar encolar si fue un error antes de la transacción
+            try {
+                const queued = get()._queueFailedSale(sale, e?.message || String(e));
+                if (queued) {
+                    return {
+                        success: true,
+                        saleId: queued.tempId,
+                        queued: true,
+                        queueReason: e?.message || 'Sin conexión',
+                    };
+                }
+            } catch { /* noop */ }
             return { success: false, error: e.message };
+        }
+    },
+
+    // ============================================
+    // 🛟 COLA DE VENTAS PENDIENTES (FAILSAFE OFFLINE)
+    // ============================================
+    // Si una venta falla en la transacción (caída de red, timeout de Turso),
+    // la guardamos en localStorage y la reintentamos en background.
+    // Así el cajero NUNCA pierde una venta aunque la conexión se corte.
+
+    _queueFailedSale: (sale, reason = 'unknown') => {
+        try {
+            if (typeof window === 'undefined' || !window.localStorage) return null;
+            const { activeCompanyId, currentUser, currentCompanyTimezone } = get();
+            const KEY = 'poskem_pending_sales_v1';
+            const queue = JSON.parse(localStorage.getItem(KEY) || '[]');
+            const tempId = `pending_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+            const entry = {
+                tempId,
+                companyId: activeCompanyId,
+                userId: currentUser?.id || null,
+                userName: currentUser?.name || null,
+                timezone: currentCompanyTimezone || null,
+                queuedAt: new Date().toISOString(),
+                attempts: 0,
+                lastError: reason,
+                sale: {
+                    items: sale.items,
+                    total: sale.total,
+                    summary: sale.summary,
+                    paymentMethod: sale.paymentMethod,
+                    paymentDetails: sale.paymentDetails,
+                    client: sale.client || null,
+                    tipoDte: sale.tipoDte ?? null,
+                    invoiceData: sale.invoiceData || null,
+                },
+            };
+            queue.push(entry);
+            localStorage.setItem(KEY, JSON.stringify(queue));
+            set({ pendingSalesCount: queue.length });
+            console.warn(`🛟 Venta encolada para reintento (tempId=${tempId}, motivo: ${reason})`);
+            return entry;
+        } catch (e) {
+            console.error('Error encolando venta pendiente:', e);
+            return null;
+        }
+    },
+
+    getPendingSalesQueue: () => {
+        try {
+            if (typeof window === 'undefined' || !window.localStorage) return [];
+            return JSON.parse(localStorage.getItem('poskem_pending_sales_v1') || '[]');
+        } catch { return []; }
+    },
+
+    processPendingSalesQueue: async () => {
+        try {
+            if (typeof window === 'undefined' || !window.localStorage) return { processed: 0 };
+            if (!navigator?.onLine) return { processed: 0, offline: true };
+            const KEY = 'poskem_pending_sales_v1';
+            const queue = JSON.parse(localStorage.getItem(KEY) || '[]');
+            if (queue.length === 0) {
+                set({ pendingSalesCount: 0 });
+                return { processed: 0 };
+            }
+            const { activeCompanyId } = get();
+            const remaining = [];
+            let processed = 0;
+            for (const entry of queue) {
+                // Solo reintentar las de la empresa activa para evitar mezclar contextos.
+                if (entry.companyId && activeCompanyId && entry.companyId !== activeCompanyId) {
+                    remaining.push(entry);
+                    continue;
+                }
+                try {
+                    entry.attempts = (entry.attempts || 0) + 1;
+                    const result = await get().addSale(entry.sale);
+                    if (result?.success && !result.queued) {
+                        processed += 1;
+                        console.log(`✅ Venta pendiente sincronizada (tempId=${entry.tempId}, saleId=${result.saleId})`);
+                    } else if (result?.queued) {
+                        // Sigue offline — mantenerla
+                        remaining.push(entry);
+                    } else {
+                        entry.lastError = result?.error || 'unknown';
+                        if (entry.attempts < 10) remaining.push(entry);
+                        else console.error(`❌ Venta pendiente descartada tras 10 intentos:`, entry);
+                    }
+                } catch (e) {
+                    entry.lastError = e?.message || String(e);
+                    if (entry.attempts < 10) remaining.push(entry);
+                }
+            }
+            localStorage.setItem(KEY, JSON.stringify(remaining));
+            set({ pendingSalesCount: remaining.length });
+            return { processed, remaining: remaining.length };
+        } catch (e) {
+            console.error('Error procesando cola de ventas pendientes:', e);
+            return { processed: 0, error: e.message };
         }
     },
 
@@ -6891,12 +7071,6 @@ export const useStore = create(persist((set, get) => ({
 
             // Ensure items is an array
             const items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items;
-
-            // Safe Parsing of date for daily profit update
-            const saleDateObj = new Date(sale.date);
-            const saleDay = !isNaN(saleDateObj.getTime())
-                ? saleDateObj.toISOString().split('T')[0]
-                : new Date().toISOString().split('T')[0];
 
             console.log(`🚫 Cancelling Sale #${saleId} - Items: ${items.length}`);
 
@@ -6942,17 +7116,23 @@ export const useStore = create(persist((set, get) => ({
                 });
             }
 
-            // 5. Update Daily Sales Summary
-            queries.push({
-                sql: `UPDATE sales_daily_summary 
-                      SET total_sales = total_sales - ?, 
-                          total_orders = total_orders - 1 
-                      WHERE day = ? AND company_id = ?`,
-                args: [sale.total, saleDay, activeCompanyId]
-            });
-
             // Execute Batch Transaction
             await turso.batch(queries);
+
+            // 5. Reverse all aggregations (sales_daily_summary, vendor_daily_performance,
+            //    product_daily_profit, product_movement_stats, hourly_sales_stats).
+            //    This keeps the pre-aggregated reports (Venta de Productos, Análisis de Ventas)
+            //    in sync with the live `sales` table.
+            try {
+                await get().reverseAllAggregations(
+                    { ...sale, items, total: sale.total, date: sale.date },
+                    sale.user_id,
+                    activeCompanyId,
+                    get().currentCompanyTimezone
+                );
+            } catch (aggErr) {
+                console.warn('⚠️ reverseAllAggregations failed for cancelled sale', saleId, aggErr);
+            }
 
             // 5. Update Local State
             set(state => ({
@@ -7028,10 +7208,15 @@ export const useStore = create(persist((set, get) => ({
                 get().refreshRegisterStats(postCancelRegister.id);
             }
 
-            // Sync client debt if this was a credit sale
+            // Sync client debt if this was a credit sale (await para que el saldo quede
+            // actualizado antes de devolver el control a la UI)
             const cancelledClientId = sale.client_id || sale.clientId;
             if (cancelledClientId && sale.payment_method === 'Crédito') {
-                get()._syncClientDebt(cancelledClientId);
+                try {
+                    await get()._syncClientDebt(cancelledClientId);
+                } catch (debtErr) {
+                    console.warn('⚠️ _syncClientDebt failed post-cancel:', debtErr);
+                }
             }
 
             return true;
@@ -7119,10 +7304,10 @@ export const useStore = create(persist((set, get) => ({
             const returnTotal = validatedItems.reduce((sum, i) => sum + (i.price * i.quantity), 0);
             const now = new Date().toISOString();
 
-            const saleDateObj = new Date(sale.date);
-            const saleDay = !isNaN(saleDateObj.getTime())
-                ? saleDateObj.toISOString().split('T')[0]
-                : new Date().toISOString().split('T')[0];
+            // Día de la VENTA original en la zona horaria del comercio (consistente con
+            // updateSalesDailySummary / updateProductDailyProfit que también usan TZ).
+            const tz = currentCompanyTimezone;
+            const saleDay = formatInCompanyTime(sale.date, tz, 'yyyy-MM-dd');
 
             // 4. Build transaction queries
             const queries = [
@@ -7157,18 +7342,52 @@ export const useStore = create(persist((set, get) => ({
                 });
             }
 
-            // 6. Update daily summary
+            // 6. Update daily summary (resta el monto devuelto del total del día de la venta original).
+            //    No tocamos total_orders porque la venta sigue existiendo (devolución parcial).
             queries.push({
                 sql: `UPDATE sales_daily_summary 
-                      SET total_sales = total_sales - ?
+                      SET total_sales = MAX(0, total_sales - ?),
+                          updated_at = datetime('now')
                       WHERE day = ? AND company_id = ?`,
                 args: [returnTotal, saleDay, activeCompanyId]
             });
 
+            // 7. Registrar movimiento de caja por el reembolso (DENTRO del batch para que sea
+            //    atómico con la devolución: si falla algo, no queda devolución sin movimiento).
+            const openRegister = get().cashRegister;
+            if (openRegister?.id) {
+                queries.push({
+                    sql: "INSERT INTO cash_movements (register_id, type, amount, reason, date, company_id) VALUES (?, ?, ?, ?, ?, ?)",
+                    args: [openRegister.id, 'OUT', returnTotal, `Devolución Venta #${saleId}: ${reason}`, now, activeCompanyId]
+                });
+            }
+
             // Execute all queries as a batch
             await turso.batch(queries);
 
-            // 7. Update local state - stock
+            // 7b. Revertir agregaciones de los productos devueltos.
+            //     Esto mantiene en cuadre: product_daily_profit, product_movement_stats.
+            //     NO tocamos vendor_daily_performance ni hourly_sales_stats porque la venta
+            //     sigue existiendo (es una devolución parcial: el ticket no desaparece).
+            try {
+                // Adaptar items al formato esperado por reverseProductDailyProfit / reverseProductMovementStats
+                const itemsForReverse = validatedItems.map(i => ({
+                    id: i.id,
+                    name: i.name,
+                    quantity: i.quantity,
+                    price: i.price,
+                    cost: i.cost || 0,
+                    tax_rate: 0, // El detalle de tax queda en la venta original; restamos solo cantidad y revenue
+                }));
+                await Promise.all([
+                    get().reverseProductDailyProfit(itemsForReverse, activeCompanyId, sale.date),
+                    get().reverseProductMovementStats(itemsForReverse, activeCompanyId),
+                ]);
+            } catch (aggErr) {
+                console.warn('⚠️ Reverso parcial de agregaciones falló (devolución):', aggErr);
+            }
+
+            // 8. Update local state - stock
             set(state => ({
                 products: state.products.map(p => {
                     const returnedItem = validatedItems.find(i => i.id === p.id);
@@ -7179,7 +7398,7 @@ export const useStore = create(persist((set, get) => ({
                 })
             }));
 
-            // 8. Sync stock to online store (non-blocking)
+            // 9. Sync stock to online store (non-blocking)
             try {
                 const { products: updatedProducts } = get();
                 const productIds = validatedItems.map(item => item.id).filter(Boolean);
@@ -7216,14 +7435,9 @@ export const useStore = create(persist((set, get) => ({
                 console.warn('Stock sync post-return setup error:', syncErr);
             }
 
-            // Registrar movimiento de caja por el reembolso
-            const postReturnRegister = get().cashRegister;
-            if (postReturnRegister?.id) {
-                await turso.execute({
-                    sql: "INSERT INTO cash_movements (register_id, type, amount, reason, date, company_id) VALUES (?, ?, ?, ?, ?, ?)",
-                    args: [postReturnRegister.id, 'OUT', returnTotal, `Devolución Venta #${saleId}: ${reason}`, now, activeCompanyId]
-                });
-                get().refreshRegisterStats(postReturnRegister.id);
+            // 10. Refrescar stats de caja si está abierta
+            if (openRegister?.id) {
+                get().refreshRegisterStats(openRegister.id);
             }
 
             setTimeout(() => { get().checkInventoryAlerts(); }, 100);
@@ -7564,6 +7778,7 @@ export const useStore = create(persist((set, get) => ({
 
     registerStats: { balance: 0, sales: 0, movements_in: 0, movements_out: 0, initial: 0, transactions: [] },
     suspendedSalesCount: 0,
+    pendingSalesCount: 0,
 
     refreshRegisterStats: async (registerId) => {
         try {
@@ -8322,10 +8537,17 @@ export const useStore = create(persist((set, get) => ({
         try {
             const { activeCompanyId, currentUser, currentCompanyTimezone } = get();
             const now = getNowInCompanyTime(currentCompanyTimezone).toISOString();
-            await turso.execute({
-                sql: `UPDATE preventas SET status = 'completed', completed_by = ?, completed_at = ?, sale_id = ? WHERE company_id = ? AND code = ?`,
+            const result = await turso.execute({
+                sql: `UPDATE preventas SET status = 'completed', completed_by = ?, completed_at = ?, sale_id = ? WHERE company_id = ? AND code = ? AND status = 'pending'`,
                 args: [currentUser.id, now, saleId, activeCompanyId, code]
             });
+            // Validar que realmente se haya marcado como completada (puede ya estar completed/cancelled)
+            const affected = Number(result?.rowsAffected ?? 0);
+            if (affected === 0) {
+                console.warn(`⚠️ completePreventa: ningún registro actualizado (code=${code}). Posiblemente ya estaba completada o cancelada.`);
+                await get().updatePreventasCount();
+                return false;
+            }
             await get().updatePreventasCount();
             return true;
         } catch (e) {
@@ -8337,10 +8559,16 @@ export const useStore = create(persist((set, get) => ({
     cancelPreventa: async (code) => {
         try {
             const { activeCompanyId } = get();
-            await turso.execute({
-                sql: `UPDATE preventas SET status = 'cancelled' WHERE company_id = ? AND code = ?`,
+            const result = await turso.execute({
+                sql: `UPDATE preventas SET status = 'cancelled' WHERE company_id = ? AND code = ? AND status = 'pending'`,
                 args: [activeCompanyId, code]
             });
+            const affected = Number(result?.rowsAffected ?? 0);
+            if (affected === 0) {
+                console.warn(`⚠️ cancelPreventa: ningún registro actualizado (code=${code}). Posiblemente ya estaba completada o cancelada.`);
+                await get().updatePreventasCount();
+                return false;
+            }
             await get().updatePreventasCount();
             return true;
         } catch (e) {
@@ -8858,8 +9086,8 @@ export const useStore = create(persist((set, get) => ({
 
     updateSalesDailySummary: async (saleData, companyId, timezone) => {
         try {
-            const saleDate = new Date(saleData.date);
-            const dateStr = saleDate.toLocaleDateString('en-CA');
+            const tz = timezone || get().currentCompanyTimezone;
+            const dateStr = formatInCompanyTime(saleData.date, tz, 'yyyy-MM-dd');
 
             const existing = await turso.execute({
                 sql: 'SELECT * FROM sales_daily_summary WHERE company_id = ? AND day = ?',
@@ -8893,8 +9121,8 @@ export const useStore = create(persist((set, get) => ({
 
     updateVendorDailyPerformance: async (saleData, userId, userName, companyId) => {
         try {
-            const saleDate = new Date(saleData.date);
-            const dateStr = saleDate.toLocaleDateString('en-CA');
+            const tz = get().currentCompanyTimezone;
+            const dateStr = formatInCompanyTime(saleData.date, tz, 'yyyy-MM-dd');
             const performanceId = `perf_${companyId}_${userId}_${dateStr}`;
 
             const existing = await turso.execute({
@@ -8947,7 +9175,8 @@ export const useStore = create(persist((set, get) => ({
 
     updateProductDailyProfit: async (items, companyId, date) => {
         try {
-            const dateStr = new Date(date).toLocaleDateString('en-CA');
+            const tz = get().currentCompanyTimezone;
+            const dateStr = formatInCompanyTime(date, tz, 'yyyy-MM-dd');
 
             for (const item of items) {
                 const existing = await turso.execute({
@@ -9055,9 +9284,9 @@ export const useStore = create(persist((set, get) => ({
 
     updateHourlySalesStats: async (saleData, companyId) => {
         try {
-            const saleDate = new Date(saleData.date);
-            const dateStr = saleDate.toLocaleDateString('en-CA');
-            const hour = saleDate.getHours();
+            const tz = get().currentCompanyTimezone;
+            const dateStr = formatInCompanyTime(saleData.date, tz, 'yyyy-MM-dd');
+            const hour = parseInt(formatInCompanyTime(saleData.date, tz, 'H'), 10) || 0;
             const hourlyId = `hourly_${companyId}_${dateStr}_${hour}`;
 
             const existing = await turso.execute({
@@ -9155,9 +9384,8 @@ export const useStore = create(persist((set, get) => ({
 
     reverseSalesDailySummary: async (saleData, companyId, timezone) => {
         try {
-            // Using ISO date to match exactly what update function did
-            const saleDate = new Date(saleData.date);
-            const dateStr = saleDate.toLocaleDateString('en-CA');
+            const tz = timezone || get().currentCompanyTimezone;
+            const dateStr = formatInCompanyTime(saleData.date, tz, 'yyyy-MM-dd');
 
             await turso.execute({
                 sql: `UPDATE sales_daily_summary SET
@@ -9176,15 +9404,15 @@ export const useStore = create(persist((set, get) => ({
 
     reverseVendorDailyPerformance: async (saleData, userId, companyId) => {
         try {
-            const saleDate = new Date(saleData.date);
-            const dateStr = saleDate.toLocaleDateString('en-CA');
+            const tz = get().currentCompanyTimezone;
+            const dateStr = formatInCompanyTime(saleData.date, tz, 'yyyy-MM-dd');
             const performanceId = `perf_${companyId}_${userId}_${dateStr}`;
 
             const itemsSold = saleData.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
             const cost = saleData.items?.reduce((sum, item) => sum + (item.cost || 0) * item.quantity, 0) || 0;
             const profit = saleData.total - cost;
 
-            await turso.execute({
+            const result = await turso.execute({
                 sql: `UPDATE vendor_daily_performance SET
                         total_sales = MAX(0, total_sales - 1),
                         total_amount = MAX(0, total_amount - ?),
@@ -9195,6 +9423,13 @@ export const useStore = create(persist((set, get) => ({
                       WHERE id = ?`,
                 args: [saleData.total, profit, saleData.total, itemsSold, performanceId]
             });
+            const affected = Number(result?.rowsAffected ?? 0);
+            if (affected === 0) {
+                // No existe fila en vendor_daily_performance para esta venta. Esto ocurre si
+                // se anula una venta cuya agregación nunca se creó (ej. falló silenciosamente
+                // en su momento). Lo registramos para diagnóstico, no es bloqueante.
+                console.warn(`⚠️ reverseVendorDailyPerformance: fila no encontrada (id=${performanceId}). Saltado.`);
+            }
             return { success: true };
         } catch (e) {
             console.error('Error reversing vendor performance:', e);
@@ -9204,7 +9439,8 @@ export const useStore = create(persist((set, get) => ({
 
     reverseProductDailyProfit: async (items, companyId, date) => {
         try {
-            const dateStr = new Date(date).toLocaleDateString('en-CA');
+            const tz = get().currentCompanyTimezone;
+            const dateStr = formatInCompanyTime(date, tz, 'yyyy-MM-dd');
 
             for (const item of items) {
                 const price = parseFloat(item.price) || 0;
@@ -9267,9 +9503,9 @@ export const useStore = create(persist((set, get) => ({
 
     reverseHourlySalesStats: async (saleData, companyId) => {
         try {
-            const saleDate = new Date(saleData.date);
-            const dateStr = saleDate.toLocaleDateString('en-CA');
-            const hour = saleDate.getHours();
+            const tz = get().currentCompanyTimezone;
+            const dateStr = formatInCompanyTime(saleData.date, tz, 'yyyy-MM-dd');
+            const hour = parseInt(formatInCompanyTime(saleData.date, tz, 'H'), 10) || 0;
             const hourlyId = `hourly_${companyId}_${dateStr}_${hour}`;
 
             await turso.execute({

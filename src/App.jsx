@@ -168,6 +168,33 @@ function App() {
     }
   }, [darkMode]);
 
+  // 🛟 Procesar cola de ventas pendientes (failsafe offline)
+  // - Al iniciar sesión
+  // - Cuando vuelve la conexión
+  // - Cada 60s mientras la app esté abierta
+  useEffect(() => {
+    if (!currentUser) return;
+    const { processPendingSalesQueue } = useStore.getState();
+
+    // Reintento inicial al arrancar
+    processPendingSalesQueue();
+
+    const handleOnline = () => {
+      console.log('🌐 Conexión restaurada — reintentando ventas pendientes…');
+      processPendingSalesQueue();
+    };
+    window.addEventListener('online', handleOnline);
+
+    const interval = setInterval(() => {
+      if (navigator.onLine) processPendingSalesQueue();
+    }, 60000);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      clearInterval(interval);
+    };
+  }, [currentUser]);
+
   return (
     <Router>
       <Routes>

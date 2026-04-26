@@ -196,6 +196,7 @@ const POS = () => {
     const [pendingInvoiceData, setPendingInvoiceData] = useState(null);
     const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
     const [lastSaleDetails, setLastSaleDetails] = useState(null);
+    const [isProcessingSale, setIsProcessingSale] = useState(false);
     const [isLoadingProducts, setIsLoadingProducts] = useState(true);
     const [showSuspendedModal, setShowSuspendedModal] = useState(false);
     const [showPreventasListModal, setShowPreventasListModal] = useState(false);
@@ -382,28 +383,47 @@ const POS = () => {
             invoiceData: pendingInvoiceData || null
         };
 
-        // ⚡ UI INSTANTÁNEA - Mostrar éxito ANTES de que termine la BD
-        setLastSaleDetails(saleData);
-        setIsSuccessModalOpen(true);
-        setPosSelectedClient(null);
-        setPendingInvoiceData(null);
-
-        // Ejecutar venta en background (no bloquea UI)
-        // If this cart came from a preventa, complete it
+        // Capturar el código de preventa antes de limpiarlo
         const preventaCode = activePreventaCode;
-        if (preventaCode) {
-            setActivePreventaCode(null);
-        }
 
-        addSale(saleData).then(result => {
-            if (!result.success) {
-                // Si falla (raro), cerrar modal y mostrar error
-                setIsSuccessModalOpen(false);
-                alert(`Error al procesar la venta: ${result.error}`);
-            } else if (preventaCode) {
-                completePreventa(preventaCode, result.saleId);
+        // Mostrar overlay breve de "procesando" (no bloquea, dura ~100-300ms típicamente).
+        // Solo abrimos el modal de éxito DESPUÉS de que la transacción haya hecho commit
+        // (o se haya encolado para reintento offline). Así no se pierde nunca una venta.
+        setIsProcessingSale(true);
+
+        try {
+            const result = await addSale(saleData);
+
+            if (!result?.success) {
+                // Falla real (ej: stock insuficiente, cliente bloqueado, límite de crédito).
+                // No se encoló — mostrar error al cajero, mantener el carrito.
+                setIsProcessingSale(false);
+                alert(`Error al procesar la venta: ${result?.error || 'desconocido'}`);
+                return;
             }
-        });
+
+            // ✅ Venta confirmada (commit en BD) o encolada (offline failsafe)
+            setLastSaleDetails({ ...saleData, _queued: !!result.queued });
+            setIsSuccessModalOpen(true);
+            setPosSelectedClient(null);
+            setPendingInvoiceData(null);
+            if (preventaCode) {
+                setActivePreventaCode(null);
+                if (!result.queued) {
+                    completePreventa(preventaCode, result.saleId);
+                }
+            }
+
+            if (result.queued) {
+                // Aviso suave: la venta se sincronizará apenas vuelva la conexión
+                console.warn('🛟 Venta encolada (offline). Se sincronizará automáticamente.');
+            }
+        } catch (e) {
+            console.error('Error inesperado en venta:', e);
+            alert(`Error inesperado: ${e?.message || e}`);
+        } finally {
+            setIsProcessingSale(false);
+        }
     };
 
     const handleNewSale = () => {
@@ -585,6 +605,16 @@ const POS = () => {
         <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-100px)]">
             {can('pos.open_register') && (
                 <CashOpeningModal isOpen={!cashRegister && !!currentUser} />
+            )}
+
+            {/* Overlay breve de "procesando venta" — bloquea doble click pero dura solo el commit */}
+            {isProcessingSale && (
+                <div className="fixed inset-0 z-[10000] bg-black/40 backdrop-blur-sm flex items-center justify-center pointer-events-auto">
+                    <div className="bg-[var(--color-surface)] rounded-2xl px-8 py-6 flex items-center gap-4 border border-[var(--glass-border)] shadow-2xl">
+                        <div className="w-6 h-6 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+                        <span className="text-[var(--color-text)] font-semibold">Procesando venta…</span>
+                    </div>
+                </div>
             )}
 
             {/* Camera Barcode Scanner Modal */}

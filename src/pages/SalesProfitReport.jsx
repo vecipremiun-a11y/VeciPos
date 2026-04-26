@@ -10,7 +10,7 @@ import { formatInCompanyTime, getNowInCompanyTime } from '../lib/dateHelpers';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const SalesProfitReport = () => {
-    const { fetchSales, currentCompanyTimezone, currentCurrency } = useStore();
+    const { fetchSalesForReport, currentCompanyTimezone, currentCurrency } = useStore();
     const [sales, setSales] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [dateRange, setDateRange] = useState('today'); // today, yesterday, custom
@@ -33,34 +33,26 @@ const SalesProfitReport = () => {
     const loadData = async () => {
         setIsLoading(true);
         try {
-            const allSales = await fetchSales(); // This usually fetches all, we might need to filter client-side if API doesn't support
+            // Determine start/end strings (yyyy-MM-dd) based on selected range, in company TZ
+            const nowInCompany = getNowInCompanyTime(currentCompanyTimezone);
+            const todayStr = formatInCompanyTime(nowInCompany.toISOString(), currentCompanyTimezone, 'yyyy-MM-dd');
+            const yesterday = new Date(nowInCompany);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = formatInCompanyTime(yesterday.toISOString(), currentCompanyTimezone, 'yyyy-MM-dd');
 
-            // Filter by Date
-            // Filter by Date
-            const filtered = allSales.filter(sale => {
-                if (!sale.date) return false;
+            let startStr, endStr;
+            if (dateRange === 'today') { startStr = todayStr; endStr = todayStr; }
+            else if (dateRange === 'yesterday') { startStr = yesterdayStr; endStr = yesterdayStr; }
+            else if (dateRange === 'custom') {
+                if (!customStart || !customEnd) { setIsLoading(false); return; }
+                startStr = customStart; endStr = customEnd;
+            }
 
-                // Convert sale date AND comparison dates to Company Time
-                const saleDateStr = formatInCompanyTime(sale.date, currentCompanyTimezone, 'yyyy-MM-dd');
-                const nowInCompany = getNowInCompanyTime(currentCompanyTimezone);
-                const todayStr = formatInCompanyTime(nowInCompany.toISOString(), currentCompanyTimezone, 'yyyy-MM-dd');
+            // Fetch full sales (with items) for the requested range, excluding cancelled
+            const fetched = await fetchSalesForReport(startStr, endStr);
 
-                // Calculate yesterday string properly in company time
-                const yesterday = new Date(nowInCompany);
-                yesterday.setDate(yesterday.getDate() - 1);
-                const yesterdayStr = formatInCompanyTime(yesterday.toISOString(), currentCompanyTimezone, 'yyyy-MM-dd');
-
-                if (dateRange === 'today') return saleDateStr === todayStr;
-                if (dateRange === 'yesterday') return saleDateStr === yesterdayStr;
-
-                if (dateRange === 'custom' && customStart && customEnd) {
-                    return saleDateStr >= customStart && saleDateStr <= customEnd;
-                }
-                return true;
-            });
-
-            processSales(filtered);
-            setSales(filtered);
+            processSales(fetched);
+            setSales(fetched);
         } catch (e) {
             console.error("Error loading sales report:", e);
         } finally {
