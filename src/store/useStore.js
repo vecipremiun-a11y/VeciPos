@@ -3,6 +3,8 @@ import { persist } from 'zustand/middleware';
 import { turso } from '../lib/turso';
 import { subDays } from 'date-fns';
 import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFromDateString, getEndFromDateString, formatInCompanyTime } from '../lib/dateHelpers';
+import { purgeCompanyData, localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
+import { syncCatalogFromServer } from '../lib/db/sync';
 
 let migrationsExecuted = false;
 let fetchInProgress = false;
@@ -1220,7 +1222,7 @@ export const useStore = create(persist((set, get) => ({
     },
 
     setActiveCompanyId: async (companyId) => {
-        const { currentUser, availableCompanies, fetchInitialData } = get();
+        const { currentUser, availableCompanies, fetchInitialData, activeCompanyId: previousCompanyId } = get();
 
         // Validate
         const targetCompany = availableCompanies.find(c => c.id === companyId);
@@ -1229,7 +1231,28 @@ export const useStore = create(persist((set, get) => ({
             return { success: false, error: "Invalid Company" };
         }
 
+        // OFFLINE: bloquear cambio de empresa porque no podemos descargar
+        // el catálogo de la empresa nueva. Solo permitir si es la misma empresa.
+        if (typeof navigator !== 'undefined' && !navigator.onLine && companyId !== previousCompanyId) {
+            console.warn("Cannot switch company while offline");
+            return {
+                success: false,
+                error: 'Sin conexión a internet. Para cambiar de empresa necesitas conexión.'
+            };
+        }
+
         console.log("Switching to company:", companyId);
+
+        // Purgar catálogo local de la empresa ANTERIOR (si era distinta) para
+        // evitar acumular datos en IndexedDB y mezclar empresas.
+        if (previousCompanyId && previousCompanyId !== companyId) {
+            try {
+                await purgeCompanyData(previousCompanyId);
+                console.log('🧹 Catálogo local de empresa anterior purgado:', previousCompanyId);
+            } catch (e) {
+                console.warn('No se pudo purgar catálogo local previo:', e);
+            }
+        }
 
         // CLEAR STATE IMMEDIATELY to prevent data bleeding
         set({
@@ -1275,6 +1298,14 @@ export const useStore = create(persist((set, get) => ({
         // Reload data (incluye permisos y módulos en el batch)
         await fetchInitialData();
 
+        // Sincronizar catálogo a IndexedDB local en background (no bloquear UI).
+        // Esto permite que el POS funcione offline si se cae internet más tarde.
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+            syncCatalogFromServer(companyId).catch((e) =>
+                console.warn('[sync] catálogo background falló:', e)
+            );
+        }
+
         // After data load, check if this user has an open register in the NEW company
         // We need to fetch this explicitly because fetchInitialData might not set cashRegister
         const { checkRegisterStatus } = get();
@@ -1294,6 +1325,48 @@ export const useStore = create(persist((set, get) => ({
         fetchInProgress = true;
         console.time('⏱️ fetchInitialData');
         set({ isLoading: true, error: null });
+
+        // ============================================
+        // 📴 BOOTSTRAP OFFLINE
+        // ============================================
+        // Si no hay internet, leer el catálogo desde Dexie en lugar de Turso.
+        // Esto permite que el POS funcione tras refrescar la pestaña sin red.
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            try {
+                const { activeCompanyId } = get();
+                if (activeCompanyId) {
+                    console.log('📴 Sin internet — cargando catálogo desde IndexedDB...');
+                    const [products, productLots, clients, categories, taxRates] = await Promise.all([
+                        localDb.products.where('companyId').equals(activeCompanyId).toArray(),
+                        localDb.productLots.where('companyId').equals(activeCompanyId).toArray(),
+                        localDb.clients.where('companyId').equals(activeCompanyId).toArray(),
+                        localDb.categories.where('companyId').equals(activeCompanyId).toArray(),
+                        localDb.taxRates.where('companyId').equals(activeCompanyId).toArray(),
+                    ]);
+                    const pendingCount = await pendingOpsApi.count(activeCompanyId, 'queued');
+                    set({
+                        products,
+                        productLots,
+                        clients,
+                        categories,
+                        taxRates,
+                        pendingSalesCount: pendingCount,
+                        isLoading: false,
+                    });
+                    console.log(`📴 Catálogo offline cargado: ${products.length} productos, ${clients.length} clientes`);
+                } else {
+                    set({ isLoading: false });
+                }
+            } catch (e) {
+                console.error('❌ Error bootstrap offline:', e);
+                set({ isLoading: false, error: 'No se pudo cargar catálogo offline' });
+            } finally {
+                fetchInProgress = false;
+                console.timeEnd('⏱️ fetchInitialData');
+            }
+            return;
+        }
+
         try {
             console.log('📊 fetchInitialData START');
 
@@ -2036,6 +2109,28 @@ export const useStore = create(persist((set, get) => ({
         const { activeCompanyId } = get();
         if (!term) return;
 
+        // OFFLINE: buscar en Dexie
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            try {
+                const t = String(term).toLowerCase();
+                const all = await localDb.products.where('companyId').equals(activeCompanyId).toArray();
+                const filtered = all.filter(p =>
+                    (p.name && String(p.name).toLowerCase().includes(t)) ||
+                    (p.sku && String(p.sku).toLowerCase().includes(t)) ||
+                    (p.barcode && String(p.barcode).toLowerCase().includes(t))
+                ).slice(0, 50).map(p => ({
+                    ...p,
+                    price_ranges: typeof p.price_ranges === 'string'
+                        ? (() => { try { return JSON.parse(p.price_ranges); } catch { return []; } })()
+                        : (p.price_ranges || [])
+                }));
+                set({ products: filtered });
+            } catch (e) {
+                console.error('Search offline failed', e);
+            }
+            return;
+        }
+
         try {
             console.time('⏱️ searchProducts');
             // Optimización: Búsqueda limitada a 50
@@ -2057,6 +2152,25 @@ export const useStore = create(persist((set, get) => ({
 
     getProductByBarcode: async (barcode) => {
         const { activeCompanyId } = get();
+
+        // OFFLINE: buscar en Dexie
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            try {
+                const all = await localDb.products.where('companyId').equals(activeCompanyId).toArray();
+                const p = all.find(x => x.sku === barcode || x.barcode === barcode || x.name === barcode);
+                if (!p) return null;
+                return {
+                    ...p,
+                    price_ranges: typeof p.price_ranges === 'string'
+                        ? (() => { try { return JSON.parse(p.price_ranges); } catch { return []; } })()
+                        : (p.price_ranges || [])
+                };
+            } catch (e) {
+                console.error('Barcode lookup offline failed', e);
+                return null;
+            }
+        }
+
         try {
             const res = await turso.execute({
                 sql: `SELECT * FROM products WHERE company_id = ? AND (sku = ? OR name = ?) LIMIT 1`,
@@ -2101,6 +2215,40 @@ export const useStore = create(persist((set, get) => ({
 
     loadCategoryProducts: async (category, offset = 0, limit = 30) => {
         const { activeCompanyId } = get();
+
+        // OFFLINE: leer de Dexie
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            try {
+                let all = await localDb.products.where('companyId').equals(activeCompanyId).toArray();
+                if (category && category !== 'Todos') {
+                    all = all.filter(p => p.category === category);
+                }
+                // Ordenar: ofertas primero, luego nombre
+                all.sort((a, b) => {
+                    const ao = a.is_offer ? 1 : 0;
+                    const bo = b.is_offer ? 1 : 0;
+                    if (ao !== bo) return bo - ao;
+                    return String(a.name || '').localeCompare(String(b.name || ''));
+                });
+                const slice = all.slice(offset, offset + limit).map(p => ({
+                    ...p,
+                    price_ranges: typeof p.price_ranges === 'string'
+                        ? (() => { try { return JSON.parse(p.price_ranges); } catch { return []; } })()
+                        : (p.price_ranges || [])
+                }));
+                if (offset === 0) {
+                    set({ products: slice });
+                } else {
+                    const current = get().products;
+                    set({ products: [...current, ...slice] });
+                }
+                return slice.length === limit;
+            } catch (e) {
+                console.error('Load category offline failed', e);
+                return false;
+            }
+        }
+
         try {
             console.log(`📦 Loading products: category=${category}, offset=${offset}`);
             console.time(`⏱️ loadCategoryProducts-${category}-${offset}`);
@@ -6303,6 +6451,24 @@ export const useStore = create(persist((set, get) => ({
 
     addSale: async (sale) => {
         // ============================================
+        // FASE 0: DETECCIÓN OFFLINE
+        // ============================================
+        // Si NO hay conexión, derivar a la ruta offline (Dexie + cola).
+        // Esto permite seguir vendiendo aunque la conexión esté caída por
+        // horas. La sincronización al servidor se hace automáticamente al
+        // volver online (App.jsx + OfflineSync page).
+        // Excepción: si la venta viene desde la cola de sincronización
+        // (`_fromOfflineQueue`), NO re-encolar — debe procesarse online sí o sí.
+        if (typeof navigator !== 'undefined' && !navigator.onLine && !sale?._fromOfflineQueue) {
+            try {
+                return await get()._addSaleOffline(sale);
+            } catch (offlineErr) {
+                console.error('❌ Error en venta offline:', offlineErr);
+                return { success: false, error: offlineErr.message || 'Error venta offline' };
+            }
+        }
+
+        // ============================================
         // FASE 1: VALIDACIÓN RÁPIDA (PRE-PROCESAMIENTO)
         // ============================================
         const startTime = performance.now();
@@ -6960,6 +7126,167 @@ export const useStore = create(persist((set, get) => ({
     // la guardamos en localStorage y la reintentamos en background.
     // Así el cajero NUNCA pierde una venta aunque la conexión se corte.
 
+    /**
+     * Procesa una venta SIN tocar Turso, usando solo Dexie y el state local.
+     * Se llama cuando navigator.onLine === false.
+     * El stock se decrementa LOCALMENTE en Dexie + Zustand para evitar sobreventa
+     * en la misma sesión offline. Al volver online y sincronizar, addSale ejecuta
+     * la transacción real contra Turso (fuente de verdad).
+     */
+    _addSaleOffline: async (sale) => {
+        const startTime = performance.now();
+        const { activeCompanyId, currentUser, products, productLots, clients, inventoryAdjustmentMode } = get();
+
+        // Validación básica
+        if (!sale?.items?.length || !sale.total || sale.total < 0) {
+            return { success: false, error: 'Datos de venta inválidos' };
+        }
+        if (!activeCompanyId || !currentUser) {
+            return { success: false, error: 'Sesión inválida — vuelve a iniciar sesión' };
+        }
+
+        // Validación de cliente
+        if (sale.client?.id) {
+            const c = clients.find(x => x.id === sale.client.id);
+            if (c?.client_status === 'blocked') {
+                return { success: false, error: 'CLIENT_BLOCKED', message: 'Este cliente está bloqueado.' };
+            }
+            if (sale.paymentMethod === 'Crédito' && c) {
+                if (c.client_status === 'credit_blocked' || c.credit_enabled === 0) {
+                    return { success: false, error: 'CREDIT_NOT_ALLOWED', message: 'Este cliente no tiene habilitado el crédito.' };
+                }
+                // Nota: el límite real se valida al sincronizar (requiere SUM en servidor).
+            }
+        }
+
+        // Validación de stock contra catálogo en memoria
+        const stockErrors = [];
+        for (const item of sale.items) {
+            if (item.is_combo) continue;
+            const product = products.find(p => p.id === item.id);
+            if (!product) {
+                stockErrors.push(`Producto no encontrado en catálogo local: ${item.name || item.id}`);
+                continue;
+            }
+            const lots = productLots.filter(l => (l.product_id === item.id || l.productId === item.id));
+            const lotStock = lots.reduce((sum, l) => sum + parseFloat(l.quantity || 0), 0);
+            const totalStock = parseFloat(product.stock || 0) + lotStock;
+            const qty = parseFloat(item.quantity || 0);
+            if (qty > totalStock && !inventoryAdjustmentMode) {
+                stockErrors.push(`Stock insuficiente para ${item.name || product.name}: pedido ${qty}, disponible ${totalStock}`);
+            }
+        }
+        if (stockErrors.length > 0 && !inventoryAdjustmentMode) {
+            return {
+                success: false,
+                error: 'STOCK_INSUFFICIENT_OFFLINE',
+                message: stockErrors.join(' · ')
+            };
+        }
+
+        // Encolar en Dexie
+        const tempId = `offline_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+
+        // Si es boleta (tipo 39), intentar tomar un folio CAF pre-reservado
+        // para que el DTE pueda emitirse al sincronizar. Si no hay folios
+        // disponibles, la venta se encola igual y el DTE se emitirá usando
+        // el siguiente folio del CAF al sincronizar (puede fallar si no hay).
+        let offlineFolio = null;
+        const tipoDteRequested = sale.tipoDte ?? null;
+        if (tipoDteRequested === 39) {
+            try {
+                offlineFolio = await siiFoliosApi.takeOne(activeCompanyId, 39, tempId);
+                if (!offlineFolio) {
+                    console.warn('⚠️ No hay folios CAF offline disponibles para boleta. Venta encolada sin folio.');
+                }
+            } catch (e) {
+                console.warn('⚠️ Error tomando folio offline:', e);
+            }
+        }
+
+        try {
+            await pendingOpsApi.add({
+                tempId,
+                companyId: activeCompanyId,
+                userId: currentUser.id,
+                type: 'sale',
+                payload: {
+                    items: sale.items,
+                    total: sale.total,
+                    summary: sale.summary,
+                    paymentMethod: sale.paymentMethod,
+                    paymentDetails: sale.paymentDetails,
+                    client: sale.client || null,
+                    tipoDte: sale.tipoDte ?? null,
+                    invoiceData: sale.invoiceData || null,
+                    _offlineCreatedAt: new Date().toISOString(),
+                    _offlineUserId: currentUser.id,
+                    _offlineUserName: currentUser.name || currentUser.username,
+                    _offlineFolio: offlineFolio?.folio ?? null,
+                    _offlineFolioId: offlineFolio?.id ?? null,
+                    _offlineFolioTipoDte: offlineFolio?.tipoDte ?? null,
+                },
+            });
+        } catch (e) {
+            console.error('❌ No se pudo encolar venta offline en Dexie:', e);
+            // Si tomamos folio, liberarlo para no perderlo.
+            if (offlineFolio?.id) {
+                await siiFoliosApi.releaseFolio(offlineFolio.id).catch(() => {});
+            }
+            // Fallback: usar localStorage (mecanismo legacy) para no perder la venta.
+            const fallback = get()._queueFailedSale(sale, `offline-dexie-fail: ${e.message}`);
+            if (fallback) {
+                return { success: true, saleId: fallback.tempId, queued: true, queueReason: 'offline' };
+            }
+            return { success: false, error: 'No se pudo guardar la venta offline.' };
+        }
+
+        // Decrementar stock LOCAL en Dexie (best-effort, no bloqueante).
+        try {
+            for (const item of sale.items) {
+                if (item.is_combo) continue;
+                const qty = parseFloat(item.quantity || 0);
+                if (!qty) continue;
+                const localProd = await localDb.products.get(item.id);
+                if (localProd) {
+                    const newStock = parseFloat(localProd.stock || 0) - qty;
+                    await localDb.products.update(item.id, { stock: newStock });
+                }
+            }
+        } catch (e) {
+            console.warn('⚠️ Decremento de stock local falló (no bloquea venta):', e);
+        }
+
+        // Actualizar contador y stock en Zustand state
+        try {
+            const total = await pendingOpsApi.count(activeCompanyId, 'queued');
+            set({ pendingSalesCount: total });
+        } catch { /* noop */ }
+
+        try {
+            set(state => ({
+                products: state.products.map(p => {
+                    const item = sale.items.find(i => !i.is_combo && i.id === p.id);
+                    if (!item) return p;
+                    const qty = parseFloat(item.quantity || 0);
+                    return { ...p, stock: parseFloat(p.stock || 0) - qty };
+                })
+            }));
+        } catch { /* noop */ }
+
+        const elapsed = (performance.now() - startTime).toFixed(0);
+        console.log(`📴 Venta OFFLINE encolada en ${elapsed}ms — tempId=${tempId}`);
+
+        return {
+            success: true,
+            saleId: tempId,
+            queued: true,
+            offline: true,
+            queueReason: 'offline',
+            offlineFolio: offlineFolio?.folio ?? null,
+        };
+    },
+
     _queueFailedSale: (sale, reason = 'unknown') => {
         try {
             if (typeof window === 'undefined' || !window.localStorage) return null;
@@ -7012,8 +7339,16 @@ export const useStore = create(persist((set, get) => ({
             const KEY = 'poskem_pending_sales_v1';
             const queue = JSON.parse(localStorage.getItem(KEY) || '[]');
             if (queue.length === 0) {
-                set({ pendingSalesCount: 0 });
-                return { processed: 0 };
+                // Aún así, contar lo que haya en Dexie para mantener el badge correcto
+                let dexieCount = 0;
+                try {
+                    const { activeCompanyId } = get();
+                    if (activeCompanyId) {
+                        dexieCount = await pendingOpsApi.count(activeCompanyId, 'queued');
+                    }
+                } catch { /* noop */ }
+                set({ pendingSalesCount: dexieCount });
+                return { processed: 0, remaining: dexieCount };
             }
             const { activeCompanyId } = get();
             const remaining = [];
@@ -7044,8 +7379,16 @@ export const useStore = create(persist((set, get) => ({
                 }
             }
             localStorage.setItem(KEY, JSON.stringify(remaining));
-            set({ pendingSalesCount: remaining.length });
-            return { processed, remaining: remaining.length };
+            // Contador unificado: legacy localStorage + Dexie pendingOps queued
+            let dexieCount = 0;
+            try {
+                const { activeCompanyId } = get();
+                if (activeCompanyId) {
+                    dexieCount = await pendingOpsApi.count(activeCompanyId, 'queued');
+                }
+            } catch { /* noop */ }
+            set({ pendingSalesCount: remaining.length + dexieCount });
+            return { processed, remaining: remaining.length + dexieCount };
         } catch (e) {
             console.error('Error procesando cola de ventas pendientes:', e);
             return { processed: 0, error: e.message };

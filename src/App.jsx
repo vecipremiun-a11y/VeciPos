@@ -35,6 +35,7 @@ import InventoryControl from './pages/InventoryControl';
 import ProductCombos from './pages/ProductCombos';
 import DocumentosSII from './pages/DocumentosSII';
 import FolioSettings from './pages/FolioSettings';
+import OfflineSync from './pages/OfflineSync';
 import MainLayout from './layouts/MainLayout';
 import AdminLayout from './layouts/AdminLayout';
 import RequireAdmin from './components/RequireAdmin';
@@ -48,6 +49,7 @@ import SalesAnalytics from './pages/reports/SalesAnalytics';
 
 import React, { useEffect } from 'react';
 import { useStore } from './store/useStore';
+import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncPendingOpsToServer, ensureMinimumFolios } from './lib/db/sync';
 
 // Protected Route Component - ROBUST RESTORE
 const ProtectedRoute = ({ children }) => {
@@ -168,25 +170,59 @@ function App() {
     }
   }, [darkMode]);
 
-  // 🛟 Procesar cola de ventas pendientes (failsafe offline)
+  // 🛟 Procesar cola de ventas pendientes (failsafe offline) + sync catálogo
   // - Al iniciar sesión
   // - Cuando vuelve la conexión
   // - Cada 60s mientras la app esté abierta
   useEffect(() => {
     if (!currentUser) return;
-    const { processPendingSalesQueue } = useStore.getState();
+    const { processPendingSalesQueue, activeCompanyId } = useStore.getState();
 
-    // Reintento inicial al arrancar
+    // Migrar cola legacy de localStorage a IndexedDB (se ejecuta una vez)
+    migrateLegacyQueueToDexie();
+
+    // Reintento inicial al arrancar (cola legacy localStorage)
     processPendingSalesQueue();
 
+    // Sincronizar cola Dexie + descargar catálogo si hay internet
+    const syncAll = async () => {
+      if (!navigator.onLine) return;
+      const state = useStore.getState();
+      const cid = state.activeCompanyId;
+      if (!cid) return;
+      // Sync catálogo en background (no bloquear)
+      syncCatalogFromServer(cid).catch((e) => console.warn('[sync] catálogo:', e));
+      // Asegurar folios CAF offline (boleta, mín 30 / pide 100)
+      ensureMinimumFolios(cid, 39, currentUser?.id || null, 30, 100)
+        .catch((e) => console.warn('[sii] folios:', e));
+      // Procesar cola Dexie
+      try {
+        const result = await syncPendingOpsToServer(cid, state);
+        if (result?.processed > 0) {
+          console.log(`✅ ${result.processed} venta(s) offline sincronizada(s)`);
+        }
+        // Refrescar contador unificado tras el sync
+        const { processPendingSalesQueue: pp } = useStore.getState();
+        if (pp) pp();
+      } catch (e) {
+        console.warn('[sync] cola:', e);
+      }
+    };
+
+    syncAll();
+
     const handleOnline = () => {
-      console.log('🌐 Conexión restaurada — reintentando ventas pendientes…');
+      console.log('🌐 Conexión restaurada — sincronizando…');
       processPendingSalesQueue();
+      syncAll();
     };
     window.addEventListener('online', handleOnline);
 
     const interval = setInterval(() => {
-      if (navigator.onLine) processPendingSalesQueue();
+      if (navigator.onLine) {
+        processPendingSalesQueue();
+        syncAll();
+      }
     }, 60000);
 
     return () => {
@@ -256,6 +292,7 @@ function App() {
           <Route path="reports/sales-analytics" element={<ProtectedPage permission="reports.sales_analytics"><SalesAnalytics /></ProtectedPage>} />
 
           <Route path="settings" element={<ProtectedPage permission="settings.view"><Settings /></ProtectedPage>} />
+          <Route path="offline-sales" element={<ProtectedPage permission="pos.access"><OfflineSync /></ProtectedPage>} />
         </Route>
 
         {/* Super Admin Routes */}

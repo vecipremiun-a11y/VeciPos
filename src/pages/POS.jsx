@@ -16,6 +16,7 @@ import PreventaSuccessModal from '../components/PreventaSuccessModal';
 import PreventasListModal from '../components/PreventasListModal';
 import { usePermissions } from '../hooks/usePermissions';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { turso } from '../lib/turso';
 
 // Component for Kg quantity input that allows typing decimals with comma
@@ -202,6 +203,9 @@ const POS = () => {
     const [showPreventasListModal, setShowPreventasListModal] = useState(false);
     const [showPreventaSuccessModal, setShowPreventaSuccessModal] = useState(false);
     const [lastPreventaData, setLastPreventaData] = useState(null);
+
+    // Detector de conexión para mostrar banner offline en el POS
+    const { online } = useOnlineStatus();
     const [activePreventaCode, setActivePreventaCode] = useState(null);
     const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
     const [showTotalsDetail, setShowTotalsDetail] = useState(false);
@@ -605,6 +609,14 @@ const POS = () => {
         <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-100px)]">
             {can('pos.open_register') && (
                 <CashOpeningModal isOpen={!cashRegister && !!currentUser} />
+            )}
+
+            {/* Banner offline — visible cuando se cae internet */}
+            {!online && (
+                <div className="fixed top-0 left-0 right-0 z-[9998] bg-amber-500 text-black text-xs md:text-sm font-semibold px-3 py-1.5 flex items-center justify-center gap-2 shadow-md">
+                    <span className="w-2 h-2 rounded-full bg-black animate-pulse" />
+                    Modo offline · Las ventas se guardarán localmente y se sincronizarán al volver internet
+                </div>
             )}
 
             {/* Overlay breve de "procesando venta" — bloquea doble click pero dura solo el commit */}

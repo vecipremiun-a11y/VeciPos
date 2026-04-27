@@ -61,6 +61,28 @@ async function ensureSiiTables() {
             xml TEXT, track_id TEXT, estado TEXT DEFAULT 'pending', created_at TEXT
         )`);
         await c.execute(`CREATE INDEX IF NOT EXISTS idx_sii_rcof_lookup ON sii_rcof(company_id, fecha)`);
+
+        // Folios pre-reservados para emisión offline.
+        // Se reservan cuando hay internet (avanza folio_actual en sii_cafs);
+        // se consumen offline al emitir una venta sin red; el DTE real se
+        // emite al sincronizar usando el folio aquí asignado.
+        await c.execute(`CREATE TABLE IF NOT EXISTS sii_offline_folios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id TEXT NOT NULL,
+            tipo_dte INTEGER NOT NULL,
+            folio INTEGER NOT NULL,
+            caf_id INTEGER NOT NULL,
+            reserved_for_user_id TEXT,
+            status TEXT NOT NULL DEFAULT 'reserved',
+            sale_id INTEGER,
+            sale_temp_id TEXT,
+            reserved_at TEXT,
+            used_at TEXT,
+            UNIQUE(company_id, tipo_dte, folio)
+        )`);
+        await c.execute(`CREATE INDEX IF NOT EXISTS idx_sii_off_lookup ON sii_offline_folios(company_id, tipo_dte, status)`);
+        await c.execute(`CREATE INDEX IF NOT EXISTS idx_sii_off_user ON sii_offline_folios(company_id, reserved_for_user_id, status)`);
+
         _tablesEnsured = true;
     } catch (e) {
         console.error('Error ensuring SII tables:', e.message);

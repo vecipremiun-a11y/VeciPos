@@ -20,6 +20,7 @@
     "csv-parser": "^3.2.0",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
+    "dexie": "^4.4.2",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "framer-motion": "^12.27.5",

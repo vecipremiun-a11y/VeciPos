@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { sale_id, tipo_dte, rut_receptor, razon_social_receptor, giro_receptor, dir_receptor, comuna_receptor, ciudad_receptor, forma_pago, dias_credito } = req.body;
+        const { sale_id, tipo_dte, rut_receptor, razon_social_receptor, giro_receptor, dir_receptor, comuna_receptor, ciudad_receptor, forma_pago, dias_credito, folio: preReservedFolio } = req.body;
 
         if (!sale_id) {
             return res.status(400).json({ error: 'sale_id requerido' });
@@ -75,33 +75,73 @@ export default async function handler(req, res) {
         const cert = loadCertificado(siiConfig);
 
         // 3. Get active CAF and reserve folio (atomic)
-        const cafRes = await turso.execute({
-            sql: `SELECT * FROM sii_cafs
-                  WHERE company_id = ? AND tipo_dte = ? AND estado = 'active' AND folio_actual <= folio_hasta
-                  ORDER BY folio_desde ASC LIMIT 1`,
-            args: [companyId, tipoDte]
-        });
-
-        if (cafRes.rows.length === 0) {
-            return res.status(400).json({ error: `No hay folios disponibles para ${tipoDte === 33 ? 'factura' : tipoDte === 34 ? 'factura exenta' : 'boleta'}. Solicite nuevos folios.` });
-        }
-
-        const cafRow = cafRes.rows[0];
-        const folio = cafRow.folio_actual;
-        const nextFolio = folio + 1;
+        // Si viene `folio` pre-reservado (ruta offline → sync), validar y usarlo.
+        let cafRow;
+        let folio;
+        let usedPreReserved = false;
         const now = new Date().toISOString();
 
-        // Reserve folio atomically
-        const updateResult = await turso.execute({
-            sql: `UPDATE sii_cafs SET folio_actual = ?, 
-                  estado = CASE WHEN ? > folio_hasta THEN 'exhausted' ELSE 'active' END,
-                  updated_at = ?
-                  WHERE id = ? AND folio_actual = ?`,
-            args: [nextFolio, nextFolio, now, cafRow.id, folio]
-        });
+        if (preReservedFolio) {
+            // Validar folio reservado en sii_offline_folios
+            const reservedRes = await turso.execute({
+                sql: `SELECT * FROM sii_offline_folios
+                      WHERE company_id = ? AND tipo_dte = ? AND folio = ? AND status = 'reserved'`,
+                args: [companyId, tipoDte, preReservedFolio]
+            });
+            if (reservedRes.rows.length === 0) {
+                return res.status(409).json({ error: `Folio ${preReservedFolio} no está reservado o ya fue usado` });
+            }
+            const reserved = reservedRes.rows[0];
+            // Cargar el CAF correspondiente
+            const cafLoad = await turso.execute({
+                sql: 'SELECT * FROM sii_cafs WHERE id = ?',
+                args: [reserved.caf_id]
+            });
+            if (cafLoad.rows.length === 0) {
+                return res.status(500).json({ error: 'CAF asociado al folio reservado no encontrado' });
+            }
+            cafRow = cafLoad.rows[0];
+            folio = preReservedFolio;
+            usedPreReserved = true;
 
-        if (updateResult.rowsAffected === 0) {
-            return res.status(409).json({ error: 'Conflicto de folio, reintente la operación' });
+            // Marcar como 'used' (atómico: solo si sigue en 'reserved')
+            const markUsed = await turso.execute({
+                sql: `UPDATE sii_offline_folios
+                      SET status = 'used', sale_id = ?, used_at = ?
+                      WHERE id = ? AND status = 'reserved'`,
+                args: [sale_id, now, reserved.id]
+            });
+            if (markUsed.rowsAffected === 0) {
+                return res.status(409).json({ error: 'Folio fue consumido por otro proceso, reintente' });
+            }
+        } else {
+            const cafRes = await turso.execute({
+                sql: `SELECT * FROM sii_cafs
+                      WHERE company_id = ? AND tipo_dte = ? AND estado = 'active' AND folio_actual <= folio_hasta
+                      ORDER BY folio_desde ASC LIMIT 1`,
+                args: [companyId, tipoDte]
+            });
+
+            if (cafRes.rows.length === 0) {
+                return res.status(400).json({ error: `No hay folios disponibles para ${tipoDte === 33 ? 'factura' : tipoDte === 34 ? 'factura exenta' : 'boleta'}. Solicite nuevos folios.` });
+            }
+
+            cafRow = cafRes.rows[0];
+            folio = cafRow.folio_actual;
+            const nextFolio = folio + 1;
+
+            // Reserve folio atomically
+            const updateResult = await turso.execute({
+                sql: `UPDATE sii_cafs SET folio_actual = ?, 
+                      estado = CASE WHEN ? > folio_hasta THEN 'exhausted' ELSE 'active' END,
+                      updated_at = ?
+                      WHERE id = ? AND folio_actual = ?`,
+                args: [nextFolio, nextFolio, now, cafRow.id, folio]
+            });
+
+            if (updateResult.rowsAffected === 0) {
+                return res.status(409).json({ error: 'Conflicto de folio, reintente la operación' });
+            }
         }
 
         // 4. Load sale data
@@ -191,6 +231,7 @@ export default async function handler(req, res) {
             track_id: trackId,
             estado,
             monto_total: montoTotal,
+            pre_reserved: usedPreReserved,
         });
     } catch (e) {
         console.error('Error emitting DTE:', e);

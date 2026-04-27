@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
@@ -49,6 +49,7 @@ const MainLayout = () => {
     const allNavItems = [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: 'dashboard.view', moduleKey: 'dashboard' },
         { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', permission: 'pos.access', moduleKey: 'pos' },
+        { icon: CloudOff, label: 'Ventas Offline', path: '/offline-sales', permission: 'pos.access', moduleKey: 'pos' },
         { icon: Users, label: 'Clientes', path: '/clients', permission: 'clients.view', moduleKey: 'clients' },
         { icon: History, label: 'Historial', path: '/sales-history', permission: 'sales.view', moduleKey: 'sales_history' },
         {
