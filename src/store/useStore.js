@@ -10548,6 +10548,7 @@ export const useStore = create(persist((set, get) => ({
     preorders: [],
     preorderCart: [],
     _preorderCache: { key: '', products: [], ts: 0 },
+    _preorderIndexEnsured: false,
 
     addToPreorderCart: (product) => {
         set(state => {
@@ -10829,33 +10830,126 @@ export const useStore = create(persist((set, get) => ({
     getPreorderableProducts: async (searchTerm = '', category = 'Todos') => {
         const { activeCompanyId, _preorderCache } = get();
         const cacheKey = `${activeCompanyId}|${searchTerm}|${category}`;
-        if (_preorderCache.key === cacheKey && Date.now() - _preorderCache.ts < 30000) {
+
+        // Helper: filtrar+formatear desde cualquier lista de productos
+        const filterAndFormat = (rows) => {
+            const term = String(searchTerm || '').toLowerCase();
+            let out = (rows || []).filter(p =>
+                p && (p.sale_mode === 'preorder_only' || p.sale_mode === 'both')
+            );
+            if (category && category !== 'Todos') out = out.filter(p => p.category === category);
+            if (term) out = out.filter(p =>
+                (p.name && String(p.name).toLowerCase().includes(term)) ||
+                (p.sku && String(p.sku).toLowerCase().includes(term))
+            );
+            out.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+            return out.slice(0, 50).map(p => ({
+                ...p,
+                price_ranges: typeof p.price_ranges === 'string'
+                    ? (() => { try { return JSON.parse(p.price_ranges); } catch { return []; } })()
+                    : (p.price_ranges || [])
+            }));
+        };
+
+        // Refresco silencioso desde Turso → actualiza Dexie + caché
+        const refreshFromTurso = async () => {
+            if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+            try {
+                if (!get()._preorderIndexEnsured) {
+                    set({ _preorderIndexEnsured: true });
+                    turso.execute(
+                        `CREATE INDEX IF NOT EXISTS idx_products_company_salemode
+                         ON products(company_id, sale_mode)`
+                    ).catch(() => {});
+                }
+                const result = await turso.execute({
+                    sql: `SELECT id, name, sku, price, cost, image, category, unit,
+                          sale_mode, is_offer, offer_price, allow_item_notes, price_ranges,
+                          preorder_unit, preorder_billing_unit, preorder_price_per_kg,
+                          preorder_gram_per_unit, preorder_use_base_price
+                          FROM products
+                          WHERE company_id = ? AND sale_mode IN ('preorder_only', 'both')
+                          ORDER BY name ASC`,
+                    args: [activeCompanyId]
+                });
+                // Actualizar Dexie con productos preorder (upsert)
+                try {
+                    const stamped = result.rows.map(r => ({ ...r, companyId: activeCompanyId }));
+                    await localDb.products.bulkPut(stamped);
+                } catch (dexErr) {
+                    console.warn('No se pudo actualizar Dexie con preorder:', dexErr.message);
+                }
+                // Marcar timestamp de último refresco
+                try {
+                    localStorage.setItem(`_preTs_${activeCompanyId}`, String(Date.now()));
+                } catch { /* noop */ }
+                // Si la búsqueda actual coincide, actualizar caché de UI
+                const products = filterAndFormat(result.rows);
+                set({ _preorderCache: { key: cacheKey, products, ts: Date.now() } });
+            } catch (e) {
+                console.warn('Refresh preorder Turso falló:', e?.message);
+            }
+        };
+
+        // 1) Caché en memoria
+        if (_preorderCache.key === cacheKey && Date.now() - _preorderCache.ts < 5 * 60 * 1000) {
+            // Si la última sincronización con Turso fue hace >5min, refrescar en background
+            try {
+                const lastSync = parseInt(localStorage.getItem(`_preTs_${activeCompanyId}`) || '0', 10);
+                if (Date.now() - lastSync > 5 * 60 * 1000) refreshFromTurso();
+            } catch { /* noop */ }
             return { success: true, products: _preorderCache.products };
         }
+
+        // 2) DEXIE PRIMERO — siempre, instantáneo
         try {
-            let sql = `SELECT id, name, sku, price, cost, image, category, unit,
-                sale_mode, is_offer, offer_price, allow_item_notes, price_ranges,
-                preorder_unit, preorder_billing_unit, preorder_price_per_kg,
-                preorder_gram_per_unit, preorder_use_base_price
-                FROM products WHERE company_id = ? AND sale_mode IN ('preorder_only', 'both')`;
-            const args = [activeCompanyId];
+            const all = await localDb.products
+                .where('companyId').equals(activeCompanyId).toArray();
+            if (all.length > 0) {
+                const products = filterAndFormat(all);
+                set({ _preorderCache: { key: cacheKey, products, ts: Date.now() } });
 
-            if (searchTerm) {
-                sql += ' AND (name LIKE ? OR sku LIKE ?)';
-                args.push(`%${searchTerm}%`, `%${searchTerm}%`);
+                // Refrescar Turso en background si la última sync fue hace >5min
+                try {
+                    const lastSync = parseInt(localStorage.getItem(`_preTs_${activeCompanyId}`) || '0', 10);
+                    if (Date.now() - lastSync > 5 * 60 * 1000) refreshFromTurso();
+                } catch { /* noop */ }
+
+                return { success: true, products };
             }
-            if (category && category !== 'Todos') {
-                sql += ' AND category = ?';
-                args.push(category);
+        } catch (e) {
+            console.warn('Dexie preorder lookup falló:', e?.message);
+        }
+
+        // 3) Sin datos locales: pedir a Turso (primera vez después de login)
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            return { success: false, error: 'Sin conexión y sin catálogo local' };
+        }
+        try {
+            if (!get()._preorderIndexEnsured) {
+                set({ _preorderIndexEnsured: true });
+                turso.execute(
+                    `CREATE INDEX IF NOT EXISTS idx_products_company_salemode
+                     ON products(company_id, sale_mode)`
+                ).catch(() => {});
             }
-
-            sql += ' ORDER BY name ASC LIMIT 50';
-
-            const result = await turso.execute({ sql, args });
-            const products = result.rows.map(p => ({
-                ...p,
-                price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
-            }));
+            const result = await turso.execute({
+                sql: `SELECT id, name, sku, price, cost, image, category, unit,
+                      sale_mode, is_offer, offer_price, allow_item_notes, price_ranges,
+                      preorder_unit, preorder_billing_unit, preorder_price_per_kg,
+                      preorder_gram_per_unit, preorder_use_base_price
+                      FROM products
+                      WHERE company_id = ? AND sale_mode IN ('preorder_only', 'both')
+                      ORDER BY name ASC`,
+                args: [activeCompanyId]
+            });
+            // Guardar en Dexie para próximas veces
+            try {
+                const stamped = result.rows.map(r => ({ ...r, companyId: activeCompanyId }));
+                await localDb.products.bulkPut(stamped);
+                localStorage.setItem(`_preTs_${activeCompanyId}`, String(Date.now()));
+            } catch { /* noop */ }
+            const products = filterAndFormat(result.rows);
             set({ _preorderCache: { key: cacheKey, products, ts: Date.now() } });
             return { success: true, products };
         } catch (e) {

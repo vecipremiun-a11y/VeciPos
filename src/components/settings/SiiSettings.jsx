@@ -166,7 +166,11 @@ const SiiSettings = () => {
                 showMessage(`Folios solicitados: ${data.folio_desde} - ${data.folio_hasta}`);
                 loadFolios();
             } else {
-                showMessage(data.error || 'Error al solicitar folios', 'error');
+                // Construir mensaje detallado: error + mensaje real del SII + sugerencia
+                const parts = [data.error || 'Error al solicitar folios'];
+                if (data.sii_message) parts.push(`SII: ${data.sii_message}`);
+                if (data.hint) parts.push(`💡 ${data.hint}`);
+                showMessage(parts.join(' · '), 'error');
             }
         } catch (e) {
             showMessage('Error de conexión al solicitar folios', 'error');

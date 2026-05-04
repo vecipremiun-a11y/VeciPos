@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { turso } from '../lib/turso';
-import { Moon, Sun, Settings as SettingsIcon, FileText, Smartphone, Wrench, Building2, Save, CreditCard } from 'lucide-react';
+import { Moon, Sun, Settings as SettingsIcon, FileText, Smartphone, Wrench, Building2, Save, CreditCard, Volume2, Play, ChefHat } from 'lucide-react';
 
 import { recompressAllImages } from '../scripts/recompressImages';
 import ReceiptSettings from '../components/settings/ReceiptSettings';
@@ -12,6 +12,8 @@ import SiiSettings from '../components/settings/SiiSettings';
 import { Shield, Stamp } from 'lucide-react';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
+import { PRODUCTION_SOUNDS, getProductionSound, setProductionSound, playProductionSound } from '../utils/productionSounds';
+import { cn } from '../lib/utils';
 
 const Settings = () => {
     const { darkMode, toggleDarkMode, inventoryAdjustmentMode, toggleInventoryAdjustmentMode, activeCompanyId, currentCompanyTimezone, fetchInitialData, updateCurrency } = useStore();
@@ -35,6 +37,14 @@ const Settings = () => {
     const [isSavingCompanyInfo, setIsSavingCompanyInfo] = useState(false);
 
     const [activeTab, setActiveTab] = useState('general');
+
+    // Sonido de nuevos pedidos en Producción
+    const [productionSoundId, setProductionSoundId] = useState(getProductionSound());
+    const [savedSoundId, setSavedSoundId] = useState(getProductionSound());
+    const handleSaveProductionSound = () => {
+        setProductionSound(productionSoundId);
+        setSavedSoundId(productionSoundId);
+    };
 
     useEffect(() => {
         setSelectedTimezone(currentCompanyTimezone);
@@ -253,6 +263,91 @@ const Settings = () => {
                                             Actual: {currentCompanyTimezone}
                                         </span>
                                     </div>
+                                </div>
+                            </div>
+
+                            {/* ===== SONIDO DE NUEVOS PEDIDOS (PRODUCCIÓN) ===== */}
+                            <div className="glass-card animate-in fade-in slide-in-from-bottom-4 duration-500 delay-300">
+                                <div className="flex items-start gap-3 mb-4">
+                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-md shadow-amber-500/25 shrink-0">
+                                        <ChefHat size={20} className="text-white" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <h2 className="text-xl font-bold text-[var(--color-text)] flex items-center gap-2">
+                                            Sonido de Nuevos Pedidos
+                                            <Volume2 size={18} className="text-[var(--color-primary)]" />
+                                        </h2>
+                                        <p className="text-sm text-[var(--color-text-muted)]">
+                                            Sonido que se reproducirá en la pantalla de Producción cuando ingrese un nuevo pedido del día.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mb-4">
+                                    {PRODUCTION_SOUNDS.map(s => {
+                                        const isSelected = productionSoundId === s.id;
+                                        const isSaved = savedSoundId === s.id;
+                                        return (
+                                            <div key={s.id}
+                                                onClick={() => setProductionSoundId(s.id)}
+                                                className={cn(
+                                                    "rounded-xl border p-3 cursor-pointer transition-all flex items-center gap-3",
+                                                    isSelected
+                                                        ? "bg-[var(--color-primary)]/10 border-[var(--color-primary)] shadow-md shadow-[var(--color-primary)]/20"
+                                                        : "bg-[var(--glass-bg)] border-[var(--glass-border)] hover:border-[var(--color-primary)]/40"
+                                                )}
+                                            >
+                                                <div className={cn(
+                                                    "w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all",
+                                                    isSelected ? "border-[var(--color-primary)] bg-[var(--color-primary)]" : "border-[var(--glass-border)]"
+                                                )}>
+                                                    {isSelected && <div className="w-2 h-2 rounded-full bg-black" />}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-sm font-bold text-[var(--color-text)] truncate">{s.label}</p>
+                                                        {isSaved && (
+                                                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 uppercase tracking-wider">
+                                                                Activo
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-[11px] text-[var(--color-text-muted)] truncate">{s.description}</p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => { e.stopPropagation(); playProductionSound(s.id); }}
+                                                    title="Escuchar"
+                                                    className="px-3 py-2 rounded-lg text-xs font-bold bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/25 hover:bg-[var(--color-primary)]/25 transition-all flex items-center gap-1.5 shrink-0 active:scale-95"
+                                                >
+                                                    <Play size={12} />
+                                                    Escuchar
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <p className="text-xs text-[var(--color-text-muted)]">
+                                        {productionSoundId !== savedSoundId
+                                            ? '⚠️ Tienes cambios sin guardar.'
+                                            : 'Sonido actual guardado correctamente.'}
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveProductionSound}
+                                        disabled={productionSoundId === savedSoundId}
+                                        className={cn(
+                                            "px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all active:scale-95",
+                                            productionSoundId === savedSoundId
+                                                ? "bg-[var(--glass-bg)] text-[var(--color-text-muted)] border border-[var(--glass-border)] cursor-not-allowed"
+                                                : "bg-gradient-to-r from-[var(--color-primary)] to-emerald-500 text-black shadow-lg shadow-[var(--color-primary)]/25 hover:shadow-xl"
+                                        )}
+                                    >
+                                        <Save size={16} />
+                                        Guardar Sonido
+                                    </button>
                                 </div>
                             </div>
                         </>

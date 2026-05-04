@@ -1,12 +1,35 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Clock, User, ChefHat, Check, X, AlertTriangle,
-    Calendar, Filter, Package, Search, Eye, ChevronDown, Truck
+    Calendar, Filter, Package, Search, Eye, ChevronDown, Truck,
+    List, LayoutGrid
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
+import { playProductionSound } from '../utils/productionSounds';
+
+// ========== HELPERS ==========
+/**
+ * Parsea el string `items_summary` (ej: "Pan de Completo 1kg x10.0, Pan de Churrasco 1kg x5.0")
+ * en una lista estructurada [{ name, qty }, ...]. Tolerante a `x10`, `x10.0`, `x10.5`.
+ */
+const parseItemsSummary = (summary) => {
+    if (!summary || typeof summary !== 'string') return [];
+    return summary.split(',').map(raw => {
+        const txt = raw.trim();
+        if (!txt) return null;
+        const m = txt.match(/^(.+?)\s*x\s*(\d+(?:[.,]\d+)?)\s*$/i);
+        if (m) {
+            const qtyNum = parseFloat(m[2].replace(',', '.'));
+            // Mostrar entero si es .0, decimal si no
+            const qtyStr = Number.isInteger(qtyNum) ? String(qtyNum) : qtyNum.toString();
+            return { name: m[1].trim(), qty: qtyStr };
+        }
+        return { name: txt, qty: '1' };
+    }).filter(Boolean);
+};
 
 // ========== STATUS CONFIG ==========
 const STATUS_CONFIG = {
@@ -154,12 +177,28 @@ const Production = () => {
     const [customDate, setCustomDate] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [selectedPreorder, setSelectedPreorder] = useState(null);
+    // Vista preferida persistida en localStorage: 'list' | 'cards'
+    const [viewMode, setViewMode] = useState(() => {
+        try { return localStorage.getItem('production_view_mode') || 'list'; } catch { return 'list'; }
+    });
+    useEffect(() => {
+        try { localStorage.setItem('production_view_mode', viewMode); } catch { /* ignore */ }
+    }, [viewMode]);
 
-    // Build filters
+    // ===== Sonido para nuevos pedidos del día =====
+    // Mantenemos los IDs ya vistos. En el primer fetch solo poblamos la
+    // referencia (sin sonido). En fetches posteriores, si aparece un nuevo
+    // pedido cuya fecha de entrega es HOY, reproducimos un beep.
+    const seenIdsRef = useRef(null);
+    const playNewOrderSound = () => playProductionSound();
+
+    // Build filters — el filtro de estado se aplica en cliente para que los
+    // contadores de las tarjetas resumen se mantengan correctos al cambiar
+    // de pestaña/filtro.
     const getFilters = () => {
         const today = new Date().toLocaleDateString('en-CA');
         const tomorrow = new Date(Date.now() + 86400000).toLocaleDateString('en-CA');
-        const filters = { status: statusFilter };
+        const filters = {};
         if (dateFilter === 'today') filters.date = today;
         else if (dateFilter === 'tomorrow') filters.date = tomorrow;
         else if (dateFilter === 'custom' && customDate) filters.date = customDate;
@@ -168,13 +207,40 @@ const Production = () => {
 
     useEffect(() => {
         fetchPreorders(getFilters());
-    }, [dateFilter, customDate, statusFilter]);
+    }, [dateFilter, customDate]);
+
+    // Al cambiar de fecha, resetear el filtro de estado para mostrar todas las órdenes
+    useEffect(() => {
+        setStatusFilter('all');
+    }, [dateFilter, customDate]);
 
     // Auto-refresh every 30 seconds
     useEffect(() => {
         const interval = setInterval(() => fetchPreorders(getFilters()), 30000);
         return () => clearInterval(interval);
-    }, [dateFilter, customDate, statusFilter]);
+    }, [dateFilter, customDate]);
+
+    // Detectar nuevos pedidos: solo suena si el pedido es para HOY.
+    useEffect(() => {
+        const today = new Date().toLocaleDateString('en-CA');
+        const currentIds = new Set(preorders.map(p => p.id));
+
+        // Primer render: solo poblar la referencia, sin sonar
+        if (seenIdsRef.current === null) {
+            seenIdsRef.current = currentIds;
+            return;
+        }
+
+        const newOrders = preorders.filter(
+            p => !seenIdsRef.current.has(p.id) && p.due_date === today
+        );
+
+        if (newOrders.length > 0) {
+            playNewOrderSound();
+        }
+
+        seenIdsRef.current = currentIds;
+    }, [preorders]);
 
     const handleStatusChange = async (preorderId, newStatus) => {
         await updatePreorderStatus(preorderId, newStatus);
@@ -198,39 +264,68 @@ const Production = () => {
         });
     }, [preorders, statusFilter]);
 
+    // Total a producir: agrupa todos los productos de las órdenes filtradas
+    // sumando las cantidades por nombre de producto. Permite al panadero saber
+    // de un vistazo cuánto debe preparar en total de cada producto.
+    const productionTotals = useMemo(() => {
+        const map = new Map();
+        filteredPreorders.forEach(order => {
+            // Solo contar lo que aún hay que producir (excluye entregados/cancelados)
+            if (order.status === 'delivered' || order.status === 'canceled') return;
+            const items = parseItemsSummary(order.items_summary);
+            items.forEach(it => {
+                const qty = parseFloat(String(it.qty).replace(',', '.')) || 0;
+                const prev = map.get(it.name) || 0;
+                map.set(it.name, prev + qty);
+            });
+        });
+        return Array.from(map.entries())
+            .map(([name, qty]) => ({
+                name,
+                qty: Number.isInteger(qty) ? String(qty) : qty.toFixed(2).replace(/\.?0+$/, '')
+            }))
+            .sort((a, b) => parseFloat(b.qty) - parseFloat(a.qty));
+    }, [filteredPreorders]);
+
     const canManage = can('production.manage');
 
-    // Summary card config
+    // Summary card config — also act as status filters
     const summaryCards = [
         {
             icon: Clock,
             label: 'Órdenes Pendientes',
             count: counts.pending,
+            filterKey: 'pending',
             borderColor: 'border-l-amber-500',
             textColor: 'text-amber-600 dark:text-amber-400',
             bg: 'bg-amber-50 dark:bg-amber-500/10',
             iconColor: 'text-amber-600 dark:text-amber-400',
-            iconBg: 'bg-amber-100 dark:bg-amber-500/20'
+            iconBg: 'bg-amber-100 dark:bg-amber-500/20',
+            ringColor: 'ring-amber-500'
         },
         {
             icon: ChefHat,
             label: 'En Preparación',
             count: counts.preparing,
+            filterKey: 'preparing',
             borderColor: 'border-l-blue-500',
             textColor: 'text-blue-600 dark:text-blue-400',
             bg: 'bg-blue-50 dark:bg-blue-500/10',
             iconColor: 'text-blue-600 dark:text-blue-400',
-            iconBg: 'bg-blue-100 dark:bg-blue-500/20'
+            iconBg: 'bg-blue-100 dark:bg-blue-500/20',
+            ringColor: 'ring-blue-500'
         },
         {
             icon: Check,
             label: 'Órdenes Completas',
             count: counts.completed,
+            filterKey: 'ready',
             borderColor: 'border-l-emerald-500',
             textColor: 'text-emerald-600 dark:text-emerald-400',
             bg: 'bg-emerald-50 dark:bg-emerald-500/10',
             iconColor: 'text-emerald-600 dark:text-emerald-400',
-            iconBg: 'bg-emerald-100 dark:bg-emerald-500/20'
+            iconBg: 'bg-emerald-100 dark:bg-emerald-500/20',
+            ringColor: 'ring-emerald-500'
         },
     ];
 
@@ -271,16 +366,21 @@ const Production = () => {
                 </div>
             </div>
 
-            {/* ===== SUMMARY CARDS — horizontal like the reference ===== */}
+            {/* ===== SUMMARY CARDS — also work as status filters ===== */}
             <div className="grid grid-cols-3 gap-3 sm:gap-4 shrink-0">
                 {summaryCards.map((card, i) => {
                     const Icon = card.icon;
+                    const isActive = statusFilter === card.filterKey;
                     return (
-                        <div key={i}
+                        <button key={i}
+                            type="button"
+                            onClick={() => setStatusFilter(isActive ? 'all' : card.filterKey)}
+                            title={isActive ? 'Click para ver todos' : `Filtrar: ${card.label}`}
                             className={cn(
-                                "relative overflow-hidden rounded-xl border-l-[6px] p-3 sm:p-4 transition-all shadow-sm",
+                                "relative overflow-hidden rounded-xl border-l-[6px] p-3 sm:p-4 transition-all shadow-sm text-left cursor-pointer hover:scale-[1.02] hover:shadow-md",
                                 card.bg,
-                                card.borderColor
+                                card.borderColor,
+                                isActive && cn("ring-2 ring-offset-2 ring-offset-[var(--color-bg)] scale-[1.02] shadow-lg", card.ringColor)
                             )}>
                             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                                 <div className={cn("p-2 rounded-lg flex items-center justify-center shrink-0", card.iconBg)}>
@@ -295,29 +395,92 @@ const Production = () => {
                                     </p>
                                 </div>
                             </div>
-                        </div>
+                        </button>
                     );
                 })}
             </div>
 
-            {/* ===== STATUS TABS ===== */}
-            <div className="flex gap-2 shrink-0 flex-wrap">
-                {[
-                    { key: 'all', label: 'Todos' },
-                    { key: 'pending', label: '⏳ Pendiente', dotColor: 'bg-amber-400' },
-                    { key: 'preparing', label: '🍳 En Preparación', dotColor: 'bg-blue-400' },
-                    { key: 'ready', label: '✅ Listo / Entregado', dotColor: 'bg-emerald-400' },
-                ].map(tab => (
-                    <button key={tab.key} onClick={() => setStatusFilter(tab.key)}
-                        className={cn("px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border flex items-center gap-2",
-                            statusFilter === tab.key
-                                ? "bg-[var(--color-primary)] text-black border-[var(--color-primary)] shadow-lg shadow-[var(--color-primary)]/20"
-                                : "bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)] hover:border-[var(--color-primary)]/50 hover:text-[var(--color-text)]"
-                        )}>
-                        {tab.dotColor && statusFilter !== tab.key && <span className={cn("w-2 h-2 rounded-full", tab.dotColor)} />}
-                        {tab.label}
+            {/* ===== TOTAL A PRODUCIR (agregado por producto) ===== */}
+            {productionTotals.length > 0 && (
+                <div className="shrink-0 rounded-2xl border border-[var(--glass-border)] bg-gradient-to-br from-amber-500/[0.07] via-orange-500/[0.04] to-transparent overflow-hidden">
+                    <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-[var(--glass-border)] bg-black/10 dark:bg-white/[0.02]">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-md shadow-amber-500/25 shrink-0">
+                                <Package size={16} className="text-white" />
+                            </div>
+                            <div className="min-w-0">
+                                <p className="text-sm font-bold text-[var(--color-text)] truncate">Total a Producir</p>
+                                <p className="text-[11px] text-[var(--color-text-muted)] truncate">
+                                    Suma por producto de todas las órdenes pendientes en cocina
+                                </p>
+                            </div>
+                        </div>
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/25 tabular-nums shrink-0">
+                            {productionTotals.length} {productionTotals.length === 1 ? 'producto' : 'productos'}
+                        </span>
+                    </div>
+                    <div className="p-3 sm:p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2.5">
+                        {productionTotals.map((p, i) => (
+                            <div key={i}
+                                className="group flex items-center gap-3 rounded-xl bg-[var(--color-surface)] border border-[var(--glass-border)] p-2.5 hover:border-[var(--color-primary)]/40 hover:shadow-md transition-all">
+                                <div className="flex flex-col items-center justify-center min-w-[3.75rem] py-1.5 px-2 rounded-lg bg-gradient-to-br from-[var(--color-primary)]/20 to-[var(--color-primary)]/5 border border-[var(--color-primary)]/30">
+                                    <span className="text-lg font-black text-[var(--color-primary)] leading-none tabular-nums">
+                                        {p.qty}
+                                    </span>
+                                    <span className="text-[9px] font-bold text-[var(--color-primary)]/80 uppercase tracking-wider mt-0.5">
+                                        und
+                                    </span>
+                                </div>
+                                <p className="text-sm font-semibold text-[var(--color-text)] leading-snug line-clamp-2 flex-1 min-w-0">
+                                    {p.name}
+                                </p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* ===== TOOLBAR: reset filter + view toggle ===== */}
+            <div className="flex items-center justify-between gap-3 shrink-0 flex-wrap">
+                {statusFilter !== 'all' ? (
+                    <button
+                        type="button"
+                        onClick={() => setStatusFilter('all')}
+                        className="px-4 py-2 rounded-xl text-sm font-semibold transition-all border bg-[var(--color-primary)] text-black border-[var(--color-primary)] shadow-lg shadow-[var(--color-primary)]/20 hover:opacity-90"
+                    >
+                        Ver Todos
                     </button>
-                ))}
+                ) : <span />}
+
+                {/* View toggle: lista | tarjetas */}
+                <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+                    <button
+                        type="button"
+                        onClick={() => setViewMode('list')}
+                        title="Vista de lista"
+                        className={cn(
+                            "px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all",
+                            viewMode === 'list'
+                                ? "bg-[var(--color-primary)] text-black shadow"
+                                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                        )}>
+                        <List size={14} />
+                        Lista
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setViewMode('cards')}
+                        title="Vista de tarjetas (boletas)"
+                        className={cn(
+                            "px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all",
+                            viewMode === 'cards'
+                                ? "bg-[var(--color-primary)] text-black shadow"
+                                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                        )}>
+                        <LayoutGrid size={14} />
+                        Tarjetas
+                    </button>
+                </div>
             </div>
 
             {/* ===== TABLE / CARDS ===== */}
@@ -330,7 +493,8 @@ const Production = () => {
                     </div>
                 ) : (
                     <>
-                        {/* Desktop Table */}
+                        {/* Desktop: Lista (tabla) */}
+                        {viewMode === 'list' && (
                         <div className="hidden lg:block h-full overflow-y-auto">
                             <table className="w-full">
                                 <thead className="sticky top-0 z-10 bg-[var(--color-surface)]/95 backdrop-blur-xl">
@@ -338,7 +502,7 @@ const Production = () => {
                                         <th className="text-left py-3.5 px-5 text-[11px] uppercase tracking-widest font-bold text-[var(--color-text-muted)]">Hora</th>
                                         <th className="text-left py-3.5 px-5 text-[11px] uppercase tracking-widest font-bold text-[var(--color-text-muted)]">Cliente</th>
                                         <th className="text-left py-3.5 px-5 text-[11px] uppercase tracking-widest font-bold text-[var(--color-text-muted)]">Productos</th>
-                                        <th className="text-center py-3.5 px-5 text-[11px] uppercase tracking-widest font-bold text-[var(--color-text-muted)]">Cant.</th>
+                                        <th className="text-center py-3.5 px-5 text-[11px] uppercase tracking-widest font-bold text-[var(--color-text-muted)]">Ítems</th>
                                         <th className="text-left py-3.5 px-5 text-[11px] uppercase tracking-widest font-bold text-[var(--color-text-muted)]">Notas</th>
                                         <th className="text-center py-3.5 px-5 text-[11px] uppercase tracking-widest font-bold text-[var(--color-text-muted)]">Estado</th>
                                         <th className="text-center py-3.5 px-5 text-[11px] uppercase tracking-widest font-bold text-[var(--color-text-muted)]">Acciones</th>
@@ -348,12 +512,8 @@ const Production = () => {
                                     {filteredPreorders.map((order, idx) => {
                                         const config = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
                                         const StatusIcon = config.icon;
-                                        const totalQty = order.items_summary
-                                            ? order.items_summary.split(',').reduce((sum, item) => {
-                                                const match = item.trim().match(/x(\d+)/);
-                                                return sum + (match ? parseInt(match[1]) : 0);
-                                            }, 0)
-                                            : 0;
+                                        const parsedItems = parseItemsSummary(order.items_summary);
+                                        const itemsCount = parsedItems.length;
 
                                         return (
                                             <tr key={order.id}
@@ -362,13 +522,13 @@ const Production = () => {
                                                     idx < filteredPreorders.length - 1 && "border-b border-[var(--glass-border)]/50"
                                                 )}
                                                 onClick={() => setSelectedPreorder(order)}>
-                                                <td className="py-4 px-5">
+                                                <td className="py-4 px-5 align-top">
                                                     <div className="flex flex-col">
                                                         <span className="text-sm font-bold text-[var(--color-primary)]">{order.due_time}</span>
                                                         <span className="text-[10px] text-[var(--color-text-muted)] mt-0.5">{order.due_date}</span>
                                                     </div>
                                                 </td>
-                                                <td className="py-4 px-5">
+                                                <td className="py-4 px-5 align-top">
                                                     <div className="flex items-center gap-3">
                                                         <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs shadow-md shadow-purple-500/20">
                                                             {(order.client_name || 'S')[0].toUpperCase()}
@@ -376,15 +536,33 @@ const Production = () => {
                                                         <span className="text-sm font-semibold text-[var(--color-text)]">{order.client_name || 'Sin nombre'}</span>
                                                     </div>
                                                 </td>
-                                                <td className="py-4 px-5">
-                                                    <p className="text-sm text-[var(--color-text)] line-clamp-2 max-w-[260px] leading-relaxed">{order.items_summary}</p>
+                                                <td className="py-4 px-5 align-top">
+                                                    {parsedItems.length > 0 ? (
+                                                        <ul className="flex flex-col gap-1.5 max-w-[340px]">
+                                                            {parsedItems.map((it, i) => (
+                                                                <li key={i} className="flex items-center gap-2.5">
+                                                                    <span className="inline-flex items-center justify-center min-w-[3rem] h-7 px-2 rounded-lg text-xs font-black bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/25 tabular-nums">
+                                                                        {it.qty} und
+                                                                    </span>
+                                                                    <span className="text-sm text-[var(--color-text)] leading-snug">{it.name}</span>
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    ) : (
+                                                        <span className="text-xs text-[var(--color-text-muted)] opacity-40">Sin productos</span>
+                                                    )}
                                                 </td>
-                                                <td className="py-4 px-5 text-center">
-                                                    <span className="inline-flex items-center justify-center w-9 h-9 text-sm font-bold text-[var(--color-text)] bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
-                                                        {totalQty}
-                                                    </span>
+                                                <td className="py-4 px-5 text-center align-top">
+                                                    <div className="inline-flex flex-col items-center">
+                                                        <span className="inline-flex items-center justify-center min-w-[2.25rem] h-9 px-2.5 text-sm font-bold text-[var(--color-text)] bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)] tabular-nums">
+                                                            {itemsCount}
+                                                        </span>
+                                                        <span className="text-[10px] text-[var(--color-text-muted)] mt-1 uppercase tracking-wider">
+                                                            {itemsCount === 1 ? 'ítem' : 'ítems'}
+                                                        </span>
+                                                    </div>
                                                 </td>
-                                                <td className="py-4 px-5">
+                                                <td className="py-4 px-5 align-top">
                                                     {order.notes ? (
                                                         <p className="text-xs text-amber-400 line-clamp-2 max-w-[180px] italic flex items-start gap-1">
                                                             <span className="shrink-0">📝</span> {order.notes}
@@ -393,13 +571,13 @@ const Production = () => {
                                                         <span className="text-xs text-[var(--color-text-muted)] opacity-40">—</span>
                                                     )}
                                                 </td>
-                                                <td className="py-4 px-5 text-center">
+                                                <td className="py-4 px-5 text-center align-top">
                                                     <span className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border", config.color)}>
                                                         <StatusIcon size={12} />
                                                         {config.label}
                                                     </span>
                                                 </td>
-                                                <td className="py-4 px-5">
+                                                <td className="py-4 px-5 align-top">
                                                     <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
                                                         {canManage && order.status === 'pending' && (
                                                             <button onClick={() => handleStatusChange(order.id, 'preparing')}
@@ -435,12 +613,125 @@ const Production = () => {
                                 </tbody>
                             </table>
                         </div>
+                        )}
+
+                        {/* Desktop: Tarjetas tipo boleta */}
+                        {viewMode === 'cards' && (
+                        <div className="hidden lg:block h-full overflow-y-auto p-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+                                {filteredPreorders.map(order => {
+                                    const config = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
+                                    const StatusIcon = config.icon;
+                                    const parsedItems = parseItemsSummary(order.items_summary);
+                                    return (
+                                        <div key={order.id}
+                                            onClick={() => setSelectedPreorder(order)}
+                                            className={cn(
+                                                "relative flex flex-col rounded-2xl border-t-[6px] bg-[var(--color-surface)] shadow-md hover:shadow-xl hover:-translate-y-0.5 transition-all cursor-pointer overflow-hidden",
+                                                order.status === 'pending' && 'border-amber-500',
+                                                order.status === 'preparing' && 'border-blue-500',
+                                                order.status === 'ready' && 'border-emerald-500',
+                                                order.status === 'delivered' && 'border-gray-500',
+                                                order.status === 'canceled' && 'border-red-500',
+                                            )}>
+                                            {/* Cabecera tipo boleta: cliente */}
+                                            <div className="px-4 pt-4 pb-3 border-b border-dashed border-[var(--glass-border)]">
+                                                <div className="flex items-start justify-between gap-2">
+                                                    <div className="flex items-center gap-2.5 min-w-0">
+                                                        <div className="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm shadow-md shadow-purple-500/20">
+                                                            {(order.client_name || 'S')[0].toUpperCase()}
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <p className="text-base font-bold text-[var(--color-text)] truncate">
+                                                                {order.client_name || 'Sin nombre'}
+                                                            </p>
+                                                            <p className="text-[11px] text-[var(--color-text-muted)] flex items-center gap-2 mt-0.5">
+                                                                <span className="font-bold text-[var(--color-primary)]">🕐 {order.due_time}</span>
+                                                                <span>·</span>
+                                                                <span>{order.due_date}</span>
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border shrink-0", config.color)}>
+                                                        <StatusIcon size={10} />
+                                                        {config.label}
+                                                    </span>
+                                                </div>
+                                                <p className="text-[10px] text-[var(--color-text-muted)] mt-2 font-mono">Orden #{order.id}</p>
+                                            </div>
+
+                                            {/* Productos */}
+                                            <div className="flex-1 px-4 py-3">
+                                                <p className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Productos</p>
+                                                {parsedItems.length > 0 ? (
+                                                    <ul className="flex flex-col gap-1.5">
+                                                        {parsedItems.map((it, i) => (
+                                                            <li key={i} className="flex items-center gap-2.5">
+                                                                <span className="inline-flex items-center justify-center min-w-[3rem] h-7 px-2 rounded-lg text-xs font-black bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/25 tabular-nums">
+                                                                    {it.qty} und
+                                                                </span>
+                                                                <span className="text-sm text-[var(--color-text)] leading-snug">{it.name}</span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                ) : (
+                                                    <span className="text-xs text-[var(--color-text-muted)] opacity-60">Sin productos</span>
+                                                )}
+                                                {order.notes && (
+                                                    <p className="mt-3 text-xs text-amber-400 italic flex items-start gap-1.5 bg-amber-500/5 border border-amber-500/15 rounded-lg p-2">
+                                                        <span className="shrink-0">📝</span> {order.notes}
+                                                    </p>
+                                                )}
+                                            </div>
+
+                                            {/* Pie con acciones */}
+                                            <div className="px-4 py-3 border-t border-dashed border-[var(--glass-border)] bg-black/5 dark:bg-white/[0.02]"
+                                                onClick={e => e.stopPropagation()}>
+                                                {canManage && (order.status === 'pending' || order.status === 'preparing' || order.status === 'ready') ? (
+                                                    <div className="flex gap-2">
+                                                        {order.status === 'pending' && (
+                                                            <button onClick={() => handleStatusChange(order.id, 'preparing')}
+                                                                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-md shadow-blue-500/20 hover:shadow-lg hover:shadow-blue-500/30 transition-all flex items-center justify-center gap-1.5 active:scale-95">
+                                                                <ChefHat size={14} /> Empezar
+                                                            </button>
+                                                        )}
+                                                        {order.status === 'preparing' && (
+                                                            <button onClick={() => handleStatusChange(order.id, 'ready')}
+                                                                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/30 transition-all flex items-center justify-center gap-1.5 active:scale-95">
+                                                                <Check size={14} /> Marcar Listo
+                                                            </button>
+                                                        )}
+                                                        {order.status === 'ready' && (
+                                                            <button onClick={() => handleStatusChange(order.id, 'delivered')}
+                                                                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/30 transition-all flex items-center justify-center gap-1.5 active:scale-95">
+                                                                <Truck size={14} /> Entregar
+                                                            </button>
+                                                        )}
+                                                        <button onClick={() => setSelectedPreorder(order)}
+                                                            className="px-3 py-2.5 rounded-xl text-xs font-semibold text-[var(--color-text-muted)] border border-[var(--glass-border)] hover:border-[var(--color-primary)]/50 hover:text-[var(--color-primary)] transition-all flex items-center gap-1.5">
+                                                            <Eye size={14} />
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <button onClick={() => setSelectedPreorder(order)}
+                                                        className="w-full py-2.5 rounded-xl text-xs font-semibold text-[var(--color-text-muted)] border border-[var(--glass-border)] hover:border-[var(--color-primary)]/50 hover:text-[var(--color-primary)] transition-all flex items-center justify-center gap-1.5">
+                                                        <Eye size={14} /> Ver detalles
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        )}
 
                         {/* Mobile Cards */}
                         <div className="lg:hidden h-full overflow-y-auto space-y-3 p-3">
                             {filteredPreorders.map(order => {
                                 const config = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
                                 const StatusIcon = config.icon;
+                                const parsedItems = parseItemsSummary(order.items_summary);
 
                                 return (
                                     <div key={order.id}
@@ -461,17 +752,29 @@ const Production = () => {
                                             </div>
                                         </div>
 
-                                        {/* Client + products */}
-                                        <div className="space-y-1.5">
-                                            <p className="text-sm font-bold text-[var(--color-text)] flex items-center gap-1.5">
-                                                <User size={14} className="text-[var(--color-primary)]" />
-                                                {order.client_name || 'Sin nombre'}
-                                            </p>
-                                            <p className="text-xs text-[var(--color-text-muted)] line-clamp-2 leading-relaxed">{order.items_summary}</p>
-                                            {order.notes && (
-                                                <p className="text-xs text-amber-400 italic">📝 {order.notes}</p>
-                                            )}
-                                        </div>
+                                        {/* Client */}
+                                        <p className="text-sm font-bold text-[var(--color-text)] flex items-center gap-1.5">
+                                            <User size={14} className="text-[var(--color-primary)]" />
+                                            {order.client_name || 'Sin nombre'}
+                                        </p>
+
+                                        {/* Products list */}
+                                        {parsedItems.length > 0 && (
+                                            <ul className="flex flex-col gap-1.5 rounded-xl bg-black/10 dark:bg-white/[0.03] border border-[var(--glass-border)] p-2.5">
+                                                {parsedItems.map((it, i) => (
+                                                    <li key={i} className="flex items-center gap-2.5">
+                                                        <span className="inline-flex items-center justify-center min-w-[2.75rem] h-6 px-1.5 rounded-md text-[11px] font-black bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/25 tabular-nums">
+                                                            {it.qty} und
+                                                        </span>
+                                                        <span className="text-xs text-[var(--color-text)] leading-snug">{it.name}</span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+
+                                        {order.notes && (
+                                            <p className="text-xs text-amber-400 italic">📝 {order.notes}</p>
+                                        )}
 
                                         {/* Quick action */}
                                         {canManage && (order.status === 'pending' || order.status === 'preparing' || order.status === 'ready') && (

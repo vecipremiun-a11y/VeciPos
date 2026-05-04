@@ -610,16 +610,84 @@ const Preorders = () => {
     const hasKgItems = preorderCart.some(item => item.billing_unit === 'kg');
 
     // Load preorderable products
+    // Estrategia rápida:
+    //   1) Filtrar en memoria desde state.products (instantáneo)
+    //   2) Si no hay nada en memoria, intentar Dexie
+    //   3) Refrescar contra Turso en background (silencioso, con timeout)
     const loadProducts = async (search = '', cat = 'Todos') => {
-        setIsLoading(true);
-        const result = await getPreorderableProducts(search, cat);
-        if (result.success) setPreorderProducts(result.products);
+        const term = String(search || '').toLowerCase();
+        const filterList = (list) => {
+            let out = (list || []).filter(p =>
+                p && (p.sale_mode === 'preorder_only' || p.sale_mode === 'both')
+            );
+            if (cat && cat !== 'Todos') out = out.filter(p => p.category === cat);
+            if (term) out = out.filter(p =>
+                (p.name && String(p.name).toLowerCase().includes(term)) ||
+                (p.sku && String(p.sku).toLowerCase().includes(term))
+            );
+            out.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+            return out.slice(0, 50).map(p => ({
+                ...p,
+                price_ranges: typeof p.price_ranges === 'string'
+                    ? (() => { try { return JSON.parse(p.price_ranges); } catch { return []; } })()
+                    : (p.price_ranges || [])
+            }));
+        };
+
+        let gotLocal = false;
+
+        // 1) Memoria
+        try {
+            const fast = filterList(useStore.getState().products);
+            if (fast.length > 0) {
+                setPreorderProducts(fast);
+                gotLocal = true;
+            }
+        } catch { /* noop */ }
+
+        // 2) Dexie como respaldo si la memoria está vacía
+        if (!gotLocal) {
+            try {
+                const { localDb } = await import('../lib/db/localdb');
+                const { activeCompanyId } = useStore.getState();
+                if (activeCompanyId) {
+                    const all = await localDb.products.where('companyId').equals(activeCompanyId).toArray();
+                    const fast = filterList(all);
+                    if (fast.length > 0) {
+                        setPreorderProducts(fast);
+                        gotLocal = true;
+                    }
+                }
+            } catch { /* noop */ }
+        }
+
+        // Quitar spinner ya — sea con datos locales o vacío.
+        // Turso refrescará en silencio.
         setIsLoading(false);
+
+        // 3) Refrescar con Turso (si está online), con timeout de 8s
+        if (typeof navigator === 'undefined' || navigator.onLine) {
+            try {
+                const tursoPromise = getPreorderableProducts(search, cat);
+                const timeoutPromise = new Promise((resolve) =>
+                    setTimeout(() => resolve({ success: false, _timeout: true }), 8000)
+                );
+                const result = await Promise.race([tursoPromise, timeoutPromise]);
+                if (result && result.success) setPreorderProducts(result.products);
+                else if (result && result._timeout) {
+                    console.warn('[preorders] Turso timeout — usando datos locales');
+                }
+            } catch (e) {
+                console.warn('[preorders] refresh Turso falló:', e);
+            }
+        }
     };
 
     useEffect(() => {
+        // Carga inicial (sin debounce) — mostrar lo que se tenga rápido.
         loadProducts();
         fetchPreorders(getListFilters());
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Search debounce
@@ -716,56 +784,64 @@ const Preorders = () => {
 
     return (
         <div className="flex flex-col h-[calc(100vh-100px)]">
-            {/* POS / Encargos Navigation */}
-            <div className="flex gap-2 mb-2 shrink-0">
-                <button
-                    onClick={() => navigate('/pos')}
-                    className={cn(
-                        "flex-1 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all border",
-                        "bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
-                    )}
-                >
-                    <ShoppingCart size={18} />
-                    Venta
-                </button>
-                <button
-                    className={cn(
-                        "flex-1 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all border",
-                        "bg-[var(--color-primary)] text-black border-[var(--color-primary)] shadow-[0_0_15px_rgba(0,240,255,0.3)]"
-                    )}
-                >
-                    <CakeSlice size={18} />
-                    Encargos
-                </button>
-            </div>
+            {/* Header compacto: switch POS/Encargos + tabs internas */}
+            <div className="flex flex-wrap items-center gap-2 mb-3 shrink-0">
+                {/* Switch POS / Encargos (segmented) */}
+                <div className="inline-flex p-0.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+                    <button
+                        onClick={() => navigate('/pos')}
+                        className="px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                    >
+                        <ShoppingCart size={14} />
+                        Venta
+                    </button>
+                    <button
+                        className="px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 bg-[var(--color-primary)] text-black"
+                    >
+                        <CakeSlice size={14} />
+                        Encargos
+                    </button>
+                </div>
 
-            {/* Top Tabs */}
-            <div className="flex gap-2 mb-4 shrink-0">
-                <button onClick={() => setActiveTab('new')}
-                    className={cn("flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all border",
-                        activeTab === 'new'
-                            ? "bg-[var(--color-primary)] text-black border-[var(--color-primary)] shadow-[0_0_15px_rgba(0,240,255,0.3)]"
-                            : "bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)] hover:border-[var(--color-primary)]"
-                    )}>
-                    <Plus size={18} />
-                    Nuevo Encargo
-                </button>
-                <button onClick={() => setActiveTab('list')}
-                    className={cn("flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all border relative",
-                        activeTab === 'list'
-                            ? "bg-[var(--color-primary)] text-black border-[var(--color-primary)] shadow-[0_0_15px_rgba(0,240,255,0.3)]"
-                            : "bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)] hover:border-[var(--color-primary)]"
-                    )}>
-                    <ClipboardList size={18} />
-                    Encargos
-                    {preorders.filter(p => p.status !== 'delivered' && p.status !== 'canceled').length > 0 && (
-                        <span className={cn("absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center",
-                            activeTab === 'list' && "bg-black text-[var(--color-primary)]"
-                        )}>
-                            {preorders.filter(p => p.status !== 'delivered' && p.status !== 'canceled').length}
-                        </span>
-                    )}
-                </button>
+                <div className="hidden sm:block h-5 w-px bg-[var(--glass-border)]" />
+
+                {/* Tabs internas: Nuevo / Lista (segmented) */}
+                <div className="inline-flex p-0.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+                    <button
+                        onClick={() => setActiveTab('new')}
+                        className={cn(
+                            "px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors",
+                            activeTab === 'new'
+                                ? "bg-[var(--color-primary)] text-black"
+                                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                        )}
+                    >
+                        <Plus size={14} />
+                        Nuevo Encargo
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('list')}
+                        className={cn(
+                            "relative px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors",
+                            activeTab === 'list'
+                                ? "bg-[var(--color-primary)] text-black"
+                                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                        )}
+                    >
+                        <ClipboardList size={14} />
+                        Encargos
+                        {preorders.filter(p => p.status !== 'delivered' && p.status !== 'canceled').length > 0 && (
+                            <span className={cn(
+                                "ml-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center",
+                                activeTab === 'list'
+                                    ? "bg-black text-[var(--color-primary)]"
+                                    : "bg-red-500 text-white"
+                            )}>
+                                {preorders.filter(p => p.status !== 'delivered' && p.status !== 'canceled').length}
+                            </span>
+                        )}
+                    </button>
+                </div>
             </div>
 
             {/* ===== TAB: NEW PREORDER ===== */}

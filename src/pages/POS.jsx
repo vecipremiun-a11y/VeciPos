@@ -228,6 +228,12 @@ const POS = () => {
             setIsLoadingProducts(false);
             console.log('✅ Productos precargados');
         });
+
+        // Pre-calentar caché de Encargos en background (sin bloquear)
+        const { getPreorderableProducts } = useStore.getState();
+        if (getPreorderableProducts) {
+            getPreorderableProducts('', 'Todos').catch(() => {});
+        }
     }, []); // Array vacío = solo una vez al montar
 
     // Barcode Scanner Logic using custom hook
@@ -654,26 +660,22 @@ const POS = () => {
             {/* Left Side: Product Grid */}
             <div className="flex-1 flex flex-col gap-2 lg:gap-4 overflow-hidden min-h-0">
                 {/* Tabs: Venta / Encargos */}
-                <div className="flex gap-2 shrink-0">
-                    <button
-                        className={cn(
-                            "flex-1 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all border",
-                            "bg-[var(--color-primary)] text-black border-[var(--color-primary)] shadow-[0_0_15px_rgba(0,240,255,0.3)]"
-                        )}
-                    >
-                        <ShoppingCart size={18} />
-                        Venta
-                    </button>
-                    <button
-                        onClick={() => navigate('/preorders')}
-                        className={cn(
-                            "flex-1 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all border",
-                            "bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
-                        )}
-                    >
-                        <Gift size={18} />
-                        Encargos
-                    </button>
+                <div className="flex shrink-0">
+                    <div className="inline-flex p-0.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+                        <button
+                            className="px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 bg-[var(--color-primary)] text-black"
+                        >
+                            <ShoppingCart size={14} />
+                            Venta
+                        </button>
+                        <button
+                            onClick={() => navigate('/preorders')}
+                            className="px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                        >
+                            <Gift size={14} />
+                            Encargos
+                        </button>
+                    </div>
                 </div>
 
                 {/* Search & Categories - Compact on Mobile */}

@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, Plus, Edit, Trash2, Filter, Loader, ScanBarcode, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { turso } from '../lib/turso';
 import ProductModal from '../components/ProductModal';
 import OptimizedImage from '../components/OptimizedImage';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -44,8 +45,30 @@ const Inventory = () => {
     const [filterTax, setFilterTax] = useState('Todos');
     const [filterStock, setFilterStock] = useState('Todos');
     const [filterGroup, setFilterGroup] = useState('');
+    const [scaleGroups, setScaleGroups] = useState([]);
 
     // --- EFFECTS ---
+
+    // Cargar lista de IDs de Grupo Escala distintos (una sola vez por empresa)
+    useEffect(() => {
+        if (!activeCompanyId) { setScaleGroups([]); return; }
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await turso.execute({
+                    sql: `SELECT DISTINCT scale_group_id FROM products
+                          WHERE company_id = ? AND scale_group_id IS NOT NULL AND scale_group_id != ''
+                          ORDER BY scale_group_id ASC`,
+                    args: [activeCompanyId]
+                });
+                if (cancelled) return;
+                setScaleGroups(res.rows.map(r => r.scale_group_id).filter(Boolean));
+            } catch (e) {
+                console.warn('No se pudieron cargar grupos escala:', e?.message);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [activeCompanyId]);
 
     // Load Products on Change
     // Debounce local input to search term (1s delay)
@@ -261,8 +284,8 @@ const Inventory = () => {
             <div className="flex-1 min-h-0 flex flex-col">
 
                 {/* Filters & Search - Compact on Mobile */}
-                <div className="glass-card p-3 lg:p-4 flex flex-col md:flex-row gap-3 lg:gap-4 items-center mb-3 lg:mb-4 shrink-0">
-                    <div className="relative flex-1 w-full flex gap-2">
+                <div className="glass-card p-3 lg:p-4 flex flex-col md:flex-row gap-3 lg:gap-4 items-stretch md:items-center mb-3 lg:mb-4 shrink-0">
+                    <div className="relative w-full md:flex-1 lg:flex-none lg:w-72 flex gap-2">
                         <div className="relative flex-1">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
                             <input
@@ -281,18 +304,91 @@ const Inventory = () => {
                             <ScanBarcode size={20} />
                         </button>
                     </div>
+
+                    {/* Inline filters — visible solo en lg+ (escritorio) */}
+                    <div className="hidden lg:flex flex-1 items-center gap-2">
+                        <select
+                            value={filterCategory}
+                            onChange={(e) => setFilterCategory(e.target.value)}
+                            className="glass-input flex-1 min-w-0 p-2 text-sm"
+                            title="Categoría"
+                        >
+                            <option value="Todos" className="bg-gray-900">Todas las categorías</option>
+                            {categories.map(cat => (
+                                <option key={cat.id} value={cat.name} className="bg-gray-900">{cat.name}</option>
+                            ))}
+                        </select>
+                        <select
+                            value={filterTax}
+                            onChange={(e) => setFilterTax(e.target.value)}
+                            className="glass-input flex-1 min-w-0 p-2 text-sm"
+                            title="Impuestos"
+                        >
+                            <option value="Todos" className="bg-gray-900">Todos los impuestos</option>
+                            {taxRates && taxRates.length > 0 ? (
+                                taxRates.map(tax => (
+                                    <option key={tax.id} value={tax.rate} className="bg-gray-900">
+                                        {tax.name} ({tax.rate}%)
+                                    </option>
+                                ))
+                            ) : (
+                                <>
+                                    <option value="19" className="bg-gray-900">IVA (19%)</option>
+                                    <option value="0" className="bg-gray-900">Exento (0%)</option>
+                                </>
+                            )}
+                        </select>
+                        <select
+                            value={filterStock}
+                            onChange={(e) => setFilterStock(e.target.value)}
+                            className="glass-input flex-1 min-w-0 p-2 text-sm"
+                            title="Estado de stock"
+                        >
+                            <option value="Todos" className="bg-gray-900">Todo el stock</option>
+                            <option value="Con" className="bg-gray-900">Con Stock</option>
+                            <option value="Bajo" className="bg-gray-900">Bajo Stock (&lt;=10)</option>
+                            <option value="Sin" className="bg-gray-900">Sin Stock</option>
+                        </select>
+                        <select
+                            value={filterGroup}
+                            onChange={(e) => setFilterGroup(e.target.value)}
+                            className="glass-input flex-1 min-w-0 p-2 text-sm"
+                            title="ID Grupo Escala"
+                        >
+                            <option value="" className="bg-gray-900">Todos los grupos</option>
+                            {scaleGroups.map(g => (
+                                <option key={g} value={g} className="bg-gray-900">{g}</option>
+                            ))}
+                        </select>
+                        {(filterCategory !== 'Todos' || filterTax !== 'Todos' || filterStock !== 'Todos' || filterGroup) && (
+                            <button
+                                onClick={() => {
+                                    setFilterCategory('Todos');
+                                    setFilterTax('Todos');
+                                    setFilterStock('Todos');
+                                    setFilterGroup('');
+                                }}
+                                className="text-xs text-[var(--color-primary)] hover:underline whitespace-nowrap px-2"
+                                title="Limpiar filtros"
+                            >
+                                Limpiar
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Botón Filtros — solo móvil/tablet */}
                     <button
                         onClick={() => setShowFilters(!showFilters)}
-                        className={`glass px-3 lg:px-4 py-2 lg:py-3 rounded-lg transition-colors flex items-center gap-2 text-sm ${showFilters ? 'bg-[var(--color-primary)] text-black' : 'hover:bg-[var(--color-surface-hover)]'}`}
+                        className={`lg:hidden glass px-3 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm ${showFilters ? 'bg-[var(--color-primary)] text-black' : 'hover:bg-[var(--color-surface-hover)]'}`}
                     >
                         <Filter size={18} className={showFilters ? "text-black" : "text-[var(--color-text-muted)]"} />
-                        {showFilters && <span className="font-bold">Filtros</span>}
+                        <span className="font-bold">Filtros</span>
                     </button>
                 </div>
 
-                {/* Advanced Filters Panel */}
+                {/* Advanced Filters Panel — solo móvil/tablet */}
                 {showFilters && (
-                    <div className="glass-card p-4 grid grid-cols-1 md:grid-cols-4 gap-4 animate-in slide-in-from-top-2 fade-in duration-200 mb-4 shrink-0">
+                    <div className="lg:hidden glass-card p-4 grid grid-cols-1 md:grid-cols-4 gap-4 animate-in slide-in-from-top-2 fade-in duration-200 mb-4 shrink-0">
                         <div>
                             <label className="block text-xs text-[var(--color-text-muted)] mb-1 uppercase font-bold">Categoría</label>
                             <select
@@ -346,13 +442,16 @@ const Inventory = () => {
 
                         <div>
                             <label className="block text-xs text-[var(--color-text-muted)] mb-1 uppercase font-bold">ID Grupo Escala</label>
-                            <input
-                                type="text"
-                                placeholder="Ej: LIMPIADORES..."
+                            <select
                                 value={filterGroup}
                                 onChange={(e) => setFilterGroup(e.target.value)}
                                 className="glass-input w-full p-2 text-sm"
-                            />
+                            >
+                                <option value="" className="bg-gray-900">Todos</option>
+                                {scaleGroups.map(g => (
+                                    <option key={g} value={g} className="bg-gray-900">{g}</option>
+                                ))}
+                            </select>
                         </div>
 
                         <div className="md:col-span-4 flex justify-end">
