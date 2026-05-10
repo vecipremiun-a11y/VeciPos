@@ -34,12 +34,19 @@ const MainLayout = () => {
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
-    // Refresh permissions periodically to pick up admin changes
+    // Refrescar permisos periódicamente (subido de 30s -> 5min para reducir
+    // re-renders globales que afectaban el rendimiento del POS).
+    // También se refrescan al volver al foco / al recuperar conexión.
     React.useEffect(() => {
         const interval = setInterval(() => {
             fetchRolePermissions();
-        }, 30000); // every 30 seconds
-        return () => clearInterval(interval);
+        }, 5 * 60 * 1000);
+        const onFocus = () => fetchRolePermissions();
+        window.addEventListener('focus', onFocus);
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('focus', onFocus);
+        };
     }, [fetchRolePermissions]);
 
     const { can } = usePermissions();

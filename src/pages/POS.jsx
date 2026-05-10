@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect as useEffectReact } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift, FileText, Receipt, ScanBarcode, Package } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
 import PaymentModal from '../components/PaymentModal';
@@ -71,6 +72,8 @@ const KgQuantityInput = ({ value, onChange, onCommit }) => {
 };
 
 const POS = () => {
+    // PERF: selector shallow para evitar re-renders del POS por cambios en otras
+    // partes del store (ej. polling de permisos, alertas, soporte, etc.)
     const {
         products,
         categories: storedCategories,
@@ -93,42 +96,60 @@ const POS = () => {
         suspendSale,
         suspendedSalesCount,
         updateSuspendedCount,
-        // Preventas
         createPreventa,
         fetchPreventaByCode,
         completePreventa,
         pendingPreventasCount,
         updatePreventasCount,
-        // Multi-Cart
         carts,
         activeCartId,
         addCart,
         setActiveCart,
         removeCart,
-        currentCurrency
-    } = useStore();
+        currentCurrency,
+    } = useStore(
+        useShallow((s) => ({
+            products: s.products,
+            categories: s.categories,
+            addToCart: s.addToCart,
+            removeFromCart: s.removeFromCart,
+            clearCart: s.clearCart,
+            updateCartItem: s.updateCartItem,
+            addSale: s.addSale,
+            currentUser: s.currentUser,
+            cashRegister: s.cashRegister,
+            checkRegisterStatus: s.checkRegisterStatus,
+            inventoryAdjustmentMode: s.inventoryAdjustmentMode,
+            setPosSelectedClient: s.setPosSelectedClient,
+            setCartTipoDte: s.setCartTipoDte,
+            searchProducts: s.searchProducts,
+            loadCategoryProducts: s.loadCategoryProducts,
+            getProductByBarcode: s.getProductByBarcode,
+            fetchCombosForPOS: s.fetchCombosForPOS,
+            activeCompanyId: s.activeCompanyId,
+            suspendSale: s.suspendSale,
+            suspendedSalesCount: s.suspendedSalesCount,
+            updateSuspendedCount: s.updateSuspendedCount,
+            createPreventa: s.createPreventa,
+            fetchPreventaByCode: s.fetchPreventaByCode,
+            completePreventa: s.completePreventa,
+            pendingPreventasCount: s.pendingPreventasCount,
+            updatePreventasCount: s.updatePreventasCount,
+            carts: s.carts,
+            activeCartId: s.activeCartId,
+            addCart: s.addCart,
+            setActiveCart: s.setActiveCart,
+            removeCart: s.removeCart,
+            currentCurrency: s.currentCurrency,
+        }))
+    );
 
     const navigate = useNavigate();
 
-    // Derivar cart y client manualmente (fix para computed getters)
-    // Key para forzar re-render cuando cambian items
-    const cartKey = React.useMemo(() => {
-        const activeCart = carts.find(c => c.id === activeCartId);
-        // Usamos JSON.stringify para detectar cambios profundos en los items si es necesario, 
-        // o simplemente confiamos en que carts cambia de referencia.
-        // Agregamos timestamp para debug, pero lo importante es que esto se ejecute cuando carts cambie.
-        return `${activeCartId}-${activeCart?.items?.length || 0}`;
-    }, [carts, activeCartId]);
-
     const cart = React.useMemo(() => {
         const activeCart = carts.find(c => c.id === activeCartId);
-        console.log('🔄 Cart recalculated:', {
-            cartId: activeCartId,
-            itemsCount: activeCart?.items?.length || 0,
-            items: activeCart?.items?.map(i => i.name) || []
-        });
         return activeCart?.items || [];
-    }, [carts, activeCartId, cartKey]);
+    }, [carts, activeCartId]);
 
     const posSelectedClient = React.useMemo(() => {
         return carts.find(c => c.id === activeCartId)?.client || null;
@@ -217,24 +238,14 @@ const POS = () => {
         updatePreventasCount();
     }, [updateSuspendedCount, updatePreventasCount]);
 
-    // NUEVO: Precargar productos al montar el componente
+    // PERF: la carga de productos se delega al efecto de [searchTerm, activeCompanyId]
+    // (más abajo). Aquí solo pre-calentamos en background el caché de Encargos.
     React.useEffect(() => {
-        console.log('🚀 POS montado - Precargando productos iniciales...');
-        setIsLoadingProducts(true);
-        console.time('⏱️ Carga inicial productos');
-
-        loadCategoryProducts('Todos', 0).then(() => {
-            console.timeEnd('⏱️ Carga inicial productos');
-            setIsLoadingProducts(false);
-            console.log('✅ Productos precargados');
-        });
-
-        // Pre-calentar caché de Encargos en background (sin bloquear)
         const { getPreorderableProducts } = useStore.getState();
         if (getPreorderableProducts) {
             getPreorderableProducts('', 'Todos').catch(() => {});
         }
-    }, []); // Array vacío = solo una vez al montar
+    }, []);
 
     // Barcode Scanner Logic using custom hook
     // This hook is stable and won't detach on simple prop changes
@@ -337,29 +348,33 @@ const POS = () => {
         };
     }, [showCameraScanner]);
 
-    // Use stored categories for the filter list. 
-    const categoryList = ['Todos', ...storedCategories
-        .filter(c => c.status === 'active' && c.showInPos !== false)
-        .map(c => c.name), 'Combos'];
+    const categoryList = React.useMemo(
+        () => [
+            'Todos',
+            ...storedCategories
+                .filter((c) => c.status === 'active' && c.showInPos !== false)
+                .map((c) => c.name),
+            'Combos',
+        ],
+        [storedCategories]
+    );
 
-    // Products are now served pre-filtered
     const visibleProducts = products;
 
-    const finalTotal = cart.reduce((total, item) => {
-        const itemTotal = item.price * item.quantity;
-        const discountAmount = itemTotal * ((item.discountPercent || 0) / 100);
-        return total + (itemTotal - discountAmount);
-    }, 0);
-
-    const taxTotal = cart.reduce((total, item) => {
-        const itemTotal = item.price * item.quantity;
-        const discountAmount = itemTotal * ((item.discountPercent || 0) / 100);
-        const taxableAmount = itemTotal - discountAmount;
-
-        const itemTax = item.tax_rate ? (taxableAmount - (taxableAmount / (1 + item.tax_rate / 100))) : 0;
-        return total + itemTax;
-    }, 0);
-    const subTotal = finalTotal - taxTotal;
+    const { finalTotal, taxTotal, subTotal } = React.useMemo(() => {
+        let final = 0;
+        let tax = 0;
+        for (const item of cart) {
+            const itemTotal = item.price * item.quantity;
+            const discountAmount = itemTotal * ((item.discountPercent || 0) / 100);
+            const taxable = itemTotal - discountAmount;
+            final += taxable;
+            if (item.tax_rate) {
+                tax += taxable - taxable / (1 + item.tax_rate / 100);
+            }
+        }
+        return { finalTotal: final, taxTotal: tax, subTotal: final - tax };
+    }, [cart]);
 
     const handleCheckoutClick = () => {
         if (cart.length === 0) return;
@@ -537,30 +552,24 @@ const POS = () => {
     const [hasMore, setHasMore] = React.useState(true);
     const [isLoadingMore, setIsLoadingMore] = React.useState(false);
 
-    // Initial Load & Category Change
+    // Carga inicial y al cambiar de empresa. Categoría se maneja en handleCategoryChange.
     React.useEffect(() => {
+        if (searchTerm) return;
+        if (!activeCompanyId) return;
+        let cancelled = false;
         const load = async () => {
-            // If searching, we skip category load (or maybe we paginate search too? user asked for general scroll)
-            // For now, let's assume search handles its own limit or we stick to category mainly.
-            if (searchTerm) {
-                // Search is currently handled by separate effect, let's keep it simple.
-                return;
-            }
-
-            // Only run this on Mount or Company Change if needed
-            // But we have a specific mount effect now. 
-            // So this is mainly for ActiveCompanyId changes if distinct from mount (?)
-            // Actually, let's just keep it for activeCompanyId, but NOT selectedCategory
-            if (activeCompanyId) {
-                setIsLoadingMore(true);
-                setOffset(0);
-                const hasMoreResult = await loadCategoryProducts(selectedCategory, 0);
-                setHasMore(hasMoreResult);
-                setIsLoadingMore(false);
-            }
+            setIsLoadingProducts(true);
+            setIsLoadingMore(true);
+            setOffset(0);
+            const hasMoreResult = await loadCategoryProducts(selectedCategory, 0);
+            if (cancelled) return;
+            setHasMore(hasMoreResult);
+            setIsLoadingMore(false);
+            setIsLoadingProducts(false);
         };
         load();
-    }, [searchTerm, activeCompanyId]); // Removed selectedCategory to avoid double-fetch with handler
+        return () => { cancelled = true; };
+    }, [searchTerm, activeCompanyId]);
 
     // Search Effect (existing logic modified to reset list)
     React.useEffect(() => {
