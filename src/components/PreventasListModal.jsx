@@ -21,12 +21,12 @@ const PreventasListModal = ({ isOpen, onClose, onLoadPreventa }) => {
         }
     }, [isOpen]);
 
-    const loadPreventas = async () => {
+    async function loadPreventas() {
         setLoading(true);
         const data = await fetchPendingPreventas();
         setPreventas(data);
         setLoading(false);
-    };
+    }
 
     const handleSearch = (e) => {
         setSearchTerm(e.target.value);

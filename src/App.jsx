@@ -49,7 +49,7 @@ import SalesAnalytics from './pages/reports/SalesAnalytics';
 
 import React, { useEffect } from 'react';
 import { useStore } from './store/useStore';
-import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncPendingOpsToServer, ensureMinimumFolios } from './lib/db/sync';
+import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncPendingOpsToServer } from './lib/db/sync';
 
 // Protected Route Component - ROBUST RESTORE
 const ProtectedRoute = ({ children }) => {
@@ -176,7 +176,7 @@ function App() {
   // - Cada 60s mientras la app esté abierta
   useEffect(() => {
     if (!currentUser) return;
-    const { processPendingSalesQueue, activeCompanyId } = useStore.getState();
+    const { processPendingSalesQueue } = useStore.getState();
 
     // Migrar cola legacy de localStorage a IndexedDB (se ejecuta una vez)
     migrateLegacyQueueToDexie();
@@ -192,9 +192,11 @@ function App() {
       if (!cid) return;
       // Sync catálogo en background (no bloquear)
       syncCatalogFromServer(cid).catch((e) => console.warn('[sync] catálogo:', e));
-      // Asegurar folios CAF offline (boleta, mín 30 / pide 100)
-      ensureMinimumFolios(cid, 39, currentUser?.id || null, 30, 100)
-        .catch((e) => console.warn('[sii] folios:', e));
+      // NOTA: pre-reserva automática de folios DESACTIVADA.
+      // Consumía CAFs completos al iniciar sesión y los marcaba como exhausted
+      // sin emitir DTEs reales. Para offline, usar manualmente desde Configuración → Sincronización Offline.
+      // ensureMinimumFolios(cid, 39, currentUser?.id || null, 30, 100)
+      //   .catch((e) => console.warn('[sii] folios:', e));
       // Procesar cola Dexie
       try {
         const result = await syncPendingOpsToServer(cid, state);

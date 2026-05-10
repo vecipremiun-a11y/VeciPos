@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Check, CreditCard, ChevronDown, ChevronUp, Zap, CheckCircle2, AlertCircle } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
 

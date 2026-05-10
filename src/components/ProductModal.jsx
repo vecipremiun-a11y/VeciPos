@@ -7,7 +7,7 @@ import { compressImage, validateImage } from '../lib/imageCompression';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
-    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, saveAlertSettings } = useStore();
+    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings } = useStore();
     const { can } = usePermissions();
     const [showSkuScanner, setShowSkuScanner] = useState(false);
     const skuScannerRef = useRef(null);
@@ -155,21 +155,6 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
         setFormData(prev => {
             const newData = { ...prev, [name]: value };
-
-            // Auto-calculate margin if cost or price changes directly (and both exist)
-            if (name === 'cost' || name === 'price') {
-                const cost = parseFloat(name === 'cost' ? value : prev.cost);
-                const price = parseFloat(name === 'price' ? value : prev.price);
-                const taxRate = parseFloat(prev.tax_rate) || 0;
-
-                if (cost > 0 && price > 0) {
-                    const netPrice = price / (1 + taxRate / 100);
-                    const margin = ((netPrice - cost) / cost) * 100;
-                    // We don't set margin state here to avoid circular jumps, 
-                    // or maybe we should? Let's just update it if valid.
-                    // setMarginPercentage(margin.toFixed(2)); 
-                }
-            }
 
             // Auto-calculate Price if Tax Rate Changes (keeping Cost and Margin constant)
             if (name === 'tax_rate') {

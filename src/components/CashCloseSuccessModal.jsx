@@ -6,7 +6,7 @@ import { es } from 'date-fns/locale';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
 
-const CashCloseSuccessModal = ({ isOpen, onClose, data, onSendWhatsApp }) => {
+const CashCloseSuccessModal = ({ isOpen, onClose, data }) => {
     const { currentCurrency } = useStore();
     if (!isOpen || !data) return null;
 

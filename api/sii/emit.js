@@ -51,7 +51,7 @@ export default async function handler(req, res) {
         });
 
         if (configRes.rows.length === 0) {
-            return res.status(400).json({ error: 'Configuración SII no encontrada' });
+            return res.status(200).json({ success: false, skipped: true, error: 'Configuración SII no encontrada' });
         }
 
         const siiConfig = configRes.rows[0];
@@ -64,11 +64,11 @@ export default async function handler(req, res) {
         const companyTimezone = companyRes.rows[0]?.timezone || 'America/Santiago';
 
         if (!siiConfig.is_active) {
-            return res.status(400).json({ error: 'Facturación electrónica no está activa para esta empresa' });
+            return res.status(200).json({ success: false, skipped: true, error: 'Facturación electrónica no está activa para esta empresa' });
         }
 
         if (!siiConfig.certificado_pfx) {
-            return res.status(400).json({ error: 'Certificado digital no configurado' });
+            return res.status(200).json({ success: false, skipped: true, error: 'Certificado digital no configurado' });
         }
 
         // 2. Load certificate
@@ -123,7 +123,11 @@ export default async function handler(req, res) {
             });
 
             if (cafRes.rows.length === 0) {
-                return res.status(400).json({ error: `No hay folios disponibles para ${tipoDte === 33 ? 'factura' : tipoDte === 34 ? 'factura exenta' : 'boleta'}. Solicite nuevos folios.` });
+                return res.status(200).json({
+                    success: false,
+                    skipped: true,
+                    error: `No hay folios disponibles para ${tipoDte === 33 ? 'factura' : tipoDte === 34 ? 'factura exenta' : 'boleta'}. Solicite nuevos folios.`
+                });
             }
 
             cafRow = cafRes.rows[0];

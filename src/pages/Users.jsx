@@ -43,11 +43,6 @@ const Users = () => {
     const [sortField, setSortField] = useState('id');
     const [sortDirection, setSortDirection] = useState('asc');
 
-    // Permission check
-    if (!can('users.view')) {
-        return <div className="text-center p-10 text-red-500">Acceso Denegado. Se requieren permisos de Administrador o Gestión de Usuarios.</div>;
-    }
-
     // Load company roles for dropdown
     React.useEffect(() => {
         if (activeCompanyId && fetchCompanyRoles) {
@@ -96,6 +91,11 @@ const Users = () => {
 
         return result;
     }, [users, searchTerm, sortField, sortDirection]);
+
+    // Permission check
+    if (!can('users.view')) {
+        return <div className="text-center p-10 text-red-500">Acceso Denegado. Se requieren permisos de Administrador o Gestión de Usuarios.</div>;
+    }
 
     // Pagination
     const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);

@@ -447,8 +447,8 @@ const SiiSettings = () => {
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                    <span className={`text-sm font-medium ${f.available > 10 ? 'text-green-400' : f.available > 0 ? 'text-yellow-400' : 'text-red-400'}`}>
-                                        {f.available} disponibles
+                                    <span className={`text-sm font-medium ${f.disponibles > 10 ? 'text-green-400' : f.disponibles > 0 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                        {f.disponibles} disponibles
                                     </span>
                                     <span className={`text-xs px-2 py-0.5 rounded ${f.estado === 'active'
                                         ? 'bg-green-500/20 text-green-400'

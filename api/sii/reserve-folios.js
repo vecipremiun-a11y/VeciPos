@@ -19,9 +19,22 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { tipo_dte, count, user_id } = req.body || {};
+        const { tipo_dte, count, user_id, force } = req.body || {};
         const tipoDte = Number(tipo_dte) || 39;
         const want = Math.min(Math.max(Number(count) || 50, 1), 500);
+
+        // SEGURIDAD: La pre-reserva automática consumía CAFs enteros sin emitir DTEs reales.
+        // Solo se permite si el llamador explícitamente envía force=true (uso manual desde
+        // pantalla de Sincronización Offline). Llamadas automáticas reciben skipped.
+        if (!force) {
+            return res.status(200).json({
+                ok: false,
+                skipped: true,
+                reason: 'auto_reserve_disabled',
+                message: 'Pre-reserva automática deshabilitada. Use force=true desde la pantalla de Sincronización Offline.',
+                available: 0,
+            });
+        }
 
         if (![39].includes(tipoDte)) {
             return res.status(400).json({ error: 'Solo se soportan folios offline para boleta (39) por ahora' });
@@ -36,8 +49,11 @@ export default async function handler(req, res) {
         });
 
         if (cafRes.rows.length === 0) {
-            return res.status(400).json({
-                error: `No hay folios disponibles para tipo ${tipoDte}. Solicite nuevos CAF al SII.`,
+            return res.status(200).json({
+                ok: false,
+                skipped: true,
+                reason: 'no_active_caf',
+                message: `No hay folios disponibles para tipo ${tipoDte}. Solicite nuevos CAF al SII.`,
                 available: 0
             });
         }

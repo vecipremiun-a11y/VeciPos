@@ -11,7 +11,6 @@ import {
 const SupportWidget = () => {
     const {
         currentUser,
-        activeCompanyId,
         supportTickets,
         unreadSupportCount,
         fetchSupportTickets,
@@ -22,15 +21,11 @@ const SupportWidget = () => {
         uploadSupportAttachment
     } = useStore();
 
-    // Si no es administrador, no mostrar el widget
-    if (currentUser?.role !== 'Administrador') return null;
-
     const [isOpen, setIsOpen] = useState(false);
     const [currentTicket, setCurrentTicket] = useState(null);
     const [messages, setMessages] = useState([]);
     const [inputMessage, setInputMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [selectedCategory, setSelectedCategory] = useState(null);
 
     const [selectedImage, setSelectedImage] = useState(null);
 
@@ -46,6 +41,8 @@ const SupportWidget = () => {
     // Cargar tickets al montar
     // Cargar tickets al montar y polling global
     useEffect(() => {
+        if (currentUser?.role !== 'Administrador') return;
+
         fetchSupportTickets();
 
         // Polling para notificaciones (cada 30 seg)
@@ -54,10 +51,12 @@ const SupportWidget = () => {
         }, 30000);
 
         return () => clearInterval(globalPolling);
-    }, []);
+    }, [currentUser?.role, fetchSupportTickets]);
 
     // Polling: revisar mensajes nuevos cada 3 segundos cuando el panel está abierto
     useEffect(() => {
+        if (currentUser?.role !== 'Administrador') return;
+
         if (isOpen && currentTicket) {
             loadMessages();
 
@@ -71,18 +70,21 @@ const SupportWidget = () => {
                 }
             };
         }
-    }, [isOpen, currentTicket]);
+    }, [currentUser?.role, isOpen, currentTicket]);
 
     // Auto-scroll al final cuando hay mensajes nuevos
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
 
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    };
+    // Si no es administrador, no mostrar el widget
+    if (currentUser?.role !== 'Administrador') return null;
 
-    const loadMessages = async (silent = false) => {
+    function scrollToBottom() {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function loadMessages(silent = false) {
         if (!currentTicket) return;
 
         if (!silent) setIsLoading(true);
@@ -102,7 +104,7 @@ const SupportWidget = () => {
         }
 
         if (!silent) setIsLoading(false);
-    };
+    }
 
     const handleOpenWidget = () => {
         setIsOpen(true);
@@ -118,7 +120,6 @@ const SupportWidget = () => {
     };
 
     const handleSelectCategory = async (categoryId) => {
-        setSelectedCategory(categoryId);
         const category = SUPPORT_CATEGORIES[categoryId];
 
         // Crear ticket con categoría

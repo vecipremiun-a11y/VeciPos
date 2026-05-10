@@ -105,8 +105,8 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
             if (!isOpen || !activeCompanyId) return;
 
             try {
-                const result = await turso.execute({
-                    sql: `SELECT 
+                const runConfigQuery = (includeFormat = true) => turso.execute({
+                    sql: `SELECT
                             receipt_business_name as business_name,
                             receipt_address as address,
                             receipt_tax_id as tax_id,
@@ -116,11 +116,19 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                             receipt_footer_message as footer_message,
                             receipt_show_tax_id as show_tax_id,
                             receipt_show_phone as show_phone,
-                            receipt_show_email as show_email,
-                            receipt_format as format
+                            receipt_show_email as show_email${includeFormat ? `,
+                            receipt_format as format` : ''}
                           FROM companies WHERE id = ?`,
                     args: [activeCompanyId]
                 });
+
+                let result;
+                try {
+                    result = await runConfigQuery(true);
+                } catch (queryError) {
+                    if (!String(queryError?.message || '').includes('receipt_format')) throw queryError;
+                    result = await runConfigQuery(false);
+                }
 
                 if (result.rows.length > 0) {
                     const data = result.rows[0];

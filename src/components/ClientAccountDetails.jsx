@@ -11,14 +11,9 @@ import AccessDenied from './auth/AccessDenied';
 import { generateAccountStatementPDF } from '../utils/generateAccountPDF';
 
 const ClientAccountDetails = ({ client, onBack }) => {
-    const { users, registerClientPayment, fetchClientSales, currentCurrency, getClientCreditStatus, activeCompanyId } = useStore();
+    const { users, registerClientPayment, fetchClientSales, currentCurrency, activeCompanyId } = useStore();
     const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
     const { can } = usePermissions();
-
-    // Permission Check
-    if (!can('clients.view_account')) {
-        return <AccessDenied />;
-    }
 
     const [rawClientSales, setRawClientSales] = useState([]); // All sales for this client
     const [viewMode, setViewMode] = useState('pending'); // 'pending' | 'history'
@@ -47,6 +42,11 @@ const ClientAccountDetails = ({ client, onBack }) => {
 
         return () => { mounted = false; };
     }, [client]);
+
+    // Permission Check
+    if (!can('clients.view_account')) {
+        return <AccessDenied />;
+    }
 
     if (!client) return null;
 

@@ -292,10 +292,9 @@ export async function syncReservedFoliosFromServer(companyId, tipoDte = 39, user
  * @param {number} min umbral (default 30)
  * @param {number} want cantidad a reservar si se gatilla (default 100)
  */
-export async function ensureMinimumFolios(companyId, tipoDte = 39, userId = null, min = 30, want = 100) {
+export async function ensureMinimumFolios(companyId, tipoDte = 39, userId = null, min = 30, want = 100, opts = {}) {
   if (!companyId || !navigator.onLine) return { ok: false, skipped: true };
   try {
-    // Primero refrescar de servidor por si hay reservas previas
     await syncReservedFoliosFromServer(companyId, tipoDte, userId);
     const have = await siiFoliosApi.count(companyId, tipoDte, 'available');
     if (have >= min) return { ok: true, have, reserved: 0 };
@@ -303,13 +302,16 @@ export async function ensureMinimumFolios(companyId, tipoDte = 39, userId = null
     const r = await fetch('/api/sii/reserve-folios', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-company-id': companyId },
-      body: JSON.stringify({ tipo_dte: tipoDte, count: want, user_id: userId }),
+      body: JSON.stringify({ tipo_dte: tipoDte, count: want, user_id: userId, force: opts.force === true }),
     });
     if (!r.ok) {
       const txt = await r.text().catch(() => '');
       throw new Error(`HTTP ${r.status}: ${txt}`);
     }
     const data = await r.json();
+    if (data.skipped) {
+      return { ok: false, skipped: true, have, reserved: 0, reason: data.reason || data.message };
+    }
     // Re-sincronizar para guardar los recién creados
     await syncReservedFoliosFromServer(companyId, tipoDte, userId);
     console.log(`[sii] Reservados ${data.reserved} folios (${data.folio_from}-${data.folio_to})`);

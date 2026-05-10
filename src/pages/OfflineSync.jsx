@@ -92,7 +92,7 @@ export default function OfflineSync() {
     if (!online || !activeCompanyId || busy) return;
     setBusy(true);
     try {
-      const r = await ensureMinimumFolios(activeCompanyId, 39, currentUser?.id || null, 30, 100);
+      const r = await ensureMinimumFolios(activeCompanyId, 39, currentUser?.id || null, 30, 100, { force: true });
       setLastResult(r);
       await reload();
     } finally {

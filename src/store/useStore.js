@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { turso } from '../lib/turso';
-import { subDays } from 'date-fns';
 import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFromDateString, getEndFromDateString, formatInCompanyTime } from '../lib/dateHelpers';
 import { purgeCompanyData, localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
 import { syncCatalogFromServer } from '../lib/db/sync';
@@ -9,7 +8,7 @@ import { syncCatalogFromServer } from '../lib/db/sync';
 let migrationsExecuted = false;
 let fetchInProgress = false;
 const DDL_CACHE_KEY = 'poskem_ddl_v';
-const DDL_TARGET = 21; // Increment when adding new migrations/DDL
+const DDL_TARGET = 22; // Increment when adding new migrations/DDL
 
 const safeJsonStringify = (value) => JSON.stringify(value, (_key, currentValue) => {
     if (typeof currentValue === 'bigint') {
@@ -1106,7 +1105,6 @@ export const useStore = create(persist((set, get) => ({
 
     // Clients State & Actions
     clients: [],
-    posSelectedClient: null,
     // setPosSelectedClient is defined below in the multi-cart section (L3641+)
 
     addClient: async (client) => {
@@ -2866,8 +2864,6 @@ export const useStore = create(persist((set, get) => ({
 
             // 1. Calcular fechas
             const today = new Date();
-            const startOfToday = getCompanyDayStart(today, currentCompanyTimezone);
-            const endOfToday = getCompanyDayEnd(today, currentCompanyTimezone);
 
             // Para mes: desde día 1 del mes actual
             const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -3052,7 +3048,7 @@ export const useStore = create(persist((set, get) => ({
     },
 
     fetchProductLotsGlobalStats: async () => {
-        const { activeCompanyId, currentCompanyTimezone } = get();
+        const { activeCompanyId } = get();
         try {
             // Calculate stats server-side
             const today = new Date().toISOString().split('T')[0];
@@ -3061,17 +3057,6 @@ export const useStore = create(persist((set, get) => ({
             d.setDate(d.getDate() + 30);
             const nextMonth = d.toISOString().split('T')[0];
 
-            const sql = `
-                SELECT 
-                    COUNT(*) as total_lots,
-                    COUNT(DISTINCT product_id) as total_products,
-                    SUM(CASE WHEN expiry_date < ? THEN 1 ELSE 0 END) as expired_lots,
-                    SUM(CASE WHEN expiry_date >= ? AND expiry_date <= ? THEN 1 ELSE 0 END) as near_expiry_lots,
-                    SUM(CASE WHEN expiry_date < ? THEN (cost * quantity) ELSE 0 END) as expiry_value_lost,
-                    SUM(CASE WHEN (expiry_date >= ? OR expiry_date IS NULL) AND NOT (expiry_date >= ? AND expiry_date <= ?) THEN 1 ELSE 0 END) as valid_lots
-                FROM product_lots 
-                WHERE company_id = ? AND quantity > 0
-            `;
             // Params: today (expired <), today (near >=), nextMonth (near <=), today (value <), today (valid >=), today(valid_near_start), nextMonth(valid_near_end), company
             // Simplified valid logic: Total - Expired - Near = Valid (roughly, seeing how component did it)
             // Component logic: 
@@ -3896,7 +3881,6 @@ export const useStore = create(persist((set, get) => ({
                             const cost = parseFloat(item.cost) || 0;
 
                             // Simplified tax logic matching addSale
-                            const netPrice = price;
                             const taxRate = parseFloat(item.tax_rate) || 0;
                             const netPriceTax = price / (1 + (taxRate / 100));
 
@@ -4371,7 +4355,7 @@ export const useStore = create(persist((set, get) => ({
     },
 
     fetchRolePermissions: async () => {
-        const { activeCompanyId, currentUserCompanyRole } = get();
+        const { activeCompanyId } = get();
         if (!activeCompanyId) return;
 
         try {
@@ -4639,7 +4623,7 @@ export const useStore = create(persist((set, get) => ({
     },
 
     resetRoleDefaults: async (role) => {
-        const { activeCompanyId, setupDefaultPermissions } = get();
+        const { activeCompanyId } = get();
         try {
             // 1. Delete all permissions for this role
             await turso.execute({
@@ -5369,7 +5353,7 @@ export const useStore = create(persist((set, get) => ({
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
             // 1. Find the old category to see if name changed
-            const { categories, products } = get();
+            const { categories } = get();
             const oldCategory = categories.find(c => c.id === id);
 
             if (!oldCategory) return { success: false, error: "Category not found" };
@@ -7816,7 +7800,7 @@ export const useStore = create(persist((set, get) => ({
 
     registerClientPayment: async (client, amount, distributionOrSalesIds, paymentMethod) => {
         try {
-            const { currentUser, sales, products } = get();
+            const { currentUser, sales } = get();
 
             // Ensure amount_paid column exists (migration may not have run yet)
             try {
@@ -7839,7 +7823,6 @@ export const useStore = create(persist((set, get) => ({
                 });
             }
 
-            const fullyPaidCount = distribution.filter(d => d.fullyPaid).length;
             const partialCount = distribution.filter(d => !d.fullyPaid).length;
             const totalBoletas = distribution.length;
 
@@ -7941,8 +7924,6 @@ export const useStore = create(persist((set, get) => ({
     },
 
     // Cash Register Logic
-    cashRegister: null,
-
     fetchActiveRegisters: async () => {
         try {
             console.time('⏱️ fetchActiveRegisters');
@@ -12301,7 +12282,6 @@ export const useStore = create(persist((set, get) => ({
             const config = await get().fetchPersonalConfig();
             const tolerance = config?.late_tolerance_minutes || 10;
             const workingDaysMonth = config?.working_days_per_month || 30;
-            const workingHoursDay = config?.working_hours_per_day || 8;
 
             // 2. Attendance, Shifts, Absences
             const attendance = await get().fetchAttendanceByRangeRaw(periodStart, periodEnd, userId);
@@ -12418,7 +12398,6 @@ export const useStore = create(persist((set, get) => ({
             const baseRate = user.pay_base_amount || 0;
             const hourlyRate = user.pay_hourly_rate || 0;
             const valorDia = workingDaysMonth > 0 ? baseRate / workingDaysMonth : 0;
-            const valorMinuto = valorDia / (workingHoursDay * 60);
 
             if (payType === 'monthly') {
                 baseAmount = baseRate;

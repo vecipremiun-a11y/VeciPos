@@ -9,7 +9,6 @@ const CriticalAlertsModal = () => {
 
     useEffect(() => {
         // Check once on mount (after login)
-        const sessionKey = 'poskem_alerts_shown_' + Date.now().toString().slice(0, -5); // per ~100s window
         if (sessionStorage.getItem('poskem_login_alerts_shown')) return;
 
         fetchAlertSummary().then(data => {

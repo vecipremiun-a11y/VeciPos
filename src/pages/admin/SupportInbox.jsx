@@ -17,7 +17,6 @@ import {
 
 const SupportInbox = () => {
     const {
-        currentUser,
         fetchAllSupportTickets,
         fetchTicketMessages,
         replyToTicket,
@@ -67,11 +66,11 @@ const SupportInbox = () => {
         scrollToBottom();
     }, [messages]);
 
-    const scrollToBottom = () => {
+    function scrollToBottom() {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    };
+    }
 
-    const loadTickets = async () => {
+    async function loadTickets() {
         const filters = {
             status: statusFilter === 'all' ? null : statusFilter,
             search: searchQuery || null
@@ -81,9 +80,9 @@ const SupportInbox = () => {
         if (result.success) {
             setTickets(result.tickets);
         }
-    };
+    }
 
-    const loadMessages = async (silent = false) => {
+    async function loadMessages(silent = false) {
         if (!selectedTicket) return;
 
         if (!silent) setIsLoading(true);
@@ -98,9 +97,9 @@ const SupportInbox = () => {
         }
 
         if (!silent) setIsLoading(false);
-    };
+    }
 
-    const loadCompanyContext = async (ticket) => {
+    async function loadCompanyContext(ticket) {
         // Cargar contexto de la empresa
         try {
             const result = await turso.execute({
@@ -119,7 +118,7 @@ const SupportInbox = () => {
         } catch (e) {
             console.error('Error loading company context:', e);
         }
-    };
+    }
 
     const handleSelectTicket = (ticket) => {
         setSelectedTicket(ticket);

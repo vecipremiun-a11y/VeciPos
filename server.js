@@ -17,6 +17,8 @@ import siiEmitHandler from './api/sii/emit.js';
 import siiStatusHandler from './api/sii/status.js';
 import siiRcofHandler from './api/sii/rcof.js';
 import siiLookupRutHandler from './api/sii/lookup-rut.js';
+import siiReservedFoliosHandler from './api/sii/reserved-folios.js';
+import siiReserveFoliosHandler from './api/sii/reserve-folios.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -161,6 +163,14 @@ app.all('/api/sii/rcof', async (req, res) => {
 app.all('/api/sii/lookup-rut', async (req, res) => {
     try { return await siiLookupRutHandler(req, res); }
     catch (error) { console.error('❌ /api/sii/lookup-rut error:', error); return res.status(500).json({ error: error.message }); }
+});
+app.all('/api/sii/reserved-folios', async (req, res) => {
+    try { return await siiReservedFoliosHandler(req, res); }
+    catch (error) { console.error('❌ /api/sii/reserved-folios error:', error); return res.status(500).json({ error: error.message }); }
+});
+app.all('/api/sii/reserve-folios', async (req, res) => {
+    try { return await siiReserveFoliosHandler(req, res); }
+    catch (error) { console.error('❌ /api/sii/reserve-folios error:', error); return res.status(500).json({ error: error.message }); }
 });
 
 app.use('/api', (_req, res) => {

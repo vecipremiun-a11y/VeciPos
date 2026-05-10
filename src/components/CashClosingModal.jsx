@@ -3,8 +3,6 @@ import { createPortal } from 'react-dom';
 import { X, Calculator, CheckCircle, AlertTriangle, Save, ArrowRight } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => {

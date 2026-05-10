@@ -60,21 +60,24 @@ const ProfitReport = () => {
             case 'today':
                 start = end;
                 break;
-            case 'week':
+            case 'week': {
                 const weekAgo = new Date(today);
                 weekAgo.setDate(weekAgo.getDate() - 7);
                 start = weekAgo.toLocaleDateString('en-CA');
                 break;
-            case 'month':
+            }
+            case 'month': {
                 const monthAgo = new Date(today);
                 monthAgo.setMonth(monthAgo.getMonth() - 1);
                 start = monthAgo.toLocaleDateString('en-CA');
                 break;
-            case 'year':
+            }
+            case 'year': {
                 const yearAgo = new Date(today);
                 yearAgo.setFullYear(yearAgo.getFullYear() - 1);
                 start = yearAgo.toLocaleDateString('en-CA');
                 break;
+            }
             default:
                 start = end;
         }
