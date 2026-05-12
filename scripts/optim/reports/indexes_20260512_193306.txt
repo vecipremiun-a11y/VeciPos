@@ -1,0 +1,359 @@
+Índices actuales · 2026-05-12T23:33:08.345Z
+================================================================================
+
+[attendance_corrections]
+  - idx_corrections_company_status  (company_id, status)  origin=c
+      CREATE INDEX idx_corrections_company_status ON attendance_corrections(company_id, status)
+
+[attendance_records]
+  - idx_attendance_user_date  (user_id, date)  origin=c
+      CREATE INDEX idx_attendance_user_date ON attendance_records(user_id, date)
+  - idx_attendance_company_date  (company_id, date)  origin=c
+      CREATE INDEX idx_attendance_company_date ON attendance_records(company_id, date)
+
+[cash_movements]
+  - idx_cash_movements_register  (register_id)  origin=c
+      CREATE INDEX idx_cash_movements_register ON cash_movements(register_id)
+  - idx_cash_movements_company  (company_id)  origin=c
+      CREATE INDEX idx_cash_movements_company ON cash_movements(company_id)
+  - idx_cash_movements_company_id  (company_id)  origin=c
+      CREATE INDEX idx_cash_movements_company_id ON cash_movements(company_id)
+
+[cash_registers]
+  - idx_cash_registers_closure  (company_id, opening_time, status)  origin=c
+      CREATE INDEX idx_cash_registers_closure 
+                    ON cash_registers(company_id, opening_time DESC, status)
+                
+  - idx_cash_registers_active  (company_id, status)  origin=c
+      CREATE INDEX idx_cash_registers_active ON cash_registers(company_id, status)
+  - idx_cash_registers_status_company  (status, company_id)  origin=c
+      CREATE INDEX idx_cash_registers_status_company ON cash_registers(status, company_id)
+  - idx_cash_registers_company_user  (company_id, user_id)  origin=c
+      CREATE INDEX idx_cash_registers_company_user ON cash_registers(company_id, user_id)
+  - idx_cash_registers_company  (company_id)  origin=c
+      CREATE INDEX idx_cash_registers_company ON cash_registers(company_id)
+  - idx_cash_registers_company_id  (company_id)  origin=c
+      CREATE INDEX idx_cash_registers_company_id ON cash_registers(company_id)
+
+[categories]
+  - idx_categories_company  (company_id)  origin=c
+      CREATE INDEX idx_categories_company ON categories(company_id)
+  - idx_categories_company_id  (company_id)  origin=c
+      CREATE INDEX idx_categories_company_id ON categories(company_id)
+
+[clients]
+  - idx_clients_company  (company_id)  origin=c
+      CREATE INDEX idx_clients_company ON clients(company_id)
+  - idx_clients_company_id  (company_id)  origin=c
+      CREATE INDEX idx_clients_company_id ON clients(company_id)
+
+[companies]
+  - idx_companies_status  (status)  origin=c
+      CREATE INDEX idx_companies_status ON companies(status)
+  - sqlite_autoindex_companies_1  (id)  UNIQUE origin=pk
+
+[company_modules]
+  - sqlite_autoindex_company_modules_1  (company_id, module_key)  UNIQUE origin=u
+
+[custom_roles]
+  - sqlite_autoindex_custom_roles_1  (company_id, role_name)  UNIQUE origin=u
+
+[hourly_sales_stats]
+  - idx_hourly_sales_company_date  (company_id, date, hour)  origin=c
+      CREATE INDEX idx_hourly_sales_company_date 
+ON hourly_sales_stats(company_id, date DESC, hour)
+  - sqlite_autoindex_hourly_sales_stats_2  (company_id, date, hour)  UNIQUE origin=u
+  - sqlite_autoindex_hourly_sales_stats_1  (id)  UNIQUE origin=pk
+
+[integration_sync_logs]
+  - idx_integration_logs_event  (event, created_at)  origin=c
+      CREATE INDEX idx_integration_logs_event ON integration_sync_logs(event, created_at DESC)
+  - idx_integration_logs_company_date  (company_id, created_at)  origin=c
+      CREATE INDEX idx_integration_logs_company_date ON integration_sync_logs(company_id, created_at DESC)
+
+[inventory_alerts]
+  - idx_alerts_company_type  (company_id, alert_type)  origin=c
+      CREATE INDEX idx_alerts_company_type ON inventory_alerts(company_id, alert_type)
+  - idx_alerts_company_read  (company_id, is_read)  origin=c
+      CREATE INDEX idx_alerts_company_read ON inventory_alerts(company_id, is_read)
+
+[inventory_control_items]
+  - idx_inv_ctrl_items_ctrl  (control_id)  origin=c
+      CREATE INDEX idx_inv_ctrl_items_ctrl ON inventory_control_items(control_id)
+  - sqlite_autoindex_inventory_control_items_1  (control_id, product_id)  UNIQUE origin=u
+
+[inventory_controls]
+  - idx_inv_ctrl_company_status  (company_id, status)  origin=c
+      CREATE INDEX idx_inv_ctrl_company_status ON inventory_controls(company_id, status)
+
+[labor_absences]
+  - idx_absences_user  (user_id, absence_date)  origin=c
+      CREATE INDEX idx_absences_user ON labor_absences(user_id, absence_date)
+  - idx_absences_company_date  (company_id, absence_date)  origin=c
+      CREATE INDEX idx_absences_company_date ON labor_absences(company_id, absence_date)
+
+[payment_methods_config]
+  - sqlite_autoindex_payment_methods_config_1  (company_id)  UNIQUE origin=pk
+
+[payments]
+  - idx_payments_status  (status)  origin=c
+      CREATE INDEX idx_payments_status ON payments(status)
+  - idx_payments_mercadopago  (mercadopago_payment_id)  origin=c
+      CREATE INDEX idx_payments_mercadopago ON payments(mercadopago_payment_id)
+  - idx_payments_company  (company_id)  origin=c
+      CREATE INDEX idx_payments_company ON payments(company_id)
+  - sqlite_autoindex_payments_1  (id)  UNIQUE origin=pk
+
+[payroll_periods]
+  - idx_payroll_company_user  (company_id, user_id)  origin=c
+      CREATE INDEX idx_payroll_company_user ON payroll_periods(company_id, user_id)
+
+[personal_config]
+  - sqlite_autoindex_personal_config_1  (company_id)  UNIQUE origin=u
+
+[preventas]
+  - sqlite_autoindex_preventas_1  (company_id, code)  UNIQUE origin=u
+
+[product_alert_settings]
+  - idx_alert_settings_company  (company_id, is_active)  origin=c
+      CREATE INDEX idx_alert_settings_company ON product_alert_settings(company_id, is_active)
+  - sqlite_autoindex_product_alert_settings_1  (company_id, product_id)  UNIQUE origin=u
+
+[product_combo_items]
+  - idx_combo_items_combo  (combo_id)  origin=c
+      CREATE INDEX idx_combo_items_combo ON product_combo_items(combo_id)
+
+[product_combos]
+  - idx_combos_company_active  (company_id, is_active)  origin=c
+      CREATE INDEX idx_combos_company_active ON product_combos(company_id, is_active)
+
+[product_daily_profit]
+  - idx_product_daily_profit_top  (company_id, day, total_quantity)  origin=c
+      CREATE INDEX idx_product_daily_profit_top 
+                    ON product_daily_profit(company_id, day, total_quantity DESC)
+                
+  - idx_product_daily_profit_lookup  (company_id, day, product_id)  origin=c
+      CREATE INDEX idx_product_daily_profit_lookup 
+                    ON product_daily_profit(company_id, day, product_id)
+                
+  - idx_profit_company_day  (company_id, day)  origin=c
+      CREATE INDEX idx_profit_company_day ON product_daily_profit(company_id, day)
+  - sqlite_autoindex_product_daily_profit_1  (company_id, product_id, day)  UNIQUE origin=pk
+
+[product_lots]
+  - idx_product_lots_fefo  (product_id, expiry_date)  PARTIAL origin=c
+      CREATE INDEX idx_product_lots_fefo 
+                    ON product_lots(product_id, expiry_date) 
+                    WHERE quantity > 0
+                
+  - idx_product_lots_product  (product_id, quantity)  origin=c
+      CREATE INDEX idx_product_lots_product ON product_lots(product_id, quantity)
+  - idx_product_lots_company_qty  (company_id, quantity, expiry_date)  origin=c
+      CREATE INDEX idx_product_lots_company_qty ON product_lots(company_id, quantity, expiry_date)
+  - idx_product_lots_expiry  (expiry_date)  origin=c
+      CREATE INDEX idx_product_lots_expiry ON product_lots(expiry_date)
+  - idx_product_lots_company_product  (company_id, product_id)  origin=c
+      CREATE INDEX idx_product_lots_company_product ON product_lots(company_id, product_id)
+  - idx_product_lots_company_id  (company_id)  origin=c
+      CREATE INDEX idx_product_lots_company_id ON product_lots(company_id)
+
+[product_movement_stats]
+  - idx_product_movement_last_sale  (last_sale_date)  origin=c
+      CREATE INDEX idx_product_movement_last_sale 
+ON product_movement_stats(last_sale_date DESC)
+  - idx_product_movement_company  (company_id, avg_daily_sales)  origin=c
+      CREATE INDEX idx_product_movement_company 
+ON product_movement_stats(company_id, avg_daily_sales DESC)
+  - sqlite_autoindex_product_movement_stats_2  (company_id, product_id)  UNIQUE origin=u
+  - sqlite_autoindex_product_movement_stats_1  (id)  UNIQUE origin=pk
+
+[products]
+  - idx_products_company_salemode  (company_id, sale_mode)  origin=c
+      CREATE INDEX idx_products_company_salemode
+                         ON products(company_id, sale_mode)
+  - idx_products_search  (company_id, name, sku)  origin=c
+      CREATE INDEX idx_products_search ON products(company_id, name, sku)
+  - idx_products_stock_company  (company_id, stock)  origin=c
+      CREATE INDEX idx_products_stock_company ON products(company_id, stock)
+  - idx_products_category_company  (company_id, category, name)  origin=c
+      CREATE INDEX idx_products_category_company ON products(company_id, category, name)
+  - idx_products_company  (company_id)  origin=c
+      CREATE INDEX idx_products_company ON products(company_id)
+  - idx_products_company_id  (company_id)  origin=c
+      CREATE INDEX idx_products_company_id ON products(company_id)
+  - sqlite_autoindex_products_1  (sku, company_id)  UNIQUE origin=u
+
+[purchases]
+  - idx_purchases_company  (company_id, date)  origin=c
+      CREATE INDEX idx_purchases_company ON purchases(company_id, date DESC)
+  - idx_purchases_company_date  (company_id, date)  origin=c
+      CREATE INDEX idx_purchases_company_date ON purchases(company_id, date)
+  - idx_purchases_company_id  (company_id)  origin=c
+      CREATE INDEX idx_purchases_company_id ON purchases(company_id)
+
+[role_permissions]
+  - idx_role_permissions_unique  (company_id, role, permission)  UNIQUE origin=c
+      CREATE UNIQUE INDEX idx_role_permissions_unique 
+                    ON role_permissions(company_id, role, permission)
+                
+  - sqlite_autoindex_role_permissions_1  (company_id, role, permission)  UNIQUE origin=u
+
+[roles]
+  - sqlite_autoindex_roles_1  (company_id, name)  UNIQUE origin=u
+
+[salary_advances]
+  - idx_advances_company_user  (company_id, user_id)  origin=c
+      CREATE INDEX idx_advances_company_user ON salary_advances(company_id, user_id)
+
+[sales]
+  - idx_sales_client  (client_id, company_id, date)  PARTIAL origin=c
+      CREATE INDEX idx_sales_client 
+                    ON sales(client_id, company_id, date DESC) 
+                    WHERE client_id IS NOT NULL
+                
+  - idx_sales_status  (company_id, status, date)  origin=c
+      CREATE INDEX idx_sales_status 
+                    ON sales(company_id, status, date DESC)
+                
+  - idx_sales_user_date  (user_id, date)  origin=c
+      CREATE INDEX idx_sales_user_date ON sales(user_id, date)
+  - idx_sales_user_date_company  (user_id, date, company_id, payment_method)  origin=c
+      CREATE INDEX idx_sales_user_date_company ON sales(user_id, date, company_id, payment_method)
+  - idx_sales_company_id_desc  (company_id, id)  origin=c
+      CREATE INDEX idx_sales_company_id_desc ON sales(company_id, id DESC)
+  - idx_sales_company_day_local_date  (company_id, day_local, date)  origin=c
+      CREATE INDEX idx_sales_company_day_local_date ON sales(company_id, day_local, date DESC)
+  - idx_sales_company_day_local  (company_id, day_local)  origin=c
+      CREATE INDEX idx_sales_company_day_local ON sales(company_id, day_local)
+  - idx_sales_company_date  (company_id, date)  origin=c
+      CREATE INDEX idx_sales_company_date ON sales(company_id, date)
+  - idx_sales_company_id  (company_id)  origin=c
+      CREATE INDEX idx_sales_company_id ON sales(company_id)
+
+[sales_daily_summary]
+  - idx_sales_daily_summary_company  (company_id)  origin=c
+      CREATE INDEX idx_sales_daily_summary_company ON sales_daily_summary(company_id)
+  - idx_sales_daily_summary_company_day  (company_id, day)  origin=c
+      CREATE INDEX idx_sales_daily_summary_company_day 
+ON sales_daily_summary(company_id, day)
+  - sqlite_autoindex_sales_daily_summary_1  (company_id, day)  UNIQUE origin=pk
+
+[sii_cafs]
+  - idx_sii_cafs_lookup  (company_id, tipo_dte, estado)  origin=c
+      CREATE INDEX idx_sii_cafs_lookup ON sii_cafs(company_id, tipo_dte, estado)
+
+[sii_config]
+  - sqlite_autoindex_sii_config_1  (company_id)  UNIQUE origin=pk
+
+[sii_dtes]
+  - idx_sii_dtes_folio  (company_id, tipo_dte, folio)  origin=c
+      CREATE INDEX idx_sii_dtes_folio ON sii_dtes(company_id, tipo_dte, folio)
+  - idx_sii_dtes_estado  (company_id, estado)  origin=c
+      CREATE INDEX idx_sii_dtes_estado ON sii_dtes(company_id, estado)
+  - idx_sii_dtes_sale  (company_id, sale_id)  origin=c
+      CREATE INDEX idx_sii_dtes_sale ON sii_dtes(company_id, sale_id)
+
+[sii_offline_folios]
+  - idx_sii_off_user  (company_id, reserved_for_user_id, status)  origin=c
+      CREATE INDEX idx_sii_off_user ON sii_offline_folios(company_id, reserved_for_user_id, status)
+  - idx_sii_off_lookup  (company_id, tipo_dte, status)  origin=c
+      CREATE INDEX idx_sii_off_lookup ON sii_offline_folios(company_id, tipo_dte, status)
+  - sqlite_autoindex_sii_offline_folios_1  (company_id, tipo_dte, folio)  UNIQUE origin=u
+
+[sii_rcof]
+  - idx_sii_rcof_lookup  (company_id, fecha)  origin=c
+      CREATE INDEX idx_sii_rcof_lookup ON sii_rcof(company_id, fecha)
+
+[stock_adjustments]
+  - idx_stock_adj_product  (company_id, product_id)  origin=c
+      CREATE INDEX idx_stock_adj_product ON stock_adjustments(company_id, product_id)
+
+[subscription_plans]
+  - sqlite_autoindex_subscription_plans_1  (id)  UNIQUE origin=pk
+
+[subscriptions]
+  - idx_subscriptions_status  (status)  origin=c
+      CREATE INDEX idx_subscriptions_status ON subscriptions(status)
+  - idx_subscriptions_company  (company_id)  origin=c
+      CREATE INDEX idx_subscriptions_company ON subscriptions(company_id)
+  - sqlite_autoindex_subscriptions_1  (id)  UNIQUE origin=pk
+
+[supplier_purchase_summary]
+  - idx_supplier_purchase_supplier  (supplier_id, date)  origin=c
+      CREATE INDEX idx_supplier_purchase_supplier 
+ON supplier_purchase_summary(supplier_id, date DESC)
+  - idx_supplier_purchase_company_date  (company_id, date)  origin=c
+      CREATE INDEX idx_supplier_purchase_company_date 
+ON supplier_purchase_summary(company_id, date DESC)
+  - sqlite_autoindex_supplier_purchase_summary_2  (company_id, supplier_id, date)  UNIQUE origin=u
+  - sqlite_autoindex_supplier_purchase_summary_1  (id)  UNIQUE origin=pk
+
+[suppliers]
+  - idx_suppliers_company  (company_id)  origin=c
+      CREATE INDEX idx_suppliers_company ON suppliers(company_id)
+  - idx_suppliers_company_id  (company_id)  origin=c
+      CREATE INDEX idx_suppliers_company_id ON suppliers(company_id)
+
+[support_attachments]
+  - idx_attachments_ticket  (ticket_id)  origin=c
+      CREATE INDEX idx_attachments_ticket ON support_attachments(ticket_id)
+  - sqlite_autoindex_support_attachments_1  (id)  UNIQUE origin=pk
+
+[support_messages]
+  - idx_messages_ticket  (ticket_id, created_at)  origin=c
+      CREATE INDEX idx_messages_ticket ON support_messages(ticket_id, created_at)
+  - sqlite_autoindex_support_messages_1  (id)  UNIQUE origin=pk
+
+[support_notes]
+  - idx_notes_ticket  (ticket_id, created_at)  origin=c
+      CREATE INDEX idx_notes_ticket ON support_notes(ticket_id, created_at)
+  - sqlite_autoindex_support_notes_1  (id)  UNIQUE origin=pk
+
+[support_tickets]
+  - sqlite_autoindex_support_tickets_1  (id)  UNIQUE origin=pk
+
+[suspended_sales]
+  - idx_suspended_sales_user  (user_id, status)  origin=c
+      CREATE INDEX idx_suspended_sales_user ON suspended_sales(user_id, status)
+  - idx_suspended_sales_company_status  (company_id, status, suspended_at)  origin=c
+      CREATE INDEX idx_suspended_sales_company_status ON suspended_sales(company_id, status, suspended_at DESC)
+
+[system_settings]
+  - sqlite_autoindex_system_settings_1  (key)  UNIQUE origin=pk
+
+[tienda_config]
+  - sqlite_autoindex_tienda_config_1  (company_id)  UNIQUE origin=pk
+
+[user_companies]
+  - sqlite_autoindex_user_companies_1  (user_id, company_id)  UNIQUE origin=pk
+
+[users]
+  - idx_users_company  (company_id)  origin=c
+      CREATE INDEX idx_users_company ON users(company_id)
+  - idx_users_company_id  (company_id)  origin=c
+      CREATE INDEX idx_users_company_id ON users(company_id)
+  - sqlite_autoindex_users_1  (username)  UNIQUE origin=u
+
+[vacation_balances]
+  - sqlite_autoindex_vacation_balances_1  (user_id)  UNIQUE origin=u
+
+[vacation_requests]
+  - idx_vacations_company  (company_id, start_date)  origin=c
+      CREATE INDEX idx_vacations_company ON vacation_requests(company_id, start_date)
+
+[vendor_daily_performance]
+  - idx_vendor_daily_perf  (company_id, date)  origin=c
+      CREATE INDEX idx_vendor_daily_perf ON vendor_daily_performance(company_id, date DESC)
+  - idx_vendor_perf_user  (user_id, date)  origin=c
+      CREATE INDEX idx_vendor_perf_user 
+ON vendor_daily_performance(user_id, date DESC)
+  - idx_vendor_perf_company_date  (company_id, date)  origin=c
+      CREATE INDEX idx_vendor_perf_company_date 
+ON vendor_daily_performance(company_id, date DESC)
+  - sqlite_autoindex_vendor_daily_performance_2  (company_id, user_id, date)  UNIQUE origin=u
+  - sqlite_autoindex_vendor_daily_performance_1  (id)  UNIQUE origin=pk
+
+[work_shifts]
+  - idx_shifts_company_date  (company_id, shift_date)  origin=c
+      CREATE INDEX idx_shifts_company_date ON work_shifts(company_id, shift_date)
+  - sqlite_autoindex_work_shifts_1  (user_id, shift_date)  UNIQUE origin=u

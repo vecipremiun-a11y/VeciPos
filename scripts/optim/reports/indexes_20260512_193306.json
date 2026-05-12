@@ -1,0 +1,1497 @@
+{
+  "attendance_corrections": [
+    {
+      "name": "idx_corrections_company_status",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "status"
+      ],
+      "sql": "CREATE INDEX idx_corrections_company_status ON attendance_corrections(company_id, status)"
+    }
+  ],
+  "attendance_records": [
+    {
+      "name": "idx_attendance_user_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "user_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_attendance_user_date ON attendance_records(user_id, date)"
+    },
+    {
+      "name": "idx_attendance_company_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_attendance_company_date ON attendance_records(company_id, date)"
+    }
+  ],
+  "cash_movements": [
+    {
+      "name": "idx_cash_movements_register",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "register_id"
+      ],
+      "sql": "CREATE INDEX idx_cash_movements_register ON cash_movements(register_id)"
+    },
+    {
+      "name": "idx_cash_movements_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_cash_movements_company ON cash_movements(company_id)"
+    },
+    {
+      "name": "idx_cash_movements_company_id",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_cash_movements_company_id ON cash_movements(company_id)"
+    }
+  ],
+  "cash_registers": [
+    {
+      "name": "idx_cash_registers_closure",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "opening_time",
+        "status"
+      ],
+      "sql": "CREATE INDEX idx_cash_registers_closure \n                    ON cash_registers(company_id, opening_time DESC, status)\n                "
+    },
+    {
+      "name": "idx_cash_registers_active",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "status"
+      ],
+      "sql": "CREATE INDEX idx_cash_registers_active ON cash_registers(company_id, status)"
+    },
+    {
+      "name": "idx_cash_registers_status_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "status",
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_cash_registers_status_company ON cash_registers(status, company_id)"
+    },
+    {
+      "name": "idx_cash_registers_company_user",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "user_id"
+      ],
+      "sql": "CREATE INDEX idx_cash_registers_company_user ON cash_registers(company_id, user_id)"
+    },
+    {
+      "name": "idx_cash_registers_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_cash_registers_company ON cash_registers(company_id)"
+    },
+    {
+      "name": "idx_cash_registers_company_id",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_cash_registers_company_id ON cash_registers(company_id)"
+    }
+  ],
+  "categories": [
+    {
+      "name": "idx_categories_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_categories_company ON categories(company_id)"
+    },
+    {
+      "name": "idx_categories_company_id",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_categories_company_id ON categories(company_id)"
+    }
+  ],
+  "clients": [
+    {
+      "name": "idx_clients_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_clients_company ON clients(company_id)"
+    },
+    {
+      "name": "idx_clients_company_id",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_clients_company_id ON clients(company_id)"
+    }
+  ],
+  "companies": [
+    {
+      "name": "idx_companies_status",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "status"
+      ],
+      "sql": "CREATE INDEX idx_companies_status ON companies(status)"
+    },
+    {
+      "name": "sqlite_autoindex_companies_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "company_modules": [
+    {
+      "name": "sqlite_autoindex_company_modules_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "module_key"
+      ],
+      "sql": null
+    }
+  ],
+  "custom_roles": [
+    {
+      "name": "sqlite_autoindex_custom_roles_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "role_name"
+      ],
+      "sql": null
+    }
+  ],
+  "hourly_sales_stats": [
+    {
+      "name": "idx_hourly_sales_company_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "date",
+        "hour"
+      ],
+      "sql": "CREATE INDEX idx_hourly_sales_company_date \nON hourly_sales_stats(company_id, date DESC, hour)"
+    },
+    {
+      "name": "sqlite_autoindex_hourly_sales_stats_2",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "date",
+        "hour"
+      ],
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_hourly_sales_stats_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "integration_sync_logs": [
+    {
+      "name": "idx_integration_logs_event",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "event",
+        "created_at"
+      ],
+      "sql": "CREATE INDEX idx_integration_logs_event ON integration_sync_logs(event, created_at DESC)"
+    },
+    {
+      "name": "idx_integration_logs_company_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "created_at"
+      ],
+      "sql": "CREATE INDEX idx_integration_logs_company_date ON integration_sync_logs(company_id, created_at DESC)"
+    }
+  ],
+  "inventory_alerts": [
+    {
+      "name": "idx_alerts_company_type",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "alert_type"
+      ],
+      "sql": "CREATE INDEX idx_alerts_company_type ON inventory_alerts(company_id, alert_type)"
+    },
+    {
+      "name": "idx_alerts_company_read",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "is_read"
+      ],
+      "sql": "CREATE INDEX idx_alerts_company_read ON inventory_alerts(company_id, is_read)"
+    }
+  ],
+  "inventory_control_items": [
+    {
+      "name": "idx_inv_ctrl_items_ctrl",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "control_id"
+      ],
+      "sql": "CREATE INDEX idx_inv_ctrl_items_ctrl ON inventory_control_items(control_id)"
+    },
+    {
+      "name": "sqlite_autoindex_inventory_control_items_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "control_id",
+        "product_id"
+      ],
+      "sql": null
+    }
+  ],
+  "inventory_controls": [
+    {
+      "name": "idx_inv_ctrl_company_status",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "status"
+      ],
+      "sql": "CREATE INDEX idx_inv_ctrl_company_status ON inventory_controls(company_id, status)"
+    }
+  ],
+  "labor_absences": [
+    {
+      "name": "idx_absences_user",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "user_id",
+        "absence_date"
+      ],
+      "sql": "CREATE INDEX idx_absences_user ON labor_absences(user_id, absence_date)"
+    },
+    {
+      "name": "idx_absences_company_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "absence_date"
+      ],
+      "sql": "CREATE INDEX idx_absences_company_date ON labor_absences(company_id, absence_date)"
+    }
+  ],
+  "payment_methods_config": [
+    {
+      "name": "sqlite_autoindex_payment_methods_config_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": null
+    }
+  ],
+  "payments": [
+    {
+      "name": "idx_payments_status",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "status"
+      ],
+      "sql": "CREATE INDEX idx_payments_status ON payments(status)"
+    },
+    {
+      "name": "idx_payments_mercadopago",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "mercadopago_payment_id"
+      ],
+      "sql": "CREATE INDEX idx_payments_mercadopago ON payments(mercadopago_payment_id)"
+    },
+    {
+      "name": "idx_payments_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_payments_company ON payments(company_id)"
+    },
+    {
+      "name": "sqlite_autoindex_payments_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "payroll_periods": [
+    {
+      "name": "idx_payroll_company_user",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "user_id"
+      ],
+      "sql": "CREATE INDEX idx_payroll_company_user ON payroll_periods(company_id, user_id)"
+    }
+  ],
+  "personal_config": [
+    {
+      "name": "sqlite_autoindex_personal_config_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": null
+    }
+  ],
+  "preventas": [
+    {
+      "name": "sqlite_autoindex_preventas_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "code"
+      ],
+      "sql": null
+    }
+  ],
+  "product_alert_settings": [
+    {
+      "name": "idx_alert_settings_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "is_active"
+      ],
+      "sql": "CREATE INDEX idx_alert_settings_company ON product_alert_settings(company_id, is_active)"
+    },
+    {
+      "name": "sqlite_autoindex_product_alert_settings_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "product_id"
+      ],
+      "sql": null
+    }
+  ],
+  "product_combo_items": [
+    {
+      "name": "idx_combo_items_combo",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "combo_id"
+      ],
+      "sql": "CREATE INDEX idx_combo_items_combo ON product_combo_items(combo_id)"
+    }
+  ],
+  "product_combos": [
+    {
+      "name": "idx_combos_company_active",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "is_active"
+      ],
+      "sql": "CREATE INDEX idx_combos_company_active ON product_combos(company_id, is_active)"
+    }
+  ],
+  "product_daily_profit": [
+    {
+      "name": "idx_product_daily_profit_top",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "day",
+        "total_quantity"
+      ],
+      "sql": "CREATE INDEX idx_product_daily_profit_top \n                    ON product_daily_profit(company_id, day, total_quantity DESC)\n                "
+    },
+    {
+      "name": "idx_product_daily_profit_lookup",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "day",
+        "product_id"
+      ],
+      "sql": "CREATE INDEX idx_product_daily_profit_lookup \n                    ON product_daily_profit(company_id, day, product_id)\n                "
+    },
+    {
+      "name": "idx_profit_company_day",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "day"
+      ],
+      "sql": "CREATE INDEX idx_profit_company_day ON product_daily_profit(company_id, day)"
+    },
+    {
+      "name": "sqlite_autoindex_product_daily_profit_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "product_id",
+        "day"
+      ],
+      "sql": null
+    }
+  ],
+  "product_lots": [
+    {
+      "name": "idx_product_lots_fefo",
+      "unique": false,
+      "origin": "c",
+      "partial": true,
+      "columns": [
+        "product_id",
+        "expiry_date"
+      ],
+      "sql": "CREATE INDEX idx_product_lots_fefo \n                    ON product_lots(product_id, expiry_date) \n                    WHERE quantity > 0\n                "
+    },
+    {
+      "name": "idx_product_lots_product",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "product_id",
+        "quantity"
+      ],
+      "sql": "CREATE INDEX idx_product_lots_product ON product_lots(product_id, quantity)"
+    },
+    {
+      "name": "idx_product_lots_company_qty",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "quantity",
+        "expiry_date"
+      ],
+      "sql": "CREATE INDEX idx_product_lots_company_qty ON product_lots(company_id, quantity, expiry_date)"
+    },
+    {
+      "name": "idx_product_lots_expiry",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "expiry_date"
+      ],
+      "sql": "CREATE INDEX idx_product_lots_expiry ON product_lots(expiry_date)"
+    },
+    {
+      "name": "idx_product_lots_company_product",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "product_id"
+      ],
+      "sql": "CREATE INDEX idx_product_lots_company_product ON product_lots(company_id, product_id)"
+    },
+    {
+      "name": "idx_product_lots_company_id",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_product_lots_company_id ON product_lots(company_id)"
+    }
+  ],
+  "product_movement_stats": [
+    {
+      "name": "idx_product_movement_last_sale",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "last_sale_date"
+      ],
+      "sql": "CREATE INDEX idx_product_movement_last_sale \nON product_movement_stats(last_sale_date DESC)"
+    },
+    {
+      "name": "idx_product_movement_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "avg_daily_sales"
+      ],
+      "sql": "CREATE INDEX idx_product_movement_company \nON product_movement_stats(company_id, avg_daily_sales DESC)"
+    },
+    {
+      "name": "sqlite_autoindex_product_movement_stats_2",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "product_id"
+      ],
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_product_movement_stats_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "products": [
+    {
+      "name": "idx_products_company_salemode",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "sale_mode"
+      ],
+      "sql": "CREATE INDEX idx_products_company_salemode\n                         ON products(company_id, sale_mode)"
+    },
+    {
+      "name": "idx_products_search",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "name",
+        "sku"
+      ],
+      "sql": "CREATE INDEX idx_products_search ON products(company_id, name, sku)"
+    },
+    {
+      "name": "idx_products_stock_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "stock"
+      ],
+      "sql": "CREATE INDEX idx_products_stock_company ON products(company_id, stock)"
+    },
+    {
+      "name": "idx_products_category_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "category",
+        "name"
+      ],
+      "sql": "CREATE INDEX idx_products_category_company ON products(company_id, category, name)"
+    },
+    {
+      "name": "idx_products_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_products_company ON products(company_id)"
+    },
+    {
+      "name": "idx_products_company_id",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_products_company_id ON products(company_id)"
+    },
+    {
+      "name": "sqlite_autoindex_products_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "sku",
+        "company_id"
+      ],
+      "sql": null
+    }
+  ],
+  "purchases": [
+    {
+      "name": "idx_purchases_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_purchases_company ON purchases(company_id, date DESC)"
+    },
+    {
+      "name": "idx_purchases_company_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_purchases_company_date ON purchases(company_id, date)"
+    },
+    {
+      "name": "idx_purchases_company_id",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_purchases_company_id ON purchases(company_id)"
+    }
+  ],
+  "role_permissions": [
+    {
+      "name": "idx_role_permissions_unique",
+      "unique": true,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "role",
+        "permission"
+      ],
+      "sql": "CREATE UNIQUE INDEX idx_role_permissions_unique \n                    ON role_permissions(company_id, role, permission)\n                "
+    },
+    {
+      "name": "sqlite_autoindex_role_permissions_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "role",
+        "permission"
+      ],
+      "sql": null
+    }
+  ],
+  "roles": [
+    {
+      "name": "sqlite_autoindex_roles_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "name"
+      ],
+      "sql": null
+    }
+  ],
+  "salary_advances": [
+    {
+      "name": "idx_advances_company_user",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "user_id"
+      ],
+      "sql": "CREATE INDEX idx_advances_company_user ON salary_advances(company_id, user_id)"
+    }
+  ],
+  "sales": [
+    {
+      "name": "idx_sales_client",
+      "unique": false,
+      "origin": "c",
+      "partial": true,
+      "columns": [
+        "client_id",
+        "company_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_sales_client \n                    ON sales(client_id, company_id, date DESC) \n                    WHERE client_id IS NOT NULL\n                "
+    },
+    {
+      "name": "idx_sales_status",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "status",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_sales_status \n                    ON sales(company_id, status, date DESC)\n                "
+    },
+    {
+      "name": "idx_sales_user_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "user_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_sales_user_date ON sales(user_id, date)"
+    },
+    {
+      "name": "idx_sales_user_date_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "user_id",
+        "date",
+        "company_id",
+        "payment_method"
+      ],
+      "sql": "CREATE INDEX idx_sales_user_date_company ON sales(user_id, date, company_id, payment_method)"
+    },
+    {
+      "name": "idx_sales_company_id_desc",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "id"
+      ],
+      "sql": "CREATE INDEX idx_sales_company_id_desc ON sales(company_id, id DESC)"
+    },
+    {
+      "name": "idx_sales_company_day_local_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "day_local",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_sales_company_day_local_date ON sales(company_id, day_local, date DESC)"
+    },
+    {
+      "name": "idx_sales_company_day_local",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "day_local"
+      ],
+      "sql": "CREATE INDEX idx_sales_company_day_local ON sales(company_id, day_local)"
+    },
+    {
+      "name": "idx_sales_company_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_sales_company_date ON sales(company_id, date)"
+    },
+    {
+      "name": "idx_sales_company_id",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_sales_company_id ON sales(company_id)"
+    }
+  ],
+  "sales_daily_summary": [
+    {
+      "name": "idx_sales_daily_summary_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_sales_daily_summary_company ON sales_daily_summary(company_id)"
+    },
+    {
+      "name": "idx_sales_daily_summary_company_day",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "day"
+      ],
+      "sql": "CREATE INDEX idx_sales_daily_summary_company_day \nON sales_daily_summary(company_id, day)"
+    },
+    {
+      "name": "sqlite_autoindex_sales_daily_summary_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "day"
+      ],
+      "sql": null
+    }
+  ],
+  "sii_cafs": [
+    {
+      "name": "idx_sii_cafs_lookup",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "tipo_dte",
+        "estado"
+      ],
+      "sql": "CREATE INDEX idx_sii_cafs_lookup ON sii_cafs(company_id, tipo_dte, estado)"
+    }
+  ],
+  "sii_config": [
+    {
+      "name": "sqlite_autoindex_sii_config_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": null
+    }
+  ],
+  "sii_dtes": [
+    {
+      "name": "idx_sii_dtes_folio",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "tipo_dte",
+        "folio"
+      ],
+      "sql": "CREATE INDEX idx_sii_dtes_folio ON sii_dtes(company_id, tipo_dte, folio)"
+    },
+    {
+      "name": "idx_sii_dtes_estado",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "estado"
+      ],
+      "sql": "CREATE INDEX idx_sii_dtes_estado ON sii_dtes(company_id, estado)"
+    },
+    {
+      "name": "idx_sii_dtes_sale",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "sale_id"
+      ],
+      "sql": "CREATE INDEX idx_sii_dtes_sale ON sii_dtes(company_id, sale_id)"
+    }
+  ],
+  "sii_offline_folios": [
+    {
+      "name": "idx_sii_off_user",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "reserved_for_user_id",
+        "status"
+      ],
+      "sql": "CREATE INDEX idx_sii_off_user ON sii_offline_folios(company_id, reserved_for_user_id, status)"
+    },
+    {
+      "name": "idx_sii_off_lookup",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "tipo_dte",
+        "status"
+      ],
+      "sql": "CREATE INDEX idx_sii_off_lookup ON sii_offline_folios(company_id, tipo_dte, status)"
+    },
+    {
+      "name": "sqlite_autoindex_sii_offline_folios_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "tipo_dte",
+        "folio"
+      ],
+      "sql": null
+    }
+  ],
+  "sii_rcof": [
+    {
+      "name": "idx_sii_rcof_lookup",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "fecha"
+      ],
+      "sql": "CREATE INDEX idx_sii_rcof_lookup ON sii_rcof(company_id, fecha)"
+    }
+  ],
+  "stock_adjustments": [
+    {
+      "name": "idx_stock_adj_product",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "product_id"
+      ],
+      "sql": "CREATE INDEX idx_stock_adj_product ON stock_adjustments(company_id, product_id)"
+    }
+  ],
+  "subscription_plans": [
+    {
+      "name": "sqlite_autoindex_subscription_plans_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "subscriptions": [
+    {
+      "name": "idx_subscriptions_status",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "status"
+      ],
+      "sql": "CREATE INDEX idx_subscriptions_status ON subscriptions(status)"
+    },
+    {
+      "name": "idx_subscriptions_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_subscriptions_company ON subscriptions(company_id)"
+    },
+    {
+      "name": "sqlite_autoindex_subscriptions_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "supplier_purchase_summary": [
+    {
+      "name": "idx_supplier_purchase_supplier",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "supplier_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_supplier_purchase_supplier \nON supplier_purchase_summary(supplier_id, date DESC)"
+    },
+    {
+      "name": "idx_supplier_purchase_company_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_supplier_purchase_company_date \nON supplier_purchase_summary(company_id, date DESC)"
+    },
+    {
+      "name": "sqlite_autoindex_supplier_purchase_summary_2",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "supplier_id",
+        "date"
+      ],
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_supplier_purchase_summary_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "suppliers": [
+    {
+      "name": "idx_suppliers_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_suppliers_company ON suppliers(company_id)"
+    },
+    {
+      "name": "idx_suppliers_company_id",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_suppliers_company_id ON suppliers(company_id)"
+    }
+  ],
+  "support_attachments": [
+    {
+      "name": "idx_attachments_ticket",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "ticket_id"
+      ],
+      "sql": "CREATE INDEX idx_attachments_ticket ON support_attachments(ticket_id)"
+    },
+    {
+      "name": "sqlite_autoindex_support_attachments_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "support_messages": [
+    {
+      "name": "idx_messages_ticket",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "ticket_id",
+        "created_at"
+      ],
+      "sql": "CREATE INDEX idx_messages_ticket ON support_messages(ticket_id, created_at)"
+    },
+    {
+      "name": "sqlite_autoindex_support_messages_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "support_notes": [
+    {
+      "name": "idx_notes_ticket",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "ticket_id",
+        "created_at"
+      ],
+      "sql": "CREATE INDEX idx_notes_ticket ON support_notes(ticket_id, created_at)"
+    },
+    {
+      "name": "sqlite_autoindex_support_notes_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "support_tickets": [
+    {
+      "name": "sqlite_autoindex_support_tickets_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "suspended_sales": [
+    {
+      "name": "idx_suspended_sales_user",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "user_id",
+        "status"
+      ],
+      "sql": "CREATE INDEX idx_suspended_sales_user ON suspended_sales(user_id, status)"
+    },
+    {
+      "name": "idx_suspended_sales_company_status",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "status",
+        "suspended_at"
+      ],
+      "sql": "CREATE INDEX idx_suspended_sales_company_status ON suspended_sales(company_id, status, suspended_at DESC)"
+    }
+  ],
+  "system_settings": [
+    {
+      "name": "sqlite_autoindex_system_settings_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "key"
+      ],
+      "sql": null
+    }
+  ],
+  "tienda_config": [
+    {
+      "name": "sqlite_autoindex_tienda_config_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": null
+    }
+  ],
+  "user_companies": [
+    {
+      "name": "sqlite_autoindex_user_companies_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "user_id",
+        "company_id"
+      ],
+      "sql": null
+    }
+  ],
+  "users": [
+    {
+      "name": "idx_users_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_users_company ON users(company_id)"
+    },
+    {
+      "name": "idx_users_company_id",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id"
+      ],
+      "sql": "CREATE INDEX idx_users_company_id ON users(company_id)"
+    },
+    {
+      "name": "sqlite_autoindex_users_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "username"
+      ],
+      "sql": null
+    }
+  ],
+  "vacation_balances": [
+    {
+      "name": "sqlite_autoindex_vacation_balances_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "user_id"
+      ],
+      "sql": null
+    }
+  ],
+  "vacation_requests": [
+    {
+      "name": "idx_vacations_company",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "start_date"
+      ],
+      "sql": "CREATE INDEX idx_vacations_company ON vacation_requests(company_id, start_date)"
+    }
+  ],
+  "vendor_daily_performance": [
+    {
+      "name": "idx_vendor_daily_perf",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_vendor_daily_perf ON vendor_daily_performance(company_id, date DESC)"
+    },
+    {
+      "name": "idx_vendor_perf_user",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "user_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_vendor_perf_user \nON vendor_daily_performance(user_id, date DESC)"
+    },
+    {
+      "name": "idx_vendor_perf_company_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "date"
+      ],
+      "sql": "CREATE INDEX idx_vendor_perf_company_date \nON vendor_daily_performance(company_id, date DESC)"
+    },
+    {
+      "name": "sqlite_autoindex_vendor_daily_performance_2",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "user_id",
+        "date"
+      ],
+      "sql": null
+    },
+    {
+      "name": "sqlite_autoindex_vendor_daily_performance_1",
+      "unique": true,
+      "origin": "pk",
+      "partial": false,
+      "columns": [
+        "id"
+      ],
+      "sql": null
+    }
+  ],
+  "work_shifts": [
+    {
+      "name": "idx_shifts_company_date",
+      "unique": false,
+      "origin": "c",
+      "partial": false,
+      "columns": [
+        "company_id",
+        "shift_date"
+      ],
+      "sql": "CREATE INDEX idx_shifts_company_date ON work_shifts(company_id, shift_date)"
+    },
+    {
+      "name": "sqlite_autoindex_work_shifts_1",
+      "unique": true,
+      "origin": "u",
+      "partial": false,
+      "columns": [
+        "user_id",
+        "shift_date"
+      ],
+      "sql": null
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "journal_mode": "wal",
+  "synchronous": 2,
+  "page_size": 4096,
+  "cache_size": -1000,
+  "foreign_keys": 1
+}

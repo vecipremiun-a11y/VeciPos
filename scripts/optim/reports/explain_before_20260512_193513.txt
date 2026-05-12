@@ -1,0 +1,77 @@
+EXPLAIN QUERY PLAN · marker=before · 2026-05-12T23:35:14.516Z
+sample company_id = default
+================================================================================
+
+[sales_history_by_company_date] Historial de ventas por empresa, ordenado por fecha desc (paginado típico)
+SQL: SELECT id, date, total, status, user_id, payment_method, client_name, client_id FROM sales WHERE company_id = ? ORDER BY date DESC, id DESC LIMIT 50
+  · SEARCH sales USING INDEX idx_sales_company_date (company_id=?)
+  ⏱ 129 ms
+
+[sales_by_company_payment_method] Filtro por método de pago dentro de una empresa
+SQL: SELECT id, date, total FROM sales WHERE company_id = ? AND payment_method = ? ORDER BY date DESC, id DESC LIMIT 50
+  · SEARCH sales USING INDEX idx_sales_company_date (company_id=?)
+  ⏱ 130 ms
+
+[sales_by_user_date_range] Ventas de un usuario en rango (turnos / cierre de caja)
+SQL: SELECT * FROM sales WHERE company_id = ? AND user_id = ? AND date BETWEEN ? AND ?
+  · SEARCH sales USING INDEX idx_sales_user_date (user_id=? AND date>? AND date<?)
+  ⏱ 128 ms
+
+[sales_by_external_order] Lookup por external_order_id (WooCommerce / APIs)
+SQL: SELECT id FROM sales WHERE company_id = ? AND external_order_id = ?
+  SKIP (columnas inexistentes: sales.external_order_id)
+
+[sales_credit_pending] Crédito pendiente por cliente (cobranza)
+SQL: SELECT id, total, payment_due_date FROM sales WHERE company_id = ? AND client_id = ? AND payment_method = 'Crédito' AND status NOT IN ('paid','cancelled')
+  · SEARCH sales USING INDEX idx_sales_client (client_id=? AND company_id=?)
+  ⏱ 131 ms
+
+[products_by_sku] Búsqueda producto por SKU exacto
+SQL: SELECT * FROM products WHERE company_id = ? AND sku = ? LIMIT 1
+  · SEARCH products USING INDEX sqlite_autoindex_products_1 (sku=? AND company_id=?)
+  ⏱ 127 ms
+
+[products_search_name_like] Búsqueda por nombre/SKU LIKE (POS search actual)
+SQL: SELECT * FROM products WHERE company_id = ? AND (name LIKE ? OR sku LIKE ?) LIMIT 50
+  · SEARCH products USING INDEX idx_products_stock_company (company_id=?)
+  ⏱ 758 ms
+
+[products_incremental_sync] Sync incremental: productos modificados desde X
+SQL: SELECT id FROM products WHERE company_id = ? AND updated_at > ? ORDER BY updated_at, id LIMIT 500
+  SKIP (columnas inexistentes: products.updated_at)
+
+[products_offer_by_name] Listado ofertas ordenadas por nombre
+SQL: SELECT id, name FROM products WHERE company_id = ? AND is_offer = 1 ORDER BY name COLLATE NOCASE LIMIT 100
+  · SEARCH products USING INDEX idx_products_stock_company (company_id=?)
+  · USE TEMP B-TREE FOR ORDER BY
+  ⏱ 130 ms
+
+[products_by_category_offer] Productos por categoría priorizando ofertas
+SQL: SELECT id, name FROM products WHERE company_id = ? AND category = ? ORDER BY is_offer DESC, name COLLATE NOCASE LIMIT 100
+  · SEARCH products USING INDEX idx_products_category_company (company_id=? AND category=?)
+  · USE TEMP B-TREE FOR ORDER BY
+  ⏱ 167 ms
+
+[product_lots_active_by_expiry] Lotes activos por producto ordenados por vencimiento (FEFO)
+SQL: SELECT id, expiry_date, quantity FROM product_lots WHERE company_id = ? AND product_id = ? AND quantity > 0 ORDER BY expiry_date
+  · SEARCH product_lots USING INDEX idx_product_lots_product (product_id=? AND quantity>?)
+  · USE TEMP B-TREE FOR ORDER BY
+  ⏱ 127 ms
+
+[product_lots_expiring_soon] Lotes activos por vencer (alertas)
+SQL: SELECT id, product_id, expiry_date, quantity FROM product_lots WHERE company_id = ? AND quantity > 0 AND expiry_date IS NOT NULL AND expiry_date <= ? ORDER BY expiry_date
+  · SEARCH product_lots USING INDEX idx_product_lots_company_qty (company_id=? AND quantity>?)
+  · USE TEMP B-TREE FOR ORDER BY
+  ⏱ 131 ms
+
+[inventory_alerts_recent] Alertas inventario recientes
+SQL: SELECT * FROM inventory_alerts WHERE company_id = ? ORDER BY created_at DESC LIMIT 50
+  · SEARCH inventory_alerts USING INDEX idx_alerts_company_read (company_id=?)
+  · USE TEMP B-TREE FOR ORDER BY
+  ⏱ 131 ms
+
+[sii_dtes_recent] DTEs SII recientes por empresa
+SQL: SELECT id, sale_id, tipo_dte, folio, estado, created_at FROM sii_dtes WHERE company_id = ? ORDER BY created_at DESC LIMIT 50
+  · SEARCH sii_dtes USING INDEX idx_sii_dtes_folio (company_id=?)
+  · USE TEMP B-TREE FOR ORDER BY
+  ⏱ 137 ms
