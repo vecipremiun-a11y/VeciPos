@@ -1,0 +1,70 @@
+{
+  "takenAt": "2026-05-12T23:36:07.009Z",
+  "dry": true,
+  "summary": {
+    "ok": 0,
+    "skipped": 2,
+    "errors": 0,
+    "dry": 11
+  },
+  "results": [
+    {
+      "name": "idx_sales_company_date_id_desc",
+      "status": "dry"
+    },
+    {
+      "name": "idx_sales_company_payment_date",
+      "status": "dry"
+    },
+    {
+      "name": "idx_sales_company_user_date",
+      "status": "dry"
+    },
+    {
+      "name": "idx_sales_company_external_order",
+      "status": "skipped",
+      "missing": [
+        "sales.external_order_id"
+      ]
+    },
+    {
+      "name": "idx_products_company_sku",
+      "status": "dry"
+    },
+    {
+      "name": "idx_products_company_updated_id",
+      "status": "skipped",
+      "missing": [
+        "products.updated_at"
+      ]
+    },
+    {
+      "name": "idx_products_company_offer_name",
+      "status": "dry"
+    },
+    {
+      "name": "idx_products_company_category_offer_name",
+      "status": "dry"
+    },
+    {
+      "name": "idx_product_lots_company_product_expiry_active",
+      "status": "dry"
+    },
+    {
+      "name": "idx_product_lots_company_expiry_product_active",
+      "status": "dry"
+    },
+    {
+      "name": "idx_inventory_alerts_company_created",
+      "status": "dry"
+    },
+    {
+      "name": "idx_sii_dtes_company_created",
+      "status": "dry"
+    },
+    {
+      "name": "idx_sales_credit_client_pending",
+      "status": "dry"
+    }
+  ]
+}

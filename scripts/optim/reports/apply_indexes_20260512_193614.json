@@ -1,0 +1,81 @@
+{
+  "takenAt": "2026-05-12T23:36:43.328Z",
+  "dry": false,
+  "summary": {
+    "ok": 11,
+    "skipped": 2,
+    "errors": 0,
+    "dry": 0
+  },
+  "results": [
+    {
+      "name": "idx_sales_company_date_id_desc",
+      "status": "created",
+      "ms": 7743
+    },
+    {
+      "name": "idx_sales_company_payment_date",
+      "status": "created",
+      "ms": 5514
+    },
+    {
+      "name": "idx_sales_company_user_date",
+      "status": "created",
+      "ms": 4420
+    },
+    {
+      "name": "idx_sales_company_external_order",
+      "status": "skipped",
+      "missing": [
+        "sales.external_order_id"
+      ]
+    },
+    {
+      "name": "idx_products_company_sku",
+      "status": "created",
+      "ms": 3251
+    },
+    {
+      "name": "idx_products_company_updated_id",
+      "status": "skipped",
+      "missing": [
+        "products.updated_at"
+      ]
+    },
+    {
+      "name": "idx_products_company_offer_name",
+      "status": "created",
+      "ms": 834
+    },
+    {
+      "name": "idx_products_company_category_offer_name",
+      "status": "created",
+      "ms": 855
+    },
+    {
+      "name": "idx_product_lots_company_product_expiry_active",
+      "status": "created",
+      "ms": 176
+    },
+    {
+      "name": "idx_product_lots_company_expiry_product_active",
+      "status": "created",
+      "ms": 215
+    },
+    {
+      "name": "idx_inventory_alerts_company_created",
+      "status": "created",
+      "ms": 145
+    },
+    {
+      "name": "idx_sii_dtes_company_created",
+      "status": "created",
+      "ms": 166
+    },
+    {
+      "name": "idx_sales_credit_client_pending",
+      "status": "created",
+      "ms": 4039
+    }
+  ]
+}

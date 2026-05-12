@@ -1,0 +1,278 @@
+{
+  "marker": "after",
+  "takenAt": "2026-05-12T23:36:55.225Z",
+  "sampleCompany": "default",
+  "results": [
+    {
+      "id": "sales_history_by_company_date",
+      "desc": "Historial de ventas por empresa, ordenado por fecha desc (paginado típico)",
+      "sql": "SELECT id, date, total, status, user_id, payment_method, client_name, client_id\n          FROM sales WHERE company_id = ? ORDER BY date DESC, id DESC LIMIT 50",
+      "args": [
+        "default"
+      ],
+      "plan": [
+        {
+          "id": 5,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH sales USING INDEX idx_sales_company_date_id_desc (company_id=?)"
+        }
+      ],
+      "timing_ms": 135,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "id": "sales_by_company_payment_method",
+      "desc": "Filtro por método de pago dentro de una empresa",
+      "sql": "SELECT id, date, total FROM sales\n          WHERE company_id = ? AND payment_method = ?\n          ORDER BY date DESC, id DESC LIMIT 50",
+      "args": [
+        "default",
+        "Efectivo"
+      ],
+      "plan": [
+        {
+          "id": 5,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH sales USING INDEX idx_sales_company_payment_date (company_id=? AND payment_method=?)"
+        }
+      ],
+      "timing_ms": 127,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "id": "sales_by_user_date_range",
+      "desc": "Ventas de un usuario en rango (turnos / cierre de caja)",
+      "sql": "SELECT * FROM sales\n          WHERE company_id = ? AND user_id = ? AND date BETWEEN ? AND ?",
+      "args": [
+        "default",
+        1,
+        "2026-04-12",
+        "2026-05-12"
+      ],
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH sales USING INDEX idx_sales_company_user_date (company_id=? AND user_id=? AND date>? AND date<?)"
+        }
+      ],
+      "timing_ms": 127,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "id": "sales_by_external_order",
+      "desc": "Lookup por external_order_id (WooCommerce / APIs)",
+      "sql": "SELECT id FROM sales WHERE company_id = ? AND external_order_id = ?",
+      "args": [
+        "default",
+        "wc_123456"
+      ],
+      "plan": [],
+      "timing_ms": null,
+      "error": "SKIP (columnas inexistentes: sales.external_order_id)",
+      "skipped": true
+    },
+    {
+      "id": "sales_credit_pending",
+      "desc": "Crédito pendiente por cliente (cobranza)",
+      "sql": "SELECT id, total, payment_due_date FROM sales\n          WHERE company_id = ? AND client_id = ?\n            AND payment_method = 'Crédito'\n            AND status NOT IN ('paid','cancelled')",
+      "args": [
+        "default",
+        1
+      ],
+      "plan": [
+        {
+          "id": 3,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH sales USING INDEX idx_sales_credit_client_pending (company_id=? AND client_id=?)"
+        }
+      ],
+      "timing_ms": 126,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "id": "products_by_sku",
+      "desc": "Búsqueda producto por SKU exacto",
+      "sql": "SELECT * FROM products WHERE company_id = ? AND sku = ? LIMIT 1",
+      "args": [
+        "default",
+        "TEST-SKU"
+      ],
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH products USING INDEX sqlite_autoindex_products_1 (sku=? AND company_id=?)"
+        }
+      ],
+      "timing_ms": 137,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "id": "products_search_name_like",
+      "desc": "Búsqueda por nombre/SKU LIKE (POS search actual)",
+      "sql": "SELECT * FROM products WHERE company_id = ? AND (name LIKE ? OR sku LIKE ?) LIMIT 50",
+      "args": [
+        "default",
+        "%agua%",
+        "%agua%"
+      ],
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH products USING INDEX idx_products_stock_company (company_id=?)"
+        }
+      ],
+      "timing_ms": 902,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "id": "products_incremental_sync",
+      "desc": "Sync incremental: productos modificados desde X",
+      "sql": "SELECT id FROM products WHERE company_id = ? AND updated_at > ? ORDER BY updated_at, id LIMIT 500",
+      "args": [
+        "default",
+        "2026-04-12"
+      ],
+      "plan": [],
+      "timing_ms": null,
+      "error": "SKIP (columnas inexistentes: products.updated_at)",
+      "skipped": true
+    },
+    {
+      "id": "products_offer_by_name",
+      "desc": "Listado ofertas ordenadas por nombre",
+      "sql": "SELECT id, name FROM products\n          WHERE company_id = ? AND is_offer = 1\n          ORDER BY name COLLATE NOCASE LIMIT 100",
+      "args": [
+        "default"
+      ],
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH products USING COVERING INDEX idx_products_company_offer_name (company_id=? AND is_offer=?)"
+        }
+      ],
+      "timing_ms": 126,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "id": "products_by_category_offer",
+      "desc": "Productos por categoría priorizando ofertas",
+      "sql": "SELECT id, name FROM products\n          WHERE company_id = ? AND category = ?\n          ORDER BY is_offer DESC, name COLLATE NOCASE LIMIT 100",
+      "args": [
+        "default",
+        "Bebidas"
+      ],
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH products USING COVERING INDEX idx_products_company_category_offer_name (company_id=? AND category=?)"
+        }
+      ],
+      "timing_ms": 128,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "id": "product_lots_active_by_expiry",
+      "desc": "Lotes activos por producto ordenados por vencimiento (FEFO)",
+      "sql": "SELECT id, expiry_date, quantity FROM product_lots\n          WHERE company_id = ? AND product_id = ? AND quantity > 0\n          ORDER BY expiry_date",
+      "args": [
+        "default",
+        1
+      ],
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH product_lots USING INDEX idx_product_lots_product (product_id=? AND quantity>?)"
+        },
+        {
+          "id": 21,
+          "parent": 0,
+          "notused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ],
+      "timing_ms": 128,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "id": "product_lots_expiring_soon",
+      "desc": "Lotes activos por vencer (alertas)",
+      "sql": "SELECT id, product_id, expiry_date, quantity FROM product_lots\n          WHERE company_id = ? AND quantity > 0 AND expiry_date IS NOT NULL\n            AND expiry_date <= ?\n          ORDER BY expiry_date",
+      "args": [
+        "default",
+        "2026-05-12"
+      ],
+      "plan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH product_lots USING INDEX idx_product_lots_company_expiry_product_active (company_id=? AND expiry_date>? AND expiry_date<?)"
+        }
+      ],
+      "timing_ms": 131,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "id": "inventory_alerts_recent",
+      "desc": "Alertas inventario recientes",
+      "sql": "SELECT * FROM inventory_alerts WHERE company_id = ? ORDER BY created_at DESC LIMIT 50",
+      "args": [
+        "default"
+      ],
+      "plan": [
+        {
+          "id": 5,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH inventory_alerts USING INDEX idx_inventory_alerts_company_created (company_id=?)"
+        }
+      ],
+      "timing_ms": 128,
+      "error": null,
+      "skipped": false
+    },
+    {
+      "id": "sii_dtes_recent",
+      "desc": "DTEs SII recientes por empresa",
+      "sql": "SELECT id, sale_id, tipo_dte, folio, estado, created_at FROM sii_dtes\n          WHERE company_id = ? ORDER BY created_at DESC LIMIT 50",
+      "args": [
+        "default"
+      ],
+      "plan": [
+        {
+          "id": 5,
+          "parent": 0,
+          "notused": 0,
+          "detail": "SEARCH sii_dtes USING INDEX idx_sii_dtes_company_created (company_id=?)"
+        }
+      ],
+      "timing_ms": 129,
+      "error": null,
+      "skipped": false
+    }
+  ]
+}
