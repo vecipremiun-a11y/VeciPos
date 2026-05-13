@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Send, Paperclip, MessageCircle } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { useShallow } from 'zustand/react/shallow';
 import {
     SUPPORT_CATEGORIES,
     TICKET_STATUS,
@@ -10,6 +11,7 @@ import {
 import { createSmartInterval } from '../lib/smartPolling';
 
 const SupportWidget = () => {
+    // FASE 10 · useShallow para evitar re-render con cualquier mutación del store.
     const {
         currentUser,
         supportTickets,
@@ -20,7 +22,17 @@ const SupportWidget = () => {
         sendSupportMessage,
         markMessagesAsRead,
         uploadSupportAttachment
-    } = useStore();
+    } = useStore(useShallow(s => ({
+        currentUser: s.currentUser,
+        supportTickets: s.supportTickets,
+        unreadSupportCount: s.unreadSupportCount,
+        fetchSupportTickets: s.fetchSupportTickets,
+        createSupportTicket: s.createSupportTicket,
+        fetchTicketMessages: s.fetchTicketMessages,
+        sendSupportMessage: s.sendSupportMessage,
+        markMessagesAsRead: s.markMessagesAsRead,
+        uploadSupportAttachment: s.uploadSupportAttachment,
+    })));
 
     const [isOpen, setIsOpen] = useState(false);
     const [currentTicket, setCurrentTicket] = useState(null);

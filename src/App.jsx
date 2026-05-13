@@ -1,53 +1,57 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect, Suspense, lazy } from 'react';
+
+// FASE 10 · Páginas críticas (eager): bundle inicial, login flow + POS + layouts.
+import Login from './pages/Login';
 import Register from './pages/Register';
 import SelectPlan from './pages/SelectPlan';
-import Login from './pages/Login';
-import PaymentSuccess from './pages/PaymentSuccess';
-import PaymentPending from './pages/PaymentPending';
-import PaymentFailure from './pages/PaymentFailure';
-import RenewSubscription from './pages/RenewSubscription';
-import Dashboard from './pages/Dashboard';
 import POS from './pages/POS';
-import SalesHistory from './pages/SalesHistory';
-import Inventory from './pages/Inventory';
-import Taxes from './pages/Taxes';
-import Invoices from './pages/Invoices';
-import Categories from './pages/Categories';
-import Suppliers from './pages/Suppliers';
-import Purchases from './pages/Purchases';
-import ProductProfile from './pages/ProductProfile';
-import Users from './pages/Users';
-import Personal from './pages/Personal';
-import PersonalKiosk from './pages/PersonalKiosk';
-import Reports from './pages/Reports';
-import ExpiringProductsReport from './pages/ExpiringProductsReport';
-import CashClosuresReport from './pages/CashClosuresReport';
-import CashMovementsReport from './pages/CashMovementsReport';
-import InvoicePaymentsReport from './pages/InvoicePaymentsReport';
-import Settings from './pages/Settings';
-import Clients from './pages/Clients';
-import Orders from './pages/Orders';
-import SupplierOrders from './pages/SupplierOrders';
-import Preorders from './pages/Preorders';
-import Production from './pages/Production';
-import InventoryReconciliation from './pages/InventoryReconciliation';
-import InventoryControl from './pages/InventoryControl';
-import ProductCombos from './pages/ProductCombos';
-import DocumentosSII from './pages/DocumentosSII';
-import FolioSettings from './pages/FolioSettings';
-import OfflineSync from './pages/OfflineSync';
+import Dashboard from './pages/Dashboard';
 import MainLayout from './layouts/MainLayout';
 import AdminLayout from './layouts/AdminLayout';
 import RequireAdmin from './components/RequireAdmin';
 import ProtectedPage from './components/auth/ProtectedPage';
 import FeatureGatePage from './components/auth/FeatureGatePage';
-import AdminDashboard from './pages/admin/AdminDashboard';
-import AdminCompanies from './pages/admin/AdminCompanies';
-import SupportInbox from './pages/admin/SupportInbox';
-import ProfitReport from './pages/admin/ProfitReport';
-import SalesAnalytics from './pages/reports/SalesAnalytics';
 
-import React, { useEffect } from 'react';
+// FASE 10 · Resto de páginas: lazy. Reduce dramáticamente el bundle inicial.
+// Cada ruta solo descarga su chunk al navegar a ella.
+const PaymentSuccess = lazy(() => import('./pages/PaymentSuccess'));
+const PaymentPending = lazy(() => import('./pages/PaymentPending'));
+const PaymentFailure = lazy(() => import('./pages/PaymentFailure'));
+const RenewSubscription = lazy(() => import('./pages/RenewSubscription'));
+const SalesHistory = lazy(() => import('./pages/SalesHistory'));
+const Inventory = lazy(() => import('./pages/Inventory'));
+const Taxes = lazy(() => import('./pages/Taxes'));
+const Invoices = lazy(() => import('./pages/Invoices'));
+const Categories = lazy(() => import('./pages/Categories'));
+const Suppliers = lazy(() => import('./pages/Suppliers'));
+const Purchases = lazy(() => import('./pages/Purchases'));
+const ProductProfile = lazy(() => import('./pages/ProductProfile'));
+const Users = lazy(() => import('./pages/Users'));
+const Personal = lazy(() => import('./pages/Personal'));
+const PersonalKiosk = lazy(() => import('./pages/PersonalKiosk'));
+const Reports = lazy(() => import('./pages/Reports'));
+const ExpiringProductsReport = lazy(() => import('./pages/ExpiringProductsReport'));
+const CashClosuresReport = lazy(() => import('./pages/CashClosuresReport'));
+const CashMovementsReport = lazy(() => import('./pages/CashMovementsReport'));
+const InvoicePaymentsReport = lazy(() => import('./pages/InvoicePaymentsReport'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Clients = lazy(() => import('./pages/Clients'));
+const Orders = lazy(() => import('./pages/Orders'));
+const SupplierOrders = lazy(() => import('./pages/SupplierOrders'));
+const Preorders = lazy(() => import('./pages/Preorders'));
+const Production = lazy(() => import('./pages/Production'));
+const InventoryReconciliation = lazy(() => import('./pages/InventoryReconciliation'));
+const InventoryControl = lazy(() => import('./pages/InventoryControl'));
+const ProductCombos = lazy(() => import('./pages/ProductCombos'));
+const DocumentosSII = lazy(() => import('./pages/DocumentosSII'));
+const FolioSettings = lazy(() => import('./pages/FolioSettings'));
+const OfflineSync = lazy(() => import('./pages/OfflineSync'));
+const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
+const AdminCompanies = lazy(() => import('./pages/admin/AdminCompanies'));
+const SupportInbox = lazy(() => import('./pages/admin/SupportInbox'));
+const ProfitReport = lazy(() => import('./pages/admin/ProfitReport'));
+const SalesAnalytics = lazy(() => import('./pages/reports/SalesAnalytics'));
 import { useStore } from './store/useStore';
 import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncPendingOpsToServer } from './lib/db/sync';
 import { createSmartInterval } from './lib/smartPolling';
@@ -142,7 +146,10 @@ const ProtectedRoute = ({ children }) => {
 };
 
 function App() {
-  const { fetchInitialData, darkMode } = useStore();
+  // FASE 10 · selectores atómicos: re-render solo cuando ESTOS valores cambian,
+  // no en cualquier mutación del store (que es 13k líneas).
+  const fetchInitialData = useStore(state => state.fetchInitialData);
+  const darkMode = useStore(state => state.darkMode);
   const currentUser = useStore(state => state.currentUser);
 
   // 1. Cargar datos SOLO una vez al montar, o cuando currentUser aparece (recarga)
@@ -247,6 +254,14 @@ function App() {
 
   return (
     <Router>
+      <Suspense fallback={
+        <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)]">
+          <div className="flex flex-col items-center gap-3">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-500"></div>
+            <p className="text-sm text-[var(--color-text-muted)]">Cargando…</p>
+          </div>
+        </div>
+      }>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/registro" element={<Register />} />
@@ -320,6 +335,7 @@ function App() {
           <Route path="soporte" element={<SupportInbox />} />
         </Route>
       </Routes>
+      </Suspense>
     </Router>
   );
 }

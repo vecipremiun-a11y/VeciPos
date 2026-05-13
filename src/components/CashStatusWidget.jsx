@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../store/useStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useNavigate } from 'react-router-dom';
 import { DollarSign, ArrowUpRight, ArrowDownLeft, Clock, ShoppingCart, LogOut, X, TrendingUp, TrendingDown } from 'lucide-react';
 import { format } from 'date-fns';
@@ -14,7 +15,18 @@ import { usePermissions } from '../hooks/usePermissions';
 import { createSmartInterval } from '../lib/smartPolling';
 
 const CashStatusWidget = () => {
-    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency } = useStore();
+    // FASE 10 · useShallow para aislar re-renders.
+    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency } = useStore(
+        useShallow(s => ({
+            cashRegister: s.cashRegister,
+            registerStats: s.registerStats,
+            refreshRegisterStats: s.refreshRegisterStats,
+            addCashMovement: s.addCashMovement,
+            closeRegister: s.closeRegister,
+            currentUser: s.currentUser,
+            currentCurrency: s.currentCurrency,
+        }))
+    );
     const { can } = usePermissions();
     const navigate = useNavigate();
     const [isOpen, setIsOpen] = useState(false);

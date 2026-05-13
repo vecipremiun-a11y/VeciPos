@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
 import NotificationBell from '../components/NotificationBell';
@@ -14,7 +15,15 @@ const MainLayout = () => {
     // Helper to check window width strictly for initial state (avoid hydration mismatch if SSR, but this is SPA)
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
     const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile); // Closed by default on mobile, open on desktop
-    const { currentUser, logout, inventoryAdjustmentMode, fetchRolePermissions } = useStore();
+    // FASE 10 · re-render solo cuando estas claves cambian, no con todo el store.
+    const { currentUser, logout, inventoryAdjustmentMode, fetchRolePermissions } = useStore(
+        useShallow(s => ({
+            currentUser: s.currentUser,
+            logout: s.logout,
+            inventoryAdjustmentMode: s.inventoryAdjustmentMode,
+            fetchRolePermissions: s.fetchRolePermissions,
+        }))
+    );
     const navigate = useNavigate();
     const location = useLocation();
 

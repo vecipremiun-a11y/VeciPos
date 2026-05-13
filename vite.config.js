@@ -95,4 +95,59 @@ export default defineConfig({
       },
     },
   },
+
+  // FASE 10 · Frontend perf
+  // ─────────────────────────────────────────────────────────────────────────
+  // Quita los console.{log,info,debug,warn} en builds de producción.
+  // Mantiene console.error / console.assert para visibilidad de problemas reales.
+  // No afecta a `npm run dev` (esbuild solo dropea en producción cuando minify=true).
+  esbuild: {
+    pure: ['console.log', 'console.info', 'console.debug', 'console.warn'],
+    legalComments: 'none',
+  },
+
+  // Acelera el primer arranque de `npm run dev` pre-bundleando dependencias
+  // pesadas con esbuild en vez de transformarlas on-demand.
+  // (Era una de las principales razones de la lentitud de dev vs preview.)
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'react-router-dom',
+      'zustand',
+      'zustand/react/shallow',
+      'date-fns',
+      'date-fns-tz',
+      'recharts',
+      'jspdf',
+      'jspdf-autotable',
+      'html2canvas',
+      'xlsx',
+      'framer-motion',
+      'lucide-react',
+      '@libsql/client',
+      'dexie',
+    ],
+  },
+
+  build: {
+    // Avisar a 1MB en vez de 500KB (ya estamos en 4MB, queremos foco en el real warning)
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        // Code-splitting de librerías grandes para que el chunk principal
+        // no incluya recharts, jspdf, xlsx, etc. cuando no se necesitan.
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-charts': ['recharts'],
+          'vendor-pdf': ['jspdf', 'jspdf-autotable', 'html2canvas'],
+          'vendor-xlsx': ['xlsx'],
+          'vendor-motion': ['framer-motion'],
+          'vendor-dates': ['date-fns', 'date-fns-tz'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-db': ['@libsql/client', 'dexie'],
+        },
+      },
+    },
+  },
 })

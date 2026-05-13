@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Bell, X, Check, CheckCheck, AlertTriangle, AlertCircle, TrendingDown, Trash2 } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
 import { createSmartInterval } from '../lib/smartPolling';
 
@@ -8,6 +9,7 @@ const NotificationBell = () => {
     const [isOpen, setIsOpen] = useState(false);
     const panelRef = useRef(null);
 
+    // FASE 10 · useShallow para evitar re-render con cualquier mutación del store.
     const {
         inventoryAlerts,
         unreadAlertCount,
@@ -16,7 +18,15 @@ const NotificationBell = () => {
         markAlertRead,
         markAllAlertsRead,
         deleteOldAlerts
-    } = useStore();
+    } = useStore(useShallow(s => ({
+        inventoryAlerts: s.inventoryAlerts,
+        unreadAlertCount: s.unreadAlertCount,
+        fetchInventoryAlerts: s.fetchInventoryAlerts,
+        fetchUnreadAlertCount: s.fetchUnreadAlertCount,
+        markAlertRead: s.markAlertRead,
+        markAllAlertsRead: s.markAllAlertsRead,
+        deleteOldAlerts: s.deleteOldAlerts,
+    })));
 
     // FASE 9 · Polling inteligente del badge de alertas:
     // 2min con actividad / 10min idle, pausa tab oculta y sin conexión.

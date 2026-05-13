@@ -1,10 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store/useStore';
+import { useShallow } from 'zustand/react/shallow';
 import { ChevronDown, Building2, Check, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const CompanySwitcher = () => {
-    const { availableCompanies, activeCompanyId, setActiveCompanyId, currentUser } = useStore();
+    // FASE 10 · useShallow → aislamos re-renders del store global.
+    const { availableCompanies, activeCompanyId, setActiveCompanyId, currentUser } = useStore(
+        useShallow(s => ({
+            availableCompanies: s.availableCompanies,
+            activeCompanyId: s.activeCompanyId,
+            setActiveCompanyId: s.setActiveCompanyId,
+            currentUser: s.currentUser,
+        }))
+    );
     const [isOpen, setIsOpen] = useState(false);
     const dropdownRef = useRef(null);
     const navigate = useNavigate();
