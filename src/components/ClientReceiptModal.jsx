@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, Receipt, Calendar, User, DollarSign, Package } from 'lucide-react';
-import { AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
 
