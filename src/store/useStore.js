@@ -6767,23 +6767,47 @@ export const useStore = create(persist((set, get) => ({
                 const saleId = typeof rawSaleId === 'bigint' ? Number(rawSaleId) : rawSaleId;
 
                 // 2. BATCH UPDATE de productos
-                const productUpdatePromises = productsToUpdate.map(p =>
-                    tx.execute({
-                        sql: `UPDATE products 
-                              SET stock = ROUND(stock - ?, 3), 
+                //
+                // FASE 3 · Concurrencia stock:
+                // Cuando inventoryAdjustmentMode === false (NO se permite stock negativo)
+                // añadimos la guarda `AND stock >= ?` y validamos rowsAffected.
+                // Esto evita que dos cajas concurrentes vendan el mismo último ítem.
+                // Si inventoryAdjustmentMode === true, mantenemos el comportamiento
+                // histórico (sin guarda) para respetar la opción del usuario.
+                const productUpdatePromises = productsToUpdate.map(p => {
+                    if (inventoryAdjustmentMode) {
+                        return tx.execute({
+                            sql: `UPDATE products
+                                  SET stock = ROUND(stock - ?, 3),
+                                      pending_adjustment = CASE WHEN ? THEN 1 ELSE pending_adjustment END
+                                  WHERE id = ? AND company_id = ?`,
+                            args: [p.quantityToDeduct, p.markPending ? 1 : 0, p.id, activeCompanyId]
+                        }).then(r => ({ kind: 'product', p, res: r }));
+                    }
+                    return tx.execute({
+                        sql: `UPDATE products
+                              SET stock = ROUND(stock - ?, 3),
                                   pending_adjustment = CASE WHEN ? THEN 1 ELSE pending_adjustment END
-                              WHERE id = ? AND company_id = ?`,
-                        args: [p.quantityToDeduct, p.markPending ? 1 : 0, p.id, activeCompanyId]
-                    })
-                );
+                              WHERE id = ? AND company_id = ? AND stock >= ?`,
+                        args: [p.quantityToDeduct, p.markPending ? 1 : 0, p.id, activeCompanyId, p.quantityToDeduct]
+                    }).then(r => ({ kind: 'product', p, res: r }));
+                });
 
                 // 3. BATCH UPDATE de lotes
-                const lotUpdatePromises = lotsToUpdate.map(l =>
-                    tx.execute({
-                        sql: `UPDATE product_lots SET quantity = ROUND(quantity - ?, 3) WHERE id = ?`,
-                        args: [l.deduct, l.id]
-                    })
-                );
+                // Misma estrategia: con stock negativo permitido no aplicamos guarda;
+                // sin él aplicamos `AND quantity >= ?` para evitar lotes negativos.
+                const lotUpdatePromises = lotsToUpdate.map(l => {
+                    if (inventoryAdjustmentMode) {
+                        return tx.execute({
+                            sql: `UPDATE product_lots SET quantity = ROUND(quantity - ?, 3) WHERE id = ?`,
+                            args: [l.deduct, l.id]
+                        }).then(r => ({ kind: 'lot', l, res: r }));
+                    }
+                    return tx.execute({
+                        sql: `UPDATE product_lots SET quantity = ROUND(quantity - ?, 3) WHERE id = ? AND quantity >= ?`,
+                        args: [l.deduct, l.id, l.deduct]
+                    }).then(r => ({ kind: 'lot', l, res: r }));
+                });
 
                 // 4. Audit log
                 const auditPromise = tx.execute({
@@ -6799,11 +6823,38 @@ export const useStore = create(persist((set, get) => ({
                 });
 
                 // Ejecutar todos los UPDATEs
-                await Promise.all([
+                const updateResults = await Promise.all([
                     ...productUpdatePromises,
                     ...lotUpdatePromises,
-                    auditPromise
                 ]);
+                await auditPromise;
+
+                // FASE 3 · Validación de rowsAffected (solo si NO se permite negativo).
+                // Si alguna fila no fue actualizada significa que otra caja se llevó
+                // el último stock entre la pre-validación y este UPDATE. Abortamos
+                // la transacción para no vender stock que ya no existe.
+                if (!inventoryAdjustmentMode) {
+                    const failed = updateResults.filter(r => Number(r.res?.rowsAffected ?? 0) === 0);
+                    if (failed.length > 0) {
+                        const failedProducts = failed
+                            .filter(f => f.kind === 'product')
+                            .map(f => {
+                                const prod = productsMap.get(String(f.p.id));
+                                return prod?.name || `product#${f.p.id}`;
+                            });
+                        const failedLots = failed
+                            .filter(f => f.kind === 'lot')
+                            .map(f => `lot#${f.l.id}`);
+                        await tx.rollback();
+                        const detail = [...failedProducts, ...failedLots].join(', ');
+                        console.error('❌ Stock concurrente insuficiente:', detail);
+                        return {
+                            success: false,
+                            error: 'CONCURRENT_STOCK',
+                            message: `Stock insuficiente (otra caja vendió primero): ${detail}`
+                        };
+                    }
+                }
 
                 // COMMIT
                 await tx.commit();

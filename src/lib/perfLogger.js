@@ -26,9 +26,10 @@ function readFlag(key, fallback = null) {
       const v = window.localStorage.getItem(key);
       if (v != null) return v;
     }
-    if (typeof process !== 'undefined' && process.env) {
+    const proc = globalThis.process;
+    if (proc && proc.env) {
       const envKey = key.toUpperCase().replace(/\./g, '_');
-      if (process.env[envKey] != null) return process.env[envKey];
+      if (proc.env[envKey] != null) return proc.env[envKey];
     }
   } catch {}
   return fallback;
@@ -67,10 +68,8 @@ function record(label, ms) {
     const prefix = slow ? '%c[perf SLOW]' : '%c[perf]';
     const css = slow ? 'color:#b00;font-weight:bold' : 'color:#888';
     try {
-      // eslint-disable-next-line no-console
       console.log(prefix, css, label, `${ms} ms`);
     } catch {
-      // eslint-disable-next-line no-console
       console.log('[perf]', label, ms + 'ms');
     }
   }
