@@ -5,6 +5,7 @@ import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFrom
 import { purgeCompanyData, localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
 import { syncCatalogFromServer } from '../lib/db/sync';
 import { markActivity } from '../lib/smartPolling';
+import { mirrorSaleItems, mirrorPurchaseItems } from '../lib/itemNormalization';
 
 let migrationsExecuted = false;
 let fetchInProgress = false;
@@ -5927,6 +5928,17 @@ export const useStore = create(persist((set, get) => ({
 
             await turso.batch(queries);
 
+            // FASE 4 · Escritura dual silenciosa a purchase_items.
+            // purchases.items (JSON) ya está guardado. Si la normalización falla,
+            // NO afecta la compra ni las APIs externas — solo se loggea.
+            mirrorPurchaseItems(turso, {
+                purchaseId,
+                companyId: activeCompanyId,
+                purchaseDate: purchase.date,
+                items: purchase.items,
+                source: 'live',
+            }).catch(err => console.error('[fase4] mirrorPurchaseItems:', err?.message || err));
+
             // Refetch lots or simulate (Optimistic). Usamos UUID o id+random para evitar
             // colisiones si addPurchase se invoca varias veces en el mismo tick.
             const tempBase = (typeof crypto !== 'undefined' && crypto.randomUUID)
@@ -6859,6 +6871,19 @@ export const useStore = create(persist((set, get) => ({
 
                 // COMMIT
                 await tx.commit();
+
+                // FASE 4 · Escritura dual silenciosa a sale_items.
+                // El JSON sales.items YA está guardado (fuente de verdad).
+                // sale_items es snapshot complementario para analytics.
+                // Si falla, NO debe afectar la venta — solo se loggea.
+                // No se await: se dispara en background para no añadir latencia.
+                mirrorSaleItems(turso, {
+                    saleId,
+                    companyId: activeCompanyId,
+                    saleDate: now,
+                    items: itemsToProcess,
+                    source: 'live',
+                }).catch(err => console.error('[fase4] mirrorSaleItems:', err?.message || err));
 
                 // FASE 9 · Marca actividad para que el smart-polling (sync,
                 // dashboard, alertas) cambie a modo "activo" y refresque ya.
