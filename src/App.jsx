@@ -50,6 +50,7 @@ import SalesAnalytics from './pages/reports/SalesAnalytics';
 import React, { useEffect } from 'react';
 import { useStore } from './store/useStore';
 import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncPendingOpsToServer } from './lib/db/sync';
+import { createSmartInterval } from './lib/smartPolling';
 
 // Protected Route Component - ROBUST RESTORE
 const ProtectedRoute = ({ children }) => {
@@ -213,23 +214,34 @@ function App() {
 
     syncAll();
 
-    const handleOnline = () => {
-      console.log('🌐 Conexión restaurada — sincronizando…');
-      processPendingSalesQueue();
-      syncAll();
-    };
-    window.addEventListener('online', handleOnline);
-
-    const interval = setInterval(() => {
-      if (navigator.onLine) {
+    // FASE 9 · Sync inteligente con smart-polling:
+    //   - 60s mientras hay actividad reciente (venta / mutación)
+    //   - 5min cuando la app está idle
+    //   - PAUSA total cuando la tab está oculta u offline
+    //   - Re-ejecuta INMEDIATO al volver visible / online / actividad
+    //   - Backoff exponencial si el servidor falla
+    // Esto reemplaza el setInterval(60s) ciego anterior.
+    const stop = createSmartInterval(
+      () => {
         processPendingSalesQueue();
-        syncAll();
+        return syncAll();
+      },
+      {
+        label: 'app-sync',
+        activeMs: 60_000,
+        idleMs: 5 * 60_000,
+        activeWindowMs: 5 * 60_000,
+        pauseWhenHidden: true,
+        pauseWhenOffline: true,
+        runOnVisible: true,
+        runOnOnline: true,
+        runOnActivity: true,
+        backoffOnError: true,
       }
-    }, 60000);
+    );
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      clearInterval(interval);
+      stop();
     };
   }, [currentUser]);
 

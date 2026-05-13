@@ -4,6 +4,7 @@ import { turso } from '../lib/turso';
 import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFromDateString, getEndFromDateString, formatInCompanyTime } from '../lib/dateHelpers';
 import { purgeCompanyData, localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
 import { syncCatalogFromServer } from '../lib/db/sync';
+import { markActivity } from '../lib/smartPolling';
 
 let migrationsExecuted = false;
 let fetchInProgress = false;
@@ -6858,6 +6859,10 @@ export const useStore = create(persist((set, get) => ({
 
                 // COMMIT
                 await tx.commit();
+
+                // FASE 9 · Marca actividad para que el smart-polling (sync,
+                // dashboard, alertas) cambie a modo "activo" y refresque ya.
+                markActivity();
 
                 console.log(`⚡ Transacción: ${(performance.now() - startTime).toFixed(2)}ms`);
 

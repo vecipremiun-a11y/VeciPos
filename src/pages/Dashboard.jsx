@@ -8,6 +8,7 @@ import { es } from 'date-fns/locale';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import { formatCurrency } from '../utils/formatCurrency';
 import CriticalAlertsModal from '../components/CriticalAlertsModal';
+import { createSmartInterval } from '../lib/smartPolling';
 
 
 const Dashboard = () => {
@@ -64,11 +65,19 @@ const Dashboard = () => {
         checkInventoryAlerts();
         checkStockPredictions();
 
-        const interval = setInterval(() => {
-            loadDashboardData();
-        }, 60000); // Cada 60 segundos
+        // FASE 9 · Polling inteligente: 60s con actividad, 5min idle,
+        // pausa cuando la tab está oculta o sin conexión.
+        const stop = createSmartInterval(loadDashboardData, {
+            label: 'dashboard',
+            activeMs: 60_000,
+            idleMs: 5 * 60_000,
+            pauseWhenHidden: true,
+            pauseWhenOffline: true,
+            runOnVisible: true,
+            runOnActivity: true,
+        });
 
-        return () => clearInterval(interval);
+        return stop;
     }, [fetchDashboardData, activeCompanyId]);
 
     // Calculate Real-time Stats

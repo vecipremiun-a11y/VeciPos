@@ -9,6 +9,7 @@ import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
 import { playProductionSound } from '../utils/productionSounds';
+import { createSmartInterval } from '../lib/smartPolling';
 
 // ========== HELPERS ==========
 /**
@@ -214,10 +215,22 @@ const Production = () => {
         setStatusFilter('all');
     }, [dateFilter, customDate]);
 
-    // Auto-refresh every 30 seconds
+    // FASE 9 · Auto-refresh inteligente: 30s mientras la tab está visible,
+    // pausa cuando se oculta. Página de producción necesita refresh fluido.
     useEffect(() => {
-        const interval = setInterval(() => fetchPreorders(getFilters()), 30000);
-        return () => clearInterval(interval);
+        const stop = createSmartInterval(
+            () => fetchPreorders(getFilters()),
+            {
+                label: 'production',
+                activeMs: 30_000,
+                idleMs: 2 * 60_000,
+                pauseWhenHidden: true,
+                pauseWhenOffline: true,
+                runOnVisible: true,
+                runOnActivity: true,
+            }
+        );
+        return stop;
     }, [dateFilter, customDate]);
 
     // Detectar nuevos pedidos: solo suena si el pedido es para HOY.

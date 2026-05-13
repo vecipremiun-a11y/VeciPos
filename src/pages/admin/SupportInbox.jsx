@@ -14,6 +14,7 @@ import {
     formatMessageTime,
     groupMessagesByDay
 } from '../../utils/supportHelpers';
+import { createSmartInterval } from '../../lib/smartPolling';
 
 const SupportInbox = () => {
     const {
@@ -44,18 +45,28 @@ const SupportInbox = () => {
         loadTickets();
     }, [statusFilter]);
 
-    // Polling cada 3 segundos para la conversación activa
+    // FASE 9 · Polling inteligente de chat: 3s mientras visible, pausa cuando oculta.
     useEffect(() => {
         if (selectedTicket) {
             loadMessages();
 
-            pollingIntervalRef.current = setInterval(() => {
-                loadMessages(true);
-            }, 3000);
+            const stop = createSmartInterval(
+                () => loadMessages(true),
+                {
+                    label: 'support-inbox-chat',
+                    activeMs: 3_000,
+                    idleMs: 3_000,
+                    pauseWhenHidden: true,
+                    pauseWhenOffline: true,
+                    runOnVisible: true,
+                }
+            );
+            pollingIntervalRef.current = stop;
 
             return () => {
                 if (pollingIntervalRef.current) {
-                    clearInterval(pollingIntervalRef.current);
+                    pollingIntervalRef.current();
+                    pollingIntervalRef.current = null;
                 }
             };
         }

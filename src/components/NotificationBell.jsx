@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Bell, X, Check, CheckCheck, AlertTriangle, AlertCircle, TrendingDown, Trash2 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
+import { createSmartInterval } from '../lib/smartPolling';
 
 const NotificationBell = () => {
     const [isOpen, setIsOpen] = useState(false);
@@ -17,11 +18,20 @@ const NotificationBell = () => {
         deleteOldAlerts
     } = useStore();
 
-    // Fetch unread count on mount and every 60s
+    // FASE 9 · Polling inteligente del badge de alertas:
+    // 2min con actividad / 10min idle, pausa tab oculta y sin conexión.
     useEffect(() => {
         fetchUnreadAlertCount();
-        const interval = setInterval(fetchUnreadAlertCount, 60000);
-        return () => clearInterval(interval);
+        const stop = createSmartInterval(fetchUnreadAlertCount, {
+            label: 'notif-bell',
+            activeMs: 2 * 60_000,
+            idleMs: 10 * 60_000,
+            pauseWhenHidden: true,
+            pauseWhenOffline: true,
+            runOnVisible: true,
+            runOnActivity: true,
+        });
+        return stop;
     }, []);
 
     // Fetch alerts when panel opens

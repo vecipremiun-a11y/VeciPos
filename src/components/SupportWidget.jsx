@@ -7,6 +7,7 @@ import {
     formatMessageTime,
     groupMessagesByDay
 } from '../utils/supportHelpers';
+import { createSmartInterval } from '../lib/smartPolling';
 
 const SupportWidget = () => {
     const {
@@ -45,12 +46,18 @@ const SupportWidget = () => {
 
         fetchSupportTickets();
 
-        // Polling para notificaciones (cada 30 seg)
-        const globalPolling = setInterval(() => {
-            fetchSupportTickets();
-        }, 30000);
+        // FASE 9 · Polling inteligente: 30s con actividad / 3min idle,
+        // pausa tab oculta o sin conexión.
+        const stop = createSmartInterval(fetchSupportTickets, {
+            label: 'support-widget',
+            activeMs: 30_000,
+            idleMs: 3 * 60_000,
+            pauseWhenHidden: true,
+            pauseWhenOffline: true,
+            runOnVisible: true,
+        });
 
-        return () => clearInterval(globalPolling);
+        return stop;
     }, [currentUser?.role, fetchSupportTickets]);
 
     // Polling: revisar mensajes nuevos cada 3 segundos cuando el panel está abierto
@@ -60,13 +67,25 @@ const SupportWidget = () => {
         if (isOpen && currentTicket) {
             loadMessages();
 
-            pollingIntervalRef.current = setInterval(() => {
-                loadMessages(true); // silent = true para no mostrar loading
-            }, 3000);
+            // FASE 9 · Polling de chat: 3s mientras visible y panel abierto,
+            // pausa si la tab pasa a oculta. Antes corría aún en background.
+            const stop = createSmartInterval(
+                () => loadMessages(true), // silent = true para no mostrar loading
+                {
+                    label: 'support-chat',
+                    activeMs: 3_000,
+                    idleMs: 3_000, // siempre rápido mientras está visible
+                    pauseWhenHidden: true,
+                    pauseWhenOffline: true,
+                    runOnVisible: true,
+                }
+            );
+            pollingIntervalRef.current = stop;
 
             return () => {
                 if (pollingIntervalRef.current) {
-                    clearInterval(pollingIntervalRef.current);
+                    pollingIntervalRef.current();
+                    pollingIntervalRef.current = null;
                 }
             };
         }

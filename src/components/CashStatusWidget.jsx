@@ -11,6 +11,7 @@ import CashCloseSuccessModal from './CashCloseSuccessModal';
 import { formatCurrency } from '../utils/formatCurrency';
 
 import { usePermissions } from '../hooks/usePermissions';
+import { createSmartInterval } from '../lib/smartPolling';
 
 const CashStatusWidget = () => {
     const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency } = useStore();
@@ -22,12 +23,25 @@ const CashStatusWidget = () => {
     const [successModalData, setSuccessModalData] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
 
-    // Refresh stats periodically or when opening
+    // FASE 9 · Polling inteligente de stats de caja:
+    // 15s con actividad reciente, 60s idle, pausa con tab oculta.
+    // Antes era setInterval(10s) ciego — muy agresivo a la base.
     useEffect(() => {
         if (cashRegister) {
             refreshRegisterStats(cashRegister.id);
-            const interval = setInterval(() => refreshRegisterStats(cashRegister.id), 10000); // Poll every 10s
-            return () => clearInterval(interval);
+            const stop = createSmartInterval(
+                () => refreshRegisterStats(cashRegister.id),
+                {
+                    label: 'cash-status',
+                    activeMs: 15_000,
+                    idleMs: 60_000,
+                    pauseWhenHidden: true,
+                    pauseWhenOffline: true,
+                    runOnVisible: true,
+                    runOnActivity: true,
+                }
+            );
+            return stop;
         }
     }, [cashRegister, refreshRegisterStats]);
 

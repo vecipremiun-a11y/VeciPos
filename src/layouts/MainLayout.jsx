@@ -8,6 +8,7 @@ import NotificationBell from '../components/NotificationBell';
 import SupportWidget from '../components/SupportWidget';
 import { usePermissions } from '../hooks/usePermissions';
 import { useCompanyFeatures } from '../hooks/useCompanyFeatures';
+import { createSmartInterval } from '../lib/smartPolling';
 
 const MainLayout = () => {
     // Helper to check window width strictly for initial state (avoid hydration mismatch if SSR, but this is SPA)
@@ -34,19 +35,20 @@ const MainLayout = () => {
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
-    // Refrescar permisos periódicamente (subido de 30s -> 5min para reducir
-    // re-renders globales que afectaban el rendimiento del POS).
-    // También se refrescan al volver al foco / al recuperar conexión.
+    // FASE 9 · Refresh inteligente de permisos: 5min activo, 15min idle,
+    // pausa cuando tab oculta o offline, re-ejecuta al volver al foco.
+    // Antes era setInterval(5min) ciego + listener de focus separado.
     React.useEffect(() => {
-        const interval = setInterval(() => {
-            fetchRolePermissions();
-        }, 5 * 60 * 1000);
-        const onFocus = () => fetchRolePermissions();
-        window.addEventListener('focus', onFocus);
-        return () => {
-            clearInterval(interval);
-            window.removeEventListener('focus', onFocus);
-        };
+        const stop = createSmartInterval(fetchRolePermissions, {
+            label: 'permissions',
+            activeMs: 5 * 60_000,
+            idleMs: 15 * 60_000,
+            pauseWhenHidden: true,
+            pauseWhenOffline: true,
+            runOnVisible: true,
+            runOnFocus: true,
+        });
+        return stop;
     }, [fetchRolePermissions]);
 
     const { can } = usePermissions();

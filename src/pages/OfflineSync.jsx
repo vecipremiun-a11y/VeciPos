@@ -7,6 +7,7 @@ import { useStore } from '../store/useStore';
 import { localDb, pendingOpsApi, getLocalCatalogStats, siiFoliosApi } from '../lib/db/localdb';
 import { syncCatalogFromServer, syncPendingOpsToServer, ensureMinimumFolios, syncReservedFoliosFromServer } from '../lib/db/sync';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { createSmartInterval } from '../lib/smartPolling';
 import {
   CloudUpload as CloudArrowUpIcon,
   Clock as ClockIcon,
@@ -51,9 +52,18 @@ export default function OfflineSync() {
 
   useEffect(() => {
     reload();
-    // Recargar cada 5s para reflejar cambios en background
-    const i = setInterval(reload, 5000);
-    return () => clearInterval(i);
+    // FASE 9 · Refresh inteligente: 5s mientras la pestaña esté visible,
+    // 30s idle, pausa cuando se oculta. Antes corría 5s siempre.
+    const stop = createSmartInterval(reload, {
+      label: 'offline-sync',
+      activeMs: 5_000,
+      idleMs: 30_000,
+      pauseWhenHidden: true,
+      pauseWhenOffline: false, // queremos seguir refrescando counts locales aunque no haya red
+      runOnVisible: true,
+      runOnActivity: true,
+    });
+    return stop;
   }, [reload]);
 
   const filtered = ops.filter((o) => o.status === tab);
