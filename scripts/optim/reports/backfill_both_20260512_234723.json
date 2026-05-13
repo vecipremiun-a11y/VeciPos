@@ -1,0 +1,23 @@
+{
+  "takenAt": "2026-05-13T03:47:46.620Z",
+  "target": "both",
+  "dry": true,
+  "chunkSize": 50,
+  "elapsed_ms": 23467,
+  "results": [
+    {
+      "table": "sales",
+      "total": 42074,
+      "migrated": 0,
+      "pending": 42074,
+      "dry": true
+    },
+    {
+      "table": "purchases",
+      "total": 701,
+      "migrated": 0,
+      "pending": 701,
+      "dry": true
+    }
+  ]
+}

@@ -1,0 +1,124 @@
+{
+  "takenAt": "2026-05-13T04:49:38.151Z",
+  "sample": 5000,
+  "tolerance": 0.5,
+  "counts": {
+    "sales": {
+      "sales_with_items": 42074,
+      "sale_items_rows": 122659,
+      "sale_items_distinct_sale_ids": 41996,
+      "coverage_pct": "99.81"
+    },
+    "purchases": {
+      "purchases_with_items": 701,
+      "purchase_items_rows": 4432,
+      "purchase_items_distinct_purchase_ids": 701,
+      "coverage_pct": "100.00"
+    }
+  },
+  "missing_sales": {
+    "count_sample": 50,
+    "ids": [
+      25433,
+      7339,
+      7335,
+      7329,
+      7327,
+      7323,
+      7322,
+      7317,
+      7316,
+      7310,
+      7306,
+      7301,
+      7296,
+      7295,
+      7288,
+      7271,
+      7269,
+      7227,
+      7226,
+      7206,
+      7196,
+      7190,
+      7177,
+      7166,
+      7164,
+      7158,
+      7157,
+      7138,
+      7121,
+      7119,
+      7118,
+      7117,
+      7114,
+      7110,
+      7105,
+      7104,
+      7099,
+      7097,
+      7095,
+      7091,
+      7088,
+      7084,
+      7075,
+      7074,
+      7068,
+      7064,
+      7063,
+      7058,
+      7051,
+      7043
+    ]
+  },
+  "missing_purchases": {
+    "count_sample": 0,
+    "ids": []
+  },
+  "sales_comparison": {
+    "ok": 5000,
+    "diff": 0,
+    "no_mirror": 0,
+    "samples": []
+  },
+  "purchases_comparison": {
+    "ok": 701,
+    "diff": 0,
+    "no_mirror": 0,
+    "samples": []
+  },
+  "sale_items_per_company": [
+    {
+      "company_id": "default",
+      "sale_items_rows": 120713,
+      "sales_with_mirror": 41563
+    },
+    {
+      "company_id": "veci-2",
+      "sale_items_rows": 2232,
+      "sales_with_mirror": 416
+    },
+    {
+      "company_id": "barberia-keylut",
+      "sale_items_rows": 42,
+      "sales_with_mirror": 17
+    }
+  ],
+  "purchase_items_per_company": [
+    {
+      "company_id": "default",
+      "purchase_items_rows": 4258,
+      "purchases_with_mirror": 673
+    },
+    {
+      "company_id": "veci-2",
+      "purchase_items_rows": 165,
+      "purchases_with_mirror": 25
+    },
+    {
+      "company_id": "barberia-keylut",
+      "purchase_items_rows": 9,
+      "purchases_with_mirror": 3
+    }
+  ]
+}

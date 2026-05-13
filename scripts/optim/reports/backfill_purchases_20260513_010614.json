@@ -1,0 +1,17 @@
+{
+  "takenAt": "2026-05-13T05:06:49.629Z",
+  "target": "purchases",
+  "dry": false,
+  "chunkSize": 200,
+  "elapsed_ms": 34680,
+  "results": [
+    {
+      "table": "purchases",
+      "processed": 701,
+      "inserted": 0,
+      "skipped": 701,
+      "errors": 0,
+      "errorSamples": []
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "takenAt": "2026-05-13T05:24:08.974Z",
+  "sample": 5000,
+  "tolerance": 0.5,
+  "counts": {
+    "sales": {
+      "sales_with_items": 41996,
+      "sale_items_rows": 110781,
+      "sale_items_distinct_sale_ids": 41996,
+      "coverage_pct": "100.00"
+    },
+    "purchases": {
+      "purchases_with_items": 701,
+      "purchase_items_rows": 4432,
+      "purchase_items_distinct_purchase_ids": 701,
+      "coverage_pct": "100.00"
+    }
+  },
+  "missing_sales": {
+    "count_sample": 0,
+    "ids": []
+  },
+  "missing_purchases": {
+    "count_sample": 0,
+    "ids": []
+  },
+  "sales_comparison": {
+    "ok": 5000,
+    "diff": 0,
+    "no_mirror": 0,
+    "samples": []
+  },
+  "purchases_comparison": {
+    "ok": 701,
+    "diff": 0,
+    "no_mirror": 0,
+    "samples": []
+  },
+  "sale_items_per_company": [
+    {
+      "company_id": "default",
+      "sale_items_rows": 108939,
+      "sales_with_mirror": 41563
+    },
+    {
+      "company_id": "veci-2",
+      "sale_items_rows": 2269,
+      "sales_with_mirror": 416
+    },
+    {
+      "company_id": "barberia-keylut",
+      "sale_items_rows": 38,
+      "sales_with_mirror": 17
+    }
+  ],
+  "purchase_items_per_company": [
+    {
+      "company_id": "default",
+      "purchase_items_rows": 4258,
+      "purchases_with_mirror": 673
+    },
+    {
+      "company_id": "veci-2",
+      "purchase_items_rows": 165,
+      "purchases_with_mirror": 25
+    },
+    {
+      "company_id": "barberia-keylut",
+      "purchase_items_rows": 9,
+      "purchases_with_mirror": 3
+    }
+  ]
+}
