@@ -151,6 +151,17 @@ export async function syncProductToStore({ companyId, product }) {
     const tiers = normalizePriceTiers(product.price_ranges);
     if (tiers !== undefined) payload.priceTiers = tiers;
 
+    // Modo del producto (sale_only / preorder_only / both) y configuración
+    // de encargo. La tienda puede usarlos para decidir visibilidad y formato.
+    // Si los ignora, no afecta — sigue funcionando como antes.
+    if (product.sale_mode !== undefined) payload.sale_mode = product.sale_mode;
+    if (product.preorder_unit !== undefined) payload.preorder_unit = product.preorder_unit;
+    if (product.preorder_billing_unit !== undefined) payload.preorder_billing_unit = product.preorder_billing_unit;
+    if (product.preorder_price_per_kg !== undefined) payload.preorder_price_per_kg = Number(product.preorder_price_per_kg || 0);
+    if (product.preorder_gram_per_unit !== undefined) payload.preorder_gram_per_unit = Number(product.preorder_gram_per_unit || 0);
+    if (product.preorder_use_base_price !== undefined) payload.preorder_use_base_price = Boolean(product.preorder_use_base_price);
+    if (product.units_per_box !== undefined) payload.units_per_box = Number(product.units_per_box || 0);
+
     if (product.image && typeof product.image === 'string') {
         if (product.image.startsWith('http')) {
             payload.image_url = product.image;

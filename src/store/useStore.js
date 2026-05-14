@@ -4845,6 +4845,25 @@ export const useStore = create(persist((set, get) => ({
             const { activeCompanyId, currentUser, validateCompanyAccess } = get();
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
 
+            // Pre-check: si el SKU ya existe para la misma empresa, evitamos crear
+            // un duplicado silencioso (lo que confundía con un sync fallido). Si el
+            // SKU está vacío o auto-generado tipo "QUICK-..." dejamos pasar.
+            if (product.sku && !String(product.sku).startsWith('QUICK-')) {
+                const dup = await turso.execute({
+                    sql: 'SELECT id, name FROM products WHERE sku = ? AND company_id = ? LIMIT 1',
+                    args: [product.sku, activeCompanyId],
+                });
+                if (dup.rows.length > 0) {
+                    const existing = dup.rows[0];
+                    return {
+                        success: false,
+                        error: 'SKU_DUPLICATE',
+                        message: `Ya existe un producto con SKU ${product.sku}: "${existing.name}" (id=${existing.id}). Ábrelo desde el listado para editarlo.`,
+                        existingProductId: existing.id,
+                    };
+                }
+            }
+
             const result = await turso.execute({
                 sql: "INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier, is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes, preorder_unit, preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit, preorder_use_base_price, units_per_box) VALUES (?, ?, ROUND(?, 3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
@@ -4917,6 +4936,15 @@ export const useStore = create(persist((set, get) => ({
                         offer_price: newProduct.is_offer ? Number(newProduct.offer_price || 0) : 0,
                         image: newProduct.image || null,
                         price_ranges: parsedPriceRanges || [],
+                        sale_mode: newProduct.sale_mode || 'sale_only',
+                        preorder_unit: newProduct.preorder_unit || null,
+                        preorder_billing_unit: newProduct.preorder_billing_unit || 'unit',
+                        preorder_price_per_kg: Number(newProduct.preorder_price_per_kg || 0),
+                        preorder_gram_per_unit: Number(newProduct.preorder_gram_per_unit || 0),
+                        preorder_use_base_price: newProduct.preorder_use_base_price !== undefined
+                            ? Boolean(newProduct.preorder_use_base_price)
+                            : true,
+                        units_per_box: Number(newProduct.units_per_box || 0),
                     };
                     fetch(`/api/integration/sync-product?company_id=${encodeURIComponent(activeCompanyId)}`, {
                         method: 'POST',
@@ -5020,6 +5048,18 @@ export const useStore = create(persist((set, get) => ({
                         is_offer: updatedProduct.is_offer ? true : false,
                         offer_price: updatedProduct.is_offer ? Number(updatedProduct.offer_price || 0) : 0,
                         price_ranges: updatedProduct.price_ranges || [],
+                        // Modo del producto y configuración de encargo (consumido por la tienda
+                        // para decidir visibilidad / tipo de producto). Si la tienda ignora estos
+                        // campos no pasa nada, se mantiene compatibilidad atrás.
+                        sale_mode: updatedProduct.sale_mode || 'sale_only',
+                        preorder_unit: updatedProduct.preorder_unit || null,
+                        preorder_billing_unit: updatedProduct.preorder_billing_unit || 'unit',
+                        preorder_price_per_kg: Number(updatedProduct.preorder_price_per_kg || 0),
+                        preorder_gram_per_unit: Number(updatedProduct.preorder_gram_per_unit || 0),
+                        preorder_use_base_price: updatedProduct.preorder_use_base_price !== undefined
+                            ? Boolean(updatedProduct.preorder_use_base_price)
+                            : true,
+                        units_per_box: Number(updatedProduct.units_per_box || 0),
                     };
                     if (imageChanged && updatedProduct.image) {
                         syncPayload.image = updatedProduct.image;

@@ -216,7 +216,16 @@ const Inventory = () => {
             setEditingProduct(null);
             setView('list');
         } else {
-            alert('Error al guardar el producto: ' + (result?.error || 'Error desconocido'));
+            const friendlyMsg = result?.message || result?.error || 'Error desconocido';
+            alert('Error al guardar el producto: ' + friendlyMsg);
+            // Si el SKU ya existe, ofrecemos navegar a la edición del existente
+            if (result?.error === 'SKU_DUPLICATE' && result.existingProductId) {
+                const existing = products.find(p => p.id === result.existingProductId);
+                if (existing && window.confirm('¿Quieres abrir el producto existente para editarlo?')) {
+                    setEditingProduct(existing);
+                    setView('form');
+                }
+            }
         }
     };
 
