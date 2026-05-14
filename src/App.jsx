@@ -55,6 +55,7 @@ const SalesAnalytics = lazy(() => import('./pages/reports/SalesAnalytics'));
 import { useStore } from './store/useStore';
 import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncPendingOpsToServer } from './lib/db/sync';
 import { createSmartInterval } from './lib/smartPolling';
+import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 
 // Protected Route Component - ROBUST RESTORE
 const ProtectedRoute = ({ children }) => {
@@ -151,6 +152,15 @@ function App() {
   const fetchInitialData = useStore(state => state.fetchInitialData);
   const darkMode = useStore(state => state.darkMode);
   const currentUser = useStore(state => state.currentUser);
+  const activeCompanyId = useStore(state => state.activeCompanyId);
+
+  // FASE 5.5 · Exponer activeCompanyId a la capa lib (pwaUpdate) para que
+  // pueda verificar ops offline pendientes antes de aplicar un refresh.
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.__POSKEM_ACTIVE_COMPANY_ID__ = activeCompanyId || null;
+    }
+  }, [activeCompanyId]);
 
   // 1. Cargar datos SOLO una vez al montar, o cuando currentUser aparece (recarga)
   useEffect(() => {
@@ -254,6 +264,7 @@ function App() {
 
   return (
     <Router>
+      <PWAUpdatePrompt />
       <Suspense fallback={
         <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)]">
           <div className="flex flex-col items-center gap-3">

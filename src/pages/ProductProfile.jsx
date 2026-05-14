@@ -17,6 +17,9 @@ import {
     productPurchasesHistoryNormalized,
     productPurchasesHistoryViaJson,
 } from '../lib/analyticsQueries';
+// FASE 5.5 · Telemetría de fallbacks — cuántas veces la versión normalizada
+// falla y debe usarse la JSON. Si supera ~1%, es señal de problema sistémico.
+import { logAnalyticsEvent } from '../lib/analyticsTelemetry';
 
 const ProductProfile = () => {
     const { activeCompanyId, currentCurrency, searchProductsForDropdown, users, currentCompanyTimezone } = useStore();
@@ -178,6 +181,7 @@ const ProductProfile = () => {
             // ─── PURCHASES ──────────────────────────────────────────────
             let productPurchases = [];
             let purchasesViaNormalized = false;
+            const tPurchStart = Date.now();
             try {
                 const rows = await productPurchasesHistoryNormalized({ ...ctxNorm, limit: 100 });
                 purchasesViaNormalized = true;
@@ -214,6 +218,13 @@ const ProductProfile = () => {
                 });
             } catch (e) {
                 console.warn('[fase5] purchases normalized falló, cae a JSON:', e?.message || e);
+                logAnalyticsEvent({
+                    event_type: 'fallback',
+                    query_name: 'productPurchasesHistory',
+                    error_msg: e?.message || String(e),
+                    duration_ms: Date.now() - tPurchStart,
+                    company_id: activeCompanyId,
+                });
             }
 
             if (!purchasesViaNormalized) {
@@ -255,6 +266,7 @@ const ProductProfile = () => {
             // ─── SALES ──────────────────────────────────────────────────
             let productSales = [];
             let salesViaNormalized = false;
+            const tSalesStart = Date.now();
             try {
                 const rows = await productSalesHistoryNormalized({ ...ctxNorm, limit: 200 });
                 salesViaNormalized = true;
@@ -287,6 +299,13 @@ const ProductProfile = () => {
                 });
             } catch (e) {
                 console.warn('[fase5] sales normalized falló, cae a JSON:', e?.message || e);
+                logAnalyticsEvent({
+                    event_type: 'fallback',
+                    query_name: 'productSalesHistory',
+                    error_msg: e?.message || String(e),
+                    duration_ms: Date.now() - tSalesStart,
+                    company_id: activeCompanyId,
+                });
             }
 
             if (!salesViaNormalized) {

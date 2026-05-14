@@ -1,0 +1,23 @@
+{
+  "ts": "2026-05-14T04:16:42.805Z",
+  "mode": "health-check",
+  "sinceDays": null,
+  "gap": {
+    "sales": 0,
+    "purchases": 0
+  },
+  "mirrored": {
+    "sales": 0,
+    "purchases": 0
+  },
+  "itemsInserted": {
+    "sales": 0,
+    "purchases": 0
+  },
+  "errors": {
+    "sales": 0,
+    "purchases": 0
+  },
+  "durationMs": 21461,
+  "exitCode": 0
+}
