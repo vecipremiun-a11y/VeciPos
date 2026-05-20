@@ -27,3 +27,7 @@ dist-ssr
 .env
 .env.local
 .env.production.local
+
+# Local dev tooling (Claude Code, file backups)
+.claude/
+*.bak

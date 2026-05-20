@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Clock, User, ChefHat, Check, X, AlertTriangle,
     Calendar, Filter, Package, Search, Eye, ChevronDown, Truck,
-    List, LayoutGrid
+    List, LayoutGrid, Globe, CircleCheck, PackageCheck, Ban
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
@@ -10,6 +10,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
 import { playProductionSound } from '../utils/productionSounds';
 import { createSmartInterval } from '../lib/smartPolling';
+import Pusher from 'pusher-js';
 
 // ========== HELPERS ==========
 /**
@@ -32,17 +33,169 @@ const parseItemsSummary = (summary) => {
     }).filter(Boolean);
 };
 
+// Badge para encargos provenientes de la web (mini-veci u otro canal externo)
+const ExternalSourceBadge = ({ preorder, size = 'sm' }) => {
+    if (!preorder?.external_source) return null;
+    const code = preorder.external_public_code;
+    const label = preorder.external_source === 'miniveci' ? 'mini-veci' : preorder.external_source;
+    const iconSize = size === 'sm' ? 10 : 12;
+    return (
+        <span
+            title={code ? `${label} · ${code}` : label}
+            className={cn(
+                "inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold border bg-violet-500/15 text-violet-300 border-violet-500/30 tabular-nums whitespace-nowrap",
+                size === 'sm' ? "text-[10px]" : "text-xs"
+            )}
+        >
+            <Globe size={iconSize} />
+            {code || label}
+        </span>
+    );
+};
+
 // ========== STATUS CONFIG ==========
 const STATUS_CONFIG = {
     pending: { label: 'Pendiente', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', dotColor: 'bg-amber-400', icon: Clock },
+    confirmed: { label: 'Confirmado', color: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30', dotColor: 'bg-cyan-400', icon: CircleCheck },
     preparing: { label: 'En Preparación', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30', dotColor: 'bg-blue-400', icon: Package },
     ready: { label: 'Listo', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', dotColor: 'bg-emerald-400', icon: Check },
-    delivered: { label: 'Entregado', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30', dotColor: 'bg-gray-400', icon: Truck },
+    out_for_delivery: { label: 'En Reparto', color: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30', dotColor: 'bg-indigo-400', icon: Truck },
+    delivered: { label: 'Entregado', color: 'bg-gray-500/20 text-gray-400 border-gray-500/30', dotColor: 'bg-gray-400', icon: PackageCheck },
     canceled: { label: 'Cancelado', color: 'bg-red-500/20 text-red-400 border-red-500/30', dotColor: 'bg-red-400', icon: X },
 };
 
+// Acciones "hacia adelante" disponibles según estado actual y tipo de entrega.
+// Devuelve [{ status, label, icon, variant }]. La rama ready depende de pickup/delivery.
+const getForwardActions = (order) => {
+    const isDelivery = order.delivery_type === 'delivery';
+    switch (order.status) {
+        case 'pending':
+            return [{ status: 'confirmed', label: 'Confirmar', icon: CircleCheck, variant: 'cyan' }];
+        case 'confirmed':
+            return [{ status: 'preparing', label: 'Empezar', icon: ChefHat, variant: 'blue' }];
+        case 'preparing':
+            return [{ status: 'ready', label: 'Marcar Listo', icon: Check, variant: 'emerald' }];
+        case 'ready':
+            return isDelivery
+                ? [{ status: 'out_for_delivery', label: 'Enviar a Reparto', icon: Truck, variant: 'indigo' }]
+                : [{ status: 'delivered', label: 'Entregar', icon: PackageCheck, variant: 'emerald' }];
+        case 'out_for_delivery':
+            return [{ status: 'delivered', label: 'Entregar', icon: PackageCheck, variant: 'emerald' }];
+        default:
+            return [];
+    }
+};
+
+// ¿Se puede rechazar/cancelar desde este estado? (con motivo)
+const canRejectOrder = (order) =>
+    ['pending', 'confirmed', 'preparing', 'ready'].includes(order.status);
+
+// Clases por variante de botón (gradiente + sombra)
+const ACTION_VARIANTS = {
+    cyan: 'from-cyan-600 to-cyan-500 shadow-cyan-500/20 hover:shadow-cyan-500/30',
+    blue: 'from-blue-600 to-blue-500 shadow-blue-500/20 hover:shadow-blue-500/30',
+    emerald: 'from-emerald-600 to-emerald-500 shadow-emerald-500/20 hover:shadow-emerald-500/30',
+    indigo: 'from-indigo-600 to-indigo-500 shadow-indigo-500/20 hover:shadow-indigo-500/30',
+};
+
+// Botones de acción según la máquina de estados. `layout`:
+//  - 'inline': compacto para la tabla (rechazo icono-only)
+//  - 'block':  botones flex-1 para tarjetas/modal/mobile (rechazo con label)
+const ProductionActions = ({ order, canManage, onAction, onReject, layout = 'block' }) => {
+    if (!canManage) return null;
+    const actions = getForwardActions(order);
+    const showReject = canRejectOrder(order);
+    if (actions.length === 0 && !showReject) return null;
+
+    const inline = layout === 'inline';
+    const fwdBase = inline
+        ? 'px-3.5 py-2 rounded-xl text-xs font-bold'
+        : 'flex-1 py-2.5 rounded-xl text-xs font-bold';
+
+    return (
+        <>
+            {actions.map(a => {
+                const Icon = a.icon;
+                return (
+                    <button key={a.status} onClick={() => onAction(order.id, a.status)}
+                        className={cn(fwdBase, 'bg-gradient-to-r text-white shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-1.5 active:scale-95', ACTION_VARIANTS[a.variant])}>
+                        <Icon size={inline ? 13 : 14} /> {a.label}
+                    </button>
+                );
+            })}
+            {showReject && (
+                <button onClick={() => onReject(order)}
+                    title="Rechazar"
+                    className={cn(
+                        inline ? 'px-3 py-2' : 'px-3 py-2.5',
+                        'rounded-xl text-xs font-bold bg-red-500/15 text-red-400 border border-red-500/25 hover:bg-red-500/25 transition-all flex items-center justify-center gap-1.5'
+                    )}>
+                    <Ban size={inline ? 13 : 14} /> {inline ? '' : 'Rechazar'}
+                </button>
+            )}
+        </>
+    );
+};
+
+// ========== REJECT REASON MODAL ==========
+const RejectReasonModal = ({ order, onClose, onConfirm }) => {
+    const [reason, setReason] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+
+    const handleConfirm = async () => {
+        setSubmitting(true);
+        await onConfirm(order.id, reason.trim());
+        setSubmitting(false);
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+            <div className="glass-card w-full max-w-md animate-[float_0.3s_ease-out]" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shrink-0">
+                        <Ban size={20} className="text-white" />
+                    </div>
+                    <div>
+                        <h2 className="text-lg font-bold text-[var(--color-text)]">Rechazar encargo</h2>
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                            #{order.id} · {order.client_name || 'Sin nombre'}
+                        </p>
+                    </div>
+                </div>
+
+                <label className="block text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">
+                    Motivo del rechazo
+                </label>
+                <textarea
+                    autoFocus
+                    value={reason}
+                    onChange={e => setReason(e.target.value)}
+                    placeholder="Ej: no alcanzamos a tener listo para esa hora"
+                    rows={3}
+                    className="glass-input w-full text-sm rounded-xl p-3 resize-none"
+                />
+                <p className="text-[11px] text-[var(--color-text-muted)] mt-1.5">
+                    El cliente verá este motivo en miniveci. Opcional pero recomendado.
+                </p>
+
+                <div className="flex gap-2 pt-4">
+                    <button onClick={onClose}
+                        className="flex-1 py-2.5 rounded-xl font-bold text-sm border border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-white/5 transition-all">
+                        Cancelar
+                    </button>
+                    <button onClick={handleConfirm} disabled={submitting}
+                        className="flex-1 py-2.5 rounded-xl font-bold text-sm bg-gradient-to-r from-red-600 to-rose-500 text-white shadow-lg shadow-red-500/25 hover:from-red-500 hover:to-rose-400 transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50">
+                        <Ban size={16} /> {submitting ? 'Rechazando...' : 'Confirmar rechazo'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ========== DETAIL MODAL ==========
-const ProductionDetailModal = ({ preorder, onClose, onStatusChange }) => {
+const ProductionDetailModal = ({ preorder, onClose, onStatusChange, onReject, canManage }) => {
     const [details, setDetails] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const { getPreorderDetails } = useStore();
@@ -69,9 +222,12 @@ const ProductionDetailModal = ({ preorder, onClose, onStatusChange }) => {
                         </div>
                         <div>
                             <h2 className="text-lg font-bold text-[var(--color-text)]">Orden #{preorder.id}</h2>
-                            <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border", config.color)}>
-                                <StatusIcon size={10} /> {config.label}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border", config.color)}>
+                                    <StatusIcon size={10} /> {config.label}
+                                </span>
+                                <ExternalSourceBadge preorder={preorder} />
+                            </div>
                         </div>
                     </div>
                     <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] p-2 rounded-xl hover:bg-white/5 transition-colors">
@@ -132,32 +288,13 @@ const ProductionDetailModal = ({ preorder, onClose, onStatusChange }) => {
                         {/* Actions */}
                         {preorder.status !== 'delivered' && preorder.status !== 'canceled' && (
                             <div className="flex gap-2 pt-1">
-                                {preorder.status === 'pending' && (
-                                    <button onClick={() => { onStatusChange(preorder.id, 'preparing'); onClose(); }}
-                                        className="flex-1 py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-500 hover:to-blue-400 transition-all shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 active:scale-[0.98]">
-                                        <ChefHat size={16} />
-                                        Empezar Preparación
-                                    </button>
-                                )}
-                                {preorder.status === 'preparing' && (
-                                    <button onClick={() => { onStatusChange(preorder.id, 'ready'); onClose(); }}
-                                        className="flex-1 py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-600 to-emerald-500 text-white hover:from-emerald-500 hover:to-emerald-400 transition-all shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 active:scale-[0.98]">
-                                        <Check size={16} />
-                                        Marcar Listo
-                                    </button>
-                                )}
-                                {preorder.status === 'ready' && (
-                                    <button onClick={() => { onStatusChange(preorder.id, 'delivered'); onClose(); }}
-                                        className="flex-1 py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-600 to-emerald-500 text-white hover:from-emerald-500 hover:to-emerald-400 transition-all shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 active:scale-[0.98]">
-                                        <Truck size={16} />
-                                        Entregar
-                                    </button>
-                                )}
-                                <button onClick={() => { onStatusChange(preorder.id, 'canceled'); onClose(); }}
-                                    className="py-3 px-5 rounded-xl font-bold text-sm bg-red-500/15 text-red-400 border border-red-500/25 hover:bg-red-500/25 transition-all flex items-center justify-center gap-2 active:scale-[0.98]">
-                                    <X size={16} />
-                                    Rechazar
-                                </button>
+                                <ProductionActions
+                                    order={preorder}
+                                    canManage={canManage}
+                                    onAction={(id, status) => { onStatusChange(id, status); onClose(); }}
+                                    onReject={(order) => { onClose(); onReject(order); }}
+                                    layout="block"
+                                />
                             </div>
                         )}
                     </div>
@@ -178,6 +315,7 @@ const Production = () => {
     const [customDate, setCustomDate] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [selectedPreorder, setSelectedPreorder] = useState(null);
+    const [rejectingOrder, setRejectingOrder] = useState(null);
     // Vista preferida persistida en localStorage: 'list' | 'cards'
     const [viewMode, setViewMode] = useState(() => {
         try { return localStorage.getItem('production_view_mode') || 'list'; } catch { return 'list'; }
@@ -215,23 +353,71 @@ const Production = () => {
         setStatusFilter('all');
     }, [dateFilter, customDate]);
 
-    // FASE 9 · Auto-refresh inteligente: 30s mientras la tab está visible,
-    // pausa cuando se oculta. Página de producción necesita refresh fluido.
+    // El refresh principal es vía SSE (push en vivo, ver useEffect siguiente).
+    // Este intervalo queda solo como red de seguridad por si el canal SSE muere
+    // sin avisar (proxy raro, sleep del SO, etc.). 2 min en activo es invisible
+    // para el operario y no genera carga.
     useEffect(() => {
         const stop = createSmartInterval(
             () => fetchPreorders(getFilters()),
             {
-                label: 'production',
-                activeMs: 30_000,
-                idleMs: 2 * 60_000,
+                label: 'production-fallback',
+                activeMs: 2 * 60_000,
+                idleMs: 5 * 60_000,
                 pauseWhenHidden: true,
                 pauseWhenOffline: true,
                 runOnVisible: true,
-                runOnActivity: true,
+                runOnActivity: false,
             }
         );
         return stop;
     }, [dateFilter, customDate]);
+
+    // Canal Pusher en vivo: el backend publica `order.created`/`order.updated`
+    // apenas miniveci dispara el POST. Sin polling, sin tener que refrescar.
+    // Mantengo una sola suscripción durante toda la vida del componente; los
+    // filtros se aplican vía `refreshRef` para no resuscribir el canal cuando
+    // cambian.
+    const refreshRef = useRef(() => { });
+    refreshRef.current = () => fetchPreorders(getFilters());
+
+    useEffect(() => {
+        const key = import.meta.env.VITE_PUSHER_KEY;
+        const cluster = import.meta.env.VITE_PUSHER_CLUSTER;
+        if (!key || !cluster) {
+            console.warn('📡 Pusher deshabilitado (faltan VITE_PUSHER_KEY/CLUSTER) — solo polling de fallback');
+            return;
+        }
+
+        const pusher = new Pusher(key, {
+            cluster,
+            forceTLS: true,
+            enabledTransports: ['ws', 'wss'],
+        });
+
+        pusher.connection.bind('connected', () => {
+            console.log('📡 Pusher conectado — pedidos en vivo activos');
+        });
+        pusher.connection.bind('error', (err) => {
+            console.warn('📡 Pusher error de conexión:', err?.error?.data?.message || err);
+        });
+
+        const channel = pusher.subscribe('preorders');
+        const onMutation = (label) => (data) => {
+            console.log(`📡 Pusher ${label}:`, data?.public_code || data?.id || data);
+            refreshRef.current();
+        };
+        channel.bind('order.created', onMutation('order.created'));
+        channel.bind('order.updated', onMutation('order.updated'));
+
+        return () => {
+            try {
+                channel.unbind_all();
+                pusher.unsubscribe('preorders');
+                pusher.disconnect();
+            } catch { /* ignore */ }
+        };
+    }, []);
 
     // Detectar nuevos pedidos: solo suena si el pedido es para HOY.
     useEffect(() => {
@@ -260,19 +446,24 @@ const Production = () => {
         fetchPreorders(getFilters());
     };
 
+    const handleReject = async (preorderId, reason) => {
+        await updatePreorderStatus(preorderId, 'canceled', reason);
+        fetchPreorders(getFilters());
+    };
+
     // Summary counts
     const counts = useMemo(() => ({
-        pending: preorders.filter(p => p.status === 'pending').length,
+        pending: preorders.filter(p => p.status === 'pending' || p.status === 'confirmed').length,
         preparing: preorders.filter(p => p.status === 'preparing').length,
-        completed: preorders.filter(p => p.status === 'ready' || p.status === 'delivered').length,
+        completed: preorders.filter(p => p.status === 'ready' || p.status === 'out_for_delivery' || p.status === 'delivered').length,
     }), [preorders]);
 
     // Filtered preorders for table
     const filteredPreorders = useMemo(() => {
         return preorders.filter(p => {
-            if (statusFilter === 'pending') return p.status === 'pending';
+            if (statusFilter === 'pending') return p.status === 'pending' || p.status === 'confirmed';
             if (statusFilter === 'preparing') return p.status === 'preparing';
-            if (statusFilter === 'ready') return p.status === 'ready' || p.status === 'delivered';
+            if (statusFilter === 'ready') return p.status === 'ready' || p.status === 'out_for_delivery' || p.status === 'delivered';
             return p.status !== 'canceled';
         });
     }, [preorders, statusFilter]);
@@ -283,8 +474,8 @@ const Production = () => {
     const productionTotals = useMemo(() => {
         const map = new Map();
         filteredPreorders.forEach(order => {
-            // Solo contar lo que aún hay que producir (excluye entregados/cancelados)
-            if (order.status === 'delivered' || order.status === 'canceled') return;
+            // Solo contar lo que aún hay que producir (excluye lo ya hecho/entregado/cancelado)
+            if (['ready', 'out_for_delivery', 'delivered', 'canceled'].includes(order.status)) return;
             const items = parseItemsSummary(order.items_summary);
             items.forEach(it => {
                 const qty = parseFloat(String(it.qty).replace(',', '.')) || 0;
@@ -546,7 +737,10 @@ const Production = () => {
                                                         <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs shadow-md shadow-purple-500/20">
                                                             {(order.client_name || 'S')[0].toUpperCase()}
                                                         </div>
-                                                        <span className="text-sm font-semibold text-[var(--color-text)]">{order.client_name || 'Sin nombre'}</span>
+                                                        <div className="flex flex-col gap-1 min-w-0">
+                                                            <span className="text-sm font-semibold text-[var(--color-text)] truncate">{order.client_name || 'Sin nombre'}</span>
+                                                            <ExternalSourceBadge preorder={order} />
+                                                        </div>
                                                     </div>
                                                 </td>
                                                 <td className="py-4 px-5 align-top">
@@ -591,28 +785,14 @@ const Production = () => {
                                                     </span>
                                                 </td>
                                                 <td className="py-4 px-5 align-top">
-                                                    <div className="flex items-center justify-center gap-2" onClick={e => e.stopPropagation()}>
-                                                        {canManage && order.status === 'pending' && (
-                                                            <button onClick={() => handleStatusChange(order.id, 'preparing')}
-                                                                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-md shadow-blue-500/20 hover:shadow-lg hover:shadow-blue-500/30 transition-all flex items-center gap-1.5 active:scale-95">
-                                                                <ChefHat size={13} />
-                                                                Empezar
-                                                            </button>
-                                                        )}
-                                                        {canManage && order.status === 'preparing' && (
-                                                            <button onClick={() => handleStatusChange(order.id, 'ready')}
-                                                                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/30 transition-all flex items-center gap-1.5 active:scale-95">
-                                                                <Check size={13} />
-                                                                Listo
-                                                            </button>
-                                                        )}
-                                                        {canManage && order.status === 'ready' && (
-                                                            <button onClick={() => handleStatusChange(order.id, 'delivered')}
-                                                                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/30 transition-all flex items-center gap-1.5 active:scale-95">
-                                                                <Truck size={13} />
-                                                                Entregar
-                                                            </button>
-                                                        )}
+                                                    <div className="flex items-center justify-center gap-2 flex-wrap" onClick={e => e.stopPropagation()}>
+                                                        <ProductionActions
+                                                            order={order}
+                                                            canManage={canManage}
+                                                            onAction={handleStatusChange}
+                                                            onReject={setRejectingOrder}
+                                                            layout="inline"
+                                                        />
                                                         <button onClick={() => setSelectedPreorder(order)}
                                                             className="px-3 py-2 rounded-xl text-xs font-semibold text-[var(--color-text-muted)] border border-[var(--glass-border)] hover:border-[var(--color-primary)]/50 hover:text-[var(--color-primary)] transition-all flex items-center gap-1.5">
                                                             <Eye size={13} />
@@ -642,8 +822,10 @@ const Production = () => {
                                             className={cn(
                                                 "relative flex flex-col rounded-2xl border-t-[6px] bg-[var(--color-surface)] shadow-md hover:shadow-xl hover:-translate-y-0.5 transition-all cursor-pointer overflow-hidden",
                                                 order.status === 'pending' && 'border-amber-500',
+                                                order.status === 'confirmed' && 'border-cyan-500',
                                                 order.status === 'preparing' && 'border-blue-500',
                                                 order.status === 'ready' && 'border-emerald-500',
+                                                order.status === 'out_for_delivery' && 'border-indigo-500',
                                                 order.status === 'delivered' && 'border-gray-500',
                                                 order.status === 'canceled' && 'border-red-500',
                                             )}>
@@ -670,7 +852,10 @@ const Production = () => {
                                                         {config.label}
                                                     </span>
                                                 </div>
-                                                <p className="text-[10px] text-[var(--color-text-muted)] mt-2 font-mono">Orden #{order.id}</p>
+                                                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                                    <p className="text-[10px] text-[var(--color-text-muted)] font-mono">Orden #{order.id}</p>
+                                                    <ExternalSourceBadge preorder={order} />
+                                                </div>
                                             </div>
 
                                             {/* Productos */}
@@ -700,26 +885,15 @@ const Production = () => {
                                             {/* Pie con acciones */}
                                             <div className="px-4 py-3 border-t border-dashed border-[var(--glass-border)] bg-black/5 dark:bg-white/[0.02]"
                                                 onClick={e => e.stopPropagation()}>
-                                                {canManage && (order.status === 'pending' || order.status === 'preparing' || order.status === 'ready') ? (
+                                                {canManage && (getForwardActions(order).length > 0 || canRejectOrder(order)) ? (
                                                     <div className="flex gap-2">
-                                                        {order.status === 'pending' && (
-                                                            <button onClick={() => handleStatusChange(order.id, 'preparing')}
-                                                                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-md shadow-blue-500/20 hover:shadow-lg hover:shadow-blue-500/30 transition-all flex items-center justify-center gap-1.5 active:scale-95">
-                                                                <ChefHat size={14} /> Empezar
-                                                            </button>
-                                                        )}
-                                                        {order.status === 'preparing' && (
-                                                            <button onClick={() => handleStatusChange(order.id, 'ready')}
-                                                                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/30 transition-all flex items-center justify-center gap-1.5 active:scale-95">
-                                                                <Check size={14} /> Marcar Listo
-                                                            </button>
-                                                        )}
-                                                        {order.status === 'ready' && (
-                                                            <button onClick={() => handleStatusChange(order.id, 'delivered')}
-                                                                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/30 transition-all flex items-center justify-center gap-1.5 active:scale-95">
-                                                                <Truck size={14} /> Entregar
-                                                            </button>
-                                                        )}
+                                                        <ProductionActions
+                                                            order={order}
+                                                            canManage={canManage}
+                                                            onAction={handleStatusChange}
+                                                            onReject={setRejectingOrder}
+                                                            layout="block"
+                                                        />
                                                         <button onClick={() => setSelectedPreorder(order)}
                                                             className="px-3 py-2.5 rounded-xl text-xs font-semibold text-[var(--color-text-muted)] border border-[var(--glass-border)] hover:border-[var(--color-primary)]/50 hover:text-[var(--color-primary)] transition-all flex items-center gap-1.5">
                                                             <Eye size={14} />
@@ -752,12 +926,13 @@ const Production = () => {
                                         className="rounded-2xl p-4 cursor-pointer transition-all border border-[var(--glass-border)] hover:border-[var(--color-primary)]/30 space-y-3 active:scale-[0.99] bg-[var(--color-surface)]">
                                         {/* Top row: status + time */}
                                         <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 flex-wrap">
                                                 <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border", config.color)}>
                                                     <StatusIcon size={12} />
                                                     {config.label}
                                                 </span>
                                                 <span className="text-[10px] text-[var(--color-text-muted)] font-medium">#{order.id}</span>
+                                                <ExternalSourceBadge preorder={order} />
                                             </div>
                                             <div className="text-right">
                                                 <p className="text-sm font-bold text-[var(--color-primary)]">🕐 {order.due_time}</p>
@@ -790,26 +965,15 @@ const Production = () => {
                                         )}
 
                                         {/* Quick action */}
-                                        {canManage && (order.status === 'pending' || order.status === 'preparing' || order.status === 'ready') && (
+                                        {canManage && (getForwardActions(order).length > 0 || canRejectOrder(order)) && (
                                             <div className="flex gap-2 pt-1" onClick={e => e.stopPropagation()}>
-                                                {order.status === 'pending' && (
-                                                    <button onClick={() => handleStatusChange(order.id, 'preparing')}
-                                                        className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-md shadow-blue-500/20 flex items-center justify-center gap-1.5 active:scale-95">
-                                                        <ChefHat size={14} /> Empezar
-                                                    </button>
-                                                )}
-                                                {order.status === 'preparing' && (
-                                                    <button onClick={() => handleStatusChange(order.id, 'ready')}
-                                                        className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5 active:scale-95">
-                                                        <Check size={14} /> Listo
-                                                    </button>
-                                                )}
-                                                {order.status === 'ready' && (
-                                                    <button onClick={() => handleStatusChange(order.id, 'delivered')}
-                                                        className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5 active:scale-95">
-                                                        <Truck size={14} /> Entregar
-                                                    </button>
-                                                )}
+                                                <ProductionActions
+                                                    order={order}
+                                                    canManage={canManage}
+                                                    onAction={handleStatusChange}
+                                                    onReject={setRejectingOrder}
+                                                    layout="block"
+                                                />
                                             </div>
                                         )}
                                     </div>
@@ -826,6 +990,17 @@ const Production = () => {
                     preorder={selectedPreorder}
                     onClose={() => setSelectedPreorder(null)}
                     onStatusChange={handleStatusChange}
+                    onReject={setRejectingOrder}
+                    canManage={canManage}
+                />
+            )}
+
+            {/* Reject Reason Modal */}
+            {rejectingOrder && (
+                <RejectReasonModal
+                    order={rejectingOrder}
+                    onClose={() => setRejectingOrder(null)}
+                    onConfirm={handleReject}
                 />
             )}
         </div>

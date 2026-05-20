@@ -10874,13 +10874,42 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    updatePreorderStatus: async (preorderId, newStatus) => {
+    updatePreorderStatus: async (preorderId, newStatus, reason = null) => {
         try {
-            await turso.execute({
-                sql: `UPDATE preorders SET status = ?, updated_at = datetime('now') WHERE id = ?`,
-                args: [newStatus, preorderId]
+            // Leemos external_source/public_code antes para saber si avisar a miniveci
+            const infoRes = await turso.execute({
+                sql: 'SELECT external_source, external_public_code FROM preorders WHERE id = ?',
+                args: [preorderId],
             });
+            const info = infoRes.rows?.[0] || {};
+
+            // Si hay motivo (rechazo), lo guardamos en notes para que quede registro local
+            if (reason && reason.trim()) {
+                await turso.execute({
+                    sql: `UPDATE preorders SET status = ?, notes = TRIM(COALESCE(notes,'') || ' · Rechazo: ' || ?), updated_at = datetime('now') WHERE id = ?`,
+                    args: [newStatus, reason.trim(), preorderId]
+                });
+            } else {
+                await turso.execute({
+                    sql: `UPDATE preorders SET status = ?, updated_at = datetime('now') WHERE id = ?`,
+                    args: [newStatus, preorderId]
+                });
+            }
             await get().fetchPreorders();
+
+            // Aviso saliente a miniveci si el encargo vino de allí (fire-and-forget)
+            if (info.external_source === 'miniveci' && info.external_public_code) {
+                fetch('/api/integration/notify-miniveci-status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        public_code: info.external_public_code,
+                        status: newStatus,
+                        ...(reason && reason.trim() ? { reason: reason.trim() } : {}),
+                    }),
+                }).catch(err => console.warn('notify-miniveci failed', err));
+            }
+
             return { success: true };
         } catch (e) {
             console.error('Error updating preorder status:', e);

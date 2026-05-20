@@ -8,6 +8,9 @@ import integrationSyncPriceHandler from './api/integration/sync-price.js';
 import integrationSyncStockHandler from './api/integration/sync-stock.js';
 import integrationRetryStockHandler from './api/integration/retry-stock.js';
 import integrationSyncProductHandler from './api/integration/sync-product.js';
+import notifyMiniveciStatusHandler from './api/integration/notify-miniveci-status.js';
+
+import externalPreordersHandler from './api/external/preorders.js';
 
 import siiConfigHandler from './api/sii/config.js';
 import siiUploadCertHandler from './api/sii/upload-cert.js';
@@ -171,6 +174,16 @@ app.all('/api/sii/reserved-folios', async (req, res) => {
 app.all('/api/sii/reserve-folios', async (req, res) => {
     try { return await siiReserveFoliosHandler(req, res); }
     catch (error) { console.error('❌ /api/sii/reserve-folios error:', error); return res.status(500).json({ error: error.message }); }
+});
+
+app.all('/api/integration/notify-miniveci-status', async (req, res) => {
+    try { return await notifyMiniveciStatusHandler(req, res); }
+    catch (error) { console.error('❌ /api/integration/notify-miniveci-status error:', error); return res.status(500).json({ error: error.message }); }
+});
+
+app.all('/api/external/preorders', async (req, res) => {
+    try { return await externalPreordersHandler(req, res); }
+    catch (error) { console.error('❌ /api/external/preorders error:', error); return res.status(500).json({ error: error.message }); }
 });
 
 app.use('/api', (_req, res) => {

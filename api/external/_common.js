@@ -1,10 +1,26 @@
 import crypto from 'crypto';
 import { createClient } from '@libsql/client';
 
-export const turso = createClient({
-    url: process.env.VITE_TURSO_DATABASE_URL,
-    authToken: process.env.VITE_TURSO_AUTH_TOKEN,
-});
+// Lazy: el cliente se construye en la primera llamada para que dotenv ya haya
+// cargado las env vars cuando se ejecute en server.js local (los `import` ESM
+// se hoistean antes de dotenv.config()). En Vercel da igual porque las vars
+// están en el proceso desde el inicio.
+let _client = null;
+function getClient() {
+    if (_client) return _client;
+    const url = process.env.VITE_TURSO_DATABASE_URL;
+    const authToken = process.env.VITE_TURSO_AUTH_TOKEN;
+    if (!url || !authToken) {
+        throw new Error('Faltan VITE_TURSO_DATABASE_URL o VITE_TURSO_AUTH_TOKEN');
+    }
+    _client = createClient({ url, authToken });
+    return _client;
+}
+
+export const turso = {
+    execute: (...args) => getClient().execute(...args),
+    batch: (...args) => getClient().batch(...args),
+};
 
 const ALLOWED_ORIGINS = (process.env.EXTERNAL_CORS_ORIGINS || '')
     .split(',')
@@ -71,6 +87,165 @@ export async function ensureProductsSyncColumns() {
             is_active = COALESCE(is_active, 1)
         WHERE updated_at IS NULL OR created_at IS NULL OR is_active IS NULL
     `);
+}
+
+export async function ensurePreordersSyncColumns() {
+    const preorderCols = await getTableColumns('preorders');
+    const additions = [
+        ['external_order_id', 'TEXT'],
+        ['external_public_code', 'TEXT'],
+        ['external_source', 'TEXT'],
+        ['client_email', 'TEXT'],
+        ['client_rut', 'TEXT'],
+        ['client_external_id', 'TEXT'],
+        ['delivery_fee', 'REAL DEFAULT 0'],
+        ['payment_method', 'TEXT'],
+    ];
+    for (const [col, type] of additions) {
+        if (!preorderCols.has(col)) {
+            await turso.execute(`ALTER TABLE preorders ADD COLUMN ${col} ${type}`);
+        }
+    }
+
+    const itemCols = await getTableColumns('preorder_items');
+    // preorder_items ya tiene billing_unit, gram_per_unit. Añadimos los externos.
+    const itemAdditions = [
+        ['external_product_id', 'TEXT'],
+    ];
+    for (const [col, type] of itemAdditions) {
+        if (!itemCols.has(col)) {
+            await turso.execute(`ALTER TABLE preorder_items ADD COLUMN ${col} ${type}`);
+        }
+    }
+}
+
+export async function ensureClientsSyncColumns() {
+    const cols = await getTableColumns('clients');
+    const additions = [
+        ['external_id', 'TEXT'],
+        ['external_source', 'TEXT'],
+    ];
+    for (const [col, type] of additions) {
+        if (!cols.has(col)) {
+            await turso.execute(`ALTER TABLE clients ADD COLUMN ${col} ${type}`);
+        }
+    }
+}
+
+export function normalizePhoneForLookup(value) {
+    if (!value) return '';
+    // Stripeamos todo lo no-numérico y comparamos por los últimos 9 dígitos.
+    // Cubre formatos `+56 9 5022 5491`, `+56950225491`, `950225491`, `9-5022-5491`.
+    return String(value).replace(/\D+/g, '').slice(-9);
+}
+
+export function normalizeRutForLookup(value) {
+    if (!value) return '';
+    // RUT chileno: quitamos puntos, guiones, espacios y normalizamos la `k`.
+    return String(value).replace(/[.\s-]/g, '').toLowerCase();
+}
+
+/**
+ * Busca un cliente existente (external_id → rut → phone) o lo crea si no
+ * existe. Devuelve el `id` numérico del cliente, o `null` si el payload no
+ * tiene datos suficientes para crear uno (en cuyo caso el preorder queda con
+ * client_id=null, comportamiento pre-existente).
+ *
+ * Idempotencia: si matchea por rut o phone pero el cliente no tenía
+ * external_id guardado, lo backfilleamos. Esto evita duplicar clientes cuando
+ * miniveci empieza a mandar UUIDs después de haber mandado solo teléfono.
+ */
+export async function resolveOrCreateClient(client, companyId, { source = null } = {}) {
+    if (!client || typeof client !== 'object') return null;
+
+    const externalId = (client.external_id ?? '').toString().trim() || null;
+    const rutRaw = (client.rut ?? '').toString().trim();
+    const phoneRaw = (client.phone ?? '').toString().trim();
+    const name = (client.name ?? '').toString().trim();
+    const email = (client.email ?? '').toString().trim() || null;
+    const address = (client.address ?? '').toString().trim() || null;
+
+    const rutNorm = normalizeRutForLookup(rutRaw);
+    const phoneNorm = normalizePhoneForLookup(phoneRaw);
+
+    if (!externalId && !rutNorm && !phoneNorm && !name) return null;
+
+    const backfillExternal = async (clientId) => {
+        if (!externalId) return;
+        await turso.execute({
+            sql: `UPDATE clients
+                  SET external_id = COALESCE(NULLIF(external_id, ''), ?),
+                      external_source = COALESCE(NULLIF(external_source, ''), ?)
+                  WHERE id = ?`,
+            args: [externalId, source, clientId],
+        });
+    };
+
+    // 1) Match por external_id (la llave más estable)
+    if (externalId) {
+        const r = await turso.execute({
+            sql: 'SELECT id FROM clients WHERE company_id = ? AND external_id = ? LIMIT 1',
+            args: [companyId, externalId],
+        });
+        if (r.rows?.[0]) return r.rows[0].id;
+    }
+
+    // 2) Match por RUT normalizado
+    if (rutNorm) {
+        const r = await turso.execute({
+            sql: `SELECT id FROM clients
+                  WHERE company_id = ?
+                    AND rut IS NOT NULL AND rut != ''
+                    AND lower(replace(replace(replace(rut, '.', ''), '-', ''), ' ', '')) = ?
+                  LIMIT 1`,
+            args: [companyId, rutNorm],
+        });
+        if (r.rows?.[0]) {
+            await backfillExternal(r.rows[0].id);
+            return r.rows[0].id;
+        }
+    }
+
+    // 3) Match por teléfono (últimos 9 dígitos)
+    if (phoneNorm) {
+        const r = await turso.execute({
+            sql: `SELECT id FROM clients
+                  WHERE company_id = ?
+                    AND phone IS NOT NULL AND phone != ''
+                    AND substr(replace(replace(replace(replace(phone, ' ', ''), '+', ''), '-', ''), '.', ''), -9) = ?
+                  LIMIT 1`,
+            args: [companyId, phoneNorm],
+        });
+        if (r.rows?.[0]) {
+            await backfillExternal(r.rows[0].id);
+            return r.rows[0].id;
+        }
+    }
+
+    // 4) No matcheó: crear cliente nuevo. `name` es NOT NULL en la tabla.
+    if (!name) return null;
+
+    const insertRes = await turso.execute({
+        sql: `INSERT INTO clients
+              (name, rut, phone, email, address, created_at, company_id, external_id, external_source)
+              VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
+              RETURNING id`,
+        args: [
+            name,
+            rutRaw || null,
+            phoneRaw || null,
+            email,
+            address,
+            companyId,
+            externalId,
+            source,
+        ],
+    });
+    const newId = insertRes.rows?.[0]?.id;
+    if (newId) {
+        console.log(`✅ [clients] Cliente nuevo creado #${newId} desde ${source || 'externa'} (${name}${phoneRaw ? ' · ' + phoneRaw : ''})`);
+    }
+    return newId || null;
 }
 
 export async function ensureSalesSyncColumns() {

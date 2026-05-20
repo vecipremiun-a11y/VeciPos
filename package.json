@@ -30,6 +30,8 @@
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.562.0",
     "mercadopago": "^2.0.11",
+    "pusher": "^5.3.3",
+    "pusher-js": "^8.5.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.12.0",
