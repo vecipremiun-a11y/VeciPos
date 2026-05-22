@@ -9534,28 +9534,19 @@ export const useStore = create(persist((set, get) => ({
             const tz = timezone || get().currentCompanyTimezone;
             const dateStr = formatInCompanyTime(saleData.date, tz, 'yyyy-MM-dd');
 
-            const existing = await turso.execute({
-                sql: 'SELECT * FROM sales_daily_summary WHERE company_id = ? AND day = ?',
-                args: [companyId, dateStr]
+            // FASE 7.1 · UPSERT: 1 roundtrip en vez de SELECT + INSERT/UPDATE (2).
+            // PK (company_id, day) garantiza atomicidad y elimina race condition
+            // entre cajeros concurrentes del mismo día.
+            await turso.execute({
+                sql: `INSERT INTO sales_daily_summary
+                        (company_id, day, total_sales, total_orders, updated_at)
+                      VALUES (?, ?, ?, 1, datetime('now'))
+                      ON CONFLICT(company_id, day) DO UPDATE SET
+                        total_sales = total_sales + excluded.total_sales,
+                        total_orders = total_orders + 1,
+                        updated_at = datetime('now')`,
+                args: [companyId, dateStr, saleData.total]
             });
-
-            if (existing.rows.length === 0) {
-                await turso.execute({
-                    sql: `INSERT INTO sales_daily_summary 
-                          (company_id, day, total_sales, total_orders, updated_at)
-                          VALUES (?, ?, ?, 1, datetime('now'))`,
-                    args: [companyId, dateStr, saleData.total]
-                });
-            } else {
-                await turso.execute({
-                    sql: `UPDATE sales_daily_summary SET
-                            total_sales = total_sales + ?,
-                            total_orders = total_orders + 1,
-                            updated_at = datetime('now')
-                          WHERE company_id = ? AND day = ?`,
-                    args: [saleData.total, companyId, dateStr]
-                });
-            }
 
             return { success: true };
         } catch (e) {
