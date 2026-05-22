@@ -9611,15 +9611,17 @@ export const useStore = create(persist((set, get) => ({
 
     updateProductDailyProfit: async (items, companyId, date) => {
         try {
+            if (!Array.isArray(items) || items.length === 0) {
+                return { success: true };
+            }
+
             const tz = get().currentCompanyTimezone;
             const dateStr = formatInCompanyTime(date, tz, 'yyyy-MM-dd');
 
-            for (const item of items) {
-                const existing = await turso.execute({
-                    sql: 'SELECT * FROM product_daily_profit WHERE company_id = ? AND product_id = ? AND day = ?',
-                    args: [companyId, item.id, dateStr]
-                });
-
+            // FASE 7.2 · Batch UPSERT: 1 roundtrip de red en vez de 2N
+            // (un SELECT + un INSERT/UPDATE por cada item). Atómico (transacción
+            // implícita de turso.batch) y sin race condition en agregados.
+            const queries = items.map(item => {
                 const price = parseFloat(item.price) || 0;
                 const qty = parseFloat(item.quantity) || 0;
                 const costUnit = parseFloat(item.cost) || 0;
@@ -9631,37 +9633,24 @@ export const useStore = create(persist((set, get) => ({
                 const tax = revenue - (netPrice * qty);
                 const profit = (netPrice - costUnit) * qty;
 
-                if (existing.rows.length === 0) {
-                    await turso.execute({
-                        sql: `INSERT INTO product_daily_profit
-                              (company_id, product_id, day, total_quantity, total_revenue,
-                               total_cost, total_tax, total_profit, updated_at)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-                        args: [companyId, item.id, dateStr, item.quantity,
-                            revenue, cost, tax, profit]
-                    });
-                } else {
-                    const current = existing.rows[0];
-                    const newRevenue = current.total_revenue + revenue;
-                    const newCost = current.total_cost + cost;
-                    const newTax = current.total_tax + tax;
-                    const newProfit = current.total_profit + profit;
+                return {
+                    sql: `INSERT INTO product_daily_profit
+                            (company_id, product_id, day, total_quantity, total_revenue,
+                             total_cost, total_tax, total_profit, updated_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                          ON CONFLICT(company_id, product_id, day) DO UPDATE SET
+                            total_quantity = total_quantity + excluded.total_quantity,
+                            total_revenue = total_revenue + excluded.total_revenue,
+                            total_cost = total_cost + excluded.total_cost,
+                            total_tax = total_tax + excluded.total_tax,
+                            total_profit = total_profit + excluded.total_profit,
+                            updated_at = CURRENT_TIMESTAMP`,
+                    args: [companyId, item.id, dateStr, item.quantity,
+                        revenue, cost, tax, profit]
+                };
+            });
 
-                    await turso.execute({
-                        sql: `UPDATE product_daily_profit SET
-                                total_quantity = total_quantity + ?,
-                                total_revenue = ?,
-                                total_cost = ?,
-                                total_tax = ?,
-                                total_profit = ?,
-                                updated_at = CURRENT_TIMESTAMP
-                              WHERE company_id = ? AND product_id = ? AND day = ?`,
-                        args: [item.quantity, newRevenue, newCost, newTax, newProfit,
-                            companyId, item.id, dateStr]
-                    });
-                }
-            }
-
+            await turso.batch(queries);
             return { success: true };
         } catch (e) {
             console.error('Error updating product profit:', e);
