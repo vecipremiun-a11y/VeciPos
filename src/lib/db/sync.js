@@ -96,6 +96,97 @@ export async function syncCatalogFromServer(companyId) {
 }
 
 /**
+ * FASE 8.1 — Sincronización incremental del catálogo.
+ *
+ * Trae solo las filas con `updated_at > lastSync` de las tablas que YA
+ * tienen la columna (products, tax_rates). Las demás (clients, categories,
+ * product_lots) NO se tocan acá — su refresco depende del próximo full sync
+ * (login, cambio de empresa, refresh manual). Se cubrirán en Fase 8.2 cuando
+ * agreguemos `updated_at` en esas tablas.
+ *
+ * Comportamiento:
+ * - Si no hay `lastSync` registrado en Dexie → fallback a `syncCatalogFromServer`
+ *   (primera vez en este browser/empresa).
+ * - bulkPut de Dexie es upsert por PK (`&id`): actualiza si existe, inserta si no.
+ *   No se borran filas — el full sync (login/switch) sigue siendo la fuente
+ *   de verdad para purgar locales obsoletos.
+ * - `lastSync` se actualiza al MAX(updated_at) observado en las filas
+ *   descargadas. Si no llegan filas (sin cambios), `lastSync` NO se mueve —
+ *   la próxima pasada repite el mismo rango (idempotente, query barata).
+ *
+ * Pensado para reemplazar el sync de cada polling (cada 60s/5min). Los
+ * paths críticos (startup, cambio de empresa, refresh manual) deben seguir
+ * llamando a `syncCatalogFromServer` (full).
+ *
+ * @param {string} companyId
+ * @returns {Promise<{ok: boolean, counts?: object, mode?: 'incremental'|'full', lastSync?: string, error?: string}>}
+ */
+export async function syncCatalogIncremental(companyId) {
+  if (!companyId) return { ok: false, error: 'companyId requerido' };
+  if (!navigator.onLine) return { ok: false, error: 'offline' };
+
+  const lastSyncRow = await localDb.meta.get(`lastSync:${companyId}`);
+  const lastSync = lastSyncRow?.value;
+
+  // Primera vez (sin checkpoint): cae al full sync para inicializar.
+  if (!lastSync) {
+    return syncCatalogFromServer(companyId);
+  }
+
+  try {
+    const queries = [
+      { sql: 'SELECT * FROM products WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
+      { sql: 'SELECT * FROM tax_rates WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
+    ];
+
+    const results = await turso.batch(queries, 'read');
+    const [productsRes, taxesRes] = results;
+
+    const stamp = (rows) => rows.map((r) => ({ ...r, companyId }));
+    const allRows = [...productsRes.rows, ...taxesRes.rows];
+
+    // Avanzar checkpoint solo si efectivamente trajimos filas. Si quedó vacío,
+    // no movemos lastSync — la próxima pasada repite la ventana (sin pérdida).
+    const maxUpdatedAt = allRows.reduce((max, r) => {
+      const t = r.updated_at;
+      return t && String(t) > String(max) ? String(t) : max;
+    }, lastSync);
+
+    await localDb.transaction(
+      'rw',
+      [localDb.products, localDb.taxRates, localDb.meta],
+      async () => {
+        if (productsRes.rows.length) {
+          await localDb.products.bulkPut(stamp(productsRes.rows));
+        }
+        if (taxesRes.rows.length) {
+          await localDb.taxRates.bulkPut(stamp(taxesRes.rows));
+        }
+        if (maxUpdatedAt !== lastSync) {
+          await localDb.meta.put({
+            key: `lastSync:${companyId}`,
+            value: maxUpdatedAt,
+          });
+        }
+      }
+    );
+
+    const counts = {
+      products: productsRes.rows.length,
+      taxRates: taxesRes.rows.length,
+    };
+
+    if (allRows.length > 0) {
+      console.log('[sync] Incremental:', counts, 'lastSync→', maxUpdatedAt);
+    }
+    return { ok: true, counts, mode: 'incremental', lastSync: maxUpdatedAt };
+  } catch (err) {
+    console.error('[sync] Error sincronización incremental:', err);
+    return { ok: false, mode: 'incremental', error: String(err?.message || err) };
+  }
+}
+
+/**
  * Procesa la cola de operaciones offline pendientes.
  * Por ahora solo soporta 'sale' (delegando al store.addSale).
  * Las demás operaciones (return, cash_open, etc.) se agregarán en Fase 2.

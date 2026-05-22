@@ -53,7 +53,7 @@ const SupportInbox = lazy(() => import('./pages/admin/SupportInbox'));
 const ProfitReport = lazy(() => import('./pages/admin/ProfitReport'));
 const SalesAnalytics = lazy(() => import('./pages/reports/SalesAnalytics'));
 import { useStore } from './store/useStore';
-import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncPendingOpsToServer } from './lib/db/sync';
+import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncCatalogIncremental, syncPendingOpsToServer } from './lib/db/sync';
 import { createSmartInterval } from './lib/smartPolling';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 
@@ -202,14 +202,19 @@ function App() {
     // Reintento inicial al arrancar (cola legacy localStorage)
     processPendingSalesQueue();
 
-    // Sincronizar cola Dexie + descargar catálogo si hay internet
-    const syncAll = async () => {
+    // Sincronizar cola Dexie + descargar catálogo si hay internet.
+    // FASE 8.1 · El polling usa sync incremental (solo trae rows con
+    // updated_at > lastSync de products y tax_rates). El startup y los
+    // refresh manuales siguen siendo full sync. Si no hay lastSync,
+    // syncCatalogIncremental cae automáticamente a full.
+    const syncAll = async ({ incremental = false } = {}) => {
       if (!navigator.onLine) return;
       const state = useStore.getState();
       const cid = state.activeCompanyId;
       if (!cid) return;
       // Sync catálogo en background (no bloquear)
-      syncCatalogFromServer(cid).catch((e) => console.warn('[sync] catálogo:', e));
+      const catalogFn = incremental ? syncCatalogIncremental : syncCatalogFromServer;
+      catalogFn(cid).catch((e) => console.warn('[sync] catálogo:', e));
       // NOTA: pre-reserva automática de folios DESACTIVADA.
       // Consumía CAFs completos al iniciar sesión y los marcaba como exhausted
       // sin emitir DTEs reales. Para offline, usar manualmente desde Configuración → Sincronización Offline.
@@ -229,7 +234,8 @@ function App() {
       }
     };
 
-    syncAll();
+    // Startup: full sync (limpia stale y purga rows borradas server-side).
+    syncAll({ incremental: false });
 
     // FASE 9 · Sync inteligente con smart-polling:
     //   - 60s mientras hay actividad reciente (venta / mutación)
@@ -241,7 +247,8 @@ function App() {
     const stop = createSmartInterval(
       () => {
         processPendingSalesQueue();
-        return syncAll();
+        // Polling: incremental (Fase 8.1)
+        return syncAll({ incremental: true });
       },
       {
         label: 'app-sync',
