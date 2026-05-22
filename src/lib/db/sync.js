@@ -96,23 +96,25 @@ export async function syncCatalogFromServer(companyId) {
 }
 
 /**
- * FASE 8.1 — Sincronización incremental del catálogo.
+ * FASE 8.1 + 8.3 — Sincronización incremental del catálogo.
  *
- * Trae solo las filas con `updated_at > lastSync` de las tablas que YA
- * tienen la columna (products, tax_rates). Las demás (clients, categories,
- * product_lots) NO se tocan acá — su refresco depende del próximo full sync
- * (login, cambio de empresa, refresh manual). Se cubrirán en Fase 8.2 cuando
- * agreguemos `updated_at` en esas tablas.
+ * Trae solo las filas con `updated_at > lastSync` de las 5 tablas catálogo:
+ * products + tax_rates (desde Fase 8.1, con updated_at de Fase 2.5) +
+ * clients + categories + product_lots (desde Fase 8.3, con updated_at
+ * añadido por la migration de Fase 8.2).
  *
  * Comportamiento:
  * - Si no hay `lastSync` registrado en Dexie → fallback a `syncCatalogFromServer`
  *   (primera vez en este browser/empresa).
  * - bulkPut de Dexie es upsert por PK (`&id`): actualiza si existe, inserta si no.
  *   No se borran filas — el full sync (login/switch) sigue siendo la fuente
- *   de verdad para purgar locales obsoletos.
+ *   de verdad para purgar locales obsoletos (soft-delete diferido).
  * - `lastSync` se actualiza al MAX(updated_at) observado en las filas
  *   descargadas. Si no llegan filas (sin cambios), `lastSync` NO se mueve —
  *   la próxima pasada repite el mismo rango (idempotente, query barata).
+ * - product_lots aquí NO filtra por `quantity > 0` (el full sí lo hace) —
+ *   para incremental queremos también detectar lotes que llegan a 0
+ *   (vencidos / agotados / consumidos por venta).
  *
  * Pensado para reemplazar el sync de cada polling (cada 60s/5min). Los
  * paths críticos (startup, cambio de empresa, refresh manual) deben seguir
@@ -136,14 +138,23 @@ export async function syncCatalogIncremental(companyId) {
   try {
     const queries = [
       { sql: 'SELECT * FROM products WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
+      { sql: 'SELECT * FROM product_lots WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
+      { sql: 'SELECT * FROM clients WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
+      { sql: 'SELECT * FROM categories WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
       { sql: 'SELECT * FROM tax_rates WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
     ];
 
     const results = await turso.batch(queries, 'read');
-    const [productsRes, taxesRes] = results;
+    const [productsRes, lotsRes, clientsRes, catsRes, taxesRes] = results;
 
-    const stamp = (rows) => rows.map((r) => ({ ...r, companyId }));
-    const allRows = [...productsRes.rows, ...taxesRes.rows];
+    const stamp = (rows, extra = {}) => rows.map((r) => ({ ...r, companyId, ...extra }));
+    const allRows = [
+      ...productsRes.rows,
+      ...lotsRes.rows,
+      ...clientsRes.rows,
+      ...catsRes.rows,
+      ...taxesRes.rows,
+    ];
 
     // Avanzar checkpoint solo si efectivamente trajimos filas. Si quedó vacío,
     // no movemos lastSync — la próxima pasada repite la ventana (sin pérdida).
@@ -154,10 +165,28 @@ export async function syncCatalogIncremental(companyId) {
 
     await localDb.transaction(
       'rw',
-      [localDb.products, localDb.taxRates, localDb.meta],
+      [
+        localDb.products,
+        localDb.productLots,
+        localDb.clients,
+        localDb.categories,
+        localDb.taxRates,
+        localDb.meta,
+      ],
       async () => {
         if (productsRes.rows.length) {
           await localDb.products.bulkPut(stamp(productsRes.rows));
+        }
+        if (lotsRes.rows.length) {
+          await localDb.productLots.bulkPut(
+            stamp(lotsRes.rows.map((r) => ({ ...r, productId: r.product_id })))
+          );
+        }
+        if (clientsRes.rows.length) {
+          await localDb.clients.bulkPut(stamp(clientsRes.rows));
+        }
+        if (catsRes.rows.length) {
+          await localDb.categories.bulkPut(stamp(catsRes.rows));
         }
         if (taxesRes.rows.length) {
           await localDb.taxRates.bulkPut(stamp(taxesRes.rows));
@@ -173,6 +202,9 @@ export async function syncCatalogIncremental(companyId) {
 
     const counts = {
       products: productsRes.rows.length,
+      productLots: lotsRes.rows.length,
+      clients: clientsRes.rows.length,
+      categories: catsRes.rows.length,
       taxRates: taxesRes.rows.length,
     };
 
