@@ -9561,46 +9561,31 @@ export const useStore = create(persist((set, get) => ({
             const dateStr = formatInCompanyTime(saleData.date, tz, 'yyyy-MM-dd');
             const performanceId = `perf_${companyId}_${userId}_${dateStr}`;
 
-            const existing = await turso.execute({
-                sql: 'SELECT * FROM vendor_daily_performance WHERE company_id = ? AND user_id = ? AND date = ?',
-                args: [companyId, userId, dateStr]
-            });
-
             const itemsSold = saleData.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
             const cost = saleData.items?.reduce((sum, item) => sum + (item.cost || 0) * item.quantity, 0) || 0;
             const profit = saleData.total - cost;
             const saleTime = new Date(saleData.date).toISOString();
+            const now = new Date().toISOString();
 
-            if (existing.rows.length === 0) {
-                const now = new Date().toISOString();
-                await turso.execute({
-                    sql: `INSERT INTO vendor_daily_performance
-                          (id, company_id, user_id, user_name, date, total_sales, total_amount, total_profit,
-                           avg_ticket, total_items_sold, first_sale_time, last_sale_time, created_at, updated_at)
-                          VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    args: [performanceId, companyId, userId, userName, dateStr, saleData.total,
-                        profit, saleData.total, itemsSold, saleTime, saleTime, now, now]
-                });
-            } else {
-                const current = existing.rows[0];
-                const newTotalSales = current.total_sales + 1;
-                const newTotalAmount = current.total_amount + saleData.total;
-                const newAvgTicket = newTotalAmount / newTotalSales;
-
-                await turso.execute({
-                    sql: `UPDATE vendor_daily_performance SET
-                            total_sales = ?,
-                            total_amount = ?,
-                            total_profit = total_profit + ?,
-                            avg_ticket = ?,
-                            total_items_sold = total_items_sold + ?,
-                            last_sale_time = ?,
-                            updated_at = ?
-                          WHERE id = ?`,
-                    args: [newTotalSales, newTotalAmount, profit, newAvgTicket, itemsSold,
-                        saleTime, new Date().toISOString(), performanceId]
-                });
-            }
+            // FASE 7.3 · UPSERT: 1 roundtrip en vez de SELECT + INSERT/UPDATE.
+            // avg_ticket se recalcula inline contra los valores OLD del row
+            // (SQLite evalúa SET expressions sobre los valores pre-update).
+            await turso.execute({
+                sql: `INSERT INTO vendor_daily_performance
+                        (id, company_id, user_id, user_name, date, total_sales, total_amount, total_profit,
+                         avg_ticket, total_items_sold, first_sale_time, last_sale_time, created_at, updated_at)
+                      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+                      ON CONFLICT(company_id, user_id, date) DO UPDATE SET
+                        total_sales = total_sales + 1,
+                        total_amount = total_amount + excluded.total_amount,
+                        total_profit = total_profit + excluded.total_profit,
+                        avg_ticket = (total_amount + excluded.total_amount) / (total_sales + 1),
+                        total_items_sold = total_items_sold + excluded.total_items_sold,
+                        last_sale_time = excluded.last_sale_time,
+                        updated_at = excluded.updated_at`,
+                args: [performanceId, companyId, userId, userName, dateStr, saleData.total,
+                    profit, saleData.total, itemsSold, saleTime, saleTime, now, now]
+            });
 
             return { success: true };
         } catch (e) {
@@ -9660,46 +9645,39 @@ export const useStore = create(persist((set, get) => ({
 
     updateProductMovementStats: async (items, companyId) => {
         try {
-            const now = new Date().toISOString();
-
-            for (const item of items) {
-                const statsId = `stats_${companyId}_${item.id}`;
-
-                const existing = await turso.execute({
-                    sql: 'SELECT * FROM product_movement_stats WHERE company_id = ? AND product_id = ?',
-                    args: [companyId, item.id]
-                });
-
-                const revenue = item.price * item.quantity;
-
-                if (existing.rows.length === 0) {
-                    await turso.execute({
-                        sql: `INSERT INTO product_movement_stats
-                              (id, company_id, product_id, product_name, total_sold_all_time,
-                               total_revenue_all_time, sold_last_7_days, revenue_last_7_days,
-                               sold_last_30_days, revenue_last_30_days, last_sale_date, updated_at)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                        args: [statsId, companyId, item.id, item.name, item.quantity, revenue,
-                            item.quantity, revenue, item.quantity, revenue, now, now]
-                    });
-                } else {
-                    await turso.execute({
-                        sql: `UPDATE product_movement_stats SET
-                                total_sold_all_time = total_sold_all_time + ?,
-                                total_revenue_all_time = total_revenue_all_time + ?,
-                                sold_last_7_days = sold_last_7_days + ?,
-                                revenue_last_7_days = revenue_last_7_days + ?,
-                                sold_last_30_days = sold_last_30_days + ?,
-                                revenue_last_30_days = revenue_last_30_days + ?,
-                                last_sale_date = ?,
-                                updated_at = ?
-                              WHERE id = ?`,
-                        args: [item.quantity, revenue, item.quantity, revenue, item.quantity,
-                            revenue, now, now, statsId]
-                    });
-                }
+            if (!Array.isArray(items) || items.length === 0) {
+                return { success: true };
             }
 
+            const now = new Date().toISOString();
+
+            // FASE 7.3 · Batch UPSERT: 1 roundtrip de red en vez de 2N
+            // (SELECT + INSERT/UPDATE por cada item). Atómico, sin race condition.
+            const queries = items.map(item => {
+                const statsId = `stats_${companyId}_${item.id}`;
+                const revenue = item.price * item.quantity;
+
+                return {
+                    sql: `INSERT INTO product_movement_stats
+                            (id, company_id, product_id, product_name, total_sold_all_time,
+                             total_revenue_all_time, sold_last_7_days, revenue_last_7_days,
+                             sold_last_30_days, revenue_last_30_days, last_sale_date, updated_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          ON CONFLICT(company_id, product_id) DO UPDATE SET
+                            total_sold_all_time = total_sold_all_time + excluded.total_sold_all_time,
+                            total_revenue_all_time = total_revenue_all_time + excluded.total_revenue_all_time,
+                            sold_last_7_days = sold_last_7_days + excluded.sold_last_7_days,
+                            revenue_last_7_days = revenue_last_7_days + excluded.revenue_last_7_days,
+                            sold_last_30_days = sold_last_30_days + excluded.sold_last_30_days,
+                            revenue_last_30_days = revenue_last_30_days + excluded.revenue_last_30_days,
+                            last_sale_date = excluded.last_sale_date,
+                            updated_at = excluded.updated_at`,
+                    args: [statsId, companyId, item.id, item.name, item.quantity, revenue,
+                        item.quantity, revenue, item.quantity, revenue, now, now]
+                };
+            });
+
+            await turso.batch(queries);
             return { success: true };
         } catch (e) {
             console.error('Error updating product stats:', e);
@@ -9713,30 +9691,19 @@ export const useStore = create(persist((set, get) => ({
             const dateStr = formatInCompanyTime(saleData.date, tz, 'yyyy-MM-dd');
             const hour = parseInt(formatInCompanyTime(saleData.date, tz, 'H'), 10) || 0;
             const hourlyId = `hourly_${companyId}_${dateStr}_${hour}`;
+            const now = new Date().toISOString();
 
-            const existing = await turso.execute({
-                sql: 'SELECT * FROM hourly_sales_stats WHERE company_id = ? AND date = ? AND hour = ?',
-                args: [companyId, dateStr, hour]
+            // FASE 7.3 · UPSERT: 1 roundtrip en vez de SELECT + INSERT/UPDATE.
+            await turso.execute({
+                sql: `INSERT INTO hourly_sales_stats
+                        (id, company_id, date, hour, total_sales, total_amount, created_at, updated_at)
+                      VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+                      ON CONFLICT(company_id, date, hour) DO UPDATE SET
+                        total_sales = total_sales + 1,
+                        total_amount = total_amount + excluded.total_amount,
+                        updated_at = excluded.updated_at`,
+                args: [hourlyId, companyId, dateStr, hour, saleData.total, now, now]
             });
-
-            if (existing.rows.length === 0) {
-                const now = new Date().toISOString();
-                await turso.execute({
-                    sql: `INSERT INTO hourly_sales_stats
-                          (id, company_id, date, hour, total_sales, total_amount, created_at, updated_at)
-                          VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
-                    args: [hourlyId, companyId, dateStr, hour, saleData.total, now, now]
-                });
-            } else {
-                await turso.execute({
-                    sql: `UPDATE hourly_sales_stats SET
-                            total_sales = total_sales + 1,
-                            total_amount = total_amount + ?,
-                            updated_at = ?
-                          WHERE id = ?`,
-                    args: [saleData.total, new Date().toISOString(), hourlyId]
-                });
-            }
 
             return { success: true };
         } catch (e) {
