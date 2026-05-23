@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Scale, Package, DollarSign, CheckCircle2, AlertTriangle, Plus, Minus } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -96,8 +97,8 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
 
     const preorder = preorderDetails.preorder;
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    return createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <div className="glass-card w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-slide-up">
                 {/* Header */}
                 <div className="p-4 border-b border-[var(--glass-border)] flex items-center justify-between">
@@ -292,7 +293,8 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };
 

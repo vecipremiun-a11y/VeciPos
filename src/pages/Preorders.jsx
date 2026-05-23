@@ -788,6 +788,7 @@ const Preorders = () => {
             const details = await getPreorderDetails(preorderId);
             setIsLoading(false);
             if (details.success) {
+                setSelectedPreorder(null); // cerrar detalle para no superponer modales
                 setDeliveryPreorder(details);
                 setShowDeliveryModal(true);
             }
@@ -800,8 +801,8 @@ const Preorders = () => {
         setSelectedPreorder(null);
     };
 
-    const handleDeliverSuccess = async (preorderId, weights, method) => {
-        const result = await deliverPreorder(preorderId, weights, method);
+    const handleDeliverSuccess = async (preorderId, weights, method, opts = {}) => {
+        const result = await deliverPreorder(preorderId, weights, method, opts);
         if (result.success) {
             setShowDeliveryModal(false);
             setDeliveryPreorder(null);

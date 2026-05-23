@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cocina - POSVECI</title>
+<!--
+  Pantalla KDS (Kitchen Display System) para TV de cocina.
+  DISENADO PARA NAVEGADORES VIEJOS DE SMART TV:
+    - HTML plano + CSS inline + JavaScript ES5 (var, funciones, sin arrow ni template strings)
+    - XMLHttpRequest (no fetch) para maxima compatibilidad
+    - Flexbox (no grid) para layout
+    - Polling cada 15s, sin React, sin Pusher, sin build de Vite
+  Uso:  https://TU-DOMINIO/kds.html?company_id=default
+  Pantalla completa: F11 (o el modo fullscreen de la TV)
+-->
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #0b1120;
+    color: #e2e8f0;
+    font-family: Arial, Helvetica, sans-serif;
+    overflow: hidden;
+  }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* Header */
+  #header {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 24px;
+    background: #111a2e;
+    border-bottom: 3px solid #1e293b;
+  }
+  #title { font-size: 32px; font-weight: bold; color: #38bdf8; }
+  #title .dot { color: #22c55e; }
+  #header-right { text-align: right; }
+  #clock { font-size: 34px; font-weight: bold; color: #f1f5f9; line-height: 1; }
+  #status-line { font-size: 13px; color: #64748b; margin-top: 4px; }
+  #status-line .live { color: #22c55e; }
+  #status-line .err { color: #ef4444; }
+
+  /* Board */
+  #board {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 16px;
+  }
+
+  /* Card */
+  .card {
+    width: 320px;
+    background: #1a2238;
+    border-radius: 12px;
+    border-left: 10px solid #22c55e;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+  }
+  .card.urg-green  { border-left-color: #22c55e; }
+  .card.urg-yellow { border-left-color: #eab308; }
+  .card.urg-orange { border-left-color: #f97316; }
+  .card.urg-red    { border-left-color: #ef4444; background: #2a1620; }
+
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .card-client { font-size: 24px; font-weight: bold; color: #ffffff; }
+  .card-id { font-size: 14px; color: #64748b; }
+  .card-elapsed {
+    font-size: 14px; font-weight: bold; padding: 4px 10px; border-radius: 8px;
+    background: rgba(255,255,255,0.08); color: #cbd5e1; white-space: nowrap;
+  }
+  .card-elapsed.late { background: rgba(239,68,68,0.2); color: #fca5a5; }
+
+  .card-items { margin: 6px 0; }
+  .item-row { display: flex; align-items: baseline; padding: 5px 0; border-top: 1px solid rgba(255,255,255,0.06); }
+  .item-qty {
+    font-size: 26px; font-weight: bold; color: #38bdf8;
+    min-width: 70px; text-align: center;
+    background: rgba(56,189,248,0.12); border-radius: 8px; padding: 2px 6px; margin-right: 10px;
+  }
+  .item-name { font-size: 20px; color: #e2e8f0; }
+  .item-note { font-size: 14px; color: #fbbf24; font-style: italic; margin-top: 2px; display: block; }
+
+  .card-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); }
+  .card-due { font-size: 18px; font-weight: bold; color: #f1f5f9; }
+  .card-due span { color: #64748b; font-size: 13px; font-weight: normal; }
+  .badge {
+    font-size: 12px; font-weight: bold; text-transform: uppercase;
+    padding: 4px 8px; border-radius: 6px;
+  }
+  .badge.pending   { background: rgba(234,179,8,0.2);  color: #fde047; }
+  .badge.confirmed { background: rgba(139,92,246,0.2); color: #c4b5fd; }
+  .badge.preparing { background: rgba(56,189,248,0.2); color: #7dd3fc; }
+  .badge.ready     { background: rgba(34,197,94,0.2);  color: #86efac; }
+
+  /* Empty state */
+  #empty { width: 100%; text-align: center; color: #475569; padding-top: 80px; font-size: 28px; }
+
+  /* Tap-to-start overlay */
+  #overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(11,17,32,0.97); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; cursor: pointer; z-index: 9999;
+  }
+  #overlay h2 { font-size: 44px; color: #38bdf8; margin-bottom: 16px; }
+  #overlay p { font-size: 22px; color: #94a3b8; }
+  #overlay .hand { font-size: 70px; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <div id="title">&#127838; COCINA <span class="dot">&#9679;</span></div>
+    <div id="header-right">
+      <div id="clock">--:--</div>
+      <div id="status-line"><span class="live">en vivo</span> &middot; <span id="last-upd">--</span></div>
+    </div>
+  </div>
+  <div id="board">
+    <div id="empty">Cargando pedidos...</div>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="hand">&#128072;</div>
+  <h2>Tocar para empezar</h2>
+  <p>Activa el sonido de avisos de pedidos</p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- Config desde la URL ----
+  function getParam(name, def) {
+    var m = new RegExp('[?&]' + name + '=([^&]+)').exec(window.location.search);
+    return m ? decodeURIComponent(m[1]) : def;
+  }
+  var TOKEN = getParam('token', '');
+  var COMPANY_ID = getParam('company_id', getParam('company', ''));
+  var POLL_MS = 15000;
+
+  // ---- Estado ----
+  var knownIds = {};      // ids ya vistos (para detectar nuevos)
+  var firstLoad = true;
+  var audioCtx = null;
+
+  // ---- Fecha local de la TV (no del servidor) ----
+  function todayStr() {
+    var d = new Date();
+    var y = d.getFullYear();
+    var m = ('0' + (d.getMonth() + 1)).slice(-2);
+    var day = ('0' + d.getDate()).slice(-2);
+    return y + '-' + m + '-' + day;
+  }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  // ---- Reloj ----
+  function tickClock() {
+    var d = new Date();
+    var h = d.getHours();
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    var h12 = h % 12; if (h12 === 0) h12 = 12;
+    document.getElementById('clock').innerHTML = h12 + ':' + pad2(d.getMinutes()) + ' ' + ampm;
+  }
+
+  // ---- Sonido (Web Audio API, sin archivo) ----
+  function initAudio() {
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function ding() {
+    if (!audioCtx) return;
+    try {
+      var t = audioCtx.currentTime;
+      // Dos tonos cortos tipo campanita
+      playTone(880, t, 0.18);
+      playTone(1320, t + 0.18, 0.28);
+    } catch (e) { /* ignore */ }
+  }
+  function playTone(freq, start, dur) {
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.001, start);
+    gain.gain.exponentialRampToValueAtTime(0.4, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(start);
+    osc.stop(start + dur + 0.02);
+  }
+
+  // ---- Urgencia segun hora de entrega ----
+  function urgencyClass(order) {
+    if (!order.due_time) return 'urg-green';
+    var parts = String(order.due_time).split(':');
+    if (parts.length < 2) return 'urg-green';
+    var due = new Date();
+    due.setHours(parseInt(parts[0], 10) || 0, parseInt(parts[1], 10) || 0, 0, 0);
+    var diffMin = (due.getTime() - new Date().getTime()) / 60000;
+    if (diffMin < 0) return 'urg-red';
+    if (diffMin < 30) return 'urg-orange';
+    if (diffMin < 60) return 'urg-yellow';
+    return 'urg-green';
+  }
+
+  // ---- Tiempo transcurrido desde creacion ----
+  function elapsedText(createdAt) {
+    if (!createdAt) return '';
+    var created = new Date(String(createdAt).replace(' ', 'T'));
+    if (isNaN(created.getTime())) return '';
+    var min = Math.floor((new Date().getTime() - created.getTime()) / 60000);
+    if (min < 1) return 'recien';
+    if (min < 60) return 'hace ' + min + ' min';
+    var h = Math.floor(min / 60);
+    return 'hace ' + h + 'h ' + (min % 60) + 'm';
+  }
+
+  function statusLabel(s) {
+    if (s === 'pending') return 'Pendiente';
+    if (s === 'confirmed') return 'Confirmado';
+    if (s === 'preparing') return 'Preparando';
+    if (s === 'ready') return 'Listo';
+    return s;
+  }
+
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ---- Render ----
+  function render(orders) {
+    var board = document.getElementById('board');
+    if (!orders || orders.length === 0) {
+      board.innerHTML = '<div id="empty">&#9989; Sin pedidos pendientes para hoy</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < orders.length; i++) {
+      var o = orders[i];
+      var elapsed = elapsedText(o.created_at);
+      var late = urgencyClass(o) === 'urg-red';
+      html += '<div class="card ' + urgencyClass(o) + '">';
+      html += '  <div class="card-top">';
+      html += '    <div>';
+      html += '      <div class="card-client">' + escapeHtml(o.client_name || 'Sin cliente') + '</div>';
+      html += '      <div class="card-id">Orden #' + o.id + '</div>';
+      html += '    </div>';
+      html += '    <div class="card-elapsed ' + (late ? 'late' : '') + '">' + elapsed + '</div>';
+      html += '  </div>';
+      html += '  <div class="card-items">';
+      var items = o.items || [];
+      for (var j = 0; j < items.length; j++) {
+        var it = items[j];
+        // qty siempre es en unidades del producto (ej "15 Und"), aunque se
+        // facture por kg. El billing_unit solo afecta el precio, no el conteo.
+        var unitLabel = it.unit || 'Und';
+        html += '    <div class="item-row">';
+        html += '      <div class="item-qty">' + (it.qty) + '<span style="font-size:13px"> ' + escapeHtml(unitLabel) + '</span></div>';
+        html += '      <div class="item-name">' + escapeHtml(it.name);
+        if (it.note) html += '<span class="item-note">&#128221; ' + escapeHtml(it.note) + '</span>';
+        html += '      </div>';
+        html += '    </div>';
+      }
+      html += '  </div>';
+      html += '  <div class="card-foot">';
+      html += '    <div class="card-due"><span>Para</span> ' + escapeHtml(o.due_time || '--') + '</div>';
+      html += '    <div class="badge ' + o.status + '">' + statusLabel(o.status) + '</div>';
+      html += '  </div>';
+      html += '</div>';
+    }
+    board.innerHTML = html;
+  }
+
+  // ---- Deteccion de pedidos nuevos ----
+  function checkNew(orders) {
+    var hasNew = false;
+    var nextKnown = {};
+    for (var i = 0; i < orders.length; i++) {
+      var id = orders[i].id;
+      nextKnown[id] = true;
+      if (!knownIds[id] && !firstLoad) hasNew = true;
+    }
+    knownIds = nextKnown;
+    if (hasNew) ding();
+    firstLoad = false;
+  }
+
+  // ---- Polling (XMLHttpRequest para compatibilidad) ----
+  function setStatus(ok, msg) {
+    var el = document.getElementById('status-line');
+    if (ok) {
+      el.innerHTML = '<span class="live">en vivo</span> &middot; ' + msg;
+    } else {
+      el.innerHTML = '<span class="err">sin conexion</span> &middot; reintentando...';
+    }
+  }
+
+  function fetchOrders() {
+    var auth = TOKEN ? ('token=' + encodeURIComponent(TOKEN)) : ('company_id=' + encodeURIComponent(COMPANY_ID));
+    var url = '/api/kds/orders?' + auth + '&day=' + todayStr() + '&_=' + new Date().getTime();
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.timeout = 12000;
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) return;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          var data = JSON.parse(xhr.responseText);
+          var orders = data.orders || [];
+          render(orders);
+          checkNew(orders);
+          var d = new Date();
+          setStatus(true, d.getHours() % 12 + ':' + pad2(d.getMinutes()));
+        } catch (e) {
+          setStatus(false);
+        }
+      } else {
+        setStatus(false);
+      }
+    };
+    xhr.onerror = function () { setStatus(false); };
+    xhr.ontimeout = function () { setStatus(false); };
+    try { xhr.send(); } catch (e) { setStatus(false); }
+  }
+
+  // ---- Arranque ----
+  document.getElementById('overlay').onclick = function () {
+    initAudio();
+    // resume necesario en algunos navegadores
+    if (audioCtx && audioCtx.state === 'suspended' && audioCtx.resume) audioCtx.resume();
+    ding(); // confirma que suena
+    document.getElementById('overlay').style.display = 'none';
+  };
+
+  tickClock();
+  setInterval(tickClock, 1000);
+  fetchOrders();
+  setInterval(fetchOrders, POLL_MS);
+})();
+</script>
+</body>
+</html>
