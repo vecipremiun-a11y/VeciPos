@@ -172,33 +172,144 @@
   }
 
   // ---- Sonido (Web Audio API, sin archivo) ----
+  // Mismos 6 sonidos que la pantalla de Producción (src/utils/productionSounds.js),
+  // portados a JS plano. El sonido elegido viene del endpoint (data.sound),
+  // configurable desde Configuracion -> Sonido de Nuevos Pedidos.
+  var currentSound = 'crystal-ping';
+
   function initAudio() {
     try {
       var AC = window.AudioContext || window.webkitAudioContext;
       if (AC) audioCtx = new AC();
     } catch (e) { audioCtx = null; }
   }
+
+  // Cadena de salida con compresor (volumen parejo sobre ruido de cocina)
+  function buildOut() {
+    var comp = audioCtx.createDynamicsCompressor();
+    comp.threshold.value = -8; comp.knee.value = 18; comp.ratio.value = 8;
+    comp.attack.value = 0.002; comp.release.value = 0.2;
+    var master = audioCtx.createGain();
+    master.gain.value = 1.0;
+    comp.connect(master); master.connect(audioCtx.destination);
+    return comp;
+  }
+
+  function tone(out, opt) {
+    var now = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = opt.type || 'square';
+    osc.frequency.value = opt.freq;
+    var vol = opt.vol == null ? 0.7 : opt.vol;
+    gain.gain.setValueAtTime(0.0001, now + opt.start);
+    gain.gain.exponentialRampToValueAtTime(vol, now + opt.start + 0.008);
+    gain.gain.setValueAtTime(vol, now + opt.start + Math.max(0, opt.dur - 0.04));
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + opt.start + opt.dur);
+    osc.connect(gain); gain.connect(out);
+    osc.start(now + opt.start); osc.stop(now + opt.start + opt.dur + 0.02);
+  }
+  function sweep(out, opt) {
+    var now = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = opt.type || 'sawtooth';
+    osc.frequency.setValueAtTime(opt.fromFreq, now + opt.start);
+    osc.frequency.linearRampToValueAtTime(opt.toFreq, now + opt.start + opt.dur);
+    var vol = opt.vol == null ? 0.7 : opt.vol;
+    gain.gain.setValueAtTime(0.0001, now + opt.start);
+    gain.gain.exponentialRampToValueAtTime(vol, now + opt.start + 0.012);
+    gain.gain.setValueAtTime(vol, now + opt.start + Math.max(0, opt.dur - 0.05));
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + opt.start + opt.dur);
+    osc.connect(gain); gain.connect(out);
+    osc.start(now + opt.start); osc.stop(now + opt.start + opt.dur + 0.02);
+  }
+  // helper de nota con decay (campana/marimba/ping)
+  function decayNote(out, freq, start, dur, vol, type) {
+    var now = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, now + start);
+    gain.gain.exponentialRampToValueAtTime(vol, now + start + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+    osc.connect(gain); gain.connect(out);
+    osc.start(now + start); osc.stop(now + start + dur + 0.02);
+  }
+
+  var SOUND_BUILDERS = {
+    'crystal-ping': function (out) {
+      sweep(out, { fromFreq: 2400, toFreq: 1800, start: 0, dur: 0.06, type: 'sine', vol: 0.5 });
+      decayNote(out, 1975.53, 0.05, 2.5, 0.7);
+      decayNote(out, 2637.02, 0.05, 2.0, 0.45);
+      decayNote(out, 3951.07, 0.05, 1.5, 0.25);
+      decayNote(out, 987.77, 0.05, 1.2, 0.4);
+    },
+    'zen-chime': function (out) {
+      var f = 587.33;
+      decayNote(out, f, 0, 2.8, 0.75);
+      decayNote(out, f * 2, 0, 2.2, 0.45);
+      decayNote(out, f * 2.76, 0, 1.8, 0.30);
+      decayNote(out, f * 5.4, 0, 1.2, 0.18);
+      decayNote(out, f * 1.5, 0.6, 2.4, 0.55);
+      decayNote(out, f * 3, 0.6, 1.8, 0.35);
+    },
+    'soft-pop': function (out) {
+      sweep(out, { fromFreq: 200, toFreq: 800, start: 0, dur: 0.08, type: 'sine', vol: 0.85 });
+      tone(out, { freq: 783.99, start: 0.06, dur: 0.5, type: 'triangle', vol: 0.7 });
+      tone(out, { freq: 1046.5, start: 0.18, dur: 1.6, type: 'triangle', vol: 0.7 });
+      tone(out, { freq: 2093, start: 0.18, dur: 1.4, type: 'sine', vol: 0.45 });
+      tone(out, { freq: 1568, start: 0.18, dur: 1.8, type: 'sine', vol: 0.35 });
+    },
+    'cinematic-arrival': function (out) {
+      sweep(out, { fromFreq: 100, toFreq: 1400, start: 0, dur: 1.4, type: 'sawtooth', vol: 0.55 });
+      sweep(out, { fromFreq: 200, toFreq: 2800, start: 0, dur: 1.4, type: 'sine', vol: 0.35 });
+      sweep(out, { fromFreq: 800, toFreq: 80, start: 1.35, dur: 0.18, type: 'square', vol: 0.85 });
+      var chord = [523.25, 659.25, 783.99, 1046.5];
+      for (var i = 0; i < chord.length; i++) {
+        tone(out, { freq: chord[i], start: 1.5, dur: 1.45, type: 'triangle', vol: 0.55 });
+        tone(out, { freq: chord[i] * 2, start: 1.5, dur: 1.20, type: 'sine', vol: 0.30 });
+      }
+    },
+    'double-ding': function (out) {
+      decayNote(out, 1318.51, 0, 1.4, 0.75, 'triangle');
+      decayNote(out, 2637.02, 0, 1.0, 0.35, 'triangle');
+      decayNote(out, 1567.98, 0.35, 1.8, 0.75, 'triangle');
+      decayNote(out, 3135.96, 0.35, 1.2, 0.35, 'triangle');
+      decayNote(out, 2093.00, 0.8, 2.2, 0.7, 'triangle');
+      decayNote(out, 4186.01, 0.8, 1.5, 0.30, 'triangle');
+    },
+    'warm-marimba': function (out) {
+      function note(freq, start, vol) {
+        if (vol == null) vol = 0.7;
+        var now = audioCtx.currentTime;
+        var osc = audioCtx.createOscillator(); var gain = audioCtx.createGain();
+        osc.type = 'triangle'; osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, now + start);
+        gain.gain.exponentialRampToValueAtTime(vol, now + start + 0.005);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + start + 1.4);
+        osc.connect(gain); gain.connect(out);
+        osc.start(now + start); osc.stop(now + start + 1.45);
+        var osc2 = audioCtx.createOscillator(); var gain2 = audioCtx.createGain();
+        osc2.type = 'sine'; osc2.frequency.value = freq * 4;
+        gain2.gain.setValueAtTime(0.0001, now + start);
+        gain2.gain.exponentialRampToValueAtTime(vol * 0.35, now + start + 0.008);
+        gain2.gain.exponentialRampToValueAtTime(0.0001, now + start + 0.5);
+        osc2.connect(gain2); gain2.connect(out);
+        osc2.start(now + start); osc2.stop(now + start + 0.55);
+      }
+      note(523.25, 0.0); note(659.25, 0.18); note(783.99, 0.36); note(1046.5, 0.54);
+      note(523.25, 0.9, 0.5); note(659.25, 0.9, 0.5); note(783.99, 0.9, 0.5); note(1046.5, 0.9, 0.65);
+    }
+  };
+
   function ding() {
     if (!audioCtx) return;
     try {
-      var t = audioCtx.currentTime;
-      // Dos tonos cortos tipo campanita
-      playTone(880, t, 0.18);
-      playTone(1320, t + 0.18, 0.28);
+      var builder = SOUND_BUILDERS[currentSound] || SOUND_BUILDERS['crystal-ping'];
+      builder(buildOut());
     } catch (e) { /* ignore */ }
-  }
-  function playTone(freq, start, dur) {
-    var osc = audioCtx.createOscillator();
-    var gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.001, start);
-    gain.gain.exponentialRampToValueAtTime(0.4, start + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start(start);
-    osc.stop(start + dur + 0.02);
   }
 
   // ---- Urgencia segun hora de entrega ----
@@ -321,6 +432,7 @@
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           var data = JSON.parse(xhr.responseText);
+          if (data.sound) currentSound = data.sound;
           var orders = data.orders || [];
           render(orders);
           checkNew(orders);

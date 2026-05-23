@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { turso } from '../lib/turso';
-import { Moon, Sun, Settings as SettingsIcon, FileText, Smartphone, Wrench, Building2, Save, CreditCard, Volume2, Play, ChefHat } from 'lucide-react';
+import { Moon, Sun, Settings as SettingsIcon, FileText, Smartphone, Wrench, Building2, Save, CreditCard, Volume2, Play, ChefHat, Tv, Copy, Check, ExternalLink } from 'lucide-react';
 
 import { recompressAllImages } from '../scripts/recompressImages';
 import ReceiptSettings from '../components/settings/ReceiptSettings';
@@ -36,14 +36,49 @@ const Settings = () => {
     });
     const [isSavingCompanyInfo, setIsSavingCompanyInfo] = useState(false);
 
+    // Pantalla de Cocina (TV) — link con token secreto por empresa
+    const [kdsToken, setKdsToken] = useState('');
+    const [kdsCopied, setKdsCopied] = useState(false);
+    const kdsUrl = kdsToken
+        ? `${window.location.origin}/kds.html?token=${kdsToken}`
+        : '';
+    const handleCopyKds = async () => {
+        if (!kdsUrl) return;
+        try {
+            await navigator.clipboard.writeText(kdsUrl);
+        } catch {
+            // Fallback para navegadores viejos / sin permiso de clipboard
+            const ta = document.createElement('textarea');
+            ta.value = kdsUrl;
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch { /* noop */ }
+            document.body.removeChild(ta);
+        }
+        setKdsCopied(true);
+        setTimeout(() => setKdsCopied(false), 2000);
+    };
+
     const [activeTab, setActiveTab] = useState('general');
 
     // Sonido de nuevos pedidos en Producción
     const [productionSoundId, setProductionSoundId] = useState(getProductionSound());
     const [savedSoundId, setSavedSoundId] = useState(getProductionSound());
-    const handleSaveProductionSound = () => {
-        setProductionSound(productionSoundId);
+    const handleSaveProductionSound = async () => {
+        setProductionSound(productionSoundId); // localStorage (pantalla Producción)
         setSavedSoundId(productionSoundId);
+        // Persistir también en la empresa para que la pantalla KDS (TV) use el
+        // mismo sonido (la TV no comparte localStorage con el POS).
+        try {
+            if (activeCompanyId) {
+                await turso.execute({
+                    sql: 'UPDATE companies SET kds_sound = ? WHERE id = ?',
+                    args: [productionSoundId, activeCompanyId]
+                });
+            }
+        } catch (e) {
+            console.error('Error guardando sonido KDS en empresa:', e);
+        }
     };
 
     useEffect(() => {
@@ -66,7 +101,8 @@ const Settings = () => {
                             postal_code,
                             website,
                             business_type,
-                            currency
+                            currency,
+                            kds_token
                           FROM companies WHERE id = ?`,
                     args: [activeCompanyId]
                 });
@@ -86,6 +122,7 @@ const Settings = () => {
                         business_type: data.business_type || '',
                         currency: data.currency || 'CLP'
                     });
+                    setKdsToken(data.kds_token || '');
                 }
             } catch (e) {
                 console.error('Error loading company info:', e);
@@ -278,7 +315,7 @@ const Settings = () => {
                                             <Volume2 size={18} className="text-[var(--color-primary)]" />
                                         </h2>
                                         <p className="text-sm text-[var(--color-text-muted)]">
-                                            Sonido que se reproducirá en la pantalla de Producción cuando ingrese un nuevo pedido del día.
+                                            Sonido que se reproducirá en la pantalla de Producción y en la pantalla de Cocina (TV) cuando ingrese un nuevo pedido del día.
                                         </p>
                                     </div>
                                 </div>
@@ -349,6 +386,68 @@ const Settings = () => {
                                         Guardar Sonido
                                     </button>
                                 </div>
+                            </div>
+
+                            {/* ===== PANTALLA DE COCINA (TV / KDS) ===== */}
+                            <div className="glass-card animate-in fade-in slide-in-from-bottom-4 duration-500 delay-300">
+                                <div className="flex items-start gap-3 mb-4">
+                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-md shadow-cyan-500/25 shrink-0">
+                                        <Tv size={20} className="text-white" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <h2 className="text-xl font-bold text-[var(--color-text)]">
+                                            Pantalla de Cocina (TV)
+                                        </h2>
+                                        <p className="text-sm text-[var(--color-text-muted)]">
+                                            Abre este link en el navegador de tu TV para mostrar los pedidos del día en cocina. Solo lectura, se actualiza solo. No pide login.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {kdsUrl ? (
+                                    <>
+                                        <div className="flex items-center gap-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-2.5">
+                                            <input
+                                                type="text"
+                                                readOnly
+                                                value={kdsUrl}
+                                                onClick={(e) => e.target.select()}
+                                                className="flex-1 bg-transparent text-sm text-[var(--color-text)] outline-none min-w-0 font-mono"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={handleCopyKds}
+                                                className={cn(
+                                                    "px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-all active:scale-95 shrink-0",
+                                                    kdsCopied
+                                                        ? "bg-emerald-500 text-black"
+                                                        : "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/25 hover:shadow-lg"
+                                                )}
+                                            >
+                                                {kdsCopied ? <Check size={16} /> : <Copy size={16} />}
+                                                {kdsCopied ? 'Copiado' : 'Copiar'}
+                                            </button>
+                                            <a
+                                                href={kdsUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                title="Abrir pantalla de cocina"
+                                                className="px-3 py-2 rounded-lg text-sm font-bold bg-[var(--glass-bg)] text-[var(--color-text-muted)] border border-[var(--glass-border)] hover:text-[var(--color-primary)] hover:border-[var(--color-primary)]/40 transition-all flex items-center gap-1.5 shrink-0"
+                                            >
+                                                <ExternalLink size={16} />
+                                                Abrir
+                                            </a>
+                                        </div>
+                                        <div className="mt-3 text-xs text-[var(--color-text-muted)] space-y-1">
+                                            <p>💡 Guárdalo como favorito o página de inicio en la TV para no escribirlo cada vez.</p>
+                                            <p>🔒 Este link es secreto y único de tu empresa. No lo compartas fuera de tu negocio.</p>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <p className="text-sm text-[var(--color-text-muted)] italic">
+                                        Cargando link de la pantalla de cocina…
+                                    </p>
+                                )}
                             </div>
                         </>
                     )}

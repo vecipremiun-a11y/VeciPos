@@ -41,20 +41,27 @@ export default async function handler(req, res) {
         // company_id pelado se acepta solo como fallback (testing local).
         const token = req.query?.token;
         let companyId;
+        let kdsSound = 'crystal-ping';
         if (token) {
             const cr = await turso.execute({
-                sql: 'SELECT id FROM companies WHERE kds_token = ? LIMIT 1',
+                sql: 'SELECT id, kds_sound FROM companies WHERE kds_token = ? LIMIT 1',
                 args: [token]
             });
             if (!cr.rows.length) {
                 return res.status(403).json({ ok: false, error: 'Token inválido' });
             }
             companyId = cr.rows[0].id;
+            if (cr.rows[0].kds_sound) kdsSound = cr.rows[0].kds_sound;
         } else {
             companyId = req.query?.company_id || req.query?.company;
             if (!companyId) {
                 return res.status(400).json({ ok: false, error: 'Falta token' });
             }
+            const cr = await turso.execute({
+                sql: 'SELECT kds_sound FROM companies WHERE id = ? LIMIT 1',
+                args: [companyId]
+            });
+            if (cr.rows.length && cr.rows[0].kds_sound) kdsSound = cr.rows[0].kds_sound;
         }
 
         // Pedidos activos del día (due_date) — los que cocina debe ver.
@@ -110,6 +117,7 @@ export default async function handler(req, res) {
             ok: true,
             day,
             now: new Date().toISOString(),
+            sound: kdsSound,
             orders
         });
     } catch (error) {
