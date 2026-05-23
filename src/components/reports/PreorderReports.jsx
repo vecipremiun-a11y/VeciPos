@@ -2,15 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store/useStore';
 import { format } from 'date-fns';
 import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
-import { Search, Download, DollarSign, TrendingUp, Percent, FileText, ShoppingBag, Truck, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import { Search, Download, DollarSign, TrendingUp, ShoppingBag, Truck } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import * as XLSX from 'xlsx';
 import { formatInCompanyTime, getNowInCompanyTime } from '../../lib/dateHelpers';
 import { formatCurrency } from '../../utils/formatCurrency';
-
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 const PreorderReports = () => {
     const { getPreorderReports, currentCompanyTimezone, currentCurrency } = useStore();
@@ -97,14 +95,18 @@ const PreorderReports = () => {
         XLSX.writeFile(wb, `reporte_encargos_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
     };
 
-    const pieData = data.byStatus.map(s => ({
-        name: s.status === 'pending' ? 'Pendientes' :
-            s.status === 'ready' ? 'Listos' :
-                s.status === 'delivered' ? 'Entregados' :
-                    s.status === 'production' ? 'Producción' :
-                        s.status === 'canceled' ? 'Cancelados' : s.status,
-        value: s.count
-    }));
+    // Ventas por día (a partir de los entregados ya filtrados por delivered_at).
+    const dailyRevenue = (() => {
+        const map = {};
+        (data.details || []).forEach(d => {
+            const day = (d.delivered_at || '').slice(0, 10);
+            if (!day) return;
+            map[day] = (map[day] || 0) + (Number(d.total_amount) || 0);
+        });
+        return Object.entries(map)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([day, total]) => ({ day: day.slice(5), total }));
+    })();
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -159,14 +161,14 @@ const PreorderReports = () => {
             {/* Summary Cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <StatCard
-                    title="Total Pedidos"
+                    title="Pedidos Entregados"
                     value={data.summary?.total_orders || 0}
-                    color="text-blue-400"
-                    icon={<ShoppingBag size={16} />}
+                    color="text-purple-400"
+                    icon={<Truck size={16} />}
                     isCurrency={false}
                 />
                 <StatCard
-                    title="Ingresos Estimados"
+                    title="Total Vendido"
                     value={data.summary?.total_revenue || 0}
                     color="text-green-400"
                     icon={<DollarSign size={16} />}
@@ -180,38 +182,37 @@ const PreorderReports = () => {
                     currency={currentCurrency}
                 />
                 <StatCard
-                    title="Pedidos Entregados"
-                    value={data.summary?.delivered_count || 0}
-                    color="text-purple-400"
-                    icon={<Truck size={16} />}
-                    isCurrency={false}
+                    title="Ticket Promedio"
+                    value={data.summary?.avg_ticket || 0}
+                    color="text-blue-400"
+                    icon={<TrendingUp size={16} />}
+                    currency={currentCurrency}
                 />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Status Chart */}
+                {/* Ventas por día */}
                 <div className="glass-card p-6">
-                    <h3 className="text-lg font-bold mb-4 text-white">Estado de Pedidos</h3>
+                    <h3 className="text-lg font-bold mb-4 text-white">Ventas por Día (Entregados)</h3>
                     <div className="h-64 w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie
-                                    data={pieData}
-                                    cx="50%"
-                                    cy="50%"
-                                    labelLine={false}
-                                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                                    outerRadius={80}
-                                    fill="#8884d8"
-                                    dataKey="value"
-                                >
-                                    {pieData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip contentStyle={{ backgroundColor: '#1a1a2e', borderColor: '#3b82f6', color: '#fff' }} />
-                            </PieChart>
-                        </ResponsiveContainer>
+                        {dailyRevenue.length === 0 ? (
+                            <div className="h-full flex items-center justify-center text-[var(--text-muted)] text-sm">
+                                Sin ventas entregadas en el período
+                            </div>
+                        ) : (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={dailyRevenue}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
+                                    <XAxis dataKey="day" tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                                    <YAxis tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: '#1a1a2e', borderColor: '#3b82f6', color: '#fff' }}
+                                        formatter={(value) => [formatCurrency(value, currentCurrency), 'Vendido']}
+                                    />
+                                    <Bar dataKey="total" fill="#10b981" radius={[4, 4, 0, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        )}
                     </div>
                 </div>
 

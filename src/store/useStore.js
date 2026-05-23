@@ -11041,59 +11041,64 @@ export const useStore = create(persist((set, get) => ({
     getPreorderReports: async (startDate, endDate) => {
         const { activeCompanyId } = get();
         try {
-            console.log("Generando reporte de encargos:", startDate, endDate);
+            console.log("Generando reporte de VENTAS por encargo (solo entregados):", startDate, endDate);
 
-            // Filtro por rango de DÍA usando solo la parte fecha de created_at.
-            // created_at tiene dos formatos históricos en la BD:
-            //   · ISO con 'T':  '2026-05-22T18:52:12.230Z'  (mayoría)
-            //   · con espacio:  '2026-02-10 04:19:28'         (filas viejas)
-            // Comparar el string completo contra '<fecha> 23:59:59' fallaba: la
-            // 'T' (ASCII 84) es mayor que el espacio (ASCII 32), así que las
-            // filas ISO quedaban EXCLUIDAS del límite superior. SUBSTR(...,1,10)
-            // toma solo 'YYYY-MM-DD' (idéntico en ambos formatos) → comparación
-            // robusta con BETWEEN sobre las fechas tal cual.
+            // REPORTE DE VENTAS POR ENCARGO — solo cuenta encargos ENTREGADOS.
+            //
+            // Reglas de negocio (definidas con el usuario 2026-05-22):
+            //   · Un encargo es VENTA solo cuando status = 'delivered'.
+            //   · Pendientes / confirmados / en preparación / listos = pipeline,
+            //     NO son venta todavía → excluidos.
+            //   · Cancelados (abono devuelto) = no es venta → excluidos.
+            //   · Se filtra por delivered_at (fecha de ENTREGA real), no por
+            //     created_at: un encargo creado ayer y entregado hoy es venta de hoy.
+            //   · Montos REALES: real_total del encargo y real_total/real_weight_kg
+            //     por item (lo que efectivamente se pesó y cobró), con fallback a
+            //     los estimados para datos viejos sin real_*.
+            //
+            // delivered_at puede venir en formato ISO ('...T...Z') o con espacio,
+            // por eso se filtra con SUBSTR(...,1,10) BETWEEN (parte fecha).
             const dateFilter = 'SUBSTR(__col__, 1, 10) BETWEEN ? AND ?';
 
-            // 1. Resumen General
+            // 1. Resumen General (solo entregados)
             const summaryRes = await turso.execute({
                 sql: `SELECT
                     COUNT(*) as total_orders,
-                    SUM(CASE WHEN status != 'canceled' THEN total_amount ELSE 0 END) as total_revenue,
+                    SUM(COALESCE(real_total, total_amount)) as total_revenue,
                     SUM(deposit_amount) as total_deposits,
-                    SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered_count,
-                    SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END) as canceled_count,
-                    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_count
+                    COUNT(*) as delivered_count,
+                    AVG(COALESCE(real_total, total_amount)) as avg_ticket
                   FROM preorders
-                  WHERE ${dateFilter.replace('__col__', 'created_at')} AND company_id = ?`,
+                  WHERE status = 'delivered'
+                    AND ${dateFilter.replace('__col__', 'delivered_at')}
+                    AND company_id = ?`,
                 args: [startDate, endDate, activeCompanyId]
             });
             const summary = summaryRes.rows[0];
 
-            // 2. Por Estado
-            const byStatusRes = await turso.execute({
-                sql: `SELECT status, COUNT(*) as count, SUM(total_amount) as total
-                  FROM preorders
-                  WHERE ${dateFilter.replace('__col__', 'created_at')} AND company_id = ?
-                  GROUP BY status`,
-                args: [startDate, endDate, activeCompanyId]
-            });
-            const byStatus = byStatusRes.rows;
+            // 2. Por Estado — solo hay 'delivered'. Se mantiene por compatibilidad
+            //    con el componente (pie chart). Mostrará una sola porción.
+            const byStatus = [{
+                status: 'delivered',
+                count: summary?.total_orders || 0,
+                total: summary?.total_revenue || 0,
+            }];
 
-            // 3. Por Producto (Top Productos) - Excluye cancelados
+            // 3. Por Producto (Top Productos vendidos por encargo) — montos reales
             const byProductRes = await turso.execute({
                 sql: `SELECT
                     p.name,
                     p.sku,
-                    SUM(pi.qty) as quantity,
+                    SUM(COALESCE(pi.real_weight_kg, pi.qty)) as quantity,
                     pi.billing_unit,
-                    SUM(pi.line_total) as revenue,
-                    SUM(pi.qty * COALESCE(p.original_price, 0)) as approximate_cost
+                    SUM(COALESCE(pi.real_total, pi.line_total)) as revenue,
+                    SUM(COALESCE(pi.real_weight_kg, pi.qty) * COALESCE(p.original_price, 0)) as approximate_cost
                   FROM preorder_items pi
                   JOIN preorders po ON pi.preorder_id = po.id
                   JOIN products p ON pi.product_id = p.id
-                  WHERE ${dateFilter.replace('__col__', 'po.created_at')}
+                  WHERE po.status = 'delivered'
+                    AND ${dateFilter.replace('__col__', 'po.delivered_at')}
                     AND po.company_id = ?
-                    AND po.status != 'canceled'
                   GROUP BY pi.product_id
                   ORDER BY revenue DESC`,
                 args: [startDate, endDate, activeCompanyId]
@@ -11103,19 +11108,19 @@ export const useStore = create(persist((set, get) => ({
                 profit: (p.revenue || 0) - (p.approximate_cost || 0)
             }));
 
-            // 4. Por Cliente (Top Clientes) - Excluye cancelados
+            // 4. Por Cliente (Top Clientes por encargo) — montos reales
             const byClientRes = await turso.execute({
                 sql: `SELECT
                     po.client_id,
                     po.client_name,
                     MAX(po.client_phone) as phone,
                     COUNT(*) as orders_count,
-                    SUM(po.total_amount) as total_spend,
-                    MAX(po.created_at) as last_order_date
+                    SUM(COALESCE(po.real_total, po.total_amount)) as total_spend,
+                    MAX(po.delivered_at) as last_order_date
                   FROM preorders po
-                  WHERE ${dateFilter.replace('__col__', 'po.created_at')}
+                  WHERE po.status = 'delivered'
+                    AND ${dateFilter.replace('__col__', 'po.delivered_at')}
                     AND po.company_id = ?
-                    AND po.status != 'canceled'
                   GROUP BY COALESCE(po.client_id, po.client_name)
                   ORDER BY total_spend DESC
                   LIMIT 100`,
@@ -11123,18 +11128,21 @@ export const useStore = create(persist((set, get) => ({
             });
             const byClient = byClientRes.rows;
 
-            // 5. Detalles (Para exportar o ver lista completa)
-            // Podríamos limitarlo o paginarlo si es mucho, pero para reportes suele pedirse todo
+            // 5. Detalles (lista completa de ventas entregadas)
             const detailsRes = await turso.execute({
                 sql: `SELECT
-                    po.id, po.created_at, po.due_date, po.status,
-                    po.client_name, po.total_amount, po.deposit_amount,
-                    (SELECT GROUP_CONCAT(p.name || ' (' || pi.qty || ')', ', ')
+                    po.id, po.created_at, po.delivered_at, po.due_date, po.status,
+                    po.client_name,
+                    COALESCE(po.real_total, po.total_amount) as total_amount,
+                    po.deposit_amount,
+                    (SELECT GROUP_CONCAT(p.name || ' (' || COALESCE(pi.real_weight_kg, pi.qty) || ')', ', ')
                      FROM preorder_items pi JOIN products p ON pi.product_id = p.id
                      WHERE pi.preorder_id = po.id) as items_summary
                   FROM preorders po
-                  WHERE ${dateFilter.replace('__col__', 'po.created_at')} AND po.company_id = ?
-                  ORDER BY po.created_at DESC`,
+                  WHERE po.status = 'delivered'
+                    AND ${dateFilter.replace('__col__', 'po.delivered_at')}
+                    AND po.company_id = ?
+                  ORDER BY po.delivered_at DESC`,
                 args: [startDate, endDate, activeCompanyId]
             });
             const details = detailsRes.rows;
@@ -11186,9 +11194,11 @@ export const useStore = create(persist((set, get) => ({
                 });
             }
 
-            // 4. Update preorder with real total, mark as delivered
+            // 4. Update preorder with real total, mark as delivered.
+            //    delivered_at marca cuándo se entregó (= cuándo se concretó la
+            //    venta). El reporte de ventas por encargo filtra por esta fecha.
             await turso.execute({
-                sql: `UPDATE preorders SET real_total = ?, total_amount = ?, remaining_amount = 0, deposit_amount = ?, status = 'delivered', updated_at = datetime('now') WHERE id = ?`,
+                sql: `UPDATE preorders SET real_total = ?, total_amount = ?, remaining_amount = 0, deposit_amount = ?, status = 'delivered', delivered_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
                 args: [realTotal, realTotal, totalPaid, preorderId]
             });
 
