@@ -12,6 +12,7 @@ import OptimizedImage from '../components/OptimizedImage';
 import ClientSearchWidget from '../components/ClientSearchWidget';
 import DeliveryCheckoutModal from '../components/DeliveryCheckoutModal';
 import QuickPreorderProductModal from '../components/QuickPreorderProductModal';
+import PaymentDetailPicker from '../components/PaymentDetailPicker';
 import { printPreorder } from '../utils/printPreorder';
 
 const STATUS_CONFIG = {
@@ -36,6 +37,8 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
     const [dueTime, setDueTime] = useState('10:00');
     const [depositAmount, setDepositAmount] = useState('');
     const [depositMethod, setDepositMethod] = useState('Efectivo');
+    const [depositTerminalId, setDepositTerminalId] = useState(null);
+    const [depositBankAccountId, setDepositBankAccountId] = useState(null);
     const [deliveryType, setDeliveryType] = useState('pickup');
     const [deliveryAddress, setDeliveryAddress] = useState('');
     const [notes, setNotes] = useState('');
@@ -81,6 +84,8 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
             total_amount: total || 0, // 0 if pending
             deposit_amount: deposit,
             deposit_method: depositMethod,
+            deposit_terminal_id: depositMethod === 'Tarjeta' ? depositTerminalId : null,
+            deposit_bank_account_id: depositMethod === 'Transferencia' ? depositBankAccountId : null,
             delivery_type: deliveryType,
             delivery_address: deliveryAddress,
             notes,
@@ -247,7 +252,7 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
                             </div>
                             <div className="flex gap-2">
                                 {['Efectivo', 'Tarjeta', 'Transferencia'].map(m => (
-                                    <button key={m} onClick={() => setDepositMethod(m)}
+                                    <button key={m} onClick={() => { setDepositMethod(m); setDepositTerminalId(null); setDepositBankAccountId(null); }}
                                         className={cn("flex-1 py-1.5 rounded-lg text-xs font-bold transition-all border",
                                             depositMethod === m
                                                 ? "bg-green-500/20 text-green-400 border-green-500/30"
@@ -257,6 +262,15 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
                                     </button>
                                 ))}
                             </div>
+                            <PaymentDetailPicker
+                                method={depositMethod}
+                                terminalId={depositTerminalId}
+                                bankAccountId={depositBankAccountId}
+                                onChange={({ terminalId, bankAccountId }) => {
+                                    if (terminalId !== undefined) setDepositTerminalId(terminalId);
+                                    if (bankAccountId !== undefined) setDepositBankAccountId(bankAccountId);
+                                }}
+                            />
                         </div>
                     </div>
 
@@ -326,6 +340,8 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
     const [showPayment, setShowPayment] = useState(false);
     const [payAmount, setPayAmount] = useState('');
     const [payMethod, setPayMethod] = useState('Efectivo');
+    const [payTerminalId, setPayTerminalId] = useState(null);
+    const [payBankAccountId, setPayBankAccountId] = useState(null);
     const { getPreorderDetails, addPreorderPayment } = useStore();
 
     useEffect(() => {
@@ -341,13 +357,18 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
         const amount = parseFloat(payAmount);
         if (!amount || amount <= 0) return;
 
-        const result = await addPreorderPayment(preorder.id, amount, payMethod, 'final');
+        const result = await addPreorderPayment(preorder.id, amount, payMethod, 'final', {
+            terminalId: payMethod === 'Tarjeta' ? payTerminalId : null,
+            bankAccountId: payMethod === 'Transferencia' ? payBankAccountId : null,
+        });
         if (result.success) {
             // Reload details
             const updated = await getPreorderDetails(preorder.id);
             if (updated.success) setDetails(updated);
             setShowPayment(false);
             setPayAmount('');
+            setPayTerminalId(null);
+            setPayBankAccountId(null);
         }
     };
 
@@ -494,7 +515,7 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
                                 </div>
                                 <div className="flex gap-2">
                                     {['Efectivo', 'Tarjeta', 'Transferencia'].map(m => (
-                                        <button key={m} onClick={() => setPayMethod(m)}
+                                        <button key={m} onClick={() => { setPayMethod(m); setPayTerminalId(null); setPayBankAccountId(null); }}
                                             className={cn("flex-1 py-1.5 rounded-lg text-xs font-bold transition-all border",
                                                 payMethod === m
                                                     ? "bg-green-500/20 text-green-400 border-green-500/30"
@@ -504,6 +525,15 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
                                         </button>
                                     ))}
                                 </div>
+                                <PaymentDetailPicker
+                                    method={payMethod}
+                                    terminalId={payTerminalId}
+                                    bankAccountId={payBankAccountId}
+                                    onChange={({ terminalId, bankAccountId }) => {
+                                        if (terminalId !== undefined) setPayTerminalId(terminalId);
+                                        if (bankAccountId !== undefined) setPayBankAccountId(bankAccountId);
+                                    }}
+                                />
                                 <div className="flex gap-2">
                                     <button onClick={() => setShowPayment(false)}
                                         className="flex-1 py-2 rounded-lg text-sm font-bold bg-[var(--glass-bg)] text-[var(--color-text-muted)] border border-[var(--glass-border)]">

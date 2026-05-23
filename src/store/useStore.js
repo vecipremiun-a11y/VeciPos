@@ -8474,9 +8474,13 @@ export const useStore = create(persist((set, get) => ({
                 },
                 {
                     sql: `SELECT pp.id, pp.amount, pp.created_at, pp.type, po.id as preorder_id,
-                            po.client_name
+                            po.client_name,
+                            pt.name as terminal_name,
+                            ba.bank_name as bank_name, ba.account_number as bank_account_number
                           FROM preorder_payments pp
                           JOIN preorders po ON pp.preorder_id = po.id
+                          LEFT JOIN payment_terminals pt ON pp.terminal_id = pt.id
+                          LEFT JOIN bank_accounts ba ON pp.bank_account_id = ba.id
                           WHERE pp.register_id = ? AND pp.method = ?
                             AND po.status != 'canceled'
                           ORDER BY pp.created_at DESC LIMIT 100`,
@@ -8525,15 +8529,23 @@ export const useStore = create(persist((set, get) => ({
                 } catch { /* noop */ }
             }
 
-            // Encargos: 1 transacción por pago
+            // Encargos: 1 transacción por pago. Datáfono/cuenta vienen del JOIN.
             for (const p of preorderRes.rows) {
+                let detail = null;
+                if (method === 'Tarjeta') {
+                    detail = p.terminal_name || null;
+                } else if (method === 'Transferencia') {
+                    detail = p.bank_name
+                        ? `${p.bank_name}${p.bank_account_number ? ' · ' + p.bank_account_number : ''}`
+                        : null;
+                }
                 transactions.push({
                     id: `p_${p.id}`,
                     source: 'Encargo',
                     reference: `Encargo #${p.preorder_id}${p.client_name ? ' · ' + p.client_name : ''}`,
                     amount: parseFloat(p.amount) || 0,
                     date: p.created_at,
-                    detail: null, // no se captura aún en encargos
+                    detail,
                 });
             }
 
@@ -10906,10 +10918,12 @@ export const useStore = create(persist((set, get) => ({
                 // por cash_movements). Permite ver el cobro en el desglose de la
                 // caja abierta sin mezclar entre cajeras concurrentes.
                 const regId = get().cashRegister?.id || null;
+                const tId = depositMethod === 'Tarjeta' ? (preorderData.deposit_terminal_id || null) : null;
+                const baId = depositMethod === 'Transferencia' ? (preorderData.deposit_bank_account_id || null) : null;
                 await turso.execute({
-                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id)
-                          VALUES (?, ?, ?, 'deposit', ?)`,
-                    args: [preorderId, preorderData.deposit_amount, depositMethod, regId]
+                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id, terminal_id, bank_account_id)
+                          VALUES (?, ?, ?, 'deposit', ?, ?, ?)`,
+                    args: [preorderId, preorderData.deposit_amount, depositMethod, regId, tId, baId]
                 });
                 // Si el abono fue en efectivo, sumarlo a la caja abierta.
                 if (depositMethod === 'Efectivo') {
@@ -11063,12 +11077,14 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    addPreorderPayment: async (preorderId, amount, method, type = 'final') => {
+    addPreorderPayment: async (preorderId, amount, method, type = 'final', { terminalId = null, bankAccountId = null } = {}) => {
         try {
             const regId = get().cashRegister?.id || null;
+            const tId = method === 'Tarjeta' ? (terminalId || null) : null;
+            const baId = method === 'Transferencia' ? (bankAccountId || null) : null;
             await turso.execute({
-                sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id) VALUES (?, ?, ?, ?, ?)`,
-                args: [preorderId, amount, method, type, regId]
+                sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id, terminal_id, bank_account_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                args: [preorderId, amount, method, type, regId, tId, baId]
             });
 
             // Si el pago fue en efectivo, sumarlo a la caja abierta.
@@ -11299,10 +11315,10 @@ export const useStore = create(persist((set, get) => ({
                 sql: `SELECT
                     p.name,
                     p.sku,
-                    SUM(COALESCE(pi.real_weight_kg, pi.qty)) as quantity,
+                    SUM(COALESCE(pi.real_weight_kg, pi.real_qty, pi.qty)) as quantity,
                     pi.billing_unit,
                     SUM(COALESCE(pi.real_total, pi.line_total)) as revenue,
-                    SUM(COALESCE(pi.real_weight_kg, pi.qty) * COALESCE(p.original_price, 0)) as approximate_cost
+                    SUM(COALESCE(pi.real_weight_kg, pi.real_qty, pi.qty) * COALESCE(p.original_price, 0)) as approximate_cost
                   FROM preorder_items pi
                   JOIN preorders po ON pi.preorder_id = po.id
                   JOIN products p ON pi.product_id = p.id
@@ -11345,7 +11361,7 @@ export const useStore = create(persist((set, get) => ({
                     po.client_name,
                     COALESCE(po.real_total, po.total_amount) as total_amount,
                     po.deposit_amount,
-                    (SELECT GROUP_CONCAT(p.name || ' (' || COALESCE(pi.real_weight_kg, pi.qty) || ')', ', ')
+                    (SELECT GROUP_CONCAT(p.name || ' (' || COALESCE(pi.real_weight_kg, pi.real_qty, pi.qty) || ')', ', ')
                      FROM preorder_items pi JOIN products p ON pi.product_id = p.id
                      WHERE pi.preorder_id = po.id) as items_summary
                   FROM preorders po
@@ -11446,7 +11462,7 @@ export const useStore = create(persist((set, get) => ({
                 // 5. Productos más encargados (excluye cancelados = demanda real)
                 {
                     sql: `SELECT p.name, p.sku, pi.billing_unit,
-                            SUM(COALESCE(pi.real_weight_kg, pi.qty)) as quantity,
+                            SUM(COALESCE(pi.real_weight_kg, pi.real_qty, pi.qty)) as quantity,
                             SUM(COALESCE(pi.real_total, pi.line_total)) as revenue,
                             COUNT(DISTINCT po.id) as orders
                           FROM preorder_items pi
@@ -11574,19 +11590,25 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    deliverPreorder: async (preorderId, itemWeights, paymentMethod = 'Efectivo') => {
+    deliverPreorder: async (preorderId, itemWeights, paymentMethod = 'Efectivo', { terminalId = null, bankAccountId = null } = {}) => {
         try {
-            // 1. Update each item with real weight and real total
+            // 1. Update each item with real_qty, real_weight_kg, real_total.
+            //    · Productos por kg: total = real_weight_kg × price_per_kg.
+            //      real_qty queda como conteo de unidades entregadas (tracking).
+            //    · Productos por unidad: total = real_qty × unit_price.
             let realTotal = 0;
             for (const iw of itemWeights) {
+                const realQty = iw.real_qty !== undefined && iw.real_qty !== null && iw.real_qty !== ''
+                    ? Number(iw.real_qty)
+                    : Number(iw.qty || 0);
                 const realItemTotal = iw.billing_unit === 'kg'
-                    ? (iw.real_weight_kg || 0) * (iw.price_per_kg || 0)
-                    : iw.line_total;
+                    ? (Number(iw.real_weight_kg) || 0) * (Number(iw.price_per_kg) || 0)
+                    : realQty * (Number(iw.unit_price) || 0);
                 realTotal += realItemTotal;
 
                 await turso.execute({
-                    sql: `UPDATE preorder_items SET real_weight_kg = ?, real_total = ? WHERE id = ?`,
-                    args: [iw.real_weight_kg || null, realItemTotal, iw.id]
+                    sql: `UPDATE preorder_items SET real_qty = ?, real_weight_kg = ?, real_total = ? WHERE id = ?`,
+                    args: [realQty, iw.real_weight_kg || null, realItemTotal, iw.id]
                 });
             }
 
@@ -11601,9 +11623,11 @@ export const useStore = create(persist((set, get) => ({
             // 3. Register final payment if there's balance due
             if (balanceDue > 0) {
                 const regId = get().cashRegister?.id || null;
+                const tId = paymentMethod === 'Tarjeta' ? (terminalId || null) : null;
+                const baId = paymentMethod === 'Transferencia' ? (bankAccountId || null) : null;
                 await turso.execute({
-                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id) VALUES (?, ?, ?, 'final', ?)`,
-                    args: [preorderId, balanceDue, paymentMethod, regId]
+                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id, terminal_id, bank_account_id) VALUES (?, ?, ?, 'final', ?, ?, ?)`,
+                    args: [preorderId, balanceDue, paymentMethod, regId, tId, baId]
                 });
                 // Si el saldo se cobró en efectivo, sumarlo a la caja abierta.
                 if (paymentMethod === 'Efectivo') {

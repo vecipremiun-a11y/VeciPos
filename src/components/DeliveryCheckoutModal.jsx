@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Scale, Package, DollarSign, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { X, Scale, Package, DollarSign, CheckCircle2, AlertTriangle, Plus, Minus } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
+import PaymentDetailPicker from './PaymentDetailPicker';
 
 const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, currentCurrency }) => {
     const [itemWeights, setItemWeights] = useState([]);
     const [paymentMethod, setPaymentMethod] = useState('Efectivo');
+    const [terminalId, setTerminalId] = useState(null);
+    const [bankAccountId, setBankAccountId] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
 
     useEffect(() => {
@@ -14,6 +17,7 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
                 id: item.id,
                 product_name: item.product_name,
                 qty: item.qty,
+                real_qty: item.qty, // arranca con la planeada, editable
                 unit: item.unit,
                 billing_unit: item.billing_unit || 'unit',
                 price_per_kg: item.price_per_kg || 0,
@@ -36,10 +40,14 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
     const realTotal = useMemo(() => {
         return itemWeights.reduce((sum, iw) => {
             if (iw.billing_unit === 'kg') {
+                // Precio por kg: el peso real determina el total. real_qty es
+                // solo conteo de unidades entregadas (informativo/tracking).
                 const w = parseFloat(iw.real_weight_kg) || 0;
                 return sum + w * iw.price_per_kg;
             }
-            return sum + iw.line_total;
+            // Productos por unidad: total = real_qty * unit_price.
+            const q = parseFloat(iw.real_qty) || 0;
+            return sum + q * (iw.unit_price || 0);
         }, 0);
     }, [itemWeights]);
 
@@ -54,11 +62,29 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
         ));
     };
 
+    const handleQtyChange = (itemId, value) => {
+        const v = Math.max(0, Number(value) || 0);
+        setItemWeights(prev => prev.map(iw =>
+            iw.id === itemId ? { ...iw, real_qty: v } : iw
+        ));
+    };
+
+    const adjustQty = (itemId, delta) => {
+        setItemWeights(prev => prev.map(iw => {
+            if (iw.id !== itemId) return iw;
+            const next = Math.max(0, (parseFloat(iw.real_qty) || 0) + delta);
+            return { ...iw, real_qty: next };
+        }));
+    };
+
     const handleDeliver = async () => {
         if (!allWeightsFilled) return;
         setIsProcessing(true);
         try {
-            await onDeliver(preorderDetails.preorder.id, itemWeights, paymentMethod);
+            await onDeliver(preorderDetails.preorder.id, itemWeights, paymentMethod, {
+                terminalId: paymentMethod === 'Tarjeta' ? terminalId : null,
+                bankAccountId: paymentMethod === 'Transferencia' ? bankAccountId : null,
+            });
             onClose();
         } catch (e) {
             console.error('Delivery error:', e);
@@ -93,58 +119,96 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
 
                 {/* Items */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                    {itemWeights.map(iw => (
-                        <div key={iw.id} className="p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)] space-y-2">
-                            <div className="flex justify-between items-start">
-                                <div>
-                                    <h4 className="text-[var(--color-text)] font-medium text-sm">{iw.product_name}</h4>
-                                    <p className="text-xs text-[var(--color-text-muted)]">
-                                        {iw.qty} {iw.unit}
-                                        {iw.billing_unit === 'kg' && (
-                                            <span className="ml-2 text-orange-400">
-                                                · {formatCurrency(iw.price_per_kg, currentCurrency)}/kg
-                                            </span>
-                                        )}
-                                    </p>
-                                </div>
-                                {iw.billing_unit !== 'kg' && (
+                    {itemWeights.map(iw => {
+                        const isKg = iw.billing_unit === 'kg';
+                        const realQty = parseFloat(iw.real_qty) || 0;
+                        const realKg = parseFloat(iw.real_weight_kg) || 0;
+                        const qtyChanged = realQty !== iw.qty;
+                        const lineTotal = isKg ? realKg * iw.price_per_kg : realQty * (iw.unit_price || 0);
+                        return (
+                            <div key={iw.id} className="p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)] space-y-2">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h4 className="text-[var(--color-text)] font-medium text-sm">{iw.product_name}</h4>
+                                        <p className="text-xs text-[var(--color-text-muted)]">
+                                            Planeado: {iw.qty} {iw.unit}
+                                            {isKg && (
+                                                <span className="ml-2 text-orange-400">
+                                                    · {formatCurrency(iw.price_per_kg, currentCurrency)}/kg
+                                                </span>
+                                            )}
+                                        </p>
+                                    </div>
                                     <span className="text-[var(--color-primary)] font-bold">
-                                        {formatCurrency(iw.line_total, currentCurrency)}
+                                        {formatCurrency(lineTotal, currentCurrency)}
                                     </span>
+                                </div>
+
+                                {/* Control de unidades reales entregadas (+/−) */}
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[11px] text-[var(--color-text-muted)] font-bold uppercase tracking-wider">Entregado</span>
+                                    <div className="flex items-center gap-1">
+                                        <button type="button" onClick={() => adjustQty(iw.id, -1)}
+                                            className="w-7 h-7 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)] hover:bg-red-500/20 hover:border-red-500/30 hover:text-red-400 transition-all flex items-center justify-center">
+                                            <Minus size={14} />
+                                        </button>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step={isKg ? '1' : 'any'}
+                                            value={iw.real_qty}
+                                            onChange={e => handleQtyChange(iw.id, e.target.value)}
+                                            onClick={e => e.target.select()}
+                                            className="w-16 h-7 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-center font-bold text-[var(--color-text)] text-sm"
+                                        />
+                                        <button type="button" onClick={() => adjustQty(iw.id, 1)}
+                                            className="w-7 h-7 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)] hover:bg-green-500/20 hover:border-green-500/30 hover:text-green-400 transition-all flex items-center justify-center">
+                                            <Plus size={14} />
+                                        </button>
+                                        <span className="text-xs text-[var(--color-text-muted)] ml-1">{iw.unit}</span>
+                                    </div>
+                                    {qtyChanged && (
+                                        <span className={cn(
+                                            "text-[10px] font-bold px-1.5 py-0.5 rounded",
+                                            realQty > iw.qty ? "bg-green-500/15 text-green-400" : "bg-orange-500/15 text-orange-400"
+                                        )}>
+                                            {realQty > iw.qty ? `+${(realQty - iw.qty).toFixed(realQty % 1 === 0 ? 0 : 2)}` : `${(realQty - iw.qty).toFixed(realQty % 1 === 0 ? 0 : 2)}`}
+                                        </span>
+                                    )}
+                                </div>
+
+                                {isKg && (
+                                    <div className="space-y-1.5">
+                                        <div className="flex items-center gap-2">
+                                            <div className="relative flex-1">
+                                                <Scale size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                                                <input
+                                                    type="number"
+                                                    step="0.01"
+                                                    min="0"
+                                                    placeholder="Peso real"
+                                                    className="glass-input w-full !pl-9 !pr-10 text-lg font-bold"
+                                                    value={iw.real_weight_kg}
+                                                    onChange={e => handleWeightChange(iw.id, e.target.value)}
+                                                    onClick={e => e.target.select()}
+                                                />
+                                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-bold pointer-events-none">kg</span>
+                                            </div>
+                                            <div className="text-right min-w-[80px]">
+                                                <p className="text-[var(--color-primary)] font-bold">
+                                                    {formatCurrency(realKg * iw.price_per_kg, currentCurrency)}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between text-[10px] text-[var(--color-text-muted)]">
+                                            <span>Estimado: ~{((realQty * iw.gram_per_unit) / 1000).toFixed(2)} kg ({realQty} {iw.unit})</span>
+                                            <span>≈ {formatCurrency(realQty * iw.gram_per_unit / 1000 * iw.price_per_kg, currentCurrency)}</span>
+                                        </div>
+                                    </div>
                                 )}
                             </div>
-
-                            {iw.billing_unit === 'kg' && (
-                                <div className="space-y-1.5">
-                                    <div className="flex items-center gap-2">
-                                        <div className="relative flex-1">
-                                            <Scale size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
-                                            <input
-                                                type="number"
-                                                step="0.01"
-                                                min="0"
-                                                placeholder="Peso real"
-                                                className="glass-input w-full !pl-9 !pr-10 text-lg font-bold"
-                                                value={iw.real_weight_kg}
-                                                onChange={e => handleWeightChange(iw.id, e.target.value)}
-                                                onClick={e => e.target.select()}
-                                            />
-                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-bold pointer-events-none">kg</span>
-                                        </div>
-                                        <div className="text-right min-w-[80px]">
-                                            <p className="text-[var(--color-primary)] font-bold">
-                                                {formatCurrency((parseFloat(iw.real_weight_kg) || 0) * iw.price_per_kg, currentCurrency)}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <div className="flex justify-between text-[10px] text-[var(--color-text-muted)]">
-                                        <span>Estimado: ~{((iw.qty * iw.gram_per_unit) / 1000).toFixed(2)} kg</span>
-                                        <span>≈ {formatCurrency(iw.estimated_total, currentCurrency)}</span>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
 
                 {/* Summary */}
@@ -184,17 +248,28 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
 
                     {/* Payment method for the balance */}
                     {balanceDue > 0 && (
-                        <div className="flex gap-2">
-                            {['Efectivo', 'Tarjeta', 'Transferencia'].map(m => (
-                                <button key={m} onClick={() => setPaymentMethod(m)}
-                                    className={cn("flex-1 py-1.5 rounded-lg text-xs font-bold transition-all border",
-                                        paymentMethod === m
-                                            ? "bg-green-500/20 text-green-400 border-green-500/30"
-                                            : "bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)]"
-                                    )}>
-                                    {m === 'Efectivo' ? '💵' : m === 'Tarjeta' ? '💳' : '📱'} {m}
-                                </button>
-                            ))}
+                        <div className="space-y-2">
+                            <div className="flex gap-2">
+                                {['Efectivo', 'Tarjeta', 'Transferencia'].map(m => (
+                                    <button key={m} onClick={() => { setPaymentMethod(m); setTerminalId(null); setBankAccountId(null); }}
+                                        className={cn("flex-1 py-1.5 rounded-lg text-xs font-bold transition-all border",
+                                            paymentMethod === m
+                                                ? "bg-green-500/20 text-green-400 border-green-500/30"
+                                                : "bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)]"
+                                        )}>
+                                        {m === 'Efectivo' ? '💵' : m === 'Tarjeta' ? '💳' : '📱'} {m}
+                                    </button>
+                                ))}
+                            </div>
+                            <PaymentDetailPicker
+                                method={paymentMethod}
+                                terminalId={terminalId}
+                                bankAccountId={bankAccountId}
+                                onChange={({ terminalId: tId, bankAccountId: baId }) => {
+                                    if (tId !== undefined) setTerminalId(tId);
+                                    if (baId !== undefined) setBankAccountId(baId);
+                                }}
+                            />
                         </div>
                     )}
 
