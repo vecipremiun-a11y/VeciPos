@@ -43,6 +43,31 @@
   #status-line .live { color: #22c55e; }
   #status-line .err { color: #ef4444; }
 
+  /* Totales a producir (franja superior, no achica los tickets) */
+  #totals {
+    flex: 0 0 auto;
+    padding: 12px 16px;
+    background: #0e1730;
+    border-bottom: 2px solid #1e293b;
+  }
+  .totals-label {
+    font-size: 13px; font-weight: bold; color: #f59e0b;
+    text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .totals-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+  .tchip {
+    display: flex; align-items: center; gap: 10px;
+    background: #1a2238; border: 1px solid #2a3550; border-radius: 12px;
+    padding: 7px 16px 7px 12px;
+  }
+  .tchip-qty {
+    font-size: 30px; font-weight: bold; color: #38bdf8; line-height: 1;
+    min-width: 44px; text-align: center;
+  }
+  .tchip-name { font-size: 18px; color: #e2e8f0; }
+  .tchip-unit { font-size: 12px; color: #64748b; margin-left: 2px; }
+
   /* Board */
   #board {
     flex: 1 1 auto;
@@ -120,9 +145,10 @@
     <div id="title">&#127838; COCINA <span class="dot">&#9679;</span></div>
     <div id="header-right">
       <div id="clock">--:--</div>
-      <div id="status-line"><span class="live">en vivo</span> &middot; <span id="last-upd">--</span></div>
+      <div id="status-line"><span class="live">&#9679; en vivo</span></div>
     </div>
   </div>
+  <div id="totals" style="display:none"></div>
   <div id="board">
     <div id="empty">Cargando pedidos...</div>
   </div>
@@ -353,8 +379,40 @@
       .replace(/"/g, '&quot;');
   }
 
+  // ---- Total a producir (suma por producto de todos los pedidos activos) ----
+  function renderTotals(orders) {
+    var el = document.getElementById('totals');
+    var map = {}; // name -> { qty, unit }
+    var order = []; // preserva orden de aparición
+    for (var i = 0; i < orders.length; i++) {
+      var items = orders[i].items || [];
+      for (var j = 0; j < items.length; j++) {
+        var it = items[j];
+        var key = it.name;
+        if (!map[key]) { map[key] = { qty: 0, unit: it.unit || 'Und' }; order.push(key); }
+        map[key].qty += Number(it.qty) || 0;
+      }
+    }
+    if (order.length === 0) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    // Ordenar por cantidad descendente (lo que más hay que producir, primero)
+    order.sort(function (a, b) { return map[b].qty - map[a].qty; });
+    var html = '<div class="totals-label">&#128230; TOTAL A PRODUCIR (' + order.length + ')</div>';
+    html += '<div class="totals-chips">';
+    for (var k = 0; k < order.length; k++) {
+      var m = map[order[k]];
+      html += '<div class="tchip">';
+      html += '  <span class="tchip-qty">' + m.qty + '</span>';
+      html += '  <span class="tchip-name">' + escapeHtml(order[k]) + '<span class="tchip-unit"> ' + escapeHtml(m.unit) + '</span></span>';
+      html += '</div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+    el.style.display = '';
+  }
+
   // ---- Render ----
   function render(orders) {
+    renderTotals(orders);
     var board = document.getElementById('board');
     if (!orders || orders.length === 0) {
       board.innerHTML = '<div id="empty">&#9989; Sin pedidos pendientes para hoy</div>';
@@ -412,12 +470,12 @@
   }
 
   // ---- Polling (XMLHttpRequest para compatibilidad) ----
-  function setStatus(ok, msg) {
+  function setStatus(ok) {
     var el = document.getElementById('status-line');
     if (ok) {
-      el.innerHTML = '<span class="live">en vivo</span> &middot; ' + msg;
+      el.innerHTML = '<span class="live">&#9679; en vivo</span>';
     } else {
-      el.innerHTML = '<span class="err">sin conexion</span> &middot; reintentando...';
+      el.innerHTML = '<span class="err">&#9679; sin conexion &middot; reintentando...</span>';
     }
   }
 
@@ -436,8 +494,7 @@
           var orders = data.orders || [];
           render(orders);
           checkNew(orders);
-          var d = new Date();
-          setStatus(true, d.getHours() % 12 + ':' + pad2(d.getMinutes()));
+          setStatus(true);
         } catch (e) {
           setStatus(false);
         }
