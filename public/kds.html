@@ -125,8 +125,48 @@
   .badge.preparing { background: rgba(56,189,248,0.2); color: #7dd3fc; }
   .badge.ready     { background: rgba(34,197,94,0.2);  color: #86efac; }
 
-  /* Empty state */
-  #empty { width: 100%; text-align: center; color: #475569; padding-top: 80px; font-size: 28px; }
+  /* Action button (transición de estado) */
+  .card-action {
+    margin-top: 10px;
+    width: 100%;
+    padding: 14px;
+    border-radius: 12px;
+    border: none;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: opacity 0.15s, transform 0.05s;
+    color: #0b1120;
+  }
+  .card-action:active { transform: scale(0.97); }
+  .card-action[disabled] { opacity: 0.55; cursor: wait; }
+  .card-action.act-pending   { background: linear-gradient(135deg, #eab308, #d97706); }
+  .card-action.act-confirmed { background: linear-gradient(135deg, #06b6d4, #3b82f6); }
+  .card-action.act-preparing { background: linear-gradient(135deg, #22c55e, #16a34a); }
+  .card-ready {
+    margin-top: 10px; padding: 14px; border-radius: 12px;
+    background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.35);
+    color: #86efac; font-size: 16px; font-weight: bold; text-align: center;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+
+  /* Empty state motivador */
+  #empty {
+    width: 100%; padding-top: 60px;
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+  }
+  .empty-icon { font-size: 90px; line-height: 1; animation: bob 2.6s ease-in-out infinite; }
+  .empty-title {
+    font-size: 56px; font-weight: bold;
+    background: linear-gradient(135deg, #38bdf8, #22c55e);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+  }
+  .empty-sub { font-size: 24px; color: #94a3b8; }
+  .empty-hint { font-size: 18px; color: #475569; margin-top: 18px; }
+  @keyframes bob { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-10px);} }
 
   /* Tap-to-start overlay */
   #overlay {
@@ -410,12 +450,26 @@
     el.style.display = '';
   }
 
+  // Botón siguiente según estado (la cocina no toca delivered/canceled)
+  function nextAction(status) {
+    if (status === 'pending')    return { action: 'confirm', label: '&#9989; Confirmar',          cls: 'act-pending' };
+    if (status === 'confirmed')  return { action: 'start',   label: '&#128293; Iniciar Producción', cls: 'act-confirmed' };
+    if (status === 'preparing')  return { action: 'ready',   label: '&#127869; Marcar Listo',     cls: 'act-preparing' };
+    return null; // ready o cualquier otro → no hay botón
+  }
+
   // ---- Render ----
   function render(orders) {
     renderTotals(orders);
     var board = document.getElementById('board');
     if (!orders || orders.length === 0) {
-      board.innerHTML = '<div id="empty">&#9989; Sin pedidos pendientes para hoy</div>';
+      board.innerHTML = ''
+        + '<div id="empty">'
+        + '  <div class="empty-icon">&#127869;</div>'
+        + '  <div class="empty-title">¡Cocina al día!</div>'
+        + '  <div class="empty-sub">No hay pedidos pendientes</div>'
+        + '  <div class="empty-hint">Disfruta del momento &#9749;</div>'
+        + '</div>';
       return;
     }
     var html = '';
@@ -435,8 +489,6 @@
       var items = o.items || [];
       for (var j = 0; j < items.length; j++) {
         var it = items[j];
-        // qty siempre es en unidades del producto (ej "15 Und"), aunque se
-        // facture por kg. El billing_unit solo afecta el precio, no el conteo.
         var unitLabel = it.unit || 'Und';
         html += '    <div class="item-row">';
         html += '      <div class="item-qty">' + (it.qty) + '<span style="font-size:13px"> ' + escapeHtml(unitLabel) + '</span></div>';
@@ -450,10 +502,62 @@
       html += '    <div class="card-due"><span>Para</span> ' + escapeHtml(o.due_time || '--') + '</div>';
       html += '    <div class="badge ' + o.status + '">' + statusLabel(o.status) + '</div>';
       html += '  </div>';
+      var act = nextAction(o.status);
+      if (act) {
+        html += '  <button type="button" class="card-action ' + act.cls + '" data-id="' + o.id + '" data-action="' + act.action + '">' + act.label + '</button>';
+      } else if (o.status === 'ready') {
+        html += '  <div class="card-ready">&#10004; Listo · esperando entrega</div>';
+      }
       html += '</div>';
     }
     board.innerHTML = html;
   }
+
+  // ---- Transición de estado (POST al endpoint) ----
+  function transitionOrder(btn) {
+    if (btn.disabled) return;
+    var preorderId = btn.getAttribute('data-id');
+    var action = btn.getAttribute('data-action');
+    if (!preorderId || !action) return;
+    btn.disabled = true;
+    var originalHtml = btn.innerHTML;
+    btn.innerHTML = '&#8987; ...';
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/kds/update-status', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.timeout = 10000;
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) return;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        // OK — refrescar inmediato para que se vea el cambio
+        fetchOrders();
+      } else {
+        // Restaurar botón y mostrar error simple
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+        var msg = 'Error';
+        try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) { /* noop */ }
+        alert(msg);
+      }
+    };
+    xhr.onerror = function () { btn.disabled = false; btn.innerHTML = originalHtml; alert('Sin conexión'); };
+    xhr.ontimeout = function () { btn.disabled = false; btn.innerHTML = originalHtml; alert('Tiempo agotado'); };
+    try {
+      xhr.send(JSON.stringify({ token: TOKEN, preorder_id: Number(preorderId), action: action }));
+    } catch (e) { btn.disabled = false; btn.innerHTML = originalHtml; }
+  }
+
+  // Event delegation: un solo listener para todos los botones del board
+  document.getElementById('board').addEventListener('click', function (ev) {
+    var t = ev.target;
+    while (t && t !== this) {
+      if (t.classList && t.classList.contains('card-action')) {
+        transitionOrder(t);
+        return;
+      }
+      t = t.parentNode;
+    }
+  });
 
   // ---- Deteccion de pedidos nuevos ----
   function checkNew(orders) {

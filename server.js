@@ -13,6 +13,7 @@ import notifyMiniveciStatusHandler from './api/integration/notify-miniveci-statu
 import externalPreordersHandler from './api/external/preorders.js';
 
 import kdsOrdersHandler from './api/kds/orders.js';
+import kdsUpdateStatusHandler from './api/kds/update-status.js';
 
 import siiConfigHandler from './api/sii/config.js';
 import siiUploadCertHandler from './api/sii/upload-cert.js';
@@ -191,6 +192,11 @@ app.all('/api/external/preorders', async (req, res) => {
 app.all('/api/kds/orders', async (req, res) => {
     try { return await kdsOrdersHandler(req, res); }
     catch (error) { console.error('❌ /api/kds/orders error:', error); return res.status(500).json({ error: error.message }); }
+});
+
+app.all('/api/kds/update-status', async (req, res) => {
+    try { return await kdsUpdateStatusHandler(req, res); }
+    catch (error) { console.error('❌ /api/kds/update-status error:', error); return res.status(500).json({ error: error.message }); }
 });
 
 app.use('/api', (_req, res) => {
