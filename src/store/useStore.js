@@ -11043,10 +11043,16 @@ export const useStore = create(persist((set, get) => ({
         try {
             console.log("Generando reporte de encargos:", startDate, endDate);
 
-            // Ensure we cover the full day range in UTC/ISO string comparison
-            // If startDate is '2023-10-27', we want '2023-10-27 00:00:00' to '2023-10-27 23:59:59'
-            const startDateTime = `${startDate} 00:00:00`;
-            const endDateTime = `${endDate} 23:59:59`;
+            // Filtro por rango de DÍA usando solo la parte fecha de created_at.
+            // created_at tiene dos formatos históricos en la BD:
+            //   · ISO con 'T':  '2026-05-22T18:52:12.230Z'  (mayoría)
+            //   · con espacio:  '2026-02-10 04:19:28'         (filas viejas)
+            // Comparar el string completo contra '<fecha> 23:59:59' fallaba: la
+            // 'T' (ASCII 84) es mayor que el espacio (ASCII 32), así que las
+            // filas ISO quedaban EXCLUIDAS del límite superior. SUBSTR(...,1,10)
+            // toma solo 'YYYY-MM-DD' (idéntico en ambos formatos) → comparación
+            // robusta con BETWEEN sobre las fechas tal cual.
+            const dateFilter = 'SUBSTR(__col__, 1, 10) BETWEEN ? AND ?';
 
             // 1. Resumen General
             const summaryRes = await turso.execute({
@@ -11058,8 +11064,8 @@ export const useStore = create(persist((set, get) => ({
                     SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END) as canceled_count,
                     SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_count
                   FROM preorders
-                  WHERE created_at >= ? AND created_at <= ? AND company_id = ?`,
-                args: [startDateTime, endDateTime, activeCompanyId]
+                  WHERE ${dateFilter.replace('__col__', 'created_at')} AND company_id = ?`,
+                args: [startDate, endDate, activeCompanyId]
             });
             const summary = summaryRes.rows[0];
 
@@ -11067,9 +11073,9 @@ export const useStore = create(persist((set, get) => ({
             const byStatusRes = await turso.execute({
                 sql: `SELECT status, COUNT(*) as count, SUM(total_amount) as total
                   FROM preorders
-                  WHERE created_at >= ? AND created_at <= ? AND company_id = ?
+                  WHERE ${dateFilter.replace('__col__', 'created_at')} AND company_id = ?
                   GROUP BY status`,
-                args: [startDateTime, endDateTime, activeCompanyId]
+                args: [startDate, endDate, activeCompanyId]
             });
             const byStatus = byStatusRes.rows;
 
@@ -11085,12 +11091,12 @@ export const useStore = create(persist((set, get) => ({
                   FROM preorder_items pi
                   JOIN preorders po ON pi.preorder_id = po.id
                   JOIN products p ON pi.product_id = p.id
-                  WHERE po.created_at >= ? AND po.created_at <= ?
+                  WHERE ${dateFilter.replace('__col__', 'po.created_at')}
                     AND po.company_id = ?
                     AND po.status != 'canceled'
                   GROUP BY pi.product_id
                   ORDER BY revenue DESC`,
-                args: [startDateTime, endDateTime, activeCompanyId]
+                args: [startDate, endDate, activeCompanyId]
             });
             const byProduct = byProductRes.rows.map(p => ({
                 ...p,
@@ -11107,13 +11113,13 @@ export const useStore = create(persist((set, get) => ({
                     SUM(po.total_amount) as total_spend,
                     MAX(po.created_at) as last_order_date
                   FROM preorders po
-                  WHERE po.created_at >= ? AND po.created_at <= ?
+                  WHERE ${dateFilter.replace('__col__', 'po.created_at')}
                     AND po.company_id = ?
                     AND po.status != 'canceled'
                   GROUP BY COALESCE(po.client_id, po.client_name)
                   ORDER BY total_spend DESC
                   LIMIT 100`,
-                args: [startDateTime, endDateTime, activeCompanyId]
+                args: [startDate, endDate, activeCompanyId]
             });
             const byClient = byClientRes.rows;
 
@@ -11127,9 +11133,9 @@ export const useStore = create(persist((set, get) => ({
                      FROM preorder_items pi JOIN products p ON pi.product_id = p.id
                      WHERE pi.preorder_id = po.id) as items_summary
                   FROM preorders po
-                  WHERE po.created_at >= ? AND po.created_at <= ? AND po.company_id = ?
+                  WHERE ${dateFilter.replace('__col__', 'po.created_at')} AND po.company_id = ?
                   ORDER BY po.created_at DESC`,
-                args: [startDateTime, endDateTime, activeCompanyId]
+                args: [startDate, endDate, activeCompanyId]
             });
             const details = detailsRes.rows;
 
