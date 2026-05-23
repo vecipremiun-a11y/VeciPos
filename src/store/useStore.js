@@ -11389,15 +11389,17 @@ export const useStore = create(persist((set, get) => ({
     },
 
     // Dashboard de inteligencia de encargos (Pedidos → Historial).
-    // Eje temporal: created_at (cuándo ENTRÓ el encargo) → "encargos recibidos
-    // en el período". Responde: cuántos entraron, qué pasó con ellos (entregado/
-    // cancelado/en proceso), cuánto se vendió, medios de pago, días pico,
-    // productos/clientes top, y crecimiento vs el período anterior equivalente.
+    // Eje temporal: due_date (fecha de ENTREGA del encargo) — matchea con
+    // Producción y con la operativa de la panadería ("¿qué fue para hoy?").
+    // Responde: cuántos encargos eran para el período, qué pasó con ellos
+    // (entregado/cancelado/en proceso), cuánto se vendió, medios de pago,
+    // días pico, productos/clientes top, y crecimiento vs el período anterior.
+    // due_date se guarda como 'YYYY-MM-DD' → comparación directa sin SUBSTR.
     getPreorderAnalytics: async (startDate, endDate) => {
         const { activeCompanyId } = get();
         try {
-            // Filtro robusto a formatos de created_at (ISO 'T' o espacio).
-            const df = 'SUBSTR(__col__, 1, 10) BETWEEN ? AND ?';
+            // due_date es string 'YYYY-MM-DD' → BETWEEN directo, sin SUBSTR.
+            const df = '__col__ BETWEEN ? AND ?';
 
             // Período anterior equivalente (misma duración, justo antes) para growth.
             const sd = new Date(`${startDate}T00:00:00Z`);
@@ -11417,7 +11419,7 @@ export const useStore = create(persist((set, get) => ({
                     sql: `SELECT status, COUNT(*) as count,
                             SUM(COALESCE(real_total, total_amount)) as amount
                           FROM preorders
-                          WHERE ${df.replace('__col__', 'created_at')} AND company_id = ?
+                          WHERE ${df.replace('__col__', 'due_date')} AND company_id = ?
                           GROUP BY status`,
                     args: [startDate, endDate, activeCompanyId]
                 },
@@ -11433,7 +11435,7 @@ export const useStore = create(persist((set, get) => ({
                             SUM(deposit_amount) as total_deposits,
                             AVG(CASE WHEN status='delivered' THEN COALESCE(real_total, total_amount) END) as avg_ticket
                           FROM preorders
-                          WHERE ${df.replace('__col__', 'created_at')} AND company_id = ?`,
+                          WHERE ${df.replace('__col__', 'due_date')} AND company_id = ?`,
                     args: [startDate, endDate, activeCompanyId]
                 },
                 // 3. Medios de pago (de pagos asociados a encargos entregados)
@@ -11442,21 +11444,22 @@ export const useStore = create(persist((set, get) => ({
                           FROM preorder_payments pp
                           JOIN preorders po ON pp.preorder_id = po.id
                           WHERE po.status = 'delivered'
-                            AND ${df.replace('__col__', 'po.created_at')}
+                            AND ${df.replace('__col__', 'po.due_date')}
                             AND po.company_id = ?
                           GROUP BY pp.method
                           ORDER BY total DESC`,
                     args: [startDate, endDate, activeCompanyId]
                 },
-                // 4. Serie diaria: encargos recibidos y ventas (de los entregados)
+                // 4. Serie diaria por fecha de entrega: cuántos eran para cada día
+                //    y cuántos efectivamente se entregaron (con ventas reales).
                 {
-                    sql: `SELECT SUBSTR(created_at, 1, 10) as day,
+                    sql: `SELECT due_date as day,
                             COUNT(*) as orders,
                             SUM(CASE WHEN status='delivered' THEN COALESCE(real_total, total_amount) ELSE 0 END) as revenue,
                             SUM(CASE WHEN status='delivered' THEN 1 ELSE 0 END) as delivered
                           FROM preorders
-                          WHERE ${df.replace('__col__', 'created_at')} AND company_id = ?
-                          GROUP BY day ORDER BY day`,
+                          WHERE ${df.replace('__col__', 'due_date')} AND company_id = ?
+                          GROUP BY due_date ORDER BY due_date`,
                     args: [startDate, endDate, activeCompanyId]
                 },
                 // 5. Productos más encargados (excluye cancelados = demanda real)
@@ -11469,7 +11472,7 @@ export const useStore = create(persist((set, get) => ({
                           JOIN preorders po ON pi.preorder_id = po.id
                           JOIN products p ON pi.product_id = p.id
                           WHERE po.status != 'canceled'
-                            AND ${df.replace('__col__', 'po.created_at')}
+                            AND ${df.replace('__col__', 'po.due_date')}
                             AND po.company_id = ?
                           GROUP BY pi.product_id
                           ORDER BY quantity DESC
@@ -11485,7 +11488,7 @@ export const useStore = create(persist((set, get) => ({
                             SUM(CASE WHEN po.status='canceled' THEN 1 ELSE 0 END) as canceled_count,
                             SUM(CASE WHEN po.status='delivered' THEN COALESCE(po.real_total, po.total_amount) ELSE 0 END) as total_spend
                           FROM preorders po
-                          WHERE ${df.replace('__col__', 'po.created_at')}
+                          WHERE ${df.replace('__col__', 'po.due_date')}
                             AND po.company_id = ?
                           GROUP BY COALESCE(po.client_id, po.client_name)
                           ORDER BY total_spend DESC
@@ -11498,7 +11501,7 @@ export const useStore = create(persist((set, get) => ({
                             COUNT(*) as total_orders,
                             SUM(CASE WHEN status='delivered' THEN COALESCE(real_total, total_amount) ELSE 0 END) as revenue
                           FROM preorders
-                          WHERE ${df.replace('__col__', 'created_at')} AND company_id = ?`,
+                          WHERE ${df.replace('__col__', 'due_date')} AND company_id = ?`,
                     args: [prevStartStr, prevEndStr, activeCompanyId]
                 }
             ]);

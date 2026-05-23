@@ -87,7 +87,7 @@ const PreorderHistory = () => {
                     <h1 className="text-2xl font-bold text-white flex items-center gap-2">
                         <TrendingUp className="text-[var(--primary)]" /> Historial de Encargos
                     </h1>
-                    <p className="text-sm text-[var(--text-muted)]">Inteligencia y crecimiento · encargos recibidos en el período</p>
+                    <p className="text-sm text-[var(--text-muted)]">Inteligencia y crecimiento · encargos por fecha de entrega</p>
                 </div>
                 <div className="flex flex-wrap gap-2 items-center bg-[var(--surface-light)] p-2 rounded-xl border border-[var(--glass-border)]">
                     {['today', 'yesterday', 'week', 'month', 'custom'].map(r => (
@@ -122,7 +122,7 @@ const PreorderHistory = () => {
                             sub={`Antes: ${formatCurrency(data.growth.prevRevenue, currentCurrency)}`}
                         />
                         <GrowthCard
-                            title="Encargos recibidos vs período anterior"
+                            title="Encargos del período vs anterior"
                             current={`${s.totalOrders} encargos`}
                             change={data.growth.ordersChange}
                             sub={`Antes: ${data.growth.prevOrders} encargos`}
@@ -170,7 +170,7 @@ const PreorderHistory = () => {
                         {/* Encargos por día */}
                         <div className="glass-card p-6">
                             <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-lg font-bold text-white">Encargos por Día</h3>
+                                <h3 className="text-lg font-bold text-white">Encargos por Día de Entrega</h3>
                                 {data.peakDay && (
                                     <span className="text-xs px-2 py-1 rounded-lg bg-[var(--primary)]/15 text-[var(--primary)] flex items-center gap-1">
                                         <Calendar size={12} /> Pico: {data.peakDay.day.slice(5)} ({data.peakDay.orders})
