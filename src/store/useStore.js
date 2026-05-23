@@ -10682,6 +10682,30 @@ export const useStore = create(persist((set, get) => ({
 
     clearPreorderCart: () => set({ preorderCart: [] }),
 
+    // Suma (IN) o resta (OUT) efectivo de un encargo a la caja ABIERTA del
+    // momento, vía cash_movements. Así el cobro/devolución de encargos en
+    // efectivo se refleja en la caja en tiempo real (igual que las ventas POS).
+    // Solo aplica a efectivo; tarjeta/transferencia no tocan la caja física.
+    // Si no hay caja abierta o el monto es 0, no hace nada (no se puede sumar
+    // a una caja cerrada).
+    _registerPreorderCash: async ({ amount, reason, direction = 'IN' }) => {
+        try {
+            const { cashRegister, activeCompanyId } = get();
+            const amt = Number(amount) || 0;
+            if (!cashRegister?.id || amt <= 0) return { skipped: true };
+
+            await turso.execute({
+                sql: "INSERT INTO cash_movements (register_id, type, amount, reason, date, company_id) VALUES (?, ?, ?, ?, ?, ?)",
+                args: [cashRegister.id, direction, amt, reason, new Date().toISOString(), activeCompanyId]
+            });
+            get().refreshRegisterStats(cashRegister.id);
+            return { success: true };
+        } catch (e) {
+            console.error('Error registrando efectivo de encargo en caja:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
     createPreorder: async (preorderData) => {
         const { activeCompanyId, currentUser } = get();
         try {
@@ -10740,11 +10764,19 @@ export const useStore = create(persist((set, get) => ({
 
             // Insert initial payment (deposit) if any
             if (preorderData.deposit_amount > 0) {
+                const depositMethod = preorderData.deposit_method || 'Efectivo';
                 await turso.execute({
                     sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type)
                           VALUES (?, ?, ?, 'deposit')`,
-                    args: [preorderId, preorderData.deposit_amount, preorderData.deposit_method || 'Efectivo']
+                    args: [preorderId, preorderData.deposit_amount, depositMethod]
                 });
+                // Si el abono fue en efectivo, sumarlo a la caja abierta.
+                if (depositMethod === 'Efectivo') {
+                    await get()._registerPreorderCash({
+                        amount: preorderData.deposit_amount,
+                        reason: `Abono encargo #${preorderId} - ${preorderData.client_name || 'Cliente'}`.trim()
+                    });
+                }
             }
 
             // Refresh list
@@ -10823,12 +10855,14 @@ export const useStore = create(persist((set, get) => ({
 
     updatePreorderStatus: async (preorderId, newStatus, reason = null) => {
         try {
-            // Leemos external_source/public_code antes para saber si avisar a miniveci
+            // Leemos external_source/public_code + status/cliente antes del cambio
+            // (el status previo evita devolver dos veces si ya estaba cancelado).
             const infoRes = await turso.execute({
-                sql: 'SELECT external_source, external_public_code FROM preorders WHERE id = ?',
+                sql: 'SELECT external_source, external_public_code, status, client_name FROM preorders WHERE id = ?',
                 args: [preorderId],
             });
             const info = infoRes.rows?.[0] || {};
+            const prevStatus = info.status;
 
             // Si hay motivo (rechazo), lo guardamos en notes para que quede registro local
             if (reason && reason.trim()) {
@@ -10842,6 +10876,27 @@ export const useStore = create(persist((set, get) => ({
                     args: [newStatus, preorderId]
                 });
             }
+
+            // Si se CANCELA (y no estaba ya cancelado), devolver de la caja el
+            // efectivo que se había cobrado (abonos/pagos en efectivo). La salida
+            // sale de la caja abierta del que procesa la cancelación.
+            if (newStatus === 'canceled' && prevStatus !== 'canceled') {
+                const cashRes = await turso.execute({
+                    sql: `SELECT COALESCE(SUM(amount), 0) as cash_paid
+                          FROM preorder_payments
+                          WHERE preorder_id = ? AND method = 'Efectivo'`,
+                    args: [preorderId]
+                });
+                const cashPaid = Number(cashRes.rows[0]?.cash_paid) || 0;
+                if (cashPaid > 0) {
+                    await get()._registerPreorderCash({
+                        amount: cashPaid,
+                        reason: `Devolución abono encargo #${preorderId} - ${info.client_name || ''}`.trim(),
+                        direction: 'OUT'
+                    });
+                }
+            }
+
             await get().fetchPreorders();
 
             // Aviso saliente a miniveci si el encargo vino de allí (fire-and-forget)
@@ -10870,6 +10925,14 @@ export const useStore = create(persist((set, get) => ({
                 sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type) VALUES (?, ?, ?, ?)`,
                 args: [preorderId, amount, method, type]
             });
+
+            // Si el pago fue en efectivo, sumarlo a la caja abierta.
+            if (method === 'Efectivo') {
+                await get()._registerPreorderCash({
+                    amount,
+                    reason: `Pago encargo #${preorderId}`
+                });
+            }
 
             // Update remaining amount
             const paymentsRes = await turso.execute({
@@ -11192,6 +11255,13 @@ export const useStore = create(persist((set, get) => ({
                     sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type) VALUES (?, ?, ?, 'final')`,
                     args: [preorderId, balanceDue, paymentMethod]
                 });
+                // Si el saldo se cobró en efectivo, sumarlo a la caja abierta.
+                if (paymentMethod === 'Efectivo') {
+                    await get()._registerPreorderCash({
+                        amount: balanceDue,
+                        reason: `Cobro encargo #${preorderId}`
+                    });
+                }
             }
 
             // 4. Update preorder with real total, mark as delivered.
