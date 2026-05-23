@@ -8245,19 +8245,19 @@ export const useStore = create(persist((set, get) => ({
             const openingTime = register.opening_time;
 
             // 2. OPTIMIZADO: Queries en paralelo usando batch
-            const [salesStatsRes, movementsRes, recentSalesRes] = await turso.batch([
+            const [salesStatsRes, movementsRes, recentSalesRes, preorderPaymentsRes] = await turso.batch([
                 // Query agregado para stats de ventas (MUY RÁPIDO)
                 {
-                    sql: `SELECT 
+                    sql: `SELECT
                             COUNT(*) as total_sales,
                             SUM(CASE WHEN payment_method = 'Efectivo' THEN total ELSE 0 END) as cash_total,
                             SUM(CASE WHEN payment_method = 'Tarjeta' THEN total ELSE 0 END) as card_total,
                             SUM(CASE WHEN payment_method = 'Transferencia' THEN total ELSE 0 END) as transfer_total,
                             SUM(CASE WHEN payment_method = 'Crédito' THEN total ELSE 0 END) as credit_total,
                             SUM(total) as total_sales_amount
-                          FROM sales 
-                          WHERE user_id = ? 
-                          AND date >= ? 
+                          FROM sales
+                          WHERE user_id = ?
+                          AND date >= ?
                           AND company_id = ?
                           AND status != 'cancelled'`,
                     args: [register.user_id, openingTime, activeCompanyId]
@@ -8269,16 +8269,30 @@ export const useStore = create(persist((set, get) => ({
                 },
                 // Últimas 20 ventas en efectivo para transacciones (para el widget)
                 {
-                    sql: `SELECT id, date, total, payment_method 
-                          FROM sales 
-                          WHERE user_id = ? 
-                          AND date >= ? 
+                    sql: `SELECT id, date, total, payment_method
+                          FROM sales
+                          WHERE user_id = ?
+                          AND date >= ?
                           AND company_id = ?
                           AND status != 'cancelled'
                           AND (payment_method = 'Efectivo' OR payment_method = 'Mixto')
-                          ORDER BY date DESC 
+                          ORDER BY date DESC
                           LIMIT 20`,
                     args: [register.user_id, openingTime, activeCompanyId]
+                },
+                // Tarjeta/Transferencia de encargos cobrados por ESTA caja
+                // (excluye cancelados → refunds no cuentan). Solo totales para
+                // el desglose; el detalle de cada cobro se carga lazy al abrir
+                // la pestaña correspondiente (ver getRegisterPreorderPayments).
+                {
+                    sql: `SELECT pp.method, SUM(pp.amount) as total
+                          FROM preorder_payments pp
+                          JOIN preorders po ON pp.preorder_id = po.id
+                          WHERE pp.register_id = ?
+                            AND pp.method IN ('Tarjeta', 'Transferencia')
+                            AND po.status != 'canceled'
+                          GROUP BY pp.method`,
+                    args: [registerId]
                 }
             ]);
 
@@ -8338,6 +8352,14 @@ export const useStore = create(persist((set, get) => ({
                 } catch (err) {
                     console.error("Error parsing mixed payment", err);
                 }
+            });
+
+            // 4b. Sumar Tarjeta/Transferencia de ENCARGOS al desglose
+            //     (efectivo de encargos ya va por cash_movements → balance).
+            (preorderPaymentsRes.rows || []).forEach(r => {
+                const amt = parseFloat(r.total) || 0;
+                if (r.method === 'Tarjeta') salesBreakdown.card += amt;
+                else if (r.method === 'Transferencia') salesBreakdown.transfer += amt;
             });
 
             // 5. Procesar transacciones recientes para el widget
@@ -8407,6 +8429,121 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error("❌ Refresh stats error", e);
             console.timeEnd('⏱️ refreshRegisterStats');
+        }
+    },
+
+    // Detalle por método de pago (Tarjeta o Transferencia) para el desglose
+    // del Estado de Caja. LAZY: solo se llama cuando el usuario abre la pestaña
+    // → no afecta el tiempo de carga inicial de la caja.
+    //
+    // Devuelve transacciones combinadas POS + encargo (excluye cancelados),
+    // ordenadas por fecha desc. Para POS: extrae datáfono/cuenta de
+    // payment_details. Para encargos: no se captura datáfono/cuenta aún
+    // (futuro), se muestra '-'.
+    getRegisterMethodTransactions: async (registerId, method) => {
+        try {
+            const { activeCompanyId } = get();
+            if (!registerId || !method) return { success: false, transactions: [] };
+
+            // Datos de la caja para filtrar ventas POS por user + opening_time.
+            const regRes = await turso.execute({
+                sql: 'SELECT user_id, opening_time FROM cash_registers WHERE id = ?',
+                args: [registerId]
+            });
+            if (regRes.rows.length === 0) return { success: false, transactions: [] };
+            const { user_id: userId, opening_time: openingTime } = regRes.rows[0];
+
+            // POS: ventas con el método directo + mixtas (filtramos client-side
+            // las mixtas para extraer la porción correspondiente).
+            const [salesRes, mixedRes, preorderRes] = await turso.batch([
+                {
+                    sql: `SELECT id, date, total, payment_method, payment_details
+                          FROM sales
+                          WHERE user_id = ? AND date >= ? AND company_id = ?
+                            AND status != 'cancelled' AND payment_method = ?
+                          ORDER BY date DESC LIMIT 100`,
+                    args: [userId, openingTime, activeCompanyId, method]
+                },
+                {
+                    sql: `SELECT id, date, total, payment_details
+                          FROM sales
+                          WHERE user_id = ? AND date >= ? AND company_id = ?
+                            AND status != 'cancelled' AND payment_method = 'Mixto'
+                          ORDER BY date DESC LIMIT 100`,
+                    args: [userId, openingTime, activeCompanyId]
+                },
+                {
+                    sql: `SELECT pp.id, pp.amount, pp.created_at, pp.type, po.id as preorder_id,
+                            po.client_name
+                          FROM preorder_payments pp
+                          JOIN preorders po ON pp.preorder_id = po.id
+                          WHERE pp.register_id = ? AND pp.method = ?
+                            AND po.status != 'canceled'
+                          ORDER BY pp.created_at DESC LIMIT 100`,
+                    args: [registerId, method]
+                }
+            ]);
+
+            const detailKey = method === 'Tarjeta' ? 'terminal' : 'account';
+            const sourceLabel = method === 'Tarjeta' ? 'Datáfono' : 'Cuenta';
+            const transactions = [];
+
+            // POS directo: cada venta es 1 transacción
+            for (const s of salesRes.rows) {
+                let detail = null;
+                try {
+                    const d = JSON.parse(s.payment_details || '{}');
+                    detail = d[detailKey] || null;
+                } catch { /* noop */ }
+                transactions.push({
+                    id: `s_${s.id}`,
+                    source: 'POS',
+                    reference: `Venta #${s.id}`,
+                    amount: parseFloat(s.total) || 0,
+                    date: s.date,
+                    detail, // datáfono o cuenta
+                });
+            }
+
+            // POS mixto: extraer la porción del método específico
+            for (const s of mixedRes.rows) {
+                try {
+                    const d = JSON.parse(s.payment_details || '{}');
+                    const methods = d.mixedPayments || d.methods || [];
+                    methods.forEach((m, idx) => {
+                        if (m.method === method && Number(m.amount) > 0) {
+                            transactions.push({
+                                id: `m_${s.id}_${idx}`,
+                                source: 'POS',
+                                reference: `Venta mixta #${s.id}`,
+                                amount: parseFloat(m.amount) || 0,
+                                date: s.date,
+                                detail: m[detailKey] || null,
+                            });
+                        }
+                    });
+                } catch { /* noop */ }
+            }
+
+            // Encargos: 1 transacción por pago
+            for (const p of preorderRes.rows) {
+                transactions.push({
+                    id: `p_${p.id}`,
+                    source: 'Encargo',
+                    reference: `Encargo #${p.preorder_id}${p.client_name ? ' · ' + p.client_name : ''}`,
+                    amount: parseFloat(p.amount) || 0,
+                    date: p.created_at,
+                    detail: null, // no se captura aún en encargos
+                });
+            }
+
+            // Orden desc por fecha
+            transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            return { success: true, transactions, detailLabel: sourceLabel };
+        } catch (e) {
+            console.error('Error obteniendo transacciones por método:', e);
+            return { success: false, transactions: [], error: e.message };
         }
     },
 
@@ -10765,10 +10902,14 @@ export const useStore = create(persist((set, get) => ({
             // Insert initial payment (deposit) if any
             if (preorderData.deposit_amount > 0) {
                 const depositMethod = preorderData.deposit_method || 'Efectivo';
+                // Estampamos register_id para tarjeta/transferencia (efectivo va
+                // por cash_movements). Permite ver el cobro en el desglose de la
+                // caja abierta sin mezclar entre cajeras concurrentes.
+                const regId = get().cashRegister?.id || null;
                 await turso.execute({
-                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type)
-                          VALUES (?, ?, ?, 'deposit')`,
-                    args: [preorderId, preorderData.deposit_amount, depositMethod]
+                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id)
+                          VALUES (?, ?, ?, 'deposit', ?)`,
+                    args: [preorderId, preorderData.deposit_amount, depositMethod, regId]
                 });
                 // Si el abono fue en efectivo, sumarlo a la caja abierta.
                 if (depositMethod === 'Efectivo') {
@@ -10776,6 +10917,9 @@ export const useStore = create(persist((set, get) => ({
                         amount: preorderData.deposit_amount,
                         reason: `Abono encargo #${preorderId} - ${preorderData.client_name || 'Cliente'}`.trim()
                     });
+                } else if (regId && (depositMethod === 'Tarjeta' || depositMethod === 'Transferencia')) {
+                    // Refresca stats para que el desglose tarjeta/transf se actualice live.
+                    get().refreshRegisterStats(regId);
                 }
             }
 
@@ -10921,9 +11065,10 @@ export const useStore = create(persist((set, get) => ({
 
     addPreorderPayment: async (preorderId, amount, method, type = 'final') => {
         try {
+            const regId = get().cashRegister?.id || null;
             await turso.execute({
-                sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type) VALUES (?, ?, ?, ?)`,
-                args: [preorderId, amount, method, type]
+                sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id) VALUES (?, ?, ?, ?, ?)`,
+                args: [preorderId, amount, method, type, regId]
             });
 
             // Si el pago fue en efectivo, sumarlo a la caja abierta.
@@ -10932,6 +11077,8 @@ export const useStore = create(persist((set, get) => ({
                     amount,
                     reason: `Pago encargo #${preorderId}`
                 });
+            } else if (regId && (method === 'Tarjeta' || method === 'Transferencia')) {
+                get().refreshRegisterStats(regId);
             }
 
             // Update remaining amount
@@ -11453,9 +11600,10 @@ export const useStore = create(persist((set, get) => ({
 
             // 3. Register final payment if there's balance due
             if (balanceDue > 0) {
+                const regId = get().cashRegister?.id || null;
                 await turso.execute({
-                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type) VALUES (?, ?, ?, 'final')`,
-                    args: [preorderId, balanceDue, paymentMethod]
+                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id) VALUES (?, ?, ?, 'final', ?)`,
+                    args: [preorderId, balanceDue, paymentMethod, regId]
                 });
                 // Si el saldo se cobró en efectivo, sumarlo a la caja abierta.
                 if (paymentMethod === 'Efectivo') {
@@ -11463,6 +11611,8 @@ export const useStore = create(persist((set, get) => ({
                         amount: balanceDue,
                         reason: `Cobro encargo #${preorderId}`
                     });
+                } else if (regId && (paymentMethod === 'Tarjeta' || paymentMethod === 'Transferencia')) {
+                    get().refreshRegisterStats(regId);
                 }
             }
 

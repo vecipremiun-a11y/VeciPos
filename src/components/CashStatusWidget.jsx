@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useNavigate } from 'react-router-dom';
-import { DollarSign, ArrowUpRight, ArrowDownLeft, Clock, ShoppingCart, LogOut, X, TrendingUp, TrendingDown } from 'lucide-react';
+import { DollarSign, ArrowUpRight, ArrowDownLeft, Clock, ShoppingCart, LogOut, X, TrendingUp, TrendingDown, CreditCard, ArrowLeftRight, Banknote } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '../lib/utils';
@@ -16,7 +16,7 @@ import { createSmartInterval } from '../lib/smartPolling';
 
 const CashStatusWidget = () => {
     // FASE 10 · useShallow para aislar re-renders.
-    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency } = useStore(
+    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency, getRegisterMethodTransactions } = useStore(
         useShallow(s => ({
             cashRegister: s.cashRegister,
             registerStats: s.registerStats,
@@ -25,6 +25,7 @@ const CashStatusWidget = () => {
             closeRegister: s.closeRegister,
             currentUser: s.currentUser,
             currentCurrency: s.currentCurrency,
+            getRegisterMethodTransactions: s.getRegisterMethodTransactions,
         }))
     );
     const { can } = usePermissions();
@@ -34,6 +35,32 @@ const CashStatusWidget = () => {
     const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
     const [successModalData, setSuccessModalData] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
+    // Pestaña activa del desglose de movimientos. Tarjeta/Transferencia se
+    // cargan LAZY al abrir su pestaña → cero impacto en el load inicial.
+    const [activeTab, setActiveTab] = useState('Efectivo');
+    const [methodTx, setMethodTx] = useState({ Tarjeta: null, Transferencia: null });
+    const [methodTxLoading, setMethodTxLoading] = useState(false);
+
+    // Lazy fetch del detalle de Tarjeta o Transferencia. Solo dispara al
+    // cambiar de pestaña a una no-Efectivo y si todavía no se cargó.
+    useEffect(() => {
+        if (!isOpen || !cashRegister?.id) return;
+        if (activeTab === 'Efectivo') return;
+        if (methodTx[activeTab] != null) return; // ya cargado
+        let alive = true;
+        setMethodTxLoading(true);
+        getRegisterMethodTransactions(cashRegister.id, activeTab).then(res => {
+            if (!alive) return;
+            setMethodTx(prev => ({ ...prev, [activeTab]: res?.transactions || [] }));
+        }).finally(() => alive && setMethodTxLoading(false));
+        return () => { alive = false; };
+    }, [activeTab, isOpen, cashRegister?.id, methodTx, getRegisterMethodTransactions]);
+
+    // Invalidar cache de pestañas al cerrarse el dropdown → próxima apertura
+    // verá datos frescos sin haber pegado a la base mientras estaba cerrado.
+    useEffect(() => {
+        if (!isOpen) setMethodTx({ Tarjeta: null, Transferencia: null });
+    }, [isOpen]);
 
     // FASE 9 · Polling inteligente de stats de caja:
     // 15s con actividad reciente, 60s idle, pausa con tab oculta.
@@ -162,16 +189,26 @@ const CashStatusWidget = () => {
                                         <span className="text-xs lg:text-sm text-[var(--color-text-muted)] font-medium">Saldo Actual en Caja</span>
                                     </div>
 
-                                    {/* Quick Stats Grid */}
+                                    {/* Quick Stats Grid - 4 medios visibles del turno */}
                                     <div className="grid grid-cols-2 gap-2 p-3">
+                                        <div className="p-2 lg:p-3 bg-green-500/5 rounded-xl border border-green-500/20 flex flex-col items-center">
+                                            <Banknote size={14} className="text-green-400 mb-0.5" />
+                                            <span className="text-base lg:text-lg font-bold text-green-400">{formatCurrency(registerStats.sales, currentCurrency)}</span>
+                                            <span className="text-[10px] lg:text-xs text-green-300/60">Efectivo</span>
+                                        </div>
                                         <div className="p-2 lg:p-3 bg-blue-500/5 rounded-xl border border-blue-500/20 flex flex-col items-center">
-                                            <TrendingUp size={14} className="text-blue-400 mb-0.5" />
-                                            <span className="text-lg lg:text-xl font-bold text-blue-400">{formatCurrency(registerStats.sales, currentCurrency)}</span>
-                                            <span className="text-[10px] lg:text-xs text-blue-300/60">Ventas Efectivo</span>
+                                            <CreditCard size={14} className="text-blue-400 mb-0.5" />
+                                            <span className="text-base lg:text-lg font-bold text-blue-400">{formatCurrency(registerStats.salesBreakdown?.card || 0, currentCurrency)}</span>
+                                            <span className="text-[10px] lg:text-xs text-blue-300/60">Tarjeta</span>
+                                        </div>
+                                        <div className="p-2 lg:p-3 bg-purple-500/5 rounded-xl border border-purple-500/20 flex flex-col items-center">
+                                            <ArrowLeftRight size={14} className="text-purple-400 mb-0.5" />
+                                            <span className="text-base lg:text-lg font-bold text-purple-400">{formatCurrency(registerStats.salesBreakdown?.transfer || 0, currentCurrency)}</span>
+                                            <span className="text-[10px] lg:text-xs text-purple-300/60">Transferencia</span>
                                         </div>
                                         <div className="p-2 lg:p-3 bg-orange-500/5 rounded-xl border border-orange-500/20 flex flex-col items-center">
                                             <TrendingDown size={14} className="text-orange-400 mb-0.5" />
-                                            <span className="text-lg lg:text-xl font-bold text-orange-400">{formatCurrency(registerStats.movements_out, currentCurrency)}</span>
+                                            <span className="text-base lg:text-lg font-bold text-orange-400">{formatCurrency(registerStats.movements_out, currentCurrency)}</span>
                                             <span className="text-[10px] lg:text-xs text-orange-300/60">Retiros</span>
                                         </div>
                                     </div>
@@ -196,57 +233,117 @@ const CashStatusWidget = () => {
                                         )}
                                     </div>
 
-                                    {/* Transaction List (Mini) */}
+                                    {/* Tabs + Transaction List */}
                                     <div className="px-3 pb-2">
-                                        <h4 className="text-[10px] lg:text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Últimos Movimientos</h4>
-                                        <div className="space-y-1.5 max-h-[120px] lg:max-h-[150px] overflow-y-auto pr-1 scrollbar-thin">
-                                            <div className="flex justify-between items-center text-xs lg:text-sm p-1.5 lg:p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-6 h-6 lg:w-8 lg:h-8 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500 border border-yellow-500/30">
-                                                        <Clock size={12} />
-                                                    </div>
-                                                    <div className="flex flex-col">
-                                                        <span className="font-bold text-[var(--color-text)] text-xs lg:text-sm">Apertura</span>
-                                                        <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">Apertura de caja</span>
-                                                    </div>
-                                                </div>
-                                                <div className="text-right">
-                                                    <span className="block font-bold text-green-400 text-xs lg:text-sm">+{formatCurrency(registerStats.initial, currentCurrency)}</span>
-                                                    <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{format(new Date(cashRegister.opening_time), 'h:mm a')}</span>
-                                                </div>
-                                            </div>
-
-                                            {registerStats.transactions.map((tx) => (
-                                                <div key={tx.id} className="flex justify-between items-center text-xs lg:text-sm p-1.5 lg:p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className={cn(
-                                                            "w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center border",
-                                                            tx.type === 'VENTA' ? "bg-blue-500/20 text-blue-400 border-blue-500/30" :
-                                                                tx.type === 'INGRESO' ? "bg-green-500/20 text-green-400 border-green-500/30" :
-                                                                    "bg-orange-500/20 text-orange-400 border-orange-500/30"
-                                                        )}>
-                                                            {tx.type === 'VENTA' ? <ShoppingCart size={12} /> :
-                                                                tx.type === 'INGRESO' ? <ArrowUpRight size={12} /> : <ArrowDownLeft size={12} />}
-                                                        </div>
-                                                        <div className="flex flex-col">
-                                                            <span className="font-bold text-[var(--color-text)] text-xs lg:text-sm truncate max-w-[100px] lg:max-w-[140px]">
-                                                                {tx.type === 'VENTA' ? 'Venta (Efectivo)' :
-                                                                    tx.type === 'INGRESO' ? (tx.reason || 'Ingreso') :
-                                                                        (tx.reason || 'Retiro')}
-                                                            </span>
-                                                            <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{tx.type}</span>
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <span className={cn("block font-bold text-xs lg:text-sm",
-                                                            (tx.type === 'VENTA' || tx.type === 'INGRESO') ? "text-green-400" : "text-orange-400"
-                                                        )}>
-                                                            {(tx.type === 'VENTA' || tx.type === 'INGRESO') ? '+' : '-'}{formatCurrency(tx.amount, currentCurrency)}
-                                                        </span>
-                                                        <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{format(new Date(tx.date), 'h:mm a')}</span>
-                                                    </div>
-                                                </div>
+                                        <div className="flex gap-1 mb-2 p-1 bg-[var(--glass-bg)] rounded-lg border border-[var(--glass-border)]">
+                                            {[
+                                                { key: 'Efectivo', label: 'Efectivo', icon: <Banknote size={12} />, color: 'text-green-400' },
+                                                { key: 'Tarjeta', label: 'Tarjeta', icon: <CreditCard size={12} />, color: 'text-blue-400' },
+                                                { key: 'Transferencia', label: 'Transfer.', icon: <ArrowLeftRight size={12} />, color: 'text-purple-400' }
+                                            ].map(t => (
+                                                <button key={t.key}
+                                                    onClick={() => setActiveTab(t.key)}
+                                                    className={cn(
+                                                        "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[11px] lg:text-xs font-bold transition-all",
+                                                        activeTab === t.key
+                                                            ? cn("bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30", t.color)
+                                                            : "text-[var(--color-text-muted)] hover:text-white"
+                                                    )}>
+                                                    {t.icon}<span className="hidden sm:inline">{t.label}</span>
+                                                </button>
                                             ))}
+                                        </div>
+
+                                        <div className="space-y-1.5 max-h-[180px] lg:max-h-[220px] overflow-y-auto pr-1 scrollbar-thin">
+                                            {activeTab === 'Efectivo' && (
+                                                <>
+                                                    <div className="flex justify-between items-center text-xs lg:text-sm p-1.5 lg:p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-6 h-6 lg:w-8 lg:h-8 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500 border border-yellow-500/30">
+                                                                <Clock size={12} />
+                                                            </div>
+                                                            <div className="flex flex-col">
+                                                                <span className="font-bold text-[var(--color-text)] text-xs lg:text-sm">Apertura</span>
+                                                                <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">Apertura de caja</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <span className="block font-bold text-green-400 text-xs lg:text-sm">+{formatCurrency(registerStats.initial, currentCurrency)}</span>
+                                                            <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{format(new Date(cashRegister.opening_time), 'h:mm a')}</span>
+                                                        </div>
+                                                    </div>
+                                                    {registerStats.transactions.length === 0 ? (
+                                                        <div className="text-center text-[var(--color-text-muted)] text-xs py-4">Sin movimientos aún</div>
+                                                    ) : registerStats.transactions.map((tx) => (
+                                                        <div key={tx.id} className="flex justify-between items-center text-xs lg:text-sm p-1.5 lg:p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className={cn(
+                                                                    "w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center border",
+                                                                    tx.type === 'VENTA' ? "bg-blue-500/20 text-blue-400 border-blue-500/30" :
+                                                                        tx.type === 'INGRESO' ? "bg-green-500/20 text-green-400 border-green-500/30" :
+                                                                            "bg-orange-500/20 text-orange-400 border-orange-500/30"
+                                                                )}>
+                                                                    {tx.type === 'VENTA' ? <ShoppingCart size={12} /> :
+                                                                        tx.type === 'INGRESO' ? <ArrowUpRight size={12} /> : <ArrowDownLeft size={12} />}
+                                                                </div>
+                                                                <div className="flex flex-col">
+                                                                    <span className="font-bold text-[var(--color-text)] text-xs lg:text-sm truncate max-w-[100px] lg:max-w-[140px]">
+                                                                        {tx.type === 'VENTA' ? 'Venta (Efectivo)' :
+                                                                            tx.type === 'INGRESO' ? (tx.reason || 'Ingreso') :
+                                                                                (tx.reason || 'Retiro')}
+                                                                    </span>
+                                                                    <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{tx.type}</span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <span className={cn("block font-bold text-xs lg:text-sm",
+                                                                    (tx.type === 'VENTA' || tx.type === 'INGRESO') ? "text-green-400" : "text-orange-400"
+                                                                )}>
+                                                                    {(tx.type === 'VENTA' || tx.type === 'INGRESO') ? '+' : '-'}{formatCurrency(tx.amount, currentCurrency)}
+                                                                </span>
+                                                                <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{format(new Date(tx.date), 'h:mm a')}</span>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </>
+                                            )}
+
+                                            {(activeTab === 'Tarjeta' || activeTab === 'Transferencia') && (
+                                                methodTxLoading && methodTx[activeTab] == null ? (
+                                                    <div className="text-center text-[var(--color-text-muted)] text-xs py-6">Cargando…</div>
+                                                ) : (methodTx[activeTab]?.length ?? 0) === 0 ? (
+                                                    <div className="text-center text-[var(--color-text-muted)] text-xs py-6">
+                                                        Sin cobros con {activeTab === 'Tarjeta' ? 'tarjeta' : 'transferencia'} este turno
+                                                    </div>
+                                                ) : methodTx[activeTab].map(tx => {
+                                                    const isCard = activeTab === 'Tarjeta';
+                                                    const accent = isCard ? 'text-blue-400 bg-blue-500/20 border-blue-500/30' : 'text-purple-400 bg-purple-500/20 border-purple-500/30';
+                                                    const detailLabel = isCard ? 'Datáfono' : 'Cuenta';
+                                                    return (
+                                                        <div key={tx.id} className="flex justify-between items-start text-xs lg:text-sm p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
+                                                            <div className="flex items-start gap-2 min-w-0 flex-1">
+                                                                <div className={cn("w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center border shrink-0", accent)}>
+                                                                    {isCard ? <CreditCard size={12} /> : <ArrowLeftRight size={12} />}
+                                                                </div>
+                                                                <div className="flex flex-col min-w-0 flex-1">
+                                                                    <span className="font-bold text-[var(--color-text)] text-xs lg:text-sm truncate">
+                                                                        {tx.reference}
+                                                                    </span>
+                                                                    <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)] truncate">
+                                                                        {tx.source} · {detailLabel}: {tx.detail || '—'}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="text-right shrink-0 ml-2">
+                                                                <span className={cn("block font-bold text-xs lg:text-sm", isCard ? "text-blue-400" : "text-purple-400")}>
+                                                                    +{formatCurrency(tx.amount, currentCurrency)}
+                                                                </span>
+                                                                <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{format(new Date(tx.date), 'h:mm a')}</span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })
+                                            )}
                                         </div>
                                     </div>
                                 </div>
