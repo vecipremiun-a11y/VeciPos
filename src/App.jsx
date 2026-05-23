@@ -41,6 +41,7 @@ const Orders = lazy(() => import('./pages/Orders'));
 const SupplierOrders = lazy(() => import('./pages/SupplierOrders'));
 const Preorders = lazy(() => import('./pages/Preorders'));
 const Production = lazy(() => import('./pages/Production'));
+const PreorderHistory = lazy(() => import('./pages/PreorderHistory'));
 const InventoryReconciliation = lazy(() => import('./pages/InventoryReconciliation'));
 const InventoryControl = lazy(() => import('./pages/InventoryControl'));
 const ProductCombos = lazy(() => import('./pages/ProductCombos'));
@@ -322,6 +323,7 @@ function App() {
           <Route path="orders" element={<ProtectedPage permission="supplier_orders.create"><Orders /></ProtectedPage>} />
           <Route path="orders/history" element={<ProtectedPage permission="supplier_orders.view"><SupplierOrders /></ProtectedPage>} />
           <Route path="preorders" element={<ProtectedPage permission="preorders.view"><Preorders /></ProtectedPage>} />
+          <Route path="preorders/history" element={<ProtectedPage permission="preorders.view"><PreorderHistory /></ProtectedPage>} />
           <Route path="production" element={<ProtectedPage permission="production.view"><Production /></ProtectedPage>} />
           <Route path="inventory/reconciliation" element={<ProtectedPage permission="products.adjust_stock"><InventoryReconciliation /></ProtectedPage>} />
           <Route path="inventory/control" element={<ProtectedPage permission="inventory_control.view"><InventoryControl /></ProtectedPage>} />

@@ -11225,6 +11225,208 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // Dashboard de inteligencia de encargos (Pedidos → Historial).
+    // Eje temporal: created_at (cuándo ENTRÓ el encargo) → "encargos recibidos
+    // en el período". Responde: cuántos entraron, qué pasó con ellos (entregado/
+    // cancelado/en proceso), cuánto se vendió, medios de pago, días pico,
+    // productos/clientes top, y crecimiento vs el período anterior equivalente.
+    getPreorderAnalytics: async (startDate, endDate) => {
+        const { activeCompanyId } = get();
+        try {
+            // Filtro robusto a formatos de created_at (ISO 'T' o espacio).
+            const df = 'SUBSTR(__col__, 1, 10) BETWEEN ? AND ?';
+
+            // Período anterior equivalente (misma duración, justo antes) para growth.
+            const sd = new Date(`${startDate}T00:00:00Z`);
+            const ed = new Date(`${endDate}T00:00:00Z`);
+            const days = Math.max(0, Math.round((ed - sd) / 86400000)) + 1;
+            const prevEnd = new Date(sd.getTime() - 86400000);
+            const prevStart = new Date(prevEnd.getTime() - (days - 1) * 86400000);
+            const iso = (d) => d.toISOString().slice(0, 10);
+            const prevStartStr = iso(prevStart);
+            const prevEndStr = iso(prevEnd);
+
+            const [
+                statusRes, moneyRes, payRes, dailyRes, productRes, clientRes, prevRes
+            ] = await turso.batch([
+                // 1. Conteo + monto por estado (para el círculo de %)
+                {
+                    sql: `SELECT status, COUNT(*) as count,
+                            SUM(COALESCE(real_total, total_amount)) as amount
+                          FROM preorders
+                          WHERE ${df.replace('__col__', 'created_at')} AND company_id = ?
+                          GROUP BY status`,
+                    args: [startDate, endDate, activeCompanyId]
+                },
+                // 2. Resumen de dinero
+                {
+                    sql: `SELECT
+                            COUNT(*) as total_orders,
+                            SUM(CASE WHEN status='delivered' THEN 1 ELSE 0 END) as delivered_count,
+                            SUM(CASE WHEN status='canceled' THEN 1 ELSE 0 END) as canceled_count,
+                            SUM(CASE WHEN status IN ('pending','confirmed','preparing','ready') THEN 1 ELSE 0 END) as inprocess_count,
+                            SUM(CASE WHEN status='delivered' THEN COALESCE(real_total, total_amount) ELSE 0 END) as revenue,
+                            SUM(CASE WHEN status IN ('pending','confirmed','preparing','ready') THEN COALESCE(estimated_total, total_amount) ELSE 0 END) as pipeline_value,
+                            SUM(deposit_amount) as total_deposits,
+                            AVG(CASE WHEN status='delivered' THEN COALESCE(real_total, total_amount) END) as avg_ticket
+                          FROM preorders
+                          WHERE ${df.replace('__col__', 'created_at')} AND company_id = ?`,
+                    args: [startDate, endDate, activeCompanyId]
+                },
+                // 3. Medios de pago (de pagos asociados a encargos entregados)
+                {
+                    sql: `SELECT pp.method, COUNT(DISTINCT pp.preorder_id) as orders, SUM(pp.amount) as total
+                          FROM preorder_payments pp
+                          JOIN preorders po ON pp.preorder_id = po.id
+                          WHERE po.status = 'delivered'
+                            AND ${df.replace('__col__', 'po.created_at')}
+                            AND po.company_id = ?
+                          GROUP BY pp.method
+                          ORDER BY total DESC`,
+                    args: [startDate, endDate, activeCompanyId]
+                },
+                // 4. Serie diaria: encargos recibidos y ventas (de los entregados)
+                {
+                    sql: `SELECT SUBSTR(created_at, 1, 10) as day,
+                            COUNT(*) as orders,
+                            SUM(CASE WHEN status='delivered' THEN COALESCE(real_total, total_amount) ELSE 0 END) as revenue,
+                            SUM(CASE WHEN status='delivered' THEN 1 ELSE 0 END) as delivered
+                          FROM preorders
+                          WHERE ${df.replace('__col__', 'created_at')} AND company_id = ?
+                          GROUP BY day ORDER BY day`,
+                    args: [startDate, endDate, activeCompanyId]
+                },
+                // 5. Productos más encargados (excluye cancelados = demanda real)
+                {
+                    sql: `SELECT p.name, p.sku, pi.billing_unit,
+                            SUM(COALESCE(pi.real_weight_kg, pi.qty)) as quantity,
+                            SUM(COALESCE(pi.real_total, pi.line_total)) as revenue,
+                            COUNT(DISTINCT po.id) as orders
+                          FROM preorder_items pi
+                          JOIN preorders po ON pi.preorder_id = po.id
+                          JOIN products p ON pi.product_id = p.id
+                          WHERE po.status != 'canceled'
+                            AND ${df.replace('__col__', 'po.created_at')}
+                            AND po.company_id = ?
+                          GROUP BY pi.product_id
+                          ORDER BY quantity DESC
+                          LIMIT 15`,
+                    args: [startDate, endDate, activeCompanyId]
+                },
+                // 6. Top clientes (por monto entregado real)
+                {
+                    sql: `SELECT po.client_id, po.client_name,
+                            MAX(po.client_phone) as phone,
+                            COUNT(*) as orders_count,
+                            SUM(CASE WHEN po.status='delivered' THEN 1 ELSE 0 END) as delivered_count,
+                            SUM(CASE WHEN po.status='canceled' THEN 1 ELSE 0 END) as canceled_count,
+                            SUM(CASE WHEN po.status='delivered' THEN COALESCE(po.real_total, po.total_amount) ELSE 0 END) as total_spend
+                          FROM preorders po
+                          WHERE ${df.replace('__col__', 'po.created_at')}
+                            AND po.company_id = ?
+                          GROUP BY COALESCE(po.client_id, po.client_name)
+                          ORDER BY total_spend DESC
+                          LIMIT 15`,
+                    args: [startDate, endDate, activeCompanyId]
+                },
+                // 7. Período anterior (para growth)
+                {
+                    sql: `SELECT
+                            COUNT(*) as total_orders,
+                            SUM(CASE WHEN status='delivered' THEN COALESCE(real_total, total_amount) ELSE 0 END) as revenue
+                          FROM preorders
+                          WHERE ${df.replace('__col__', 'created_at')} AND company_id = ?`,
+                    args: [prevStartStr, prevEndStr, activeCompanyId]
+                }
+            ]);
+
+            const money = moneyRes.rows[0] || {};
+            const totalOrders = Number(money.total_orders) || 0;
+            const deliveredCount = Number(money.delivered_count) || 0;
+            const canceledCount = Number(money.canceled_count) || 0;
+            const inprocessCount = Number(money.inprocess_count) || 0;
+            const revenue = Number(money.revenue) || 0;
+
+            // Tasas: cumplimiento = entregados / (entregados + cancelados resueltos)
+            const resolved = deliveredCount + canceledCount;
+            const fulfillmentRate = resolved > 0 ? (deliveredCount / resolved) * 100 : 0;
+            const cancellationRate = totalOrders > 0 ? (canceledCount / totalOrders) * 100 : 0;
+
+            // Growth vs período anterior
+            const prev = prevRes.rows[0] || {};
+            const prevRevenue = Number(prev.revenue) || 0;
+            const prevOrders = Number(prev.total_orders) || 0;
+            const pct = (cur, prv) => {
+                if (prv === 0) return cur > 0 ? 100 : 0;
+                return ((cur - prv) / prv) * 100;
+            };
+
+            // Día pico (más encargos)
+            const daily = dailyRes.rows.map(r => ({
+                day: r.day,
+                orders: Number(r.orders) || 0,
+                delivered: Number(r.delivered) || 0,
+                revenue: Number(r.revenue) || 0
+            }));
+            const peakDay = daily.reduce((max, d) => (d.orders > (max?.orders || 0) ? d : max), null);
+
+            return {
+                success: true,
+                summary: {
+                    totalOrders,
+                    deliveredCount,
+                    canceledCount,
+                    inprocessCount,
+                    revenue,
+                    pipelineValue: Number(money.pipeline_value) || 0,
+                    totalDeposits: Number(money.total_deposits) || 0,
+                    avgTicket: Number(money.avg_ticket) || 0,
+                    fulfillmentRate,
+                    cancellationRate,
+                },
+                byStatus: statusRes.rows.map(r => ({
+                    status: r.status,
+                    count: Number(r.count) || 0,
+                    amount: Number(r.amount) || 0
+                })),
+                byPaymentMethod: payRes.rows.map(r => ({
+                    method: r.method,
+                    orders: Number(r.orders) || 0,
+                    total: Number(r.total) || 0
+                })),
+                daily,
+                peakDay,
+                byProduct: productRes.rows.map(r => ({
+                    name: r.name,
+                    sku: r.sku,
+                    billing_unit: r.billing_unit,
+                    quantity: Number(r.quantity) || 0,
+                    revenue: Number(r.revenue) || 0,
+                    orders: Number(r.orders) || 0
+                })),
+                byClient: clientRes.rows.map(r => ({
+                    client_name: r.client_name,
+                    phone: r.phone,
+                    orders_count: Number(r.orders_count) || 0,
+                    delivered_count: Number(r.delivered_count) || 0,
+                    canceled_count: Number(r.canceled_count) || 0,
+                    total_spend: Number(r.total_spend) || 0
+                })),
+                growth: {
+                    revenueChange: pct(revenue, prevRevenue),
+                    ordersChange: pct(totalOrders, prevOrders),
+                    prevRevenue,
+                    prevOrders,
+                    prevStart: prevStartStr,
+                    prevEnd: prevEndStr,
+                }
+            };
+        } catch (e) {
+            console.error("Error generating preorder analytics:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
     deliverPreorder: async (preorderId, itemWeights, paymentMethod = 'Efectivo') => {
         try {
             // 1. Update each item with real weight and real total

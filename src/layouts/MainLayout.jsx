@@ -76,7 +76,8 @@ const MainLayout = () => {
             moduleKey: 'preorders',
             subItems: [
                 { icon: CakeSlice, label: 'Encargos (Caja)', path: '/preorders', permission: 'preorders.view' },
-                { icon: ChefHat, label: 'Producción', path: '/production', permission: 'production.view' }
+                { icon: ChefHat, label: 'Producción', path: '/production', permission: 'production.view' },
+                { icon: TrendingUp, label: 'Historial', path: '/preorders/history', permission: 'preorders.view' }
             ]
         },
         {
