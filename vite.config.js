@@ -53,8 +53,9 @@ export default defineConfig({
         // El bundle principal puede pesar >2 MB; subimos el límite a 6 MB
         // para que el precache lo incluya y la app abra completa offline.
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-        // Excluir explícitamente cualquier respuesta de API del cache.
-        navigateFallbackDenylist: [/^\/api\//],
+        // Excluir del SPA-fallback: las APIs y la pantalla KDS (kds.html es una
+        // página standalone para TV — NO debe redirigirse a index.html / React).
+        navigateFallbackDenylist: [/^\/api\//, /^\/kds/, /kds\.html$/],
         runtimeCaching: [
           // Cache de fuentes (Google Fonts, etc.) — opcional pero útil offline
           {
