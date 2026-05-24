@@ -6,6 +6,7 @@ import { purgeCompanyData, localDb, pendingOpsApi, siiFoliosApi } from '../lib/d
 import { syncCatalogFromServer } from '../lib/db/sync';
 import { markActivity } from '../lib/smartPolling';
 import { mirrorSaleItems, mirrorPurchaseItems } from '../lib/itemNormalization';
+import { cleanRut } from '../utils/rutValidation';
 
 let migrationsExecuted = false;
 let fetchInProgress = false;
@@ -1111,6 +1112,25 @@ export const useStore = create(persist((set, get) => ({
 
     addClient: async (client) => {
         try {
+            // Validación: RUT único por empresa. En Chile el RUT identifica a la
+            // persona, así que dos clientes con el mismo RUT = la misma persona
+            // (deuda/historial/match con miniveci se romperían si se duplica).
+            // Comparación insensible al formato (con/sin puntos, may/min).
+            // Clientes SIN RUT sí se permiten (cliente casual).
+            const rutClean = cleanRut(client.rut);
+            if (rutClean) {
+                const dup = get().clients.find(c => c.rut && cleanRut(c.rut) === rutClean);
+                if (dup) {
+                    return {
+                        success: false,
+                        error: 'RUT_DUPLICATE',
+                        message: `Ya existe un cliente con ese RUT: ${dup.name}`,
+                        existingClientId: dup.id,
+                        existingClientName: dup.name,
+                    };
+                }
+            }
+
             const result = await turso.execute({
                 sql: "INSERT INTO clients (name, rut, phone, email, address, razon_social, giro, comuna, ciudad, created_at, company_id, credit_limit, credit_period_days, credit_enabled, client_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
@@ -1151,6 +1171,21 @@ export const useStore = create(persist((set, get) => ({
         try {
             const { activeCompanyId, currentUser, validateCompanyAccess } = get();
             if (!validateCompanyAccess(currentUser?.id, activeCompanyId)) return { success: false, error: "Access Denied" };
+
+            // RUT único por empresa (excluyendo el propio cliente que se edita).
+            const rutClean = cleanRut(updatedClient.rut);
+            if (rutClean) {
+                const dup = get().clients.find(c => c.id !== id && c.rut && cleanRut(c.rut) === rutClean);
+                if (dup) {
+                    return {
+                        success: false,
+                        error: 'RUT_DUPLICATE',
+                        message: `Ya existe otro cliente con ese RUT: ${dup.name}`,
+                        existingClientId: dup.id,
+                        existingClientName: dup.name,
+                    };
+                }
+            }
 
             await turso.execute({
                 sql: "UPDATE clients SET name = ?, rut = ?, phone = ?, email = ?, address = ?, razon_social = ?, giro = ?, comuna = ?, ciudad = ?, credit_limit = ?, credit_period_days = ?, credit_enabled = ?, client_status = ? WHERE id = ? AND company_id = ?",

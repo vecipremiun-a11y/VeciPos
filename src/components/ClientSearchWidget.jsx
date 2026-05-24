@@ -82,6 +82,8 @@ const ClientSearchWidget = () => {
             handleSelectClient(result.client);
             setIsAddModalOpen(false);
             setNewClientData({ name: '', rut: '', razon_social: '', giro: '', phone: '', email: '', address: '', comuna: '', ciudad: '' });
+        } else if (result.error === 'RUT_DUPLICATE') {
+            alert(result.message || 'Ya existe un cliente con ese RUT.');
         } else {
             alert('Error al crear cliente');
         }

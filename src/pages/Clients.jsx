@@ -333,11 +333,20 @@ const Clients = () => {
     });
 
     const handleSubmit = async (data) => {
-        if (editingClient) {
-            await updateClient(editingClient.id, data);
-        } else {
-            await addClient(data);
+        const result = editingClient
+            ? await updateClient(editingClient.id, data)
+            : await addClient(data);
+
+        // Bloqueo por RUT duplicado: no cerrar el modal, avisar al usuario.
+        if (result && result.success === false) {
+            if (result.error === 'RUT_DUPLICATE') {
+                alert(result.message || 'Ya existe un cliente con ese RUT.');
+            } else if (result.error) {
+                alert('Error: ' + (result.message || result.error));
+            }
+            return; // mantener el modal abierto para corregir
         }
+
         setIsModalOpen(false);
         setEditingClient(null);
     };
