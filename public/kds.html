@@ -42,6 +42,21 @@
   #title .dot { color: #22c55e; }
   #header-right { text-align: right; }
   #clock { font-size: 28px; font-weight: bold; color: #f1f5f9; line-height: 1; }
+
+  /* Control de tamaño de tickets (propio, no depende del zoom del navegador) */
+  #size-ctl { display: flex; align-items: center; gap: 8px; }
+  #size-ctl button {
+    width: 40px; height: 40px; border-radius: 9px;
+    border: 1px solid #2a3550; background: #1a2238; color: #e2e8f0;
+    font-size: 24px; font-weight: bold; cursor: pointer; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #size-ctl button:active { transform: scale(0.94); }
+  #size-ctl button[disabled] { opacity: 0.35; cursor: default; }
+  #size-ctl .size-label {
+    font-size: 14px; font-weight: bold; color: #94a3b8;
+    min-width: 92px; text-align: center; text-transform: uppercase; letter-spacing: 0.5px;
+  }
   #status-line { font-size: 13px; color: #64748b; margin-top: 4px; }
   #status-line .live { color: #22c55e; }
   #status-line .err { color: #ef4444; }
@@ -186,6 +201,11 @@
 <div id="app">
   <div id="header">
     <div id="title">&#127838; COCINA <span class="dot">&#9679;</span></div>
+    <div id="size-ctl">
+      <button type="button" id="size-minus" title="Más chico">&#8722;</button>
+      <span class="size-label" id="size-label">Mediano</span>
+      <button type="button" id="size-plus" title="Más grande">&#43;</button>
+    </div>
     <div id="header-right">
       <div id="clock">--:--</div>
       <div id="status-line"><span class="live">&#9679; en vivo</span></div>
@@ -631,6 +651,47 @@
   fitHeight();
   window.addEventListener('resize', fitHeight);
   window.addEventListener('orientationchange', fitHeight);
+
+  // ---- Selector de tamaño de tickets (propio, persistido por TV) ----
+  // Escala SOLO el board (los tickets), no el header ni los totales.
+  // Usa zoom (reflowea como el zoom del navegador, soportado en navegadores
+  // de Smart TV WebKit/Blink) con fallback a transform scale por si acaso.
+  var SIZE_LEVELS = [
+    { name: 'Pequeño',    z: 0.65 },
+    { name: 'Chico',      z: 0.8 },
+    { name: 'Mediano',    z: 1.0 },
+    { name: 'Grande',     z: 1.2 },
+    { name: 'Muy grande', z: 1.4 }
+  ];
+  var sizeIdx = 2;
+  try {
+    var saved = parseInt(localStorage.getItem('kds.size'), 10);
+    if (!isNaN(saved)) sizeIdx = Math.max(0, Math.min(SIZE_LEVELS.length - 1, saved));
+  } catch (e) { /* noop */ }
+
+  function applySize() {
+    var lvl = SIZE_LEVELS[sizeIdx];
+    var board = document.getElementById('board');
+    // Preferir zoom (reflow real). Si el navegador no lo soporta, fallback.
+    if (typeof board.style.zoom !== 'undefined') {
+      board.style.zoom = lvl.z;
+    } else {
+      board.style.transform = 'scale(' + lvl.z + ')';
+      board.style.transformOrigin = 'top left';
+      board.style.width = (100 / lvl.z) + '%';
+    }
+    document.getElementById('size-label').textContent = lvl.name;
+    document.getElementById('size-minus').disabled = (sizeIdx === 0);
+    document.getElementById('size-plus').disabled = (sizeIdx === SIZE_LEVELS.length - 1);
+    try { localStorage.setItem('kds.size', String(sizeIdx)); } catch (e) { /* noop */ }
+  }
+  document.getElementById('size-minus').onclick = function () {
+    if (sizeIdx > 0) { sizeIdx--; applySize(); }
+  };
+  document.getElementById('size-plus').onclick = function () {
+    if (sizeIdx < SIZE_LEVELS.length - 1) { sizeIdx++; applySize(); }
+  };
+  applySize();
 
   tickClock();
   setInterval(tickClock, 1000);
