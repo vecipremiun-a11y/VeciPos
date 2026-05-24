@@ -95,7 +95,17 @@
     flex-wrap: wrap;
     align-content: flex-start;
     gap: 12px;
+    /* Barra de scroll visible/gruesa (los navegadores de TV suelen ocultarla).
+       Así se ve que hay más pedidos abajo y se puede agarrar con el mouse. */
+    scrollbar-width: thick;
+    scrollbar-color: #38bdf8 #0e1730;
   }
+  #board::-webkit-scrollbar { width: 16px; }
+  #board::-webkit-scrollbar-track { background: #0e1730; }
+  #board::-webkit-scrollbar-thumb {
+    background: #38bdf8; border-radius: 8px; border: 3px solid #0e1730;
+  }
+  #board::-webkit-scrollbar-thumb:hover { background: #7dd3fc; }
 
   /* Card — compacta para que entren más a zoom normal en la TV */
   .card {
@@ -240,6 +250,7 @@
   var knownIds = {};      // ids ya vistos (para detectar nuevos)
   var firstLoad = true;
   var audioCtx = null;
+  var lastIdsSig = '';    // firma del set de pedidos (para preservar scroll)
 
   // ---- Fecha local de la TV (no del servidor) ----
   function todayStr() {
@@ -533,7 +544,18 @@
       }
       html += '</div>';
     }
+    // Preservar la posición de scroll entre refrescos (cada 15s) para no
+    // interrumpir el auto-scroll. Solo si cambió el SET de pedidos (id+estado)
+    // volvemos arriba, así un pedido nuevo se ve desde el inicio.
+    var idsSig = orders.map(function (o) { return o.id + ':' + o.status; }).join(',');
+    var prevScroll = board.scrollTop;
     board.innerHTML = html;
+    if (idsSig === lastIdsSig) {
+      board.scrollTop = prevScroll; // mismo set → mantener posición
+    } else {
+      board.scrollTop = 0;          // cambió algo → mostrar desde arriba
+    }
+    lastIdsSig = idsSig;
   }
 
   // ---- Transición de estado (POST al endpoint) ----
