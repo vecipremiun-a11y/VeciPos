@@ -76,11 +76,15 @@ const getForwardActions = (order) => {
         case 'preparing':
             return [{ status: 'ready', label: 'Marcar Listo', icon: Check, variant: 'emerald' }];
         case 'ready':
+            // Producción termina la labor de cocina en "Listo". La ENTREGA final
+            // (con captura de gramaje/peso y cobro) se hace SOLO desde Encargos.
+            // Para delivery se permite el despacho a reparto (no es la entrega).
             return isDelivery
                 ? [{ status: 'out_for_delivery', label: 'Enviar a Reparto', icon: Truck, variant: 'indigo' }]
-                : [{ status: 'delivered', label: 'Entregar', icon: PackageCheck, variant: 'emerald' }];
+                : [];
         case 'out_for_delivery':
-            return [{ status: 'delivered', label: 'Entregar', icon: PackageCheck, variant: 'emerald' }];
+            // El "Entregar" final se hace desde Encargos (modal de peso). Acá no.
+            return [];
         default:
             return [];
     }
