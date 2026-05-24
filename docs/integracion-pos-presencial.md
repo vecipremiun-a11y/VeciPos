@@ -141,12 +141,22 @@ Si los headers no coinciden con la config de la tienda → `401 Unauthorized`.
 { "success": false, "error": "Unauthorized" }
 ```
 
-#### 422 — Cliente no se pudo asociar (opcional)
-Si miniveci decide no crear cuentas automáticas y ningún identificador hace match con una cuenta existente:
+#### 200 con `unclaimed: true` — Guest order (sin match de cuenta)
+Si ningún identificador hace match con un customer existente, NO devolver 422.
+Crear igual el order en miniveci como "guest/unclaimed order" con los
+identificadores recibidos (rut, email, phone, name) y devolver:
 ```json
-{ "success": false, "error": "client_not_matched", "reason": "No existing account matches the identifiers" }
+{
+  "success": true,
+  "public_code": "MNV-A7K3X9",
+  "external_order_id": "posveci_4321",
+  "unclaimed": true
+}
 ```
-POSVECI tratará esto como skip — el encargo igual se creó en POSVECI, solo no se sincronizó con la web. No es error crítico.
+POSVECI guarda el `public_code` igual → los cambios de estado siguen
+sincronizándose. Más tarde, cuando un cliente se registre con esos
+identificadores, miniveci debe ejecutar un "claim" que asigne los guest
+orders correspondientes a su cuenta (ver sección "Política de match" abajo).
 
 #### 500 — Error interno
 ```json
@@ -160,14 +170,34 @@ POSVECI tratará esto como skip — el encargo igual se creó en POSVECI, solo n
 3. **Match de cliente** (en este orden, primer match gana):
    1. `client.external_id` si está presente → buscar account por id
    2. `client.rut` → buscar account por RUT
-   3. `client.phone` (normalizado, sin espacios/guiones) → buscar account por teléfono
-   4. `client.email` (lowercase) → buscar account por email
-4. **Si no hay match:** decidir según política de miniveci:
-   - Opción A: crear una cuenta nueva con los datos recibidos (el cliente la "activa" después con su email/teléfono).
-   - Opción B: devolver 422 client_not_matched (POSVECI lo tratará como skip).
-   - Recomendado: **A** (crear cuenta automática), así todos los encargos quedan visibles en la web.
-5. **Crear el order** en miniveci asociado a esa account, con todos los items, en estado `pending`. Generar un `public_code` corto único (lo que ya genera para órdenes web).
-6. **Responder** con `public_code`.
+   3. `client.phone` (normalizado, sin espacios/guiones, prefijo país opcional) → buscar account por teléfono
+   4. `client.email` (lowercase, trim) → buscar account por email
+4. **Si HAY match:** crear el order asociado a esa account, devolver `public_code`. Listo.
+5. **Si NO hay match → patrón "guest order con deferred claim" (RECOMENDADO):**
+   - NO crear cuenta automática (ensucia la base con cuentas fantasma).
+   - SÍ crear el order como **guest/unclaimed order** con los identificadores recibidos guardados (rut, email, phone, name).
+   - Devolver `200 OK` con `public_code` válido + `unclaimed: true`.
+   - POSVECI seguirá sincronizando cambios de estado normal usando ese `public_code`.
+
+#### Proceso "claim unclaimed orders" (esencial para que la idea funcione)
+
+Cuando un cliente se registra en miniveci (o agrega/edita un identificador en una cuenta existente), disparar un proceso que busca guest orders matcheables y los asigna a la cuenta:
+
+- **Prioridad de match para claim** (más confiable a menos):
+  1. **RUT** ← más confiable (único por ley en Chile).
+  2. **Email** (lowercase, trim) ← muy confiable.
+  3. **Teléfono** (normalizado) ← bueno.
+  4. **Nombre solo** ← NO usar para claim automático (ambiguo).
+- Al encontrar matches: asignar los guest orders a la cuenta. Aparecen retroactivos en "Mis pedidos".
+- Idempotente: si se vuelve a correr, no asignar dos veces.
+
+#### Alternativas (no recomendadas)
+
+- **Crear cuenta auto en el push:** ensucia la base, el cliente nunca activa esas cuentas. Evitar.
+- **422 client_not_matched:** se pierde data útil. Evitar salvo que haya razones legales.
+
+6. **Generar `public_code`** corto y único (el mismo formato que usás para órdenes web).
+7. **Responder** según los casos arriba.
 
 ### Cambios de estado posteriores
 
