@@ -10941,6 +10941,18 @@ export const useStore = create(persist((set, get) => ({
             await get().fetchPreorders();
             set({ preorderCart: [] });
 
+            // Empuje a miniveci (best-effort, no bloquea). Si el cliente tiene
+            // cuenta en la web, miniveci lo asocia y este encargo aparece en
+            // su historial. Si la integración no está activa o el cliente no es
+            // identificable, el endpoint hace skip silencioso.
+            if (typeof navigator !== 'undefined' && navigator.onLine) {
+                fetch('/api/integration/push-preorder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ preorder_id: preorderId }),
+                }).catch(() => { /* fire-and-forget */ });
+            }
+
             return { success: true, preorderId };
         } catch (e) {
             console.error('Error creating preorder:', e);
@@ -11057,8 +11069,11 @@ export const useStore = create(persist((set, get) => ({
 
             await get().fetchPreorders();
 
-            // Aviso saliente a miniveci si el encargo vino de allí (fire-and-forget)
-            if (info.external_source === 'miniveci' && info.external_public_code) {
+            // Aviso saliente a miniveci si el encargo está sincronizado con la web.
+            // Disparamos para CUALQUIER preorder con external_public_code, así
+            // funciona tanto para los que vinieron de miniveci como para los
+            // presenciales que se empujaron a la cuenta del cliente.
+            if (info.external_public_code) {
                 fetch('/api/integration/notify-miniveci-status', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

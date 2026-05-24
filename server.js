@@ -9,6 +9,7 @@ import integrationSyncStockHandler from './api/integration/sync-stock.js';
 import integrationRetryStockHandler from './api/integration/retry-stock.js';
 import integrationSyncProductHandler from './api/integration/sync-product.js';
 import notifyMiniveciStatusHandler from './api/integration/notify-miniveci-status.js';
+import pushPreorderHandler from './api/integration/push-preorder.js';
 
 import externalPreordersHandler from './api/external/preorders.js';
 
@@ -182,6 +183,11 @@ app.all('/api/sii/reserve-folios', async (req, res) => {
 app.all('/api/integration/notify-miniveci-status', async (req, res) => {
     try { return await notifyMiniveciStatusHandler(req, res); }
     catch (error) { console.error('❌ /api/integration/notify-miniveci-status error:', error); return res.status(500).json({ error: error.message }); }
+});
+
+app.all('/api/integration/push-preorder', async (req, res) => {
+    try { return await pushPreorderHandler(req, res); }
+    catch (error) { console.error('❌ /api/integration/push-preorder error:', error); return res.status(500).json({ error: error.message }); }
 });
 
 app.all('/api/external/preorders', async (req, res) => {
