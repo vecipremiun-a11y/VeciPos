@@ -11701,6 +11701,23 @@ export const useStore = create(persist((set, get) => ({
                 args: [realTotal, realTotal, totalPaid, preorderId]
             });
 
+            // Si el encargo está sincronizado con la web (tiene public_code),
+            // avisar a miniveci que se entregó (best-effort, no bloquea).
+            try {
+                const codeRes = await turso.execute({
+                    sql: 'SELECT external_public_code FROM preorders WHERE id = ? LIMIT 1',
+                    args: [preorderId]
+                });
+                const publicCode = codeRes.rows?.[0]?.external_public_code;
+                if (publicCode && typeof navigator !== 'undefined' && navigator.onLine) {
+                    fetch('/api/integration/notify-miniveci-status', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ public_code: publicCode, status: 'delivered' }),
+                    }).catch(() => { /* fire-and-forget */ });
+                }
+            } catch { /* noop */ }
+
             await get().fetchPreorders();
             return { success: true, realTotal, balanceDue };
         } catch (e) {

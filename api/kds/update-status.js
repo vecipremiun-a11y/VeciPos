@@ -14,6 +14,57 @@
 // solicitada → 409 (alguien ya lo cambió, race condition o pedido viejo).
 
 import { createClient } from '@libsql/client';
+import { getTiendaConfig, logSync } from '../integration/_db.js';
+
+// Notifica a miniveci el cambio de estado de un encargo que está sincronizado
+// con la web (tiene external_public_code). Best-effort: si falla, no rompe la
+// acción del KDS. Mismo destino/headers que notify-miniveci-status.js.
+const MINIVECI_STATUS_MAP = { confirmed: 'confirmed', preparing: 'preparing', ready: 'ready' };
+async function notifyMiniveci(companyId, publicCode, status) {
+    try {
+        const mapped = MINIVECI_STATUS_MAP[status];
+        if (!publicCode || !mapped) return;
+        const config = await getTiendaConfig(companyId);
+        if (!config || config.is_active === 0 || !config.api_key || !config.api_secret) return;
+        let baseUrl = process.env.MINIVECI_BASE_URL_OVERRIDE || config.tienda_url;
+        if (!baseUrl) return;
+        if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+        const url = `${baseUrl}/api/pos/bakery/orders/${encodeURIComponent(publicCode)}/status`;
+        const response = await fetch(url, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': config.api_key,
+                'x-api-secret': config.api_secret,
+                'x-api-consumer-key': config.api_key,
+                'x-api-consumer-secret': config.api_secret,
+            },
+            body: JSON.stringify({ status: mapped }),
+        });
+        const text = await response.text();
+        await logSync({
+            company_id: companyId,
+            direction: 'pos_to_store',
+            event: 'bakery_order.status_updated',
+            status: response.ok ? 'ok' : 'error',
+            message: response.ok ? 'Estado enviado a miniveci (desde KDS)' : 'Falló envío de estado a miniveci (desde KDS)',
+            payload: { public_code: publicCode, status: mapped, via: 'kds' },
+            response: { status: response.status, body: text.slice(0, 300) },
+        });
+    } catch (e) {
+        try {
+            await logSync({
+                company_id: companyId,
+                direction: 'pos_to_store',
+                event: 'bakery_order.status_updated',
+                status: 'error',
+                message: 'Error de red notificando estado a miniveci (desde KDS)',
+                payload: { public_code: publicCode, status, via: 'kds' },
+                error: e.message,
+            });
+        } catch { /* noop */ }
+    }
+}
 
 let _client = null;
 function getTurso() {
@@ -75,7 +126,7 @@ export default async function handler(req, res) {
 
         // Verificar que el pedido pertenece a esa empresa y está en el estado esperado
         const pr = await turso.execute({
-            sql: 'SELECT status, company_id FROM preorders WHERE id = ? LIMIT 1',
+            sql: 'SELECT status, company_id, external_public_code FROM preorders WHERE id = ? LIMIT 1',
             args: [preorderId]
         });
         if (!pr.rows.length) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
@@ -94,6 +145,13 @@ export default async function handler(req, res) {
             sql: `UPDATE preorders SET status = ?, updated_at = datetime('now') WHERE id = ?`,
             args: [trans.to, preorderId]
         });
+
+        // Si está sincronizado con la web (tiene public_code), notificar a
+        // miniveci el cambio de estado. Best-effort: no bloquea la respuesta.
+        const publicCode = pr.rows[0].external_public_code;
+        if (publicCode) {
+            await notifyMiniveci(companyId, publicCode, trans.to);
+        }
 
         return res.status(200).json({ ok: true, status: trans.to });
     } catch (error) {
