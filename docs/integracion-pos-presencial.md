@@ -121,13 +121,15 @@ Si los headers no coinciden con la config de la tienda → `401 Unauthorized`.
   "success": true,
   "public_code": "MNV-A7K3X9",
   "external_order_id": "posveci_4321",
+  "customer_id": "777",
   "duplicate": false
 }
 ```
 
 | Campo | Descripción |
 |---|---|
-| `public_code` | Código corto generado por miniveci. POSVECI lo guarda en `preorders.external_public_code` y lo usa para los cambios de estado posteriores (`PATCH .../{public_code}/status`). **Es lo único que POSVECI necesita estrictamente.** |
+| `public_code` | Código corto generado por miniveci. POSVECI lo guarda en `preorders.external_public_code` y lo usa para los cambios de estado posteriores (`PATCH .../{public_code}/status`). |
+| `customer_id` | **IMPORTANTE — el ID único de la cuenta de miniveci** con la que quedó asociado el encargo (cuando matcheó/usó una cuenta REAL). POSVECI lo guarda en `clients.external_id` → así el cliente presencial queda amarrado a su cuenta web por ID exacto y permanente (los próximos pedidos ya no dependen del match por rut/teléfono/email). En guest orders (sin cuenta real) va `null`. |
 | `external_order_id` | Devolver el mismo que llegó, por confirmación. |
 | `duplicate` | `true` si `external_order_id` ya existía (idempotencia: devolver el mismo `public_code` que la primera vez). |
 
@@ -150,11 +152,13 @@ identificadores recibidos (rut, email, phone, name) y devolver:
   "success": true,
   "public_code": "MNV-A7K3X9",
   "external_order_id": "posveci_4321",
+  "customer_id": null,
   "unclaimed": true
 }
 ```
-POSVECI guarda el `public_code` igual → los cambios de estado siguen
-sincronizándose. Más tarde, cuando un cliente se registre con esos
+En guest orders `customer_id` va `null` (todavía no hay cuenta real → no hay
+ID que amarrar). POSVECI guarda el `public_code` igual → los cambios de estado
+siguen sincronizándose. Más tarde, cuando un cliente se registre con esos
 identificadores, miniveci debe ejecutar un "claim" que asigne los guest
 orders correspondientes a su cuenta (ver sección "Política de match" abajo).
 

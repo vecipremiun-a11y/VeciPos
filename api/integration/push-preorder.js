@@ -215,6 +215,9 @@ export default async function handler(req, res) {
 
         const publicCode = upstream.data?.public_code || upstream.data?.preorder?.public_code || null;
         const upstreamExtOrderId = upstream.data?.external_order_id || externalOrderId;
+        // ID único de la cuenta de miniveci con la que quedó asociado el encargo.
+        // Solo viene cuando se enlazó a una cuenta REAL (no en guest orders).
+        const customerId = upstream.data?.customer_id || upstream.data?.customer?.id || null;
 
         // 9. Guardar public_code en el preorder → futuros cambios de estado
         //    notificarán automáticamente vía notify-miniveci-status.
@@ -223,9 +226,24 @@ export default async function handler(req, res) {
                 sql: `UPDATE preorders
                       SET external_public_code = ?,
                           external_order_id = COALESCE(external_order_id, ?),
+                          client_external_id = COALESCE(NULLIF(client_external_id, ''), ?),
                           updated_at = datetime('now')
                       WHERE id = ?`,
-                args: [publicCode, upstreamExtOrderId, preorderId],
+                args: [publicCode, upstreamExtOrderId, customerId ? String(customerId) : null, preorderId],
+            });
+        }
+
+        // 9b. Enlace PERMANENTE por ID: si miniveci devolvió el customer_id y el
+        //     encargo tiene cliente, guardamos ese ID en el cliente de POSVECI.
+        //     Desde ahí, ese cliente queda amarrado a su cuenta web por ID exacto
+        //     (los próximos pedidos ya no dependen del match por rut/teléfono/email).
+        //     Solo si el cliente aún no tenía external_id (no pisar vínculo previo).
+        if (customerId && preorder.client_id) {
+            await turso.execute({
+                sql: `UPDATE clients
+                      SET external_id = COALESCE(NULLIF(external_id, ''), ?)
+                      WHERE id = ?`,
+                args: [String(customerId), preorder.client_id],
             });
         }
 
@@ -235,7 +253,7 @@ export default async function handler(req, res) {
             event: 'bakery_order.push_presencial',
             status: 'ok',
             message: 'Encargo presencial sincronizado con cuenta de miniveci',
-            payload: { preorder_id: preorderId, external_order_id: upstreamExtOrderId },
+            payload: { preorder_id: preorderId, external_order_id: upstreamExtOrderId, customer_id: customerId },
             response: { status: upstream.status, body: upstream.text, public_code: publicCode },
         });
 
