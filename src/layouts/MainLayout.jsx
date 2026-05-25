@@ -7,6 +7,7 @@ import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
 import NotificationBell from '../components/NotificationBell';
 import SupportWidget from '../components/SupportWidget';
+import WebOrderToast from '../components/WebOrderToast';
 import { usePermissions } from '../hooks/usePermissions';
 import { useCompanyFeatures } from '../hooks/useCompanyFeatures';
 import { createSmartInterval } from '../lib/smartPolling';
@@ -485,6 +486,9 @@ const MainLayout = () => {
 
             {/* Widget de Soporte flotante */}
             <SupportWidget />
+
+            {/* Aviso global de encargos web (abajo-izquierda) */}
+            <WebOrderToast />
         </div>
     );
 };

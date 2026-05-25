@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Bell, X, Check, CheckCheck, AlertTriangle, AlertCircle, TrendingDown, Trash2 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
 import { createSmartInterval } from '../lib/smartPolling';
+import WebOrderCard from './WebOrderCard';
 
 const NotificationBell = () => {
     const [isOpen, setIsOpen] = useState(false);
     const panelRef = useRef(null);
+    const navigate = useNavigate();
 
     // FASE 10 · useShallow para evitar re-render con cualquier mutación del store.
     const {
@@ -17,7 +20,12 @@ const NotificationBell = () => {
         fetchUnreadAlertCount,
         markAlertRead,
         markAllAlertsRead,
-        deleteOldAlerts
+        deleteOldAlerts,
+        webOrders,
+        currentCurrency,
+        fetchPendingWebOrders,
+        removeWebOrder,
+        updatePreorderStatus,
     } = useStore(useShallow(s => ({
         inventoryAlerts: s.inventoryAlerts,
         unreadAlertCount: s.unreadAlertCount,
@@ -26,7 +34,28 @@ const NotificationBell = () => {
         markAlertRead: s.markAlertRead,
         markAllAlertsRead: s.markAllAlertsRead,
         deleteOldAlerts: s.deleteOldAlerts,
+        webOrders: s.webOrders,
+        currentCurrency: s.currentCurrency,
+        fetchPendingWebOrders: s.fetchPendingWebOrders,
+        removeWebOrder: s.removeWebOrder,
+        updatePreorderStatus: s.updatePreorderStatus,
     })));
+
+    const totalBadge = unreadAlertCount + (webOrders?.length || 0);
+
+    const handleAcceptWebOrder = async (id) => {
+        await updatePreorderStatus(id, 'confirmed');
+        removeWebOrder(id);
+    };
+    const handleRejectWebOrder = async (id) => {
+        if (!window.confirm('¿Rechazar este encargo? El cliente verá que fue rechazado.')) return;
+        await updatePreorderStatus(id, 'canceled', 'Rechazado desde el aviso de encargo web');
+        removeWebOrder(id);
+    };
+    const handleViewWebOrder = (id) => {
+        setIsOpen(false);
+        navigate('/preorders', { state: { tab: 'list', focusPreorderId: id } });
+    };
 
     // FASE 9 · Polling inteligente del badge de alertas:
     // 2min con actividad / 10min idle, pausa tab oculta y sin conexión.
@@ -46,7 +75,10 @@ const NotificationBell = () => {
 
     // Fetch alerts when panel opens
     useEffect(() => {
-        if (isOpen) fetchInventoryAlerts(30);
+        if (isOpen) {
+            fetchInventoryAlerts(30);
+            fetchPendingWebOrders(); // reconciliar encargos web (cae los ya atendidos)
+        }
     }, [isOpen]);
 
     // Close on outside click
@@ -99,9 +131,9 @@ const NotificationBell = () => {
                 title="Notificaciones de inventario"
             >
                 <Bell size={20} />
-                {unreadAlertCount > 0 && (
+                {totalBadge > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1 animate-pulse">
-                        {unreadAlertCount > 99 ? '99+' : unreadAlertCount}
+                        {totalBadge > 99 ? '99+' : totalBadge}
                     </span>
                 )}
             </button>
@@ -139,6 +171,25 @@ const NotificationBell = () => {
 
                     {/* Alerts List */}
                     <div className="flex-1 overflow-y-auto">
+                        {/* Encargos web (miniveci) pendientes */}
+                        {webOrders && webOrders.length > 0 && (
+                            <div className="p-3 space-y-2 border-b border-[var(--glass-border)] bg-amber-500/[0.03]">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-400 px-1">
+                                    Encargos web ({webOrders.length})
+                                </p>
+                                {webOrders.map(order => (
+                                    <WebOrderCard
+                                        key={order.id}
+                                        order={order}
+                                        currency={currentCurrency}
+                                        onAccept={handleAcceptWebOrder}
+                                        onReject={handleRejectWebOrder}
+                                        onView={handleViewWebOrder}
+                                    />
+                                ))}
+                            </div>
+                        )}
+
                         {inventoryAlerts.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-10 text-[var(--color-text-muted)]">
                                 <Bell size={32} className="opacity-30 mb-2" />

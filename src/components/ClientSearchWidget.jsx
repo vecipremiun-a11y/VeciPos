@@ -84,6 +84,8 @@ const ClientSearchWidget = () => {
             setNewClientData({ name: '', rut: '', razon_social: '', giro: '', phone: '', email: '', address: '', comuna: '', ciudad: '' });
         } else if (result.error === 'RUT_DUPLICATE') {
             alert(result.message || 'Ya existe un cliente con ese RUT.');
+        } else if (result.error === 'EMAIL_DUPLICATE') {
+            alert(result.message || 'Ya existe un cliente con ese correo.');
         } else {
             alert('Error al crear cliente');
         }

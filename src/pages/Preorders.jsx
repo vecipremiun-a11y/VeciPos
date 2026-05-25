@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
     Search, ShoppingCart, Trash2, Plus, Minus, X, Clock, Phone, User,
     MapPin, FileText, Calendar, ChevronDown, Check, DollarSign, Package,
@@ -604,6 +604,7 @@ const Preorders = () => {
     } = useStore();
 
     const navigate = useNavigate();
+    const location = useLocation();
 
     const [activeTab, setActiveTab] = useState('new'); // 'new' | 'list'
     const [searchTerm, setSearchTerm] = useState('');
@@ -744,6 +745,17 @@ const Preorders = () => {
             fetchPreorders(getListFilters());
         }
     }, [activeTab, dateFilter, statusFilter]);
+
+    // Si llegamos desde el aviso de encargo web ("Ver detalles"), abrir la
+    // pestaña de lista (no la de crear) y quitar el filtro de fecha para que el
+    // encargo sea visible aunque su entrega no sea hoy.
+    useEffect(() => {
+        if (location.state?.tab === 'list') {
+            setActiveTab('list');
+            if (location.state.focusPreorderId) setDateFilter('all');
+            navigate(location.pathname, { replace: true, state: null });
+        }
+    }, [location.state]);
 
     const handleConfirmPreorder = async (data) => {
         const result = await createPreorder(data);

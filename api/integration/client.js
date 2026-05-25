@@ -129,7 +129,14 @@ export async function syncProductToStore({ companyId, product }) {
     }
 
     const endpoint = `${baseUrl}/api/pos/products/sync`;
+    // ID maestro del producto en POSVECI: llave PERMANENTE para que miniveci
+    // matchee por id (no por SKU, que es editable). Evita duplicados cuando se
+    // cambia el código de barras. miniveci debe priorizar pos_product_id sobre
+    // el SKU (con fallback a SKU solo para productos legacy sin id guardado).
     const payload = { sku: product.sku || null };
+    if (product.id !== undefined && product.id !== null) {
+        payload.pos_product_id = product.id;
+    }
 
     if (product.name) payload.name = product.name;
     if (product.category) payload.category = product.category;

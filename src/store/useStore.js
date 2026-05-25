@@ -1131,6 +1131,21 @@ export const useStore = create(persist((set, get) => ({
                 }
             }
 
+            // Email también único por empresa (insensible a mayúsculas/espacios).
+            const emailClean = (client.email || '').trim().toLowerCase();
+            if (emailClean) {
+                const dupEmail = get().clients.find(c => c.email && c.email.trim().toLowerCase() === emailClean);
+                if (dupEmail) {
+                    return {
+                        success: false,
+                        error: 'EMAIL_DUPLICATE',
+                        message: `Ya existe un cliente con ese correo: ${dupEmail.name}`,
+                        existingClientId: dupEmail.id,
+                        existingClientName: dupEmail.name,
+                    };
+                }
+            }
+
             const result = await turso.execute({
                 sql: "INSERT INTO clients (name, rut, phone, email, address, razon_social, giro, comuna, ciudad, created_at, company_id, credit_limit, credit_period_days, credit_enabled, client_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *",
                 args: [
@@ -1183,6 +1198,21 @@ export const useStore = create(persist((set, get) => ({
                         message: `Ya existe otro cliente con ese RUT: ${dup.name}`,
                         existingClientId: dup.id,
                         existingClientName: dup.name,
+                    };
+                }
+            }
+
+            // Email único por empresa (excluyendo el propio cliente que se edita).
+            const emailClean = (updatedClient.email || '').trim().toLowerCase();
+            if (emailClean) {
+                const dupEmail = get().clients.find(c => c.id !== id && c.email && c.email.trim().toLowerCase() === emailClean);
+                if (dupEmail) {
+                    return {
+                        success: false,
+                        error: 'EMAIL_DUPLICATE',
+                        message: `Ya existe otro cliente con ese correo: ${dupEmail.name}`,
+                        existingClientId: dupEmail.id,
+                        existingClientName: dupEmail.name,
                     };
                 }
             }
@@ -11026,6 +11056,85 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error('Error fetching preorders:', e);
             return { success: false, error: e.message };
+        }
+    },
+
+    // ── Avisos de encargos web (miniveci) ────────────────────────────────
+    // Tarjeta "Encargo amasandería" que aparece abajo a la izquierda y en la
+    // campanita cuando entra un encargo desde la web. Visible para todas las
+    // sesiones abiertas. La lista se reconcilia contra la DB para sobrevivir
+    // recargas y caerse sola cuando alguien ya lo atendió.
+    webOrders: [],                 // encargos web pendientes (toast + campanita)
+    dismissedWebOrderToasts: [],   // ids cuyo toast se cerró con la X (siguen en campanita)
+
+    // Devuelve true solo si agregó un encargo NUEVO (para sonar el aviso una vez,
+    // no en duplicados ni en encargos de otra empresa).
+    pushWebOrder: (data) => {
+        if (!data || !data.id) return false;
+        const active = get().activeCompanyId;
+        if (data.company_id && active && String(data.company_id) !== String(active)) return false;
+        if (get().webOrders.some(o => o.id === data.id)) return false;
+        const itemsSummary = Array.isArray(data.items)
+            ? data.items.map(i => `${i.name} x${i.qty}`).join(', ')
+            : (data.items_summary || '');
+        const order = {
+            id: data.id,
+            public_code: data.public_code || null,
+            client_name: data.client_name || 'Cliente web',
+            items_summary: itemsSummary,
+            due_date: data.due_date || null,
+            due_time: data.due_time || null,
+            total: Number(data.total ?? data.total_amount) || 0,
+        };
+        set((state) => ({ webOrders: [order, ...state.webOrders] }));
+        return true;
+    },
+
+    dismissWebOrderToast: (id) => {
+        set((state) => state.dismissedWebOrderToasts.includes(id)
+            ? {}
+            : { dismissedWebOrderToasts: [...state.dismissedWebOrderToasts, id] });
+    },
+
+    removeWebOrder: (id) => {
+        set((state) => ({
+            webOrders: state.webOrders.filter(o => o.id !== id),
+            dismissedWebOrderToasts: state.dismissedWebOrderToasts.filter(x => x !== id),
+        }));
+    },
+
+    fetchPendingWebOrders: async () => {
+        const { activeCompanyId } = get();
+        if (!activeCompanyId) return;
+        try {
+            const result = await turso.execute({
+                sql: `SELECT p.id, p.external_public_code as public_code, p.client_name,
+                             p.due_date, p.due_time, p.total_amount,
+                             (SELECT GROUP_CONCAT(pi.product_name || ' x' || pi.qty, ', ')
+                              FROM preorder_items pi WHERE pi.preorder_id = p.id) as items_summary
+                      FROM preorders p
+                      WHERE p.company_id = ? AND p.external_source = 'miniveci' AND p.status = 'pending'
+                      ORDER BY p.created_at DESC`,
+                args: [activeCompanyId],
+            });
+            const rows = (result.rows || []).map(r => ({
+                id: r.id,
+                public_code: r.public_code || null,
+                client_name: r.client_name || 'Cliente web',
+                items_summary: r.items_summary || '',
+                due_date: r.due_date || null,
+                due_time: r.due_time || null,
+                total: Number(r.total_amount) || 0,
+            }));
+            set((state) => {
+                const pendingIds = new Set(rows.map(r => r.id));
+                return {
+                    webOrders: rows,
+                    dismissedWebOrderToasts: state.dismissedWebOrderToasts.filter(id => pendingIds.has(id)),
+                };
+            });
+        } catch (e) {
+            console.error('Error fetching pending web orders:', e);
         }
     },
 

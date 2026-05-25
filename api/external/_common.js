@@ -166,9 +166,10 @@ export async function resolveOrCreateClient(client, companyId, { source = null }
     const address = (client.address ?? '').toString().trim() || null;
 
     const rutNorm = normalizeRutForLookup(rutRaw);
-    const phoneNorm = normalizePhoneForLookup(phoneRaw);
+    const phoneNorm = normalizePhoneForLookup(phoneRaw); // se guarda, ya no matchea
+    const emailNorm = email ? email.toLowerCase() : null;
 
-    if (!externalId && !rutNorm && !phoneNorm && !name) return null;
+    if (!externalId && !rutNorm && !emailNorm && !phoneNorm && !name) return null;
 
     const backfillExternal = async (clientId) => {
         if (!externalId) return;
@@ -206,15 +207,16 @@ export async function resolveOrCreateClient(client, companyId, { source = null }
         }
     }
 
-    // 3) Match por teléfono (últimos 9 dígitos)
-    if (phoneNorm) {
+    // 3) Match por email (normalizado lower/trim). NO se matchea por teléfono
+    //    (decisión: solo RUT y correo son llaves de identidad confiables).
+    if (emailNorm) {
         const r = await turso.execute({
             sql: `SELECT id FROM clients
                   WHERE company_id = ?
-                    AND phone IS NOT NULL AND phone != ''
-                    AND substr(replace(replace(replace(replace(phone, ' ', ''), '+', ''), '-', ''), '.', ''), -9) = ?
+                    AND email IS NOT NULL AND email != ''
+                    AND lower(trim(email)) = ?
                   LIMIT 1`,
-            args: [companyId, phoneNorm],
+            args: [companyId, emailNorm],
         });
         if (r.rows?.[0]) {
             await backfillExternal(r.rows[0].id);

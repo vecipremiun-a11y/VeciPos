@@ -210,6 +210,15 @@ async function createPreorder(req, res) {
         due_date,
         due_time,
         total,
+        // Para el aviso en vivo del POS (tarjeta de "Encargo amasandería"):
+        // nombre del cliente + productos/cantidades, sin que el front tenga que
+        // re-consultar el detalle.
+        client_name: displayName,
+        items: payload.items.map(it => ({
+            name: it.product_name || 'Producto',
+            qty: toNumber(it.quantity, 1),
+            unit: it.unit || null,
+        })),
     };
 
     console.log(`✅ [preorders] Encargo creado #${preorderId} (${out.public_code || 's/código'}) · ${payload.items.length} items · entrega ${due_date} ${due_time}`);
