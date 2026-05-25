@@ -12,6 +12,7 @@ import notifyMiniveciStatusHandler from './api/integration/notify-miniveci-statu
 import pushPreorderHandler from './api/integration/push-preorder.js';
 
 import externalPreordersHandler from './api/external/preorders.js';
+import externalClientsHandler from './api/external/clients.js';
 
 import kdsOrdersHandler from './api/kds/orders.js';
 import kdsUpdateStatusHandler from './api/kds/update-status.js';
@@ -193,6 +194,11 @@ app.all('/api/integration/push-preorder', async (req, res) => {
 app.all('/api/external/preorders', async (req, res) => {
     try { return await externalPreordersHandler(req, res); }
     catch (error) { console.error('❌ /api/external/preorders error:', error); return res.status(500).json({ error: error.message }); }
+});
+
+app.all('/api/external/clients', async (req, res) => {
+    try { return await externalClientsHandler(req, res); }
+    catch (error) { console.error('❌ /api/external/clients error:', error); return res.status(500).json({ error: error.message }); }
 });
 
 app.all('/api/kds/orders', async (req, res) => {
