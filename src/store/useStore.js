@@ -11754,24 +11754,70 @@ export const useStore = create(persist((set, get) => ({
 
     deliverPreorder: async (preorderId, itemWeights, paymentMethod = 'Efectivo', { terminalId = null, bankAccountId = null } = {}) => {
         try {
-            // 1. Update each item with real_qty, real_weight_kg, real_total.
+            // Snapshot del producto al ENTREGAR (no al crear el encargo): el
+            // costo y la tasa de impuesto se congelan ahora para que la utilidad
+            // del encargo en el reporte no se distorsione si después cambia el
+            // cost del producto. Patrón análogo al de sale_items en addSale.
+            const productMetaRes = await turso.execute({
+                sql: `SELECT pi.id AS preorder_item_id, pi.product_id,
+                             COALESCE(p.cost, 0) AS cost,
+                             COALESCE(p.tax_rate, 0) AS tax_rate
+                      FROM preorder_items pi
+                      LEFT JOIN products p ON p.id = pi.product_id
+                      WHERE pi.preorder_id = ?`,
+                args: [preorderId]
+            });
+            const productMetaById = new Map(
+                (productMetaRes.rows || []).map(r => [r.preorder_item_id, {
+                    product_id: r.product_id,
+                    cost: Number(r.cost) || 0,
+                    tax_rate: Number(r.tax_rate) || 0,
+                }])
+            );
+
+            // 1. Update each item with real_qty, real_weight_kg, real_total + unit_cost.
             //    · Productos por kg: total = real_weight_kg × price_per_kg.
             //      real_qty queda como conteo de unidades entregadas (tracking).
             //    · Productos por unidad: total = real_qty × unit_price.
+            //    aggregationItems acumula los datos para alimentar las mismas tablas
+            //    agregadas que usa addSale (product_daily_profit, etc.) → el reporte
+            //    de Utilidad ahora incluye los encargos entregados.
             let realTotal = 0;
+            const aggregationItems = [];
             for (const iw of itemWeights) {
                 const realQty = iw.real_qty !== undefined && iw.real_qty !== null && iw.real_qty !== ''
                     ? Number(iw.real_qty)
                     : Number(iw.qty || 0);
-                const realItemTotal = iw.billing_unit === 'kg'
-                    ? (Number(iw.real_weight_kg) || 0) * (Number(iw.price_per_kg) || 0)
-                    : realQty * (Number(iw.unit_price) || 0);
+                const isKg = iw.billing_unit === 'kg';
+                const realWeightKg = Number(iw.real_weight_kg) || 0;
+                const pricePerKg = Number(iw.price_per_kg) || 0;
+                const unitPrice = Number(iw.unit_price) || 0;
+                const realItemTotal = isKg
+                    ? realWeightKg * pricePerKg
+                    : realQty * unitPrice;
                 realTotal += realItemTotal;
 
+                const meta = productMetaById.get(iw.id) || { product_id: null, cost: 0, tax_rate: 0 };
+                // unit_cost = costo por unidad cobrada (por kg si es kg-mode, por unidad si es unit-mode).
+                // products.cost ya está en "por unidad principal" del producto, así que se usa tal cual.
+                const unitCost = meta.cost;
+
                 await turso.execute({
-                    sql: `UPDATE preorder_items SET real_qty = ?, real_weight_kg = ?, real_total = ? WHERE id = ?`,
-                    args: [realQty, iw.real_weight_kg || null, realItemTotal, iw.id]
+                    sql: `UPDATE preorder_items SET real_qty = ?, real_weight_kg = ?, real_total = ?, unit_cost = ? WHERE id = ?`,
+                    args: [realQty, iw.real_weight_kg || null, realItemTotal, unitCost, iw.id]
                 });
+
+                // Solo aportar a las agregaciones los items ligados a un producto del catálogo.
+                // Items "sueltos" (sin product_id) suman al total general pero no a product_daily_profit.
+                if (meta.product_id) {
+                    aggregationItems.push({
+                        id: meta.product_id,
+                        quantity: isKg ? realWeightKg : realQty,
+                        price: isKg ? pricePerKg : unitPrice,
+                        cost: unitCost,
+                        tax_rate: meta.tax_rate,
+                    });
+                }
             }
 
             // 2. Get total already paid (deposits)
@@ -11809,6 +11855,28 @@ export const useStore = create(persist((set, get) => ({
                 sql: `UPDATE preorders SET real_total = ?, total_amount = ?, remaining_amount = 0, deposit_amount = ?, status = 'delivered', delivered_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
                 args: [realTotal, realTotal, totalPaid, preorderId]
             });
+
+            // 4b. Alimentar las mismas tablas agregadas que usa addSale → el
+            //     reporte de Utilidad incluye este encargo entregado igual que
+            //     una venta del POS. Best-effort: si falla la agregación, la
+            //     entrega ya quedó persistida y la caja correcta.
+            try {
+                const { activeCompanyId, currentUser, currentCompanyTimezone } = get();
+                const saleData = {
+                    date: new Date().toISOString(),
+                    total: realTotal,
+                    items: aggregationItems,
+                };
+                await get().updateAllAggregations(
+                    saleData,
+                    currentUser?.id,
+                    currentUser?.name,
+                    activeCompanyId,
+                    currentCompanyTimezone
+                );
+            } catch (aggErr) {
+                console.warn('Error alimentando agregaciones desde deliverPreorder:', aggErr);
+            }
 
             // Si el encargo está sincronizado con la web (tiene public_code),
             // avisar a miniveci que se entregó (best-effort, no bloquea).
