@@ -7,6 +7,7 @@
 // sorteo_participants). Si la boleta ya existe → error amable, sin 500.
 
 import { createClient } from '@libsql/client';
+import { fromZonedTime } from 'date-fns-tz';
 
 let _client = null;
 function getTurso() {
@@ -43,13 +44,14 @@ export default async function handler(req, res) {
 
         // Resolver empresa + config en una sola ida.
         const cr = await turso.execute({
-            sql: 'SELECT id FROM companies WHERE sorteo_token = ? LIMIT 1',
+            sql: 'SELECT id, timezone FROM companies WHERE sorteo_token = ? LIMIT 1',
             args: [token],
         });
         if (!cr.rows.length) {
             return res.status(404).json({ ok: false, error: 'Sorteo no encontrado' });
         }
         const companyId = cr.rows[0].id;
+        const companyTz = cr.rows[0].timezone || 'America/Santiago';
 
         const sr = await turso.execute({
             sql: `SELECT active, field_name, field_phone, field_rut,
@@ -142,9 +144,15 @@ export default async function handler(req, res) {
                 const fmt = '$' + Math.round(minAmount).toLocaleString('es-CL');
                 return res.status(400).json({ ok: false, error: `Tu boleta debe ser de al menos ${fmt} para participar.` });
             }
+            // Comparar contra la medianoche LOCAL de la empresa, no el string
+            // UTC: una venta del 7 a las 23:00 en Chile se guarda como 08T03:00Z
+            // y un < lexicográfico la daría por válida erróneamente.
             const fromDate = clean(cfg.boleta_from_date, 30);
-            if (fromDate && String(sale.date || '') < fromDate) {
-                return res.status(400).json({ ok: false, error: 'Esa boleta no corresponde al período del sorteo.' });
+            if (fromDate) {
+                const cutoff = fromZonedTime(`${fromDate}T00:00:00`, companyTz);
+                if (!sale.date || new Date(sale.date) < cutoff) {
+                    return res.status(400).json({ ok: false, error: 'Esa boleta no corresponde al período del sorteo.' });
+                }
             }
             saleId = sale.sale_id;
         }
