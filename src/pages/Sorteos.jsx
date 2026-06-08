@@ -199,6 +199,21 @@ const Sorteos = () => {
                 ],
             });
             flash('ok', 'Configuración guardada.');
+
+            // Empujar la config a miniveci (best-effort, no bloquea el guardado).
+            // Si la tienda no está integrada, el endpoint responde skipped y no pasa nada.
+            try {
+                const r = await fetch(`/api/integration/push-sorteo?company_id=${encodeURIComponent(activeCompanyId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-company-id': activeCompanyId },
+                });
+                const j = await r.json().catch(() => null);
+                if (j?.ok && !j.skipped) {
+                    flash('ok', 'Configuración guardada y sincronizada con la web.');
+                }
+            } catch (err) {
+                console.warn('[sorteo] push a miniveci falló (no crítico):', err);
+            }
         } catch (e) {
             console.error('Sorteos save error:', e);
             flash('err', 'No se pudo guardar.');

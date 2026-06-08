@@ -10,6 +10,7 @@ import integrationRetryStockHandler from './api/integration/retry-stock.js';
 import integrationSyncProductHandler from './api/integration/sync-product.js';
 import notifyMiniveciStatusHandler from './api/integration/notify-miniveci-status.js';
 import pushPreorderHandler from './api/integration/push-preorder.js';
+import pushSorteoHandler from './api/integration/push-sorteo.js';
 
 import externalPreordersHandler from './api/external/preorders.js';
 import externalClientsHandler from './api/external/clients.js';
@@ -192,6 +193,11 @@ app.all('/api/integration/notify-miniveci-status', async (req, res) => {
 app.all('/api/integration/push-preorder', async (req, res) => {
     try { return await pushPreorderHandler(req, res); }
     catch (error) { console.error('❌ /api/integration/push-preorder error:', error); return res.status(500).json({ error: error.message }); }
+});
+
+app.all('/api/integration/push-sorteo', async (req, res) => {
+    try { return await pushSorteoHandler(req, res); }
+    catch (error) { console.error('❌ /api/integration/push-sorteo error:', error); return res.status(500).json({ error: error.message }); }
 });
 
 app.all('/api/external/preorders', async (req, res) => {
