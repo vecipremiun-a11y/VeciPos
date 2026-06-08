@@ -116,7 +116,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
         const sellerName = seller?.name || 'Vendedor';
 
         const date = new Date(sale.date).toLocaleString('es-CL');
-        const ticketId = `T-${new Date(sale.date).getTime().toString().slice(-6)}`;
+        const ticketId = sale.id ? `${sale.id}` : `${new Date(sale.date).getTime().toString().slice(-6)}`;
 
 
 

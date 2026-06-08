@@ -89,19 +89,27 @@ export default async function handler(req, res) {
             }
         }
 
-        // ── Regla: validar la boleta contra la venta real ──────────────────
-        // Solo si el sorteo pide boleta Y definió un monto mínimo (>0).
-        // El cliente escribe el folio SII (boleta electrónica) o el N° de
-        // ticket interno (T-<id de venta>). Buscamos la venta, verificamos que
-        // exista, no esté anulada, cumpla el monto y sea del período del sorteo.
-        let saleId = null;
-        const minAmount = Number(cfg.boleta_min_amount) || 0;
-        if (Number(cfg.field_boleta) === 1 && minAmount > 0) {
-            const digits = data.boleta.replace(/\D/g, '');
-            if (!digits) {
+        // Normalizar el N° de boleta a solo dígitos: el cliente puede teclear
+        // el número con o sin separadores. Lo guardamos normalizado para que el
+        // N° de participante y el dedup usen el mismo número limpio.
+        let boletaDigits = '';
+        if (Number(cfg.field_boleta) === 1) {
+            boletaDigits = data.boleta.replace(/\D/g, '');
+            if (!boletaDigits) {
                 return res.status(400).json({ ok: false, error: 'N° de boleta inválido' });
             }
-            const num = Number(digits);
+            data.boleta = boletaDigits;
+        }
+
+        // ── Regla: validar la boleta contra la venta real ──────────────────
+        // Solo si el sorteo pide boleta Y definió un monto mínimo (>0).
+        // El cliente escribe el folio SII (boleta electrónica) o el N° de la
+        // boleta interna (= id de la venta). Verificamos venta real, no anulada,
+        // que cumpla el monto y sea del período del sorteo.
+        let saleId = null;
+        const minAmount = Number(cfg.boleta_min_amount) || 0;
+        if (boletaDigits && minAmount > 0) {
+            const num = Number(boletaDigits);
 
             // 1) Folio SII (boleta afecta 39 / exenta 41).
             let sale = null;
@@ -114,7 +122,7 @@ export default async function handler(req, res) {
             });
             if (f.rows.length) sale = f.rows[0];
 
-            // 2) Venta sin SII: el N° de ticket es el id de la venta.
+            // 2) Venta sin SII: el N° de boleta es el id de la venta.
             if (!sale) {
                 const r = await turso.execute({
                     sql: `SELECT id AS sale_id, total, date, status
@@ -141,19 +149,25 @@ export default async function handler(req, res) {
             saleId = sale.sale_id;
         }
 
-        // Generar número de ticket único por empresa (4 dígitos, con reintentos).
-        let ticket = null;
-        for (let i = 0; i < 8; i++) {
-            const candidate = 1000 + Math.floor(Math.random() * 9000);
-            const dup = await turso.execute({
-                sql: 'SELECT 1 FROM sorteo_participants WHERE company_id = ? AND ticket_number = ? LIMIT 1',
-                args: [companyId, candidate],
-            });
-            if (!dup.rows.length) { ticket = candidate; break; }
-        }
-        if (ticket == null) {
-            // Fallback improbable: usar timestamp para garantizar unicidad.
-            ticket = Number(String(Date.now()).slice(-4));
+        // N° de participante = N° de boleta (si el sorteo lo pide). Así el
+        // cliente reconoce su número. Si no se pide boleta, generamos uno
+        // aleatorio único por empresa.
+        let ticket;
+        if (boletaDigits) {
+            ticket = Number(boletaDigits);
+        } else {
+            ticket = null;
+            for (let i = 0; i < 8; i++) {
+                const candidate = 1000 + Math.floor(Math.random() * 9000);
+                const dup = await turso.execute({
+                    sql: 'SELECT 1 FROM sorteo_participants WHERE company_id = ? AND ticket_number = ? LIMIT 1',
+                    args: [companyId, candidate],
+                });
+                if (!dup.rows.length) { ticket = candidate; break; }
+            }
+            if (ticket == null) {
+                ticket = Number(String(Date.now()).slice(-4));
+            }
         }
 
         const nowIso = new Date().toISOString();
