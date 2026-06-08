@@ -79,7 +79,7 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
 
     const sellerName = seller?.name || 'Vendedor';
     const date = new Date(saleDetails.date || Date.now()).toLocaleString('es-CL');
-    const ticketId = saleDetails.id ? `T-${String(saleDetails.id).slice(-6)}` : `T-${Date.now().toString().slice(-6)}`;
+    const ticketId = saleDetails.id ? `T-${saleDetails.id}` : `T-${Date.now().toString().slice(-6)}`;
 
     doc.setFontSize(fmt === 'a4' ? 9 : 7);
     // DTE folio (if SII electronic invoicing is active)
@@ -204,7 +204,7 @@ export const generateWhatsAppLink = (phoneNumber, saleDetails, seller, receiptCo
     const fullNumber = `569${cleanNumber}`;
     const sellerName = seller?.name || 'Vendedor';
     const date = new Date(saleDetails.date || Date.now()).toLocaleString('es-CL');
-    const ticketId = saleDetails.id ? `T-${String(saleDetails.id).slice(-6)}` : `T-${Date.now().toString().slice(-6)}`;
+    const ticketId = saleDetails.id ? `T-${saleDetails.id}` : `T-${Date.now().toString().slice(-6)}`;
 
     const isCash = ['cash', 'efectivo', 'Efectivo'].includes(saleDetails.paymentMethod);
     const paymentLabel = isCash ? 'Efectivo' : saleDetails.paymentMethod;

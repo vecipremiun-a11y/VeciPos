@@ -73,6 +73,13 @@ export const ALL_MODULES = [
         plan: 'pro',
     },
     {
+        key: 'sorteos',
+        label: 'Sorteos',
+        description: 'Página pública de inscripción a sorteos con link propio por empresa.',
+        defaultEnabled: false,
+        plan: 'pro',
+    },
+    {
         key: 'users',
         label: 'Usuarios',
         description: 'Gestión de usuarios y control de acceso.',

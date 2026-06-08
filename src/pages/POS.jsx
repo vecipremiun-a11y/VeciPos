@@ -428,7 +428,9 @@ const POS = () => {
             }
 
             // ✅ Venta confirmada (commit en BD) o encolada (offline failsafe)
-            setLastSaleDetails({ ...saleData, _queued: !!result.queued });
+            // Incluir el id real de la venta → el ticket imprime T-<id> y ese
+            // número es verificable (ej: sorteos). Offline encolado: aún sin id.
+            setLastSaleDetails({ ...saleData, id: result.saleId || null, _queued: !!result.queued });
             setIsSuccessModalOpen(true);
             setPosSelectedClient(null);
             setPendingInvoiceData(null);

@@ -216,7 +216,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
 
         const sellerName = seller?.name || 'Vendedor';
         const date = new Date().toLocaleString('es-CL');
-        const ticketId = `T-${Date.now().toString().slice(-6)}`;
+        const ticketId = saleDetails?.id ? `T-${saleDetails.id}` : `T-${Date.now().toString().slice(-6)}`;
 
         const dteLabel = saleDetails.tipoDte === 33 ? 'FACTURA ELECTRÓNICA' : 'BOLETA ELECTRÓNICA';
 
@@ -321,7 +321,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         const fullNumber = `569${cleanNumber}`;
         const sellerName = seller?.name || 'Vendedor';
         const date = new Date().toLocaleString('es-CL');
-        const ticketId = `T-${Date.now().toString().slice(-6)}`;
+        const ticketId = saleDetails?.id ? `T-${saleDetails.id}` : `T-${Date.now().toString().slice(-6)}`;
 
         const isCash = ['cash', 'efectivo', 'Efectivo'].includes(saleDetails.paymentMethod);
         const paymentLabel = isCash ? 'Efectivo' : saleDetails.paymentMethod;
@@ -401,7 +401,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         const printWindow = window.open('', '', 'width=400,height=700');
         const sellerName = seller?.name || 'Vendedor';
         const date = new Date().toLocaleString('es-CL');
-        const ticketId = `T-${Date.now().toString().slice(-6)}`;
+        const ticketId = saleDetails?.id ? `T-${saleDetails.id}` : `T-${Date.now().toString().slice(-6)}`;
 
         const amountPaid = saleDetails.paymentDetails?.amount || saleDetails.total;
         const change = saleDetails.paymentDetails?.change || 0;
@@ -695,7 +695,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                         )}
                         <br />
                         <div style={{ textAlign: 'left', fontSize: '10px' }}>
-                            <div>Boleta: {`T-${Date.now().toString().slice(-6)}`}</div>
+                            <div>Boleta: {saleDetails?.id ? `T-${saleDetails.id}` : `T-${Date.now().toString().slice(-6)}`}</div>
                             <div>Fecha: {new Date().toLocaleString('es-CL')}</div>
                             <div>Vend: {seller?.name || 'Vendedor'}</div>
                         </div>

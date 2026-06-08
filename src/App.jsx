@@ -53,6 +53,7 @@ const AdminCompanies = lazy(() => import('./pages/admin/AdminCompanies'));
 const SupportInbox = lazy(() => import('./pages/admin/SupportInbox'));
 const ProfitReport = lazy(() => import('./pages/admin/ProfitReport'));
 const SalesAnalytics = lazy(() => import('./pages/reports/SalesAnalytics'));
+const Sorteos = lazy(() => import('./pages/Sorteos'));
 import { useStore } from './store/useStore';
 import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncCatalogIncremental, syncPendingOpsToServer } from './lib/db/sync';
 import { createSmartInterval } from './lib/smartPolling';
@@ -339,6 +340,8 @@ function App() {
           <Route path="reports/invoice-payments" element={<ProtectedPage permission="reports.invoice_payments"><InvoicePaymentsReport /></ProtectedPage>} />
           <Route path="reports/profit" element={<ProtectedPage permission="reports.profit"><ProfitReport /></ProtectedPage>} />
           <Route path="reports/sales-analytics" element={<ProtectedPage permission="reports.sales_analytics"><SalesAnalytics /></ProtectedPage>} />
+
+          <Route path="sorteos" element={<ProtectedPage permission="sorteos.view"><FeatureGatePage moduleKey="sorteos"><Sorteos /></FeatureGatePage></ProtectedPage>} />
 
           <Route path="settings" element={<ProtectedPage permission="settings.view"><Settings /></ProtectedPage>} />
           <Route path="offline-sales" element={<ProtectedPage permission="pos.access"><OfflineSync /></ProtectedPage>} />

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Inscríbete al sorteo</title>
+<!--
+  Página pública de inscripción a sorteos (multiempresa).
+  Standalone: NO carga el bundle de React del POS → liviana para el visitante.
+  Resuelve la empresa por ?token=XXX y consume /api/sorteo/public y
+  /api/sorteo/register. Mismo enfoque que public/kds.html.
+-->
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --grad1: #6d28d9;
+    --grad2: #9333ea;
+    --accent1: #f472b6;
+    --accent2: #a855f7;
+  }
+  html, body { min-height: 100%; font-family: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif; }
+  body {
+    color: #fff;
+    background: linear-gradient(135deg, var(--grad1), var(--grad2));
+    min-height: 100vh;
+    display: flex; flex-direction: column;
+    position: relative; overflow-x: hidden;
+  }
+  /* Capa de imagen de fondo (si la empresa subió una) */
+  #bg {
+    position: fixed; inset: 0; z-index: 0;
+    background-size: cover; background-position: center;
+    display: none;
+  }
+  #bg::after { content: ''; position: absolute; inset: 0; background: rgba(76, 29, 149, 0.62); }
+  .wrap {
+    position: relative; z-index: 1;
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    padding: 28px 16px 40px;
+  }
+
+  /* Badge "sorteo activo" */
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(250, 204, 21, 0.18);
+    border: 1px solid rgba(250, 204, 21, 0.5);
+    color: #fde68a; font-weight: 700; font-size: 12px; letter-spacing: 1px;
+    padding: 5px 12px; border-radius: 999px; text-transform: uppercase;
+  }
+
+  /* Countdown */
+  #countdown { display: flex; gap: 10px; margin: 14px 0 6px; }
+  .cd-box {
+    background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 14px; padding: 8px 12px; min-width: 60px; text-align: center;
+    backdrop-filter: blur(6px);
+  }
+  .cd-box .num { font-size: 26px; font-weight: 800; line-height: 1; }
+  .cd-box .lbl { font-size: 10px; letter-spacing: 1px; opacity: 0.8; text-transform: uppercase; margin-top: 4px; }
+
+  h1#title { font-size: 34px; font-weight: 900; text-align: center; margin: 8px 0 18px; text-shadow: 0 2px 18px rgba(0,0,0,0.35); }
+
+  /* Card del formulario */
+  .card {
+    width: 100%; max-width: 420px;
+    background: rgba(255,255,255,0.97); color: #1f2937;
+    border-radius: 22px; padding: 26px 22px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.32);
+  }
+  .card h2 { font-size: 22px; font-weight: 800; text-align: center; color: #111827; }
+  .card .sub { text-align: center; color: #6b7280; font-size: 13px; margin: 6px 0 18px; }
+
+  .field { position: relative; margin-bottom: 12px; }
+  .field input {
+    width: 100%; padding: 13px 14px 13px 42px;
+    border: 1px solid #e5e7eb; border-radius: 12px; font-size: 15px;
+    background: #f9fafb; color: #111827; outline: none; transition: border-color .15s, box-shadow .15s;
+  }
+  .field input:focus { border-color: var(--accent2); box-shadow: 0 0 0 3px rgba(168,85,247,0.15); background: #fff; }
+  .field .ic { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #9ca3af; font-size: 16px; }
+
+  button#submit {
+    width: 100%; margin-top: 6px; padding: 14px;
+    border: none; border-radius: 12px; cursor: pointer;
+    color: #fff; font-size: 16px; font-weight: 800;
+    background: linear-gradient(90deg, var(--accent1), var(--accent2));
+    box-shadow: 0 10px 24px rgba(168,85,247,0.4); transition: transform .08s, opacity .15s;
+  }
+  button#submit:active { transform: scale(0.98); }
+  button#submit[disabled] { opacity: 0.6; cursor: default; }
+
+  .legal { text-align: center; color: #9ca3af; font-size: 11px; margin-top: 12px; }
+  #count { text-align: center; margin-top: 16px; font-weight: 700; font-size: 14px; text-shadow: 0 1px 8px rgba(0,0,0,0.3); }
+  #msg { text-align: center; margin-top: 10px; font-size: 13px; font-weight: 600; min-height: 18px; }
+  #msg.err { color: #fecaca; }
+
+  /* Estado de éxito */
+  .success { text-align: center; }
+  .success .tick { font-size: 54px; }
+  .success h2 { color: #059669; }
+  .success .ticket {
+    margin: 14px auto; display: inline-block;
+    background: linear-gradient(90deg, #ede9fe, #fae8ff);
+    border: 2px dashed var(--accent2); border-radius: 14px;
+    padding: 12px 26px; color: #6d28d9;
+  }
+  .success .ticket .n { font-size: 40px; font-weight: 900; line-height: 1; }
+  .success .ticket .t { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; }
+
+  .state {
+    margin-top: 60px; text-align: center; max-width: 360px;
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 18px; padding: 28px; backdrop-filter: blur(6px);
+  }
+  footer { position: relative; z-index: 1; text-align: center; padding: 14px; font-size: 12px; opacity: 0.8; }
+</style>
+</head>
+<body>
+  <div id="bg"></div>
+  <div class="wrap" id="wrap">
+    <div class="state" id="loading">Cargando…</div>
+  </div>
+  <footer>© <span id="year"></span> Sorteo legal y verificable</footer>
+
+<script>
+(function () {
+  'use strict';
+  document.getElementById('year').textContent = new Date().getFullYear();
+
+  function qs(name) {
+    var m = new RegExp('[?&]' + name + '=([^&]+)').exec(window.location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : null;
+  }
+  function el(tag, attrs, html) {
+    var e = document.createElement(tag);
+    if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (html != null) e.innerHTML = html;
+    return e;
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, function (c) {
+    return { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c];
+  }); }
+
+  var token = qs('token');
+  var wrap = document.getElementById('wrap');
+  var cfg = null;
+  var countdownTimer = null;
+
+  function showState(html) {
+    wrap.innerHTML = '<div class="state">' + html + '</div>';
+  }
+
+  if (!token) {
+    showState('<h2>Enlace inválido</h2><p style="margin-top:8px;opacity:.85">Falta el código del sorteo.</p>');
+    return;
+  }
+
+  fetch('/api/sorteo/public?token=' + encodeURIComponent(token))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data || !data.ok) {
+        showState('<h2>Sorteo no encontrado</h2><p style="margin-top:8px;opacity:.85">Revisa el enlace e intenta nuevamente.</p>');
+        return;
+      }
+      if (!data.active) {
+        showState('<div style="font-size:48px">🎉</div><h2 style="margin-top:8px">No hay sorteo activo</h2><p style="margin-top:8px;opacity:.85">' + esc(data.company_name || '') + ' no tiene un sorteo abierto en este momento.</p>');
+        return;
+      }
+      cfg = data;
+      if (data.bg_image) {
+        var bg = document.getElementById('bg');
+        bg.style.backgroundImage = 'url("' + data.bg_image + '")';
+        bg.style.display = 'block';
+      }
+      render();
+    })
+    .catch(function () {
+      showState('<h2>Sin conexión</h2><p style="margin-top:8px;opacity:.85">No pudimos cargar el sorteo. Intenta más tarde.</p>');
+    });
+
+  var FIELDS = [
+    { key: 'name', icon: '👤', ph: 'Tu nombre completo', type: 'text' },
+    { key: 'phone', icon: '📱', ph: 'Celular (ej: +56 9 1234 5678)', type: 'tel' },
+    { key: 'rut', icon: '🪪', ph: 'RUT (ej: 12.345.678-9)', type: 'text' },
+    { key: 'email', icon: '✉️', ph: 'Correo electrónico', type: 'email' },
+    { key: 'boleta', icon: '🧾', ph: 'N° de boleta (la que te dieron en el local)', type: 'text' },
+    { key: 'address', icon: '📍', ph: 'Dirección', type: 'text' }
+  ];
+
+  function render() {
+    var html = '';
+    html += '<div class="badge">🎉 Sorteo activo</div>';
+    html += '<div id="countdown"></div>';
+    html += '<h1 id="title">' + esc(cfg.name) + '</h1>';
+    html += '<div class="card" id="card">';
+    html += '  <h2>¡Inscríbete gratis!</h2>';
+    html += '  <p class="sub">Completa tus datos para participar</p>';
+    html += '  <form id="form">';
+    for (var i = 0; i < FIELDS.length; i++) {
+      var f = FIELDS[i];
+      if (!cfg.fields[f.key]) continue;
+      html += '<div class="field"><span class="ic">' + f.icon + '</span>' +
+        '<input name="' + f.key + '" type="' + f.type + '" placeholder="' + esc(f.ph) + '" autocomplete="off" /></div>';
+      if (f.key === 'boleta' && cfg.boleta_min_amount > 0) {
+        html += '<p style="margin:-6px 0 12px 4px;font-size:12px;color:#7c3aed;font-weight:600">Tu boleta debe ser de al menos $' +
+          Number(cfg.boleta_min_amount).toLocaleString('es-CL') + '</p>';
+      }
+    }
+    html += '    <button id="submit" type="submit">🎁 ¡Participar gratis!</button>';
+    html += '    <div id="msg"></div>';
+    html += '    <p class="legal">Al participar aceptas las bases del sorteo. Una boleta = una inscripción.</p>';
+    html += '  </form>';
+    html += '</div>';
+    html += '<div id="count"></div>';
+    wrap.innerHTML = html;
+
+    updateCount();
+    setupCountdown();
+    document.getElementById('form').addEventListener('submit', onSubmit);
+  }
+
+  function updateCount() {
+    var c = document.getElementById('count');
+    if (c) c.textContent = (cfg.participant_count || 0) + ' personas ya están participando';
+  }
+
+  function setupCountdown() {
+    var box = document.getElementById('countdown');
+    if (!cfg.draw_date) { if (box) box.style.display = 'none'; return; }
+    var target = new Date(cfg.draw_date).getTime();
+    if (isNaN(target)) { box.style.display = 'none'; return; }
+    function tick() {
+      var diff = target - Date.now();
+      if (diff <= 0) {
+        box.innerHTML = '<div class="cd-box" style="min-width:auto;padding:8px 16px"><div class="num" style="font-size:18px">¡Hoy es el sorteo!</div></div>';
+        if (countdownTimer) clearInterval(countdownTimer);
+        return;
+      }
+      var d = Math.floor(diff / 86400000);
+      var h = Math.floor((diff % 86400000) / 3600000);
+      var m = Math.floor((diff % 3600000) / 60000);
+      var s = Math.floor((diff % 60000) / 1000);
+      box.innerHTML =
+        cell(d, 'días') + cell(h, 'horas') + cell(m, 'min') + cell(s, 'seg');
+    }
+    function cell(n, l) {
+      return '<div class="cd-box"><div class="num">' + String(n).padStart(2, '0') + '</div><div class="lbl">' + l + '</div></div>';
+    }
+    tick();
+    countdownTimer = setInterval(tick, 1000);
+  }
+
+  function onSubmit(ev) {
+    ev.preventDefault();
+    var form = ev.target;
+    var btn = document.getElementById('submit');
+    var msg = document.getElementById('msg');
+    msg.className = '';
+    msg.textContent = '';
+
+    var payload = { token: token };
+    var inputs = form.querySelectorAll('input');
+    var i;
+    for (i = 0; i < inputs.length; i++) {
+      payload[inputs[i].name] = inputs[i].value.trim();
+      if (!inputs[i].value.trim()) {
+        msg.className = 'err';
+        msg.textContent = 'Completa todos los campos.';
+        return;
+      }
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Enviando…';
+    fetch('/api/sorteo/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.j.ok) {
+          msg.className = 'err';
+          msg.textContent = (res.j && res.j.error) ? res.j.error : 'No se pudo inscribir. Intenta nuevamente.';
+          btn.disabled = false;
+          btn.textContent = '🎁 ¡Participar gratis!';
+          return;
+        }
+        showSuccess(res.j.ticket_number);
+      })
+      .catch(function () {
+        msg.className = 'err';
+        msg.textContent = 'Sin conexión. Intenta nuevamente.';
+        btn.disabled = false;
+        btn.textContent = '🎁 ¡Participar gratis!';
+      });
+  }
+
+  function showSuccess(ticket) {
+    if (countdownTimer) clearInterval(countdownTimer);
+    var html = '';
+    html += '<h1 id="title">' + esc(cfg.name) + '</h1>';
+    html += '<div class="card success">';
+    html += '  <div class="tick">🎉</div>';
+    html += '  <h2>¡Estás participando!</h2>';
+    html += '  <p class="sub" style="margin-bottom:0">Guarda tu número de participante</p>';
+    html += '  <div class="ticket"><div class="n">' + esc(ticket) + '</div><div class="t">N° de participante</div></div>';
+    html += '  <p class="legal">¡Mucha suerte! Te contactaremos si resultas ganador.</p>';
+    html += '</div>';
+    wrap.innerHTML = html;
+  }
+})();
+</script>
+</body>
+</html>

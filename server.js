@@ -17,6 +17,9 @@ import externalClientsHandler from './api/external/clients.js';
 import kdsOrdersHandler from './api/kds/orders.js';
 import kdsUpdateStatusHandler from './api/kds/update-status.js';
 
+import sorteoPublicHandler from './api/sorteo/public.js';
+import sorteoRegisterHandler from './api/sorteo/register.js';
+
 import siiConfigHandler from './api/sii/config.js';
 import siiUploadCertHandler from './api/sii/upload-cert.js';
 import siiRequestCafHandler from './api/sii/request-caf.js';
@@ -209,6 +212,16 @@ app.all('/api/kds/orders', async (req, res) => {
 app.all('/api/kds/update-status', async (req, res) => {
     try { return await kdsUpdateStatusHandler(req, res); }
     catch (error) { console.error('❌ /api/kds/update-status error:', error); return res.status(500).json({ error: error.message }); }
+});
+
+app.all('/api/sorteo/public', async (req, res) => {
+    try { return await sorteoPublicHandler(req, res); }
+    catch (error) { console.error('❌ /api/sorteo/public error:', error); return res.status(500).json({ error: error.message }); }
+});
+
+app.all('/api/sorteo/register', async (req, res) => {
+    try { return await sorteoRegisterHandler(req, res); }
+    catch (error) { console.error('❌ /api/sorteo/register error:', error); return res.status(500).json({ error: error.message }); }
 });
 
 app.use('/api', (_req, res) => {

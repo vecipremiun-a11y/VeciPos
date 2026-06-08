@@ -55,7 +55,7 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         // Excluir del SPA-fallback: las APIs y la pantalla KDS (kds.html es una
         // página standalone para TV — NO debe redirigirse a index.html / React).
-        navigateFallbackDenylist: [/^\/api\//, /^\/kds/, /kds\.html$/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/kds/, /kds\.html$/, /^\/sorteo/, /sorteo\.html$/],
         runtimeCaching: [
           // Cache de fuentes (Google Fonts, etc.) — opcional pero útil offline
           {

@@ -229,6 +229,14 @@ export const ALL_PERMISSIONS = [
         ]
     },
     {
+        id: 'sorteos',
+        label: 'Sorteos',
+        permissions: [
+            { id: 'sorteos.view', label: 'Ver Sorteos', desc: 'Permite acceder al módulo de sorteos y ver los participantes' },
+            { id: 'sorteos.manage', label: 'Gestionar Sorteos', desc: 'Permite configurar el sorteo, editar campos y sortear ganadores' },
+        ]
+    },
+    {
         id: 'settings',
         label: 'Configuración',
         permissions: [
