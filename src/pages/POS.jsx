@@ -15,6 +15,7 @@ import SuspendedSalesModal from '../components/SuspendedSalesModal';
 import InvoiceDataModal from '../components/InvoiceDataModal';
 import PreventaSuccessModal from '../components/PreventaSuccessModal';
 import PreventasListModal from '../components/PreventasListModal';
+import ScaleReadButton from '../components/ScaleReadButton';
 import { usePermissions } from '../hooks/usePermissions';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
@@ -995,6 +996,12 @@ const POS = () => {
                                                     }}
                                                 />
                                             </div>
+                                            {item.unit === 'Kg' && (
+                                                <ScaleReadButton
+                                                    onWeight={(kg) => updateCartItem(item.id, { quantity: kg })}
+                                                    className="ml-1"
+                                                />
+                                            )}
 
                                             {discountPercent > 0 && (
                                                 <span className="text-green-400 font-bold ml-1 text-xs">

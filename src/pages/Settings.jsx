@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { turso } from '../lib/turso';
-import { Moon, Sun, Settings as SettingsIcon, FileText, Smartphone, Wrench, Building2, Save, CreditCard, Volume2, Play, ChefHat, Tv, Copy, Check, ExternalLink } from 'lucide-react';
+import { Moon, Sun, Settings as SettingsIcon, FileText, Smartphone, Wrench, Building2, Save, CreditCard, Volume2, Play, ChefHat, Tv, Copy, Check, ExternalLink, Scale } from 'lucide-react';
+import ScaleConfig from '../components/ScaleConfig';
 
 import { recompressAllImages } from '../scripts/recompressImages';
 import ReceiptSettings from '../components/settings/ReceiptSettings';
@@ -216,6 +217,7 @@ const Settings = () => {
                             { id: 'receipts', label: 'Boletas', icon: FileText, permission: 'settings.receipts' },
                             { id: 'payments', label: 'Medios de Pago', icon: CreditCard, permission: 'settings.payments' },
                             { id: 'integrations', label: 'Integraciones', icon: Smartphone, permission: 'settings.system' },
+                            { id: 'scale', label: 'Báscula', icon: Scale, permission: 'settings.system' },
                             { id: 'sii', label: 'Facturación SII', icon: Stamp, permission: 'settings.system' },
                             { id: 'permissions', label: 'Permisos', icon: Shield, permission: 'settings.manage_permissions' },
                             { id: 'system', label: 'Sistema', icon: Wrench, permission: 'settings.system' },
@@ -678,6 +680,10 @@ const Settings = () => {
 
                     {activeTab === 'integrations' && (
                         <StoreIntegrationSettings />
+                    )}
+
+                    {activeTab === 'scale' && (
+                        <ScaleConfig />
                     )}
 
                     {activeTab === 'sii' && (
