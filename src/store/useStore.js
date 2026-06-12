@@ -8733,6 +8733,68 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // Devuelve un Set de IDs de ventas (formato "s_123" / "m_123_0" / "p_45")
+    // que ya fueron consumidas por alguna conciliación CON match (sale_ids no vacío).
+    // Las conciliaciones manuales/históricas (sale_ids vacío) no consumen ventas.
+    fetchConciliatedSaleIds: async (terminalId) => {
+        try {
+            const { activeCompanyId } = get();
+            if (!terminalId) return new Set();
+            const r = await turso.execute({
+                sql: `SELECT sale_ids FROM payment_reconciliations
+                      WHERE company_id = ? AND terminal_id = ?
+                        AND sale_ids IS NOT NULL AND sale_ids != '[]'`,
+                args: [activeCompanyId, terminalId],
+            });
+            const consumed = new Set();
+            for (const row of r.rows || []) {
+                try {
+                    const arr = JSON.parse(row.sale_ids || '[]');
+                    arr.forEach(id => consumed.add(id));
+                } catch { /* noop */ }
+            }
+            return consumed;
+        } catch (e) {
+            console.error('Error fetching conciliated sale ids:', e);
+            return new Set();
+        }
+    },
+
+    // Devuelve el conteo de ventas "Tarjeta" sin datáfono asignado en el rango.
+    // Útil para diagnosticar por qué un abono no cuadra (faltan ventas etiquetadas).
+    fetchUntaggedCardSalesCount: async ({ startDate, endDate }) => {
+        try {
+            const { activeCompanyId, currentCompanyTimezone } = get();
+            if (!startDate || !endDate) return { count: 0, total: 0 };
+            const utcStart = getStartFromDateString(startDate, currentCompanyTimezone).toISOString();
+            const utcEnd = getEndFromDateString(endDate, currentCompanyTimezone).toISOString();
+
+            const r = await turso.execute({
+                sql: `SELECT id, total, payment_details FROM sales
+                      WHERE company_id = ? AND date >= ? AND date <= ?
+                        AND status != 'cancelled' AND payment_method = 'Tarjeta'`,
+                args: [activeCompanyId, utcStart, utcEnd],
+            });
+            let count = 0;
+            let total = 0;
+            for (const row of r.rows || []) {
+                let hasTerminal = false;
+                try {
+                    const d = JSON.parse(row.payment_details || '{}');
+                    if (d.terminal) hasTerminal = true;
+                } catch { /* noop */ }
+                if (!hasTerminal) {
+                    count++;
+                    total += Number(row.total) || 0;
+                }
+            }
+            return { count, total };
+        } catch (e) {
+            console.error('Error fetching untagged card sales:', e);
+            return { count: 0, total: 0 };
+        }
+    },
+
     fetchPaymentReconciliations: async ({ terminalId = null, limit = 50 } = {}) => {
         try {
             const { activeCompanyId } = get();

@@ -19,6 +19,8 @@ const PaymentReconciliation = () => {
         fetchPaymentReconciliations,
         savePaymentReconciliation,
         deletePaymentReconciliation,
+        fetchConciliatedSaleIds,
+        fetchUntaggedCardSalesCount,
     } = useStore(useShallow(s => ({
         paymentTerminals: s.paymentTerminals,
         fetchPaymentMethodsSettings: s.fetchPaymentMethodsSettings,
@@ -27,12 +29,16 @@ const PaymentReconciliation = () => {
         fetchPaymentReconciliations: s.fetchPaymentReconciliations,
         savePaymentReconciliation: s.savePaymentReconciliation,
         deletePaymentReconciliation: s.deletePaymentReconciliation,
+        fetchConciliatedSaleIds: s.fetchConciliatedSaleIds,
+        fetchUntaggedCardSalesCount: s.fetchUntaggedCardSalesCount,
     })));
 
     const [terminalId, setTerminalId] = useState('');
     const [startDate, setStartDate] = useState(daysAgoStr(7));
     const [endDate, setEndDate] = useState(todayStr());
-    const [sales, setSales] = useState([]);
+    const [sales, setSales] = useState([]);             // ventas disponibles (no conciliadas)
+    const [consumedCount, setConsumedCount] = useState(0); // cuántas ya estaban conciliadas
+    const [untagged, setUntagged] = useState({ count: 0, total: 0 });
     const [loadingSales, setLoadingSales] = useState(false);
 
     const [depositAmount, setDepositAmount] = useState('');
@@ -73,8 +79,17 @@ const PaymentReconciliation = () => {
         setLoadingSales(true);
         setMatchResult(null);
         setMatchedSales([]);
+        // 1. Ventas del datáfono en el rango
         const res = await fetchTerminalCardSales({ terminalId: Number(terminalId), startDate, endDate });
-        setSales(res.success ? res.sales : []);
+        const allSales = res.success ? res.sales : [];
+        // 2. Excluir las que ya fueron conciliadas con match → evita doble conteo.
+        const consumed = await fetchConciliatedSaleIds(Number(terminalId));
+        const available = allSales.filter(s => !consumed.has(s.id));
+        setSales(available);
+        setConsumedCount(allSales.length - available.length);
+        // 3. Diagnóstico: ventas "Tarjeta" sin datáfono asignado en el mismo rango.
+        const untaggedRes = await fetchUntaggedCardSalesCount({ startDate, endDate });
+        setUntagged(untaggedRes);
         setLoadingSales(false);
     };
 
@@ -105,7 +120,15 @@ const PaymentReconciliation = () => {
             return;
         }
         if (!sales.length) {
-            setMatchResult({ error: 'No hay ventas con tarjeta para este datáfono en el rango' });
+            setMatchResult({ error: 'No hay ventas con tarjeta para este datáfono en el rango (excluidas las ya conciliadas).' });
+            return;
+        }
+        // Aviso explícito: el abono es mayor al neto total disponible → el sistema
+        // NO va a inventar ventas. Mejor avisar y que el usuario revise.
+        if (amount > totals.neto + 100) {
+            setMatchResult({
+                error: `⚠️ El abono ($${amount.toLocaleString('es-CL')}) es mayor que el neto disponible ($${Math.round(totals.neto).toLocaleString('es-CL')}). Probablemente faltan ventas por registrar o están etiquetadas a otro datáfono. Revisa la sección de diagnóstico abajo, o guárdalo como abono histórico.`
+            });
             return;
         }
         // Tolerancia adaptativa: $50 mínimo, o 0.3% del abono (para absorber
@@ -235,14 +258,32 @@ const PaymentReconciliation = () => {
                 </div>
             </div>
 
+            {/* DIAGNÓSTICO: ventas con tarjeta sin datáfono asignado en el rango */}
+            {untagged.count > 0 && (
+                <div className="flex items-start gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200">
+                    <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                    <div className="text-xs">
+                        <b>Hay {untagged.count} ventas con tarjeta SIN datáfono asignado</b> en este rango,
+                        sumando <b>{formatCurrency(untagged.total, currentCurrency)}</b>. Esas ventas no aparecen
+                        en el cálculo de ningún datáfono. Capacita a los cajeros para que seleccionen el datáfono
+                        al cobrar con tarjeta — si no lo hacen, los abonos nunca van a cuadrar.
+                    </div>
+                </div>
+            )}
+
             {/* TOTALES + VENTAS */}
             <div className="glass-card p-4">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                    <Stat label="Ventas" value={`${totals.count}`} />
+                    <Stat label="Ventas disponibles" value={`${totals.count}`} />
                     <Stat label="Total bruto" value={formatCurrency(totals.bruto, currentCurrency)} />
                     <Stat label="Comisión estimada" value={formatCurrency(totals.comision, currentCurrency)} tone="muted" />
                     <Stat label="Neto esperado" value={formatCurrency(totals.neto, currentCurrency)} tone="primary" />
                 </div>
+                {consumedCount > 0 && (
+                    <p className="text-[11px] text-[var(--color-text-muted)] mt-2 flex items-center gap-1">
+                        <Info size={12} /> {consumedCount} venta{consumedCount > 1 ? 's' : ''} ya {consumedCount > 1 ? 'estaban' : 'estaba'} en una conciliación previa — ocultas del pool para no contarlas dos veces.
+                    </p>
+                )}
 
                 <button
                     onClick={() => setSalesExpanded(v => !v)}
