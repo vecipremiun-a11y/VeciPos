@@ -8636,10 +8636,15 @@ export const useStore = create(persist((set, get) => ({
     //  terminal, y preorder_payments del terminal en el rango.
     fetchTerminalCardSales: async ({ terminalId, startDate, endDate }) => {
         try {
-            const { activeCompanyId, currentCompanyTimezone } = get();
+            const { activeCompanyId, currentCompanyTimezone, paymentTerminals } = get();
             if (!terminalId || !startDate || !endDate) {
                 return { success: false, sales: [], error: 'Faltan parámetros' };
             }
+            // PaymentModal guarda el NOMBRE del datáfono en payment_details.terminal
+            // (no el ID). Necesitamos resolver el nombre para filtrar las ventas POS.
+            // Los preorder_payments sí usan terminal_id numérico.
+            const term = (paymentTerminals || []).find(t => Number(t.id) === Number(terminalId));
+            const terminalName = term?.name || '';
             const utcStart = getStartFromDateString(startDate, currentCompanyTimezone).toISOString();
             const utcEnd = getEndFromDateString(endDate, currentCompanyTimezone).toISOString();
 
@@ -8677,10 +8682,20 @@ export const useStore = create(persist((set, get) => ({
             const out = [];
             const termIdNum = Number(terminalId);
 
+            // El modal guarda terminal como NOMBRE (string). Por compatibilidad
+            // hacia atrás, aceptamos también el ID numérico (por si alguna
+            // versión antigua lo guardó así).
+            const matchesTerminal = (val) => {
+                if (val === null || val === undefined || val === '') return false;
+                if (typeof val === 'string' && terminalName && val === terminalName) return true;
+                const n = Number(val);
+                return Number.isFinite(n) && n === termIdNum;
+            };
+
             for (const s of salesRes.rows) {
                 try {
                     const d = JSON.parse(s.payment_details || '{}');
-                    if (Number(d.terminal) === termIdNum) {
+                    if (matchesTerminal(d.terminal)) {
                         out.push({
                             id: `s_${s.id}`,
                             source: 'POS',
@@ -8699,7 +8714,7 @@ export const useStore = create(persist((set, get) => ({
                     const d = JSON.parse(s.payment_details || '{}');
                     const methods = d.mixedPayments || d.methods || [];
                     methods.forEach((m, idx) => {
-                        if (m.method === 'Tarjeta' && Number(m.terminal) === termIdNum && Number(m.amount) > 0) {
+                        if (m.method === 'Tarjeta' && matchesTerminal(m.terminal) && Number(m.amount) > 0) {
                             out.push({
                                 id: `m_${s.id}_${idx}`,
                                 source: 'POS',
