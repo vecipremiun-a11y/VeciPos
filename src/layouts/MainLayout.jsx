@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -126,6 +126,7 @@ const MainLayout = () => {
                     children: [
                         { icon: DollarSign, label: 'Cierre de Caja', path: '/reports/closures', permission: 'reports.closures' },
                         { icon: ArrowLeftRight, label: 'Movimientos de Caja', path: '/reports/movements', permission: 'reports.movements' },
+                        { icon: CreditCard, label: 'Conciliación Datáfonos', path: '/reports/payment-reconciliation', permission: 'reports.closures' },
                     ]
                 },
                 { icon: Receipt, label: 'Pagos Facturas', path: '/reports/invoice-payments', permission: 'reports.invoice_payments' },

@@ -38,7 +38,7 @@ const PaymentMethodsSettings = () => {
     const [editingAccountId, setEditingAccountId] = useState(null);
 
     // Form States
-    const [newTerminal, setNewTerminal] = useState({ name: '', color: '#3B82F6' });
+    const [newTerminal, setNewTerminal] = useState({ name: '', color: '#3B82F6', commission_rate: 0, fixed_fee: 0 });
     const [newAccount, setNewAccount] = useState({
         bank_name: '',
         account_number: '',
@@ -78,7 +78,7 @@ const PaymentMethodsSettings = () => {
         }
 
         if (result.success) {
-            setNewTerminal({ name: '', color: '#3B82F6' });
+            setNewTerminal({ name: '', color: '#3B82F6', commission_rate: 0, fixed_fee: 0 });
             setEditingTerminalId(null);
             setIsTerminalModalOpen(false);
         }
@@ -91,7 +91,12 @@ const PaymentMethodsSettings = () => {
     };
 
     const openEditTerminalModal = (terminal) => {
-        setNewTerminal({ name: terminal.name, color: terminal.color || '#3B82F6' });
+        setNewTerminal({
+            name: terminal.name,
+            color: terminal.color || '#3B82F6',
+            commission_rate: Number(terminal.commission_rate) || 0,
+            fixed_fee: Number(terminal.fixed_fee) || 0,
+        });
         setEditingTerminalId(terminal.id);
         setIsTerminalModalOpen(true);
     };
@@ -227,7 +232,16 @@ const PaymentMethodsSettings = () => {
                                                     style={{ backgroundColor: terminal.color || '#3B82F6' }}
                                                 />
                                                 <Smartphone size={14} className="text-[var(--color-text-muted)]" />
-                                                <span className="text-sm text-[var(--color-text)]">{terminal.name}</span>
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm text-[var(--color-text)]">{terminal.name}</span>
+                                                    {(Number(terminal.commission_rate) > 0 || Number(terminal.fixed_fee) > 0) && (
+                                                        <span className="text-[10px] text-[var(--color-text-muted)]">
+                                                            {Number(terminal.commission_rate) > 0 && `${Number(terminal.commission_rate)}%`}
+                                                            {Number(terminal.commission_rate) > 0 && Number(terminal.fixed_fee) > 0 && ' · '}
+                                                            {Number(terminal.fixed_fee) > 0 && `$${Number(terminal.fixed_fee)} fijo`}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                             <div className="flex items-center gap-1">
                                                 <button
@@ -442,6 +456,40 @@ const PaymentMethodsSettings = () => {
                                             aria-label={`Seleccionar color ${color}`}
                                         />
                                     ))}
+                                </div>
+                            </div>
+
+                            <div className="pt-2 border-t border-[var(--glass-border)]">
+                                <p className="text-xs text-[var(--color-text-muted)] mb-3">
+                                    💡 La comisión se usa en <b>Reportes → Conciliación de Datáfonos</b> para
+                                    calcular cuánto te debería abonar el procesador. Deja en 0 si no la sabes.
+                                </p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Comisión (%)</label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            max="20"
+                                            value={newTerminal.commission_rate}
+                                            onChange={e => setNewTerminal({ ...newTerminal, commission_rate: e.target.value })}
+                                            placeholder="Ej: 1.49"
+                                            className="glass-input w-full"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Cargo fijo / venta ($)</label>
+                                        <input
+                                            type="number"
+                                            step="1"
+                                            min="0"
+                                            value={newTerminal.fixed_fee}
+                                            onChange={e => setNewTerminal({ ...newTerminal, fixed_fee: e.target.value })}
+                                            placeholder="0"
+                                            className="glass-input w-full"
+                                        />
+                                    </div>
                                 </div>
                             </div>
 

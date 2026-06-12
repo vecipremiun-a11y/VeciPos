@@ -8624,6 +8624,174 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // ════════════════════════════════════════════════════════════════════
+    //  CONCILIACIÓN DE DATÁFONOS
+    // ════════════════════════════════════════════════════════════════════
+    //  Lee ventas con tarjeta (POS + encargos) de un datáfono dado en un
+    //  rango de fechas, para que la pantalla de Conciliación compute el
+    //  neto esperado y haga match contra el abono real.
+    //
+    //  Incluye ventas POS con payment_method = 'Tarjeta' y payment_details
+    //  que contiene terminal=<id>, mixtas con porción 'Tarjeta' del mismo
+    //  terminal, y preorder_payments del terminal en el rango.
+    fetchTerminalCardSales: async ({ terminalId, startDate, endDate }) => {
+        try {
+            const { activeCompanyId, currentCompanyTimezone } = get();
+            if (!terminalId || !startDate || !endDate) {
+                return { success: false, sales: [], error: 'Faltan parámetros' };
+            }
+            const utcStart = getStartFromDateString(startDate, currentCompanyTimezone).toISOString();
+            const utcEnd = getEndFromDateString(endDate, currentCompanyTimezone).toISOString();
+
+            const [salesRes, mixedRes, preorderRes] = await turso.batch([
+                {
+                    sql: `SELECT id, date, total, payment_details, client_name, user_id
+                          FROM sales
+                          WHERE company_id = ? AND date >= ? AND date <= ?
+                            AND status != 'cancelled' AND payment_method = 'Tarjeta'
+                          ORDER BY date ASC`,
+                    args: [activeCompanyId, utcStart, utcEnd]
+                },
+                {
+                    sql: `SELECT id, date, total, payment_details, client_name, user_id
+                          FROM sales
+                          WHERE company_id = ? AND date >= ? AND date <= ?
+                            AND status != 'cancelled' AND payment_method = 'Mixto'
+                          ORDER BY date ASC`,
+                    args: [activeCompanyId, utcStart, utcEnd]
+                },
+                {
+                    sql: `SELECT pp.id, pp.amount, pp.created_at AS date, pp.type,
+                                 pp.preorder_id, po.client_name
+                          FROM preorder_payments pp
+                          JOIN preorders po ON pp.preorder_id = po.id
+                          WHERE po.company_id = ? AND pp.method = 'Tarjeta'
+                            AND pp.terminal_id = ?
+                            AND pp.created_at >= ? AND pp.created_at <= ?
+                            AND po.status != 'canceled'
+                          ORDER BY pp.created_at ASC`,
+                    args: [activeCompanyId, terminalId, utcStart, utcEnd]
+                }
+            ]);
+
+            const out = [];
+            const termIdNum = Number(terminalId);
+
+            for (const s of salesRes.rows) {
+                try {
+                    const d = JSON.parse(s.payment_details || '{}');
+                    if (Number(d.terminal) === termIdNum) {
+                        out.push({
+                            id: `s_${s.id}`,
+                            source: 'POS',
+                            saleId: s.id,
+                            date: s.date,
+                            total: Number(s.total) || 0,
+                            clientName: s.client_name,
+                            userId: s.user_id,
+                        });
+                    }
+                } catch { /* noop */ }
+            }
+
+            for (const s of mixedRes.rows) {
+                try {
+                    const d = JSON.parse(s.payment_details || '{}');
+                    const methods = d.mixedPayments || d.methods || [];
+                    methods.forEach((m, idx) => {
+                        if (m.method === 'Tarjeta' && Number(m.terminal) === termIdNum && Number(m.amount) > 0) {
+                            out.push({
+                                id: `m_${s.id}_${idx}`,
+                                source: 'POS',
+                                saleId: s.id,
+                                date: s.date,
+                                total: Number(m.amount) || 0,
+                                clientName: s.client_name,
+                                userId: s.user_id,
+                            });
+                        }
+                    });
+                } catch { /* noop */ }
+            }
+
+            for (const p of preorderRes.rows) {
+                out.push({
+                    id: `p_${p.id}`,
+                    source: 'Encargo',
+                    preorderId: p.preorder_id,
+                    date: p.date,
+                    total: Number(p.amount) || 0,
+                    clientName: p.client_name,
+                });
+            }
+
+            out.sort((a, b) => new Date(a.date) - new Date(b.date));
+            return { success: true, sales: out };
+        } catch (e) {
+            console.error('Error fetching terminal card sales:', e);
+            return { success: false, sales: [], error: e.message };
+        }
+    },
+
+    fetchPaymentReconciliations: async ({ terminalId = null, limit = 50 } = {}) => {
+        try {
+            const { activeCompanyId } = get();
+            const args = [activeCompanyId];
+            let sql = `SELECT pr.*, pt.name AS terminal_name, pt.color AS terminal_color, u.name AS user_name
+                       FROM payment_reconciliations pr
+                       LEFT JOIN payment_terminals pt ON pt.id = pr.terminal_id
+                       LEFT JOIN users u ON u.id = pr.created_by
+                       WHERE pr.company_id = ?`;
+            if (terminalId) { sql += ' AND pr.terminal_id = ?'; args.push(terminalId); }
+            sql += ' ORDER BY pr.deposit_date DESC, pr.id DESC LIMIT ?';
+            args.push(limit);
+            const r = await turso.execute({ sql, args });
+            return { success: true, reconciliations: r.rows };
+        } catch (e) {
+            console.error('Error fetching reconciliations:', e);
+            return { success: false, reconciliations: [], error: e.message };
+        }
+    },
+
+    savePaymentReconciliation: async ({ terminalId, depositDate, depositAmount, expectedAmount, saleIds, salesFrom, salesTo, notes }) => {
+        try {
+            const { activeCompanyId, currentUser } = get();
+            const difference = (Number(depositAmount) || 0) - (Number(expectedAmount) || 0);
+            const r = await turso.execute({
+                sql: `INSERT INTO payment_reconciliations
+                        (company_id, terminal_id, deposit_date, deposit_amount, expected_amount,
+                         difference, sale_ids, sales_from, sales_to, notes, created_by, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                      RETURNING *`,
+                args: [
+                    activeCompanyId, terminalId, depositDate,
+                    Number(depositAmount) || 0, Number(expectedAmount) || 0, difference,
+                    JSON.stringify(saleIds || []),
+                    salesFrom || null, salesTo || null,
+                    notes || null, currentUser?.id || null,
+                ],
+            });
+            return { success: true, reconciliation: r.rows[0] };
+        } catch (e) {
+            console.error('Error saving reconciliation:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deletePaymentReconciliation: async (id) => {
+        try {
+            const { activeCompanyId } = get();
+            await turso.execute({
+                sql: 'DELETE FROM payment_reconciliations WHERE id = ? AND company_id = ?',
+                args: [id, activeCompanyId],
+            });
+            return { success: true };
+        } catch (e) {
+            console.error('Error deleting reconciliation:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
     // Historical Reports
     fetchClosedRegisters: async (limit = 20, offset = 0, startDate, endDate) => {
         try {
@@ -12006,9 +12174,11 @@ export const useStore = create(persist((set, get) => ({
                 }
             } catch (e) { console.warn("Terminal migration check fail", e); }
 
+            const commissionRate = Number(terminalData.commission_rate) || 0;
+            const fixedFee = Number(terminalData.fixed_fee) || 0;
             const res = await turso.execute({
-                sql: "INSERT INTO payment_terminals (company_id, name, color, created_at) VALUES (?, ?, ?, ?) RETURNING *",
-                args: [activeCompanyId, terminalData.name, terminalData.color || '#3B82F6', new Date().toISOString()]
+                sql: "INSERT INTO payment_terminals (company_id, name, color, commission_rate, fixed_fee, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
+                args: [activeCompanyId, terminalData.name, terminalData.color || '#3B82F6', commissionRate, fixedFee, new Date().toISOString()]
             });
             const newTerminal = res.rows[0];
             set({ paymentTerminals: [...paymentTerminals, newTerminal] });
@@ -12022,12 +12192,14 @@ export const useStore = create(persist((set, get) => ({
     updatePaymentTerminal: async (id, terminalData) => {
         const { paymentTerminals } = get();
         try {
+            const commissionRate = Number(terminalData.commission_rate) || 0;
+            const fixedFee = Number(terminalData.fixed_fee) || 0;
             await turso.execute({
-                sql: "UPDATE payment_terminals SET name = ?, color = ? WHERE id = ?",
-                args: [terminalData.name, terminalData.color || '#3B82F6', id]
+                sql: "UPDATE payment_terminals SET name = ?, color = ?, commission_rate = ?, fixed_fee = ? WHERE id = ?",
+                args: [terminalData.name, terminalData.color || '#3B82F6', commissionRate, fixedFee, id]
             });
             const updatedTerminals = paymentTerminals.map(t =>
-                t.id === id ? { ...t, name: terminalData.name, color: terminalData.color || '#3B82F6' } : t
+                t.id === id ? { ...t, name: terminalData.name, color: terminalData.color || '#3B82F6', commission_rate: commissionRate, fixed_fee: fixedFee } : t
             );
             set({ paymentTerminals: updatedTerminals });
             return { success: true };

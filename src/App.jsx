@@ -35,6 +35,7 @@ const ExpiringProductsReport = lazy(() => import('./pages/ExpiringProductsReport
 const CashClosuresReport = lazy(() => import('./pages/CashClosuresReport'));
 const CashMovementsReport = lazy(() => import('./pages/CashMovementsReport'));
 const InvoicePaymentsReport = lazy(() => import('./pages/InvoicePaymentsReport'));
+const PaymentReconciliation = lazy(() => import('./pages/reports/PaymentReconciliation'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Clients = lazy(() => import('./pages/Clients'));
 const Orders = lazy(() => import('./pages/Orders'));
@@ -338,6 +339,7 @@ function App() {
           <Route path="reports/closures" element={<ProtectedPage permission="reports.closures"><CashClosuresReport /></ProtectedPage>} />
           <Route path="reports/movements" element={<ProtectedPage permission="reports.movements"><CashMovementsReport /></ProtectedPage>} />
           <Route path="reports/invoice-payments" element={<ProtectedPage permission="reports.invoice_payments"><InvoicePaymentsReport /></ProtectedPage>} />
+          <Route path="reports/payment-reconciliation" element={<ProtectedPage permission="reports.closures"><PaymentReconciliation /></ProtectedPage>} />
           <Route path="reports/profit" element={<ProtectedPage permission="reports.profit"><ProfitReport /></ProtectedPage>} />
           <Route path="reports/sales-analytics" element={<ProtectedPage permission="reports.sales_analytics"><SalesAnalytics /></ProtectedPage>} />
 
