@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
-import { CreditCard, Calendar, Search, Save, History, ChevronDown, ChevronRight, Smartphone, Trash2, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
+import { CreditCard, Calendar, Search, Save, History, ChevronDown, ChevronRight, Smartphone, Trash2, CheckCircle2, AlertTriangle, Info, FileSpreadsheet, Upload, X } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { findBestMatch, netExpected, sumNet } from '../../lib/reconciliation/matcher';
+import { parseCompraquiXlsx } from '../../lib/reconciliation/parsers/compraqui';
+import { crossMatch } from '../../lib/reconciliation/crossMatch';
 
 // Helper: hoy y hace 7 días en formato yyyy-MM-dd para los inputs.
 const todayStr = () => format(new Date(), 'yyyy-MM-dd');
@@ -50,6 +52,14 @@ const PaymentReconciliation = () => {
     const [saving, setSaving] = useState(false);
 
     const [history, setHistory] = useState([]);
+
+    // --- Importar abono del banco (XLSX) ---
+    const fileInputRef = useRef(null);
+    const [parsedBank, setParsedBank] = useState(null); // resultado de parseCompraquiXlsx
+    const [xlsxError, setXlsxError] = useState('');
+    const [xlsxLoading, setXlsxLoading] = useState(false);
+    const [bankExpand, setBankExpand] = useState({ matches: false, bankOnly: true, posOnly: false });
+    const [savingXlsx, setSavingXlsx] = useState(false);
 
     // Cargar datáfonos al montar
     useEffect(() => {
@@ -190,6 +200,84 @@ const PaymentReconciliation = () => {
         }
     };
 
+    // Cuando el banco trae transacciones, calculamos el rango mínimo de fechas
+    // (start = primera fecha, end = última) y forzamos la recarga de ventas
+    // para ese mismo rango. Sin esto, el cross-match queda vacío.
+    const handleXlsxFile = async (file) => {
+        if (!file) return;
+        setXlsxError('');
+        setParsedBank(null);
+        setXlsxLoading(true);
+        try {
+            const buf = await file.arrayBuffer();
+            const result = parseCompraquiXlsx(buf);
+            if (!result.ok) {
+                setXlsxError(result.error || 'No se pudo leer el archivo.');
+                setXlsxLoading(false);
+                return;
+            }
+            // Auto-ajustar el rango de fechas al del XLSX
+            const dates = result.transactions.map(t => t.fecha).filter(Boolean).sort();
+            if (dates.length) {
+                setStartDate(dates[0]);
+                setEndDate(dates[dates.length - 1]);
+            }
+            setParsedBank(result);
+        } catch (e) {
+            setXlsxError(e?.message || 'Error inesperado leyendo el archivo.');
+        } finally {
+            setXlsxLoading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    const handleClearXlsx = () => {
+        setParsedBank(null);
+        setXlsxError('');
+    };
+
+    // Cross-match: contra las ventas YA cargadas y filtradas (excluyen las
+    // conciliadas previamente, gracias a loadSales).
+    const crossMatchResult = useMemo(() => {
+        if (!parsedBank?.transactions?.length) return null;
+        return crossMatch(parsedBank.transactions, sales, { toleranceMinutes: 60 });
+    }, [parsedBank, sales]);
+
+    const handleSaveFromXlsx = async () => {
+        if (!parsedBank || !crossMatchResult) return;
+        setSavingXlsx(true);
+        try {
+            const { matches, summary, bankOnly } = crossMatchResult;
+            const periodo = parsedBank.info?.periodo || parsedBank.transactions[0]?.fecha;
+            const saleIds = matches.map(m => m.sale.id);
+            const noteParts = [`XLSX Compraquí · ${matches.length}/${summary.totalBankCount} matcheadas`];
+            if (bankOnly.length) noteParts.push(`${bankOnly.length} solo en banco`);
+            const baseNote = depositNotes.trim();
+            if (baseNote) noteParts.push(baseNote);
+
+            const res = await savePaymentReconciliation({
+                terminalId: Number(terminalId),
+                depositDate: periodo,
+                depositAmount: summary.totalBankDeposit,
+                expectedAmount: summary.matchedDeposit,
+                saleIds,
+                salesFrom: parsedBank.transactions[0]?.fecha,
+                salesTo: parsedBank.transactions[parsedBank.transactions.length - 1]?.fecha,
+                notes: noteParts.join(' · '),
+            });
+            if (res.success) {
+                setParsedBank(null);
+                setDepositNotes('');
+                await loadHistory();
+                await loadSales();
+            } else {
+                setXlsxError(res.error || 'No se pudo guardar.');
+            }
+        } finally {
+            setSavingXlsx(false);
+        }
+    };
+
     const handleDeleteHistory = async (id) => {
         if (!window.confirm('¿Borrar este registro de conciliación? No afecta las ventas.')) return;
         const res = await deletePaymentReconciliation(id);
@@ -327,11 +415,199 @@ const PaymentReconciliation = () => {
                 )}
             </div>
 
-            {/* CONCILIAR ABONO */}
+            {/* IMPORTAR ABONO DEL BANCO (XLSX) — la forma recomendada */}
+            <div className="glass-card p-4 border-l-4 border-l-[var(--color-primary)]">
+                <div className="flex items-start gap-3 mb-3">
+                    <div className="p-2 rounded-lg bg-[var(--color-primary)]/15 text-[var(--color-primary)]">
+                        <FileSpreadsheet size={20} />
+                    </div>
+                    <div className="flex-1">
+                        <h3 className="text-base font-bold text-[var(--color-text)] flex items-center gap-2">
+                            Importar abono del banco
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">Recomendado</span>
+                        </h3>
+                        <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                            Sube el XLSX de detalle de liquidación que te da Compraquí (o BancoEstado).
+                            POSVECI cruza transacción por transacción y te dice <b>al peso</b> qué cuadra y qué no.
+                        </p>
+                    </div>
+                </div>
+
+                {!parsedBank && (
+                    <div className="flex flex-col items-center justify-center py-8 rounded-lg border-2 border-dashed border-[var(--glass-border)] hover:border-[var(--color-primary)]/50 transition-colors">
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".xlsx,.xls"
+                            className="hidden"
+                            onChange={e => handleXlsxFile(e.target.files?.[0])}
+                        />
+                        <Upload size={32} className="text-[var(--color-text-muted)] mb-2" />
+                        <button
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={xlsxLoading}
+                            className="px-4 py-2 rounded-lg bg-[var(--color-primary)] text-white font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity text-sm"
+                        >
+                            {xlsxLoading ? 'Leyendo archivo…' : 'Elegir archivo XLSX'}
+                        </button>
+                        <p className="text-[11px] text-[var(--color-text-muted)] mt-2">Formato Compraquí. Otros bancos en camino.</p>
+                    </div>
+                )}
+
+                {xlsxError && (
+                    <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm">{xlsxError}</div>
+                )}
+
+                {parsedBank && crossMatchResult && (
+                    <div className="space-y-4">
+                        {/* Resumen del abono importado */}
+                        <div className="flex items-start justify-between gap-3 p-3 rounded-lg bg-[var(--color-surface)] border border-[var(--glass-border)]">
+                            <div className="text-xs text-[var(--color-text-muted)] space-y-0.5">
+                                <div><b className="text-[var(--color-text)]">Periodo:</b> {parsedBank.info.periodo || '—'}</div>
+                                <div><b className="text-[var(--color-text)]">Banco:</b> {parsedBank.info.bank || '—'} · {parsedBank.info.accountNumber || '—'}</div>
+                                <div><b className="text-[var(--color-text)]">Transacciones:</b> {parsedBank.transactions.length}</div>
+                            </div>
+                            <button onClick={handleClearXlsx} className="p-1 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]">
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        {/* KPIs del cruce */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                            <Stat label="Total en banco" value={formatCurrency(parsedBank.totals.sales, currentCurrency)} />
+                            <Stat label="Total abonado" value={formatCurrency(parsedBank.totals.abono, currentCurrency)} tone="primary" />
+                            <Stat label="Matcheadas" value={`${crossMatchResult.summary.matchedCount} / ${crossMatchResult.summary.totalBankCount}`} tone={crossMatchResult.summary.matchedCount === crossMatchResult.summary.totalBankCount ? 'primary' : 'muted'} />
+                            <Stat label="Solo en banco" value={`${crossMatchResult.summary.bankOnlyCount}`} tone={crossMatchResult.summary.bankOnlyCount === 0 ? 'muted' : 'default'} />
+                        </div>
+
+                        {/* Veredicto */}
+                        {crossMatchResult.summary.bankOnlyCount === 0 && crossMatchResult.summary.matchedCount === crossMatchResult.summary.totalBankCount
+                            ? <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/30 text-green-300 text-sm flex items-center gap-2">
+                                <CheckCircle2 size={16} /> <b>Cuadra al peso.</b> Todas las transacciones del banco están registradas en POSVECI.
+                            </div>
+                            : <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm flex items-start gap-2">
+                                <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                                <div>
+                                    <b>Hay diferencias.</b> {crossMatchResult.summary.bankOnlyCount > 0 && `${crossMatchResult.summary.bankOnlyCount} transacciones del banco no aparecen en POSVECI (revisar abajo). `}
+                                    {crossMatchResult.summary.posOnlyCount > 0 && `${crossMatchResult.summary.posOnlyCount} ventas POSVECI no entraron en este abono.`}
+                                </div>
+                            </div>}
+
+                        {/* Lista de discrepancias: solo en banco */}
+                        {crossMatchResult.bankOnly.length > 0 && (
+                            <CollapsibleSection
+                                title={`Transacciones del banco SIN venta en POSVECI (${crossMatchResult.bankOnly.length})`}
+                                subtitle="Cobraste pero no quedó registrada en el POS. Investigá una a una."
+                                expanded={bankExpand.bankOnly}
+                                onToggle={() => setBankExpand(b => ({ ...b, bankOnly: !b.bankOnly }))}
+                                tone="red"
+                            >
+                                <table className="w-full text-xs">
+                                    <thead className="text-[var(--color-text-muted)] bg-[var(--color-surface)]">
+                                        <tr>
+                                            <th className="text-left px-2 py-1.5">Fecha · Hora</th>
+                                            <th className="text-left px-2 py-1.5">Tarjeta</th>
+                                            <th className="text-left px-2 py-1.5">Auth</th>
+                                            <th className="text-right px-2 py-1.5">Monto</th>
+                                            <th className="text-right px-2 py-1.5">Abono</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {crossMatchResult.bankOnly.map((t, i) => (
+                                            <tr key={i} className="border-t border-[var(--glass-border)]">
+                                                <td className="px-2 py-1.5">{t.fecha} {t.hora}</td>
+                                                <td className="px-2 py-1.5 text-[var(--color-text-muted)]">{t.cardType} {t.cardBrand}</td>
+                                                <td className="px-2 py-1.5 text-[var(--color-text-muted)] font-mono">{t.authCode || t.operationNumber}</td>
+                                                <td className="px-2 py-1.5 text-right">{formatCurrency(t.saleAmount, currentCurrency)}</td>
+                                                <td className="px-2 py-1.5 text-right text-[var(--color-primary)]">{formatCurrency(t.totalAbono, currentCurrency)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </CollapsibleSection>
+                        )}
+
+                        {/* Lista de ventas POSVECI sin match */}
+                        {crossMatchResult.posOnly.length > 0 && (
+                            <CollapsibleSection
+                                title={`Ventas POSVECI sin transacción en banco (${crossMatchResult.posOnly.length})`}
+                                subtitle="Quedaron registradas pero no aparecen en este abono — pueden ser canceladas o de un abono futuro."
+                                expanded={bankExpand.posOnly}
+                                onToggle={() => setBankExpand(b => ({ ...b, posOnly: !b.posOnly }))}
+                                tone="amber"
+                            >
+                                <table className="w-full text-xs">
+                                    <thead className="text-[var(--color-text-muted)] bg-[var(--color-surface)]">
+                                        <tr>
+                                            <th className="text-left px-2 py-1.5">Fecha</th>
+                                            <th className="text-left px-2 py-1.5">Origen</th>
+                                            <th className="text-left px-2 py-1.5">Ref.</th>
+                                            <th className="text-right px-2 py-1.5">Monto</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {crossMatchResult.posOnly.map(s => (
+                                            <tr key={s.id} className="border-t border-[var(--glass-border)]">
+                                                <td className="px-2 py-1.5">{format(new Date(s.date), 'dd/MM HH:mm')}</td>
+                                                <td className="px-2 py-1.5">{s.source}</td>
+                                                <td className="px-2 py-1.5 text-[var(--color-text-muted)]">{s.source === 'POS' ? `#${s.saleId}` : `Encargo #${s.preorderId}`}</td>
+                                                <td className="px-2 py-1.5 text-right">{formatCurrency(s.total, currentCurrency)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </CollapsibleSection>
+                        )}
+
+                        {/* Lista de matches */}
+                        {crossMatchResult.matches.length > 0 && (
+                            <CollapsibleSection
+                                title={`Transacciones cuadradas (${crossMatchResult.matches.length})`}
+                                expanded={bankExpand.matches}
+                                onToggle={() => setBankExpand(b => ({ ...b, matches: !b.matches }))}
+                                tone="green"
+                            >
+                                <table className="w-full text-xs">
+                                    <thead className="text-[var(--color-text-muted)] bg-[var(--color-surface)]">
+                                        <tr>
+                                            <th className="text-left px-2 py-1.5">Banco fecha · hora</th>
+                                            <th className="text-left px-2 py-1.5">POSVECI</th>
+                                            <th className="text-right px-2 py-1.5">Monto</th>
+                                            <th className="text-right px-2 py-1.5">Δ min</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {crossMatchResult.matches.map((m, i) => (
+                                            <tr key={i} className="border-t border-[var(--glass-border)]">
+                                                <td className="px-2 py-1.5">{m.bankTx.fecha} {m.bankTx.hora}</td>
+                                                <td className="px-2 py-1.5 text-[var(--color-text-muted)]">{m.sale.source} {m.sale.source === 'POS' ? `#${m.sale.saleId}` : `Enc #${m.sale.preorderId}`}</td>
+                                                <td className="px-2 py-1.5 text-right">{formatCurrency(m.bankTx.saleAmount, currentCurrency)}</td>
+                                                <td className={`px-2 py-1.5 text-right ${m.deltaMinutes <= 5 ? 'text-green-400' : m.deltaMinutes <= 60 ? 'text-amber-300' : 'text-orange-400'}`}>{m.deltaMinutes}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </CollapsibleSection>
+                        )}
+
+                        <div className="pt-2 flex flex-wrap items-center gap-3 justify-end">
+                            <button
+                                onClick={handleSaveFromXlsx}
+                                disabled={savingXlsx || crossMatchResult.matches.length === 0}
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-500 text-white font-semibold hover:bg-green-600 disabled:opacity-50 transition-colors"
+                            >
+                                <Save size={16} /> Guardar conciliación
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* CONCILIAR ABONO (MANUAL — fallback) */}
             <div className="glass-card p-4">
-                <h3 className="text-base font-bold text-[var(--color-text)] mb-1">Conciliar un abono</h3>
+                <h3 className="text-base font-bold text-[var(--color-text)] mb-1">Conciliar un abono manualmente</h3>
                 <p className="text-xs text-[var(--color-text-muted)] mb-4">
-                    Ingresa el monto que te abonó el banco. POSVECI busca qué ventas (contiguas o no) suman a ese valor.
+                    Si no tenés el XLSX, ingresá el monto que te abonó el banco. POSVECI busca qué ventas (contiguas o no) suman a ese valor.
                 </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
@@ -499,6 +775,23 @@ const Stat = ({ label, value, tone = 'default' }) => (
         </p>
     </div>
 );
+
+const CollapsibleSection = ({ title, subtitle, expanded, onToggle, tone = 'default', children }) => {
+    const borderTone = tone === 'red' ? 'border-red-500/40' : tone === 'amber' ? 'border-amber-500/40' : tone === 'green' ? 'border-green-500/40' : 'border-[var(--glass-border)]';
+    const headerTone = tone === 'red' ? 'text-red-300' : tone === 'amber' ? 'text-amber-200' : tone === 'green' ? 'text-green-300' : 'text-[var(--color-text)]';
+    return (
+        <div className={`rounded-lg border ${borderTone} overflow-hidden`}>
+            <button onClick={onToggle} className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] transition-colors text-left">
+                <div>
+                    <p className={`text-sm font-semibold ${headerTone}`}>{title}</p>
+                    {subtitle && <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">{subtitle}</p>}
+                </div>
+                {expanded ? <ChevronDown size={16} className="text-[var(--color-text-muted)] shrink-0" /> : <ChevronRight size={16} className="text-[var(--color-text-muted)] shrink-0" />}
+            </button>
+            {expanded && <div className="max-h-72 overflow-y-auto custom-scrollbar">{children}</div>}
+        </div>
+    );
+};
 
 // Iconos no usados explícitamente afuera del componente — silencio el linter manteniendo
 // las importaciones legibles.
