@@ -243,15 +243,24 @@ const Sorteos = () => {
             ...FIELD_DEFS.filter(f => form[f.col] === 1).map(f => ({ k: f.key, h: f.label })),
             { k: 'created_at', h: 'Fecha' },
         ];
+        // Separador `;` — es el que espera Excel en español (Chile, España, etc.).
+        // Con coma Excel mete todo en una sola columna.
+        const SEP = ';';
         const escCsv = (v) => {
             const s = String(v ?? '');
-            return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+            return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
         };
-        const rows = [cols.map(c => c.h).join(',')];
+        // La línea "sep=;" es una directiva no estándar que Excel reconoce y
+        // garantiza que abra el archivo con el separador correcto sin depender
+        // de la config regional del usuario. Otras herramientas (Google Sheets,
+        // LibreOffice) la ignoran y auto-detectan.
+        const lines = ['sep=' + SEP];
+        lines.push(cols.map(c => c.h).join(SEP));
         for (const p of participants) {
-            rows.push(cols.map(c => escCsv(c.k === 'created_at' ? fmtDate(p[c.k]) : p[c.k])).join(','));
+            lines.push(cols.map(c => escCsv(c.k === 'created_at' ? fmtDate(p[c.k]) : p[c.k])).join(SEP));
         }
-        const blob = new Blob(['﻿' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+        // BOM UTF-8 (BOM) → tildes y ñ se muestran bien en Excel.
+        const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
