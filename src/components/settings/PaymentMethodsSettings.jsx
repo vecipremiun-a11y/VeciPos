@@ -38,7 +38,7 @@ const PaymentMethodsSettings = () => {
     const [editingAccountId, setEditingAccountId] = useState(null);
 
     // Form States
-    const [newTerminal, setNewTerminal] = useState({ name: '', color: '#3B82F6', commission_rate: 0, fixed_fee: 0 });
+    const [newTerminal, setNewTerminal] = useState({ name: '', color: '#3B82F6', commission_rate: 0, fixed_fee: 0, commission_includes_iva: false });
     const [newAccount, setNewAccount] = useState({
         bank_name: '',
         account_number: '',
@@ -78,7 +78,7 @@ const PaymentMethodsSettings = () => {
         }
 
         if (result.success) {
-            setNewTerminal({ name: '', color: '#3B82F6', commission_rate: 0, fixed_fee: 0 });
+            setNewTerminal({ name: '', color: '#3B82F6', commission_rate: 0, fixed_fee: 0, commission_includes_iva: false });
             setEditingTerminalId(null);
             setIsTerminalModalOpen(false);
         }
@@ -96,6 +96,7 @@ const PaymentMethodsSettings = () => {
             color: terminal.color || '#3B82F6',
             commission_rate: Number(terminal.commission_rate) || 0,
             fixed_fee: Number(terminal.fixed_fee) || 0,
+            commission_includes_iva: !!terminal.commission_includes_iva,
         });
         setEditingTerminalId(terminal.id);
         setIsTerminalModalOpen(true);
@@ -461,8 +462,8 @@ const PaymentMethodsSettings = () => {
 
                             <div className="pt-2 border-t border-[var(--glass-border)]">
                                 <p className="text-xs text-[var(--color-text-muted)] mb-3">
-                                    💡 La comisión se usa en <b>Reportes → Conciliación de Datáfonos</b> para
-                                    calcular cuánto te debería abonar el procesador. Deja en 0 si no la sabes.
+                                    💡 Se usa en <b>Reportes → Conciliación de Datáfonos</b> para calcular cuánto
+                                    te debería abonar el procesador.
                                 </p>
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
@@ -491,6 +492,28 @@ const PaymentMethodsSettings = () => {
                                         />
                                     </div>
                                 </div>
+                                <label className="mt-3 flex items-start gap-2 cursor-pointer text-xs text-[var(--color-text)]">
+                                    <input
+                                        type="checkbox"
+                                        checked={newTerminal.commission_includes_iva}
+                                        onChange={e => setNewTerminal({ ...newTerminal, commission_includes_iva: e.target.checked })}
+                                        className="mt-0.5"
+                                    />
+                                    <span>
+                                        Esta comisión <b>YA incluye el IVA (19%)</b>.
+                                        <span className="block text-[10px] text-[var(--color-text-muted)] mt-0.5">
+                                            Si dudas, déjalo desmarcado. Casi todos los datáfonos en Chile cobran
+                                            "X% + IVA" — POSVECI le suma el 19% automáticamente.
+                                        </span>
+                                    </span>
+                                </label>
+                                {Number(newTerminal.commission_rate) > 0 && !newTerminal.commission_includes_iva && (
+                                    <div className="mt-2 text-[11px] text-[var(--color-text-muted)] bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-md px-2 py-1.5">
+                                        Tasa efectiva con IVA: <b className="text-[var(--color-primary)]">
+                                            {(Number(newTerminal.commission_rate) * 1.19).toFixed(4)}%
+                                        </b>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="pt-2 flex justify-end gap-3">

@@ -63,6 +63,8 @@ const PaymentReconciliation = () => {
 
     const commissionRate = Number(terminal?.commission_rate) || 0;
     const fixedFee = Number(terminal?.fixed_fee) || 0;
+    const includesIva = !!terminal?.commission_includes_iva;
+    const effectivePct = includesIva ? commissionRate : commissionRate * 1.19;
 
     const loadSales = async () => {
         if (!terminalId) return;
@@ -89,10 +91,10 @@ const PaymentReconciliation = () => {
 
     const totals = useMemo(() => {
         const bruto = sales.reduce((s, x) => s + (Number(x.total) || 0), 0);
-        const neto = sumNet(sales, commissionRate, fixedFee);
+        const neto = sumNet(sales, commissionRate, fixedFee, includesIva);
         const comision = bruto - neto;
         return { bruto, neto, comision, count: sales.length };
-    }, [sales, commissionRate, fixedFee]);
+    }, [sales, commissionRate, fixedFee, includesIva]);
 
     const handleSearch = () => {
         const amount = parseFloat(depositAmount);
@@ -104,7 +106,11 @@ const PaymentReconciliation = () => {
             setMatchResult({ error: 'No hay ventas con tarjeta para este datáfono en el rango' });
             return;
         }
-        const result = findBestMatch(sales, amount, { commissionRate, fixedFee, toleranceClp: 50 });
+        // Tolerancia adaptativa: $50 mínimo, o 0.3% del abono (para absorber
+        // diferencias por mix débito/crédito cuando el datáfono cobra distinto
+        // según tipo de tarjeta y POSVECI no sabe cuál fue cada venta).
+        const tol = Math.max(50, Math.round(amount * 0.003));
+        const result = findBestMatch(sales, amount, { commissionRate, fixedFee, includesIva, toleranceClp: tol });
         if (!result) {
             setMatchResult({ error: 'No se encontró ninguna combinación de ventas que cuadre con ese abono.' });
             setMatchedSales([]);
@@ -188,7 +194,10 @@ const PaymentReconciliation = () => {
                         </select>
                         {terminal && (
                             <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
-                                Comisión: {commissionRate}% {fixedFee > 0 ? `+ ${formatCurrency(fixedFee, currentCurrency)} fijo` : ''}
+                                Comisión: {commissionRate}%
+                                {!includesIva && commissionRate > 0 && <span> + IVA → <b className="text-[var(--color-primary)]">{effectivePct.toFixed(4)}%</b> efectiva</span>}
+                                {includesIva && commissionRate > 0 && <span className="text-green-400"> (IVA incluido)</span>}
+                                {fixedFee > 0 && ` · ${formatCurrency(fixedFee, currentCurrency)} fijo`}
                             </p>
                         )}
                     </div>
@@ -246,7 +255,7 @@ const PaymentReconciliation = () => {
                                             <td className="px-3 py-2">{s.source}</td>
                                             <td className="px-3 py-2 text-[var(--color-text-muted)]">{s.source === 'POS' ? `#${s.saleId}` : `Encargo #${s.preorderId}`}</td>
                                             <td className="px-3 py-2 text-right">{formatCurrency(s.total, currentCurrency)}</td>
-                                            <td className="px-3 py-2 text-right text-[var(--color-primary)]">{formatCurrency(netExpected(s, commissionRate, fixedFee), currentCurrency)}</td>
+                                            <td className="px-3 py-2 text-right text-[var(--color-primary)]">{formatCurrency(netExpected(s, commissionRate, fixedFee, includesIva), currentCurrency)}</td>
                                         </tr>
                                     ))}
                                 </tbody>

@@ -21,30 +21,45 @@
 // errores de coma flotante en la búsqueda.
 
 const round = (n) => Math.round(n);
+const IVA_RATE = 19; // %
+
+// Devuelve la tasa efectiva en %: si la tasa NO incluye IVA, le suma 19%.
+// Ej: 1.29% sin IVA → 1.29 × 1.19 = 1.5351% efectivo.
+export function effectiveRate(commissionRate, includesIva) {
+    const cr = Number(commissionRate) || 0;
+    return includesIva ? cr : cr * (1 + IVA_RATE / 100);
+}
+
+// Devuelve el fee fijo efectivo (CLP). Si no incluye IVA, le suma 19%.
+export function effectiveFixedFee(fixedFee, includesIva) {
+    const ff = Number(fixedFee) || 0;
+    return includesIva ? ff : ff * (1 + IVA_RATE / 100);
+}
 
 // Calcula el neto que el procesador abona por una venta dada su comisión.
-export function netExpected(sale, commissionRate, fixedFee) {
+// `includesIva`: si la tasa configurada ya incluye IVA (true) o no (false → se suma 19%).
+export function netExpected(sale, commissionRate, fixedFee, includesIva = false) {
     const total = Number(sale.total) || 0;
-    const cr = Number(commissionRate) || 0;
-    const ff = Number(fixedFee) || 0;
-    const net = total * (1 - cr / 100) - ff;
+    const er = effectiveRate(commissionRate, includesIva);
+    const eff = effectiveFixedFee(fixedFee, includesIva);
+    const net = total * (1 - er / 100) - eff;
     return Math.max(0, net);
 }
 
 // Suma de netos para un set de ventas.
-export function sumNet(sales, commissionRate, fixedFee) {
-    return sales.reduce((acc, s) => acc + netExpected(s, commissionRate, fixedFee), 0);
+export function sumNet(sales, commissionRate, fixedFee, includesIva = false) {
+    return sales.reduce((acc, s) => acc + netExpected(s, commissionRate, fixedFee, includesIva), 0);
 }
 
 // Match por ventanas contiguas. Las ventas DEBEN venir ordenadas por fecha asc.
 // Devuelve la mejor ventana (sales array) cuyo suma de netos esté dentro de la
 // tolerancia, o null si ninguna sirve.
-export function findContiguousMatch(sales, depositAmount, { commissionRate = 0, fixedFee = 0, toleranceClp = 50 } = {}) {
+export function findContiguousMatch(sales, depositAmount, { commissionRate = 0, fixedFee = 0, includesIva = false, toleranceClp = 50 } = {}) {
     if (!sales.length) return null;
     const target = round(depositAmount);
 
     // Precalcular netos
-    const nets = sales.map(s => round(netExpected(s, commissionRate, fixedFee)));
+    const nets = sales.map(s => round(netExpected(s, commissionRate, fixedFee, includesIva)));
 
     // Prefix sums para sumas en O(1)
     const prefix = [0];
@@ -74,10 +89,10 @@ export function findContiguousMatch(sales, depositAmount, { commissionRate = 0, 
 // contiguas (ej. abono retrasado que mezcla ventas de días distintos).
 // Limit duro de N=25 para no explotar (2^25 ≈ 33M).
 // Devuelve { sales, sumNet, diff } o null.
-export function findSubsetSumMatch(sales, depositAmount, { commissionRate = 0, fixedFee = 0, toleranceClp = 50 } = {}) {
+export function findSubsetSumMatch(sales, depositAmount, { commissionRate = 0, fixedFee = 0, includesIva = false, toleranceClp = 50 } = {}) {
     if (!sales.length || sales.length > 25) return null;
     const target = round(depositAmount);
-    const nets = sales.map(s => round(netExpected(s, commissionRate, fixedFee)));
+    const nets = sales.map(s => round(netExpected(s, commissionRate, fixedFee, includesIva)));
     const n = sales.length;
 
     let best = null;

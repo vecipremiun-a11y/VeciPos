@@ -12176,9 +12176,10 @@ export const useStore = create(persist((set, get) => ({
 
             const commissionRate = Number(terminalData.commission_rate) || 0;
             const fixedFee = Number(terminalData.fixed_fee) || 0;
+            const includesIva = terminalData.commission_includes_iva ? 1 : 0;
             const res = await turso.execute({
-                sql: "INSERT INTO payment_terminals (company_id, name, color, commission_rate, fixed_fee, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
-                args: [activeCompanyId, terminalData.name, terminalData.color || '#3B82F6', commissionRate, fixedFee, new Date().toISOString()]
+                sql: "INSERT INTO payment_terminals (company_id, name, color, commission_rate, fixed_fee, commission_includes_iva, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+                args: [activeCompanyId, terminalData.name, terminalData.color || '#3B82F6', commissionRate, fixedFee, includesIva, new Date().toISOString()]
             });
             const newTerminal = res.rows[0];
             set({ paymentTerminals: [...paymentTerminals, newTerminal] });
@@ -12194,12 +12195,13 @@ export const useStore = create(persist((set, get) => ({
         try {
             const commissionRate = Number(terminalData.commission_rate) || 0;
             const fixedFee = Number(terminalData.fixed_fee) || 0;
+            const includesIva = terminalData.commission_includes_iva ? 1 : 0;
             await turso.execute({
-                sql: "UPDATE payment_terminals SET name = ?, color = ?, commission_rate = ?, fixed_fee = ? WHERE id = ?",
-                args: [terminalData.name, terminalData.color || '#3B82F6', commissionRate, fixedFee, id]
+                sql: "UPDATE payment_terminals SET name = ?, color = ?, commission_rate = ?, fixed_fee = ?, commission_includes_iva = ? WHERE id = ?",
+                args: [terminalData.name, terminalData.color || '#3B82F6', commissionRate, fixedFee, includesIva, id]
             });
             const updatedTerminals = paymentTerminals.map(t =>
-                t.id === id ? { ...t, name: terminalData.name, color: terminalData.color || '#3B82F6', commission_rate: commissionRate, fixed_fee: fixedFee } : t
+                t.id === id ? { ...t, name: terminalData.name, color: terminalData.color || '#3B82F6', commission_rate: commissionRate, fixed_fee: fixedFee, commission_includes_iva: includesIva } : t
             );
             set({ paymentTerminals: updatedTerminals });
             return { success: true };
