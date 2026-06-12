@@ -37,9 +37,11 @@ const PaymentReconciliation = () => {
 
     const [depositAmount, setDepositAmount] = useState('');
     const [depositDate, setDepositDate] = useState(todayStr());
+    const [depositNotes, setDepositNotes] = useState('');
     const [matchResult, setMatchResult] = useState(null);
     const [matchedSales, setMatchedSales] = useState([]);
     const [salesExpanded, setSalesExpanded] = useState(false);
+    const [saving, setSaving] = useState(false);
 
     const [history, setHistory] = useState([]);
 
@@ -120,29 +122,48 @@ const PaymentReconciliation = () => {
         setMatchedSales(result.sales);
     };
 
-    const handleSave = async () => {
-        if (!matchResult || matchResult.error || !matchedSales.length) return;
-        const dates = matchedSales.map(s => s.date).sort();
-        const res = await savePaymentReconciliation({
-            terminalId: Number(terminalId),
-            depositDate,
-            depositAmount: parseFloat(depositAmount),
-            expectedAmount: matchResult.sumNet,
-            saleIds: matchedSales.map(s => s.id),
-            salesFrom: dates[0] || null,
-            salesTo: dates[dates.length - 1] || null,
-            notes: matchResult.strategy === 'contiguous'
-                ? `Ventas contiguas ${matchedSales.length}`
-                : `Subset-sum (${matchedSales.length} ventas no contiguas)`,
-        });
-        if (res.success) {
-            setDepositAmount('');
-            setMatchResult(null);
-            setMatchedSales([]);
-            await loadHistory();
-            await loadSales(); // refresca por si quieres conciliar siguiente abono
-        } else {
-            setMatchResult({ error: res.error || 'No se pudo guardar.' });
+    // Guarda la conciliación. Si hay match → guarda con ventas + neto esperado.
+    // Si no hay match (manual / histórico) → guarda solo el abono con notas.
+    const handleSave = async ({ manual = false } = {}) => {
+        const amount = parseFloat(depositAmount);
+        if (!amount || amount <= 0) {
+            setMatchResult({ error: 'Ingresa el monto del abono recibido.' });
+            return;
+        }
+        setSaving(true);
+        try {
+            const isManual = manual || !matchResult || matchResult.error || !matchedSales.length;
+            const dates = matchedSales.map(s => s.date).sort();
+            const baseNote = depositNotes.trim();
+            const autoNote = isManual
+                ? 'Abono manual / histórico (sin match automático)'
+                : (matchResult.strategy === 'contiguous'
+                    ? `Ventas contiguas (${matchedSales.length})`
+                    : `Combinación libre (${matchedSales.length} ventas)`);
+            const finalNote = baseNote ? `${autoNote} · ${baseNote}` : autoNote;
+
+            const res = await savePaymentReconciliation({
+                terminalId: Number(terminalId),
+                depositDate,
+                depositAmount: amount,
+                expectedAmount: isManual ? amount : matchResult.sumNet,
+                saleIds: isManual ? [] : matchedSales.map(s => s.id),
+                salesFrom: isManual ? null : (dates[0] || null),
+                salesTo: isManual ? null : (dates[dates.length - 1] || null),
+                notes: finalNote,
+            });
+            if (res.success) {
+                setDepositAmount('');
+                setDepositNotes('');
+                setMatchResult(null);
+                setMatchedSales([]);
+                await loadHistory();
+                await loadSales();
+            } else {
+                setMatchResult({ error: res.error || 'No se pudo guardar.' });
+            }
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -294,6 +315,17 @@ const PaymentReconciliation = () => {
                     </div>
                 </div>
 
+                <div className="mb-3">
+                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Notas (opcional)</label>
+                    <input
+                        type="text"
+                        value={depositNotes}
+                        onChange={e => setDepositNotes(e.target.value)}
+                        placeholder='Ej: "Cubre ventas previas al módulo" o "Abono parcial #1 del día"'
+                        className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-primary)]"
+                    />
+                </div>
+
                 {matchResult?.error && (
                     <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm">{matchResult.error}</div>
                 )}
@@ -320,13 +352,33 @@ const PaymentReconciliation = () => {
                         </div>
 
                         <button
-                            onClick={handleSave}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-500 text-white font-semibold hover:bg-green-600 transition-colors"
+                            onClick={() => handleSave()}
+                            disabled={saving}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-500 text-white font-semibold hover:bg-green-600 transition-colors disabled:opacity-50"
                         >
                             <Save size={16} /> Marcar como conciliado y guardar
                         </button>
                     </div>
                 )}
+
+                {/* Atajo siempre disponible: guardar el abono SIN match exacto
+                    (útil cuando arrancas el módulo y los primeros abonos cubren
+                    ventas anteriores que no estaban etiquetadas con datáfono). */}
+                <div className="mt-4 pt-3 border-t border-[var(--glass-border)]">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="text-[11px] text-[var(--color-text-muted)] max-w-md">
+                            ¿No encuentra match exacto? Puedes <b>registrar el abono manualmente</b> con notas
+                            para auditoría — útil al arrancar el módulo o cuando un abono cubre ventas pre-módulo.
+                        </div>
+                        <button
+                            onClick={() => handleSave({ manual: true })}
+                            disabled={saving || !depositAmount}
+                            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--glass-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 transition-colors text-xs"
+                        >
+                            <Save size={14} /> Guardar como abono histórico
+                        </button>
+                    </div>
+                </div>
             </div>
 
             {/* HISTORIAL */}
@@ -358,6 +410,7 @@ const PaymentReconciliation = () => {
                                 {history.map(h => {
                                     let saleIds = [];
                                     try { saleIds = JSON.parse(h.sale_ids || '[]'); } catch { /* noop */ }
+                                    const isManual = saleIds.length === 0;
                                     const diff = Number(h.difference) || 0;
                                     return (
                                         <tr key={h.id} className="border-t border-[var(--glass-border)]">
@@ -371,10 +424,14 @@ const PaymentReconciliation = () => {
                                             </td>
                                             <td className="px-3 py-2 text-right">{formatCurrency(h.deposit_amount, currentCurrency)}</td>
                                             <td className="px-3 py-2 text-right text-[var(--color-text-muted)]">{formatCurrency(h.expected_amount, currentCurrency)}</td>
-                                            <td className={`px-3 py-2 text-right ${Math.abs(diff) > 50 ? 'text-amber-400' : 'text-green-400'}`}>
-                                                {formatCurrency(diff, currentCurrency)}
+                                            <td className={`px-3 py-2 text-right ${isManual ? 'text-[var(--color-text-muted)]' : Math.abs(diff) > 50 ? 'text-amber-400' : 'text-green-400'}`}>
+                                                {isManual ? '—' : formatCurrency(diff, currentCurrency)}
                                             </td>
-                                            <td className="px-3 py-2 text-[var(--color-text-muted)]">{saleIds.length}</td>
+                                            <td className="px-3 py-2 text-[var(--color-text-muted)]">
+                                                {isManual
+                                                    ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--glass-border)] text-[var(--color-text-muted)]">Manual</span>
+                                                    : saleIds.length}
+                                            </td>
                                             <td className="px-3 py-2 text-[var(--color-text-muted)]">{h.user_name || '—'}</td>
                                             <td className="px-3 py-2 text-right">
                                                 <button onClick={() => handleDeleteHistory(h.id)} className="text-[var(--color-text-muted)] hover:text-red-400">
