@@ -49,7 +49,8 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
     const [method, setMethod] = useState(null);
     const [amountPaid, setAmountPaid] = useState('');
     const [observations, setObservations] = useState('');
-    const [selectedTerminal, setSelectedTerminal] = useState(null); // 'TUU' | 'CompraAqui'
+    const [selectedTerminal, setSelectedTerminal] = useState(null); // nombre del datáfono
+    const [authCode, setAuthCode] = useState(''); // Código de autorización impreso en el recibo
 
     // State for Mixed Payment
     const [mixedPayments, setMixedPayments] = useState([]);
@@ -67,6 +68,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
             setAmountPaid('');
             setObservations('');
             setSelectedTerminal(null);
+            setAuthCode('');
             setMixedPayments([]);
         }
     }, [isOpen, total]);
@@ -105,7 +107,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
         if (selectedMethod === 'Mixto') {
             // Initialize with one row of Cash covering the total
             setMixedPayments([
-                { id: Date.now(), method: 'Efectivo', amount: total.toString(), terminal: '', account: '' }
+                { id: Date.now(), method: 'Efectivo', amount: total.toString(), terminal: '', account: '', authCode: '' }
             ]);
         } else if (selectedMethod === 'Efectivo') {
             setAmountPaid(Math.ceil(total).toString());
@@ -146,10 +148,11 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
             ...mixedPayments,
             {
                 id: Date.now(),
-                method: available[0], // Auto-select first available unused method 
+                method: available[0], // Auto-select first available unused method
                 amount: remaining.toString(),
                 terminal: '',
-                account: ''
+                account: '',
+                authCode: ''
             }
         ]);
 
@@ -328,7 +331,8 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                 ...finalPayData,
                 amountPaid: paid,
                 change: paid - total,
-                terminal: selectedTerminal
+                terminal: selectedTerminal,
+                authCode: method === 'Tarjeta' ? authCode.trim() : undefined,
             };
         }
 
@@ -494,6 +498,30 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                     )}
                                 </div>
                             </div>
+                            {/* Código de autorización: clave del recibo bancario, único por
+                                transacción. Con este código, la conciliación con el XLSX del
+                                banco cuadra al 100% — sin él, se cuadra por monto + hora
+                                (menos preciso). Es opcional pero altamente recomendado. */}
+                            <div className="space-y-2">
+                                <label className="font-bold text-white text-base flex items-center gap-2">
+                                    Código de autorización
+                                    <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">Recomendado</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
+                                    value={authCode}
+                                    onChange={e => setAuthCode(e.target.value.replace(/\s/g, ''))}
+                                    placeholder="Ej: 541692"
+                                    className="glass-input w-full p-3 text-lg font-mono tracking-wider"
+                                    autoComplete="off"
+                                />
+                                <p className="text-xs text-gray-400">
+                                    El número de 6 dígitos que sale en el recibo del datáfono (Cód. Aut. / Auth #).
+                                    Con este código la conciliación con el banco cuadra al peso, sin errores.
+                                </p>
+                            </div>
                         </div>
                     )}
 
@@ -591,7 +619,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
 
                                         {/* Sub-inputs for specific methods */}
                                         {row.method === 'Tarjeta' && (
-                                            <div className="mt-3 pl-1">
+                                            <div className="mt-3 pl-1 space-y-2">
                                                 <select
                                                     className="glass-input w-full p-2 text-sm bg-[#1a1a1a] border-dashed border-white/20"
                                                     value={row.terminal}
@@ -602,6 +630,16 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                                         <option key={t.id} value={t.name} className="bg-gray-900">{t.name}</option>
                                                     ))}
                                                 </select>
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    pattern="[0-9]*"
+                                                    value={row.authCode || ''}
+                                                    onChange={(e) => updatePaymentRow(row.id, 'authCode', e.target.value.replace(/\s/g, ''))}
+                                                    placeholder="Cód. autorización (recibo)"
+                                                    className="glass-input w-full p-2 text-sm bg-[#1a1a1a] border-dashed border-white/20 font-mono"
+                                                    autoComplete="off"
+                                                />
                                             </div>
                                         )}
 

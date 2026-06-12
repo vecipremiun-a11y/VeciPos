@@ -8667,7 +8667,7 @@ export const useStore = create(persist((set, get) => ({
                 },
                 {
                     sql: `SELECT pp.id, pp.amount, pp.created_at AS date, pp.type,
-                                 pp.preorder_id, po.client_name
+                                 pp.preorder_id, po.client_name, pp.auth_code
                           FROM preorder_payments pp
                           JOIN preorders po ON pp.preorder_id = po.id
                           WHERE po.company_id = ? AND pp.method = 'Tarjeta'
@@ -8704,6 +8704,7 @@ export const useStore = create(persist((set, get) => ({
                             total: Number(s.total) || 0,
                             clientName: s.client_name,
                             userId: s.user_id,
+                            authCode: (d.authCode || d.auth_code || '').toString().trim(),
                         });
                     }
                 } catch { /* noop */ }
@@ -8723,6 +8724,7 @@ export const useStore = create(persist((set, get) => ({
                                 total: Number(m.amount) || 0,
                                 clientName: s.client_name,
                                 userId: s.user_id,
+                                authCode: (m.authCode || m.auth_code || '').toString().trim(),
                             });
                         }
                     });
@@ -8737,6 +8739,7 @@ export const useStore = create(persist((set, get) => ({
                     date: p.date,
                     total: Number(p.amount) || 0,
                     clientName: p.client_name,
+                    authCode: (p.auth_code || '').toString().trim(),
                 });
             }
 
@@ -11230,10 +11233,11 @@ export const useStore = create(persist((set, get) => ({
                 const regId = get().cashRegister?.id || null;
                 const tId = depositMethod === 'Tarjeta' ? (preorderData.deposit_terminal_id || null) : null;
                 const baId = depositMethod === 'Transferencia' ? (preorderData.deposit_bank_account_id || null) : null;
+                const authCode = depositMethod === 'Tarjeta' ? (preorderData.deposit_auth_code || null) : null;
                 await turso.execute({
-                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id, terminal_id, bank_account_id)
-                          VALUES (?, ?, ?, 'deposit', ?, ?, ?)`,
-                    args: [preorderId, preorderData.deposit_amount, depositMethod, regId, tId, baId]
+                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id, terminal_id, bank_account_id, auth_code)
+                          VALUES (?, ?, ?, 'deposit', ?, ?, ?, ?)`,
+                    args: [preorderId, preorderData.deposit_amount, depositMethod, regId, tId, baId, authCode]
                 });
                 // Si el abono fue en efectivo, sumarlo a la caja abierta.
                 if (depositMethod === 'Efectivo') {
@@ -11481,14 +11485,15 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    addPreorderPayment: async (preorderId, amount, method, type = 'final', { terminalId = null, bankAccountId = null } = {}) => {
+    addPreorderPayment: async (preorderId, amount, method, type = 'final', { terminalId = null, bankAccountId = null, authCode = null } = {}) => {
         try {
             const regId = get().cashRegister?.id || null;
             const tId = method === 'Tarjeta' ? (terminalId || null) : null;
             const baId = method === 'Transferencia' ? (bankAccountId || null) : null;
+            const ac = method === 'Tarjeta' ? (authCode || null) : null;
             await turso.execute({
-                sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id, terminal_id, bank_account_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                args: [preorderId, amount, method, type, regId, tId, baId]
+                sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id, terminal_id, bank_account_id, auth_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                args: [preorderId, amount, method, type, regId, tId, baId, ac]
             });
 
             // Si el pago fue en efectivo, sumarlo a la caja abierta.
@@ -11997,7 +12002,7 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    deliverPreorder: async (preorderId, itemWeights, paymentMethod = 'Efectivo', { terminalId = null, bankAccountId = null } = {}) => {
+    deliverPreorder: async (preorderId, itemWeights, paymentMethod = 'Efectivo', { terminalId = null, bankAccountId = null, authCode = null } = {}) => {
         try {
             // Snapshot del producto al ENTREGAR (no al crear el encargo): el
             // costo y la tasa de impuesto se congelan ahora para que la utilidad
@@ -12078,9 +12083,10 @@ export const useStore = create(persist((set, get) => ({
                 const regId = get().cashRegister?.id || null;
                 const tId = paymentMethod === 'Tarjeta' ? (terminalId || null) : null;
                 const baId = paymentMethod === 'Transferencia' ? (bankAccountId || null) : null;
+                const authCodeFinal = paymentMethod === 'Tarjeta' ? (authCode || null) : null;
                 await turso.execute({
-                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id, terminal_id, bank_account_id) VALUES (?, ?, ?, 'final', ?, ?, ?)`,
-                    args: [preorderId, balanceDue, paymentMethod, regId, tId, baId]
+                    sql: `INSERT INTO preorder_payments (preorder_id, amount, method, type, register_id, terminal_id, bank_account_id, auth_code) VALUES (?, ?, ?, 'final', ?, ?, ?, ?)`,
+                    args: [preorderId, balanceDue, paymentMethod, regId, tId, baId, authCodeFinal]
                 });
                 // Si el saldo se cobró en efectivo, sumarlo a la caja abierta.
                 if (paymentMethod === 'Efectivo') {

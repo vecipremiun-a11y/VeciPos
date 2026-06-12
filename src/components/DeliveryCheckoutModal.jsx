@@ -10,6 +10,7 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
     const [paymentMethod, setPaymentMethod] = useState('Efectivo');
     const [terminalId, setTerminalId] = useState(null);
     const [bankAccountId, setBankAccountId] = useState(null);
+    const [authCode, setAuthCode] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
 
     useEffect(() => {
@@ -85,6 +86,7 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
             await onDeliver(preorderDetails.preorder.id, itemWeights, paymentMethod, {
                 terminalId: paymentMethod === 'Tarjeta' ? terminalId : null,
                 bankAccountId: paymentMethod === 'Transferencia' ? bankAccountId : null,
+                authCode: paymentMethod === 'Tarjeta' ? authCode.trim() : null,
             });
             onClose();
         } catch (e) {
@@ -252,7 +254,7 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
                         <div className="space-y-2">
                             <div className="flex gap-2">
                                 {['Efectivo', 'Tarjeta', 'Transferencia'].map(m => (
-                                    <button key={m} onClick={() => { setPaymentMethod(m); setTerminalId(null); setBankAccountId(null); }}
+                                    <button key={m} onClick={() => { setPaymentMethod(m); setTerminalId(null); setBankAccountId(null); setAuthCode(''); }}
                                         className={cn("flex-1 py-1.5 rounded-lg text-xs font-bold transition-all border",
                                             paymentMethod === m
                                                 ? "bg-green-500/20 text-green-400 border-green-500/30"
@@ -271,6 +273,23 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
                                     if (baId !== undefined) setBankAccountId(baId);
                                 }}
                             />
+                            {paymentMethod === 'Tarjeta' && (
+                                <div className="mt-2">
+                                    <label className="block text-[10px] text-[var(--color-text-muted)] mb-1">
+                                        Código de autorización <span className="text-[var(--color-text-muted)]">(del recibo · recomendado)</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
+                                        value={authCode}
+                                        onChange={(e) => setAuthCode(e.target.value.replace(/\s/g, ''))}
+                                        placeholder="Ej: 541692"
+                                        className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-3 py-2 text-sm font-mono text-[var(--color-text)] outline-none focus:border-[var(--color-primary)]"
+                                        autoComplete="off"
+                                    />
+                                </div>
+                            )}
                         </div>
                     )}
 

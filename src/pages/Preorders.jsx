@@ -38,6 +38,7 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
     const [depositAmount, setDepositAmount] = useState('');
     const [depositMethod, setDepositMethod] = useState('Efectivo');
     const [depositTerminalId, setDepositTerminalId] = useState(null);
+    const [depositAuthCode, setDepositAuthCode] = useState('');
     const [depositBankAccountId, setDepositBankAccountId] = useState(null);
     const [deliveryType, setDeliveryType] = useState('pickup');
     const [deliveryAddress, setDeliveryAddress] = useState('');
@@ -86,6 +87,7 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
             deposit_method: depositMethod,
             deposit_terminal_id: depositMethod === 'Tarjeta' ? depositTerminalId : null,
             deposit_bank_account_id: depositMethod === 'Transferencia' ? depositBankAccountId : null,
+            deposit_auth_code: depositMethod === 'Tarjeta' ? depositAuthCode.trim() : null,
             delivery_type: deliveryType,
             delivery_address: deliveryAddress,
             notes,
@@ -252,7 +254,7 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
                             </div>
                             <div className="flex gap-2">
                                 {['Efectivo', 'Tarjeta', 'Transferencia'].map(m => (
-                                    <button key={m} onClick={() => { setDepositMethod(m); setDepositTerminalId(null); setDepositBankAccountId(null); }}
+                                    <button key={m} onClick={() => { setDepositMethod(m); setDepositTerminalId(null); setDepositBankAccountId(null); setDepositAuthCode(''); }}
                                         className={cn("flex-1 py-1.5 rounded-lg text-xs font-bold transition-all border",
                                             depositMethod === m
                                                 ? "bg-green-500/20 text-green-400 border-green-500/30"
@@ -271,6 +273,23 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
                                     if (bankAccountId !== undefined) setDepositBankAccountId(bankAccountId);
                                 }}
                             />
+                            {depositMethod === 'Tarjeta' && (
+                                <div className="mt-2">
+                                    <label className="block text-[10px] text-[var(--color-text-muted)] mb-1">
+                                        Código de autorización <span className="text-[var(--color-text-muted)]">(del recibo · recomendado)</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
+                                        value={depositAuthCode}
+                                        onChange={(e) => setDepositAuthCode(e.target.value.replace(/\s/g, ''))}
+                                        placeholder="Ej: 541692"
+                                        className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-3 py-2 text-sm font-mono text-[var(--color-text)] outline-none focus:border-[var(--color-primary)]"
+                                        autoComplete="off"
+                                    />
+                                </div>
+                            )}
                         </div>
                     </div>
 

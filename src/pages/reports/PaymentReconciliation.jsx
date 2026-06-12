@@ -573,6 +573,7 @@ const PaymentReconciliation = () => {
                                             <th className="text-left px-2 py-1.5">Banco fecha · hora</th>
                                             <th className="text-left px-2 py-1.5">POSVECI</th>
                                             <th className="text-right px-2 py-1.5">Monto</th>
+                                            <th className="text-center px-2 py-1.5">Match por</th>
                                             <th className="text-right px-2 py-1.5">Δ min</th>
                                         </tr>
                                     </thead>
@@ -582,7 +583,12 @@ const PaymentReconciliation = () => {
                                                 <td className="px-2 py-1.5">{m.bankTx.fecha} {m.bankTx.hora}</td>
                                                 <td className="px-2 py-1.5 text-[var(--color-text-muted)]">{m.sale.source} {m.sale.source === 'POS' ? `#${m.sale.saleId}` : `Enc #${m.sale.preorderId}`}</td>
                                                 <td className="px-2 py-1.5 text-right">{formatCurrency(m.bankTx.saleAmount, currentCurrency)}</td>
-                                                <td className={`px-2 py-1.5 text-right ${m.deltaMinutes <= 5 ? 'text-green-400' : m.deltaMinutes <= 60 ? 'text-amber-300' : 'text-orange-400'}`}>{m.deltaMinutes}</td>
+                                                <td className="px-2 py-1.5 text-center">
+                                                    {m.matchedBy === 'authCode'
+                                                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-300 border border-green-500/30 inline-flex items-center gap-1"><CheckCircle2 size={10} /> Código</span>
+                                                        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30">Monto + hora</span>}
+                                                </td>
+                                                <td className={`px-2 py-1.5 text-right ${m.matchedBy === 'authCode' ? 'text-[var(--color-text-muted)]' : m.deltaMinutes <= 5 ? 'text-green-400' : m.deltaMinutes <= 60 ? 'text-amber-300' : 'text-orange-400'}`}>{m.matchedBy === 'authCode' ? '—' : m.deltaMinutes}</td>
                                             </tr>
                                         ))}
                                     </tbody>
