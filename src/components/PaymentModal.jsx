@@ -5,6 +5,12 @@ import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
+    // CLP no tiene decimales, pero productos por kg pueden generar ruido de
+    // punto flotante (ej. 9032 → 9032.0000001). Usamos `safeTotal` (entero)
+    // para todas las comparaciones y montos iniciales del pago mixto, de
+    // modo que la suma de filas cuadre limpia y el botón Cobrar se habilite.
+    // El `total` original se mantiene para display y backend.
+    const safeTotal = Math.round(Number(total) || 0);
     const {
         carts,
         activeCartId,
@@ -82,8 +88,9 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
     // Validation for Mixed Payment
     const isMixedValid = () => {
         const currentTotal = mixedPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-        // Check total covered (allowing slight floating point diffs)
-        if (Math.abs(currentTotal - total) > 0.01) return false;
+        // Comparamos contra safeTotal (entero CLP) para evitar falsos negativos
+        // por ruido de punto flotante de productos por kg.
+        if (Math.abs(currentTotal - safeTotal) > 0.01) return false;
 
         // Check required fields for specific methods
         return mixedPayments.every(p => {
@@ -94,25 +101,25 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
     };
 
     const suggestions = [
-        Math.ceil(total),
-        Math.ceil(total / 1000) * 1000 + 1000,
-        Math.ceil(total / 5000) * 5000 + 5000,
-        Math.ceil(total / 10000) * 10000 + 10000
-    ].filter((v, i, a) => a.indexOf(v) === i && v >= total).slice(0, 3);
+        safeTotal,
+        Math.ceil(safeTotal / 1000) * 1000 + 1000,
+        Math.ceil(safeTotal / 5000) * 5000 + 5000,
+        Math.ceil(safeTotal / 10000) * 10000 + 10000
+    ].filter((v, i, a) => a.indexOf(v) === i && v >= safeTotal).slice(0, 3);
 
     if (!isOpen) return null;
 
     const handleMethodSelect = (selectedMethod) => {
         setMethod(selectedMethod);
         if (selectedMethod === 'Mixto') {
-            // Initialize with one row of Cash covering the total
+            // Initialize with one row of Cash covering the total (entero CLP).
             setMixedPayments([
-                { id: Date.now(), method: 'Efectivo', amount: total.toString(), terminal: '', account: '', authCode: '' }
+                { id: Date.now(), method: 'Efectivo', amount: safeTotal.toString(), terminal: '', account: '', authCode: '' }
             ]);
         } else if (selectedMethod === 'Efectivo') {
-            setAmountPaid(Math.ceil(total).toString());
+            setAmountPaid(safeTotal.toString());
         } else {
-            setAmountPaid(total.toString());
+            setAmountPaid(safeTotal.toString());
         }
         setStep('payment-details');
     };
@@ -138,7 +145,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
         if (mixedPayments.length >= 3) return; // Max 3 methods
 
         const currentTotal = getMixedTotal();
-        const remaining = Math.max(0, total - currentTotal);
+        const remaining = Math.max(0, safeTotal - currentTotal);
 
         // Find first available method
         const available = getAvailableMethods(null);
@@ -201,13 +208,15 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
             .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
 
         // Calculate what the first row *should* be
-        // FirstRow = Total - (OtherRows + NewValue)
-        let newFirstRowAmount = total - (otherRowsSum + newVal);
+        // FirstRow = Total - (OtherRows + NewValue) — usamos safeTotal entero.
+        let newFirstRowAmount = safeTotal - (otherRowsSum + newVal);
         if (newFirstRowAmount < 0) newFirstRowAmount = 0; // Prevent negative
 
         setMixedPayments(mixedPayments.map(p => {
             if (p.id === id) return { ...p, amount: value };
-            if (p.id === firstRow.id) return { ...p, amount: newFirstRowAmount.toFixed(0) }; // Use integer strings for cleanliness if preferred, or match input
+            // Math.round + String evita el bug de .toFixed(0) que dejaba el
+            // total con decimales y bloqueaba el botón Cobrar.
+            if (p.id === firstRow.id) return { ...p, amount: String(Math.round(newFirstRowAmount)) };
             return p;
         }));
     };
@@ -261,13 +270,13 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                 }
             }
 
-            // 2. Validar que el total cubra el monto (con margen de error de centavos)
-            const diff = Math.abs(paid - total);
+            // 2. Validar que el total cubra el monto (comparado contra safeTotal entero)
+            const diff = Math.abs(paid - safeTotal);
             if (diff > 0.01) {
-                if (paid < total) {
-                    alert(`Faltan ${formatCurrency(total - paid, currentCurrency)} por pagar`);
+                if (paid < safeTotal) {
+                    alert(`Faltan ${formatCurrency(safeTotal - paid, currentCurrency)} por pagar`);
                 } else {
-                    alert(`Hay ${formatCurrency(paid - total, currentCurrency)} de más. Ajusta los montos.`);
+                    alert(`Hay ${formatCurrency(paid - safeTotal, currentCurrency)} de más. Ajusta los montos.`);
                 }
                 return;
             }
@@ -302,20 +311,20 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                     alert('Debes seleccionar un cliente para ventas a crédito');
                     return;
                 }
-                // En crédito, el monto debe ser exacto
-                if (Math.abs(paid - total) > 0.01) {
+                // En crédito, el monto debe ser exacto (comparado vs safeTotal entero)
+                if (Math.abs(paid - safeTotal) > 0.01) {
                     alert('En ventas a crédito, el monto debe ser exacto al total');
                     return;
                 }
             } else if (method === 'Efectivo') {
-                // En efectivo, validar que cubra el total
-                if (paid < total) {
-                    alert(`Monto insuficiente. Faltan ${formatCurrency(total - paid, currentCurrency)}`);
+                // En efectivo, validar que cubra el total (entero)
+                if (paid < safeTotal) {
+                    alert(`Monto insuficiente. Faltan ${formatCurrency(safeTotal - paid, currentCurrency)}`);
                     return;
                 }
             } else {
-                // Tarjeta, Transferencia: debe ser exacto
-                if (Math.abs(paid - total) > 0.01) {
+                // Tarjeta, Transferencia: debe ser exacto (entero)
+                if (Math.abs(paid - safeTotal) > 0.01) {
                     alert('El monto debe ser exacto al total de la venta');
                     return;
                 }
@@ -330,7 +339,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
             finalPayData = {
                 ...finalPayData,
                 amountPaid: paid,
-                change: paid - total,
+                change: Math.max(0, paid - safeTotal),
                 terminal: selectedTerminal,
                 authCode: method === 'Tarjeta' ? authCode.trim() : undefined,
             };
