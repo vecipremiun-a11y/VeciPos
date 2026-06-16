@@ -862,7 +862,13 @@ const POS = () => {
                     <div className="mb-4">
                         <div className="flex w-full gap-2">
                             {carts.map(cart => {
-                                const itemCount = cart.items.reduce((sum, item) => sum + item.quantity, 0);
+                                const rawCount = cart.items.reduce((sum, item) => sum + item.quantity, 0);
+                                // Productos por kg dejan decimales con ruido de punto flotante
+                                // (ej. 6.62 → 6.6199999999999). Para el badge mostramos un
+                                // valor limpio: entero si es entero, o 2 decimales máximo.
+                                const itemCount = Number.isInteger(rawCount)
+                                    ? rawCount
+                                    : Number(rawCount.toFixed(2));
                                 const isActive = cart.id === activeCartId;
 
                                 return (
@@ -1240,7 +1246,7 @@ const POS = () => {
                         {cart.length > 0 && (
                             <>
                                 <span className="text-blue-200">•</span>
-                                <span className="text-sm">{cart.reduce((sum, item) => sum + item.quantity, 0)} Items</span>
+                                <span className="text-sm">{(() => { const c = cart.reduce((s, i) => s + i.quantity, 0); return Number.isInteger(c) ? c : Number(c.toFixed(2)); })()} Items</span>
                                 <span className="bg-white/20 px-3 py-1 rounded-full text-sm font-bold ml-auto">
                                     {formatCurrency(finalTotal, currentCurrency)}
                                 </span>
@@ -1275,7 +1281,7 @@ const POS = () => {
                                     Carrito
                                     {cart.length > 0 && (
                                         <span className="bg-cyan-500/20 text-cyan-400 text-xs px-2 py-0.5 rounded-full">
-                                            {cart.reduce((sum, item) => sum + item.quantity, 0)} items
+                                            {(() => { const c = cart.reduce((s, i) => s + i.quantity, 0); return Number.isInteger(c) ? c : Number(c.toFixed(2)); })()} items
                                         </span>
                                     )}
                                 </h2>

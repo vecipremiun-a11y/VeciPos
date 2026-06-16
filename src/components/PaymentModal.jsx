@@ -573,13 +573,13 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                     {step === 'payment-details' && method === 'Mixto' && (
                         <div className="flex flex-col gap-6 max-w-2xl mx-auto w-full">
                             <div className="text-center mb-2">
-                                <h3 className="text-4xl font-bold text-white tracking-tight">{formatCurrency(total, currentCurrency)}</h3>
+                                <h3 className="text-4xl font-bold text-white tracking-tight">{formatCurrency(safeTotal, currentCurrency)}</h3>
                                 <div className="flex justify-center gap-4 text-sm font-medium mt-2">
                                     <span className="text-green-400">Total recibido: {formatCurrency(getMixedTotal(), currentCurrency)}</span>
                                     <span className={cn(
-                                        Math.abs(getMixedTotal() - total) < 0.01 ? "text-green-500" : "text-red-400"
+                                        Math.abs(getMixedTotal() - safeTotal) < 0.01 ? "text-green-500" : "text-red-400"
                                     )}>
-                                        {getMixedTotal() >= total ? 'Cobro cubierto' : `Por cobrar: ${formatCurrency(total - getMixedTotal(), currentCurrency)}`}
+                                        {getMixedTotal() >= safeTotal - 0.01 ? 'Cobro cubierto' : `Por cobrar: ${formatCurrency(safeTotal - getMixedTotal(), currentCurrency)}`}
                                     </span>
                                 </div>
                             </div>
@@ -797,8 +797,8 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                     ))}
                                 </div>
                                 <div className="text-center py-2">
-                                    <span className={cn("text-xl font-bold", (parseFloat(amountPaid) - total) >= 0 ? "text-green-500" : "text-gray-500")}>
-                                        Cambio: {formatCurrency((parseFloat(amountPaid) || 0) - total, currentCurrency)}
+                                    <span className={cn("text-xl font-bold", (parseFloat(amountPaid) - safeTotal) >= 0 ? "text-green-500" : "text-gray-500")}>
+                                        Cambio: {formatCurrency(Math.max(0, (parseFloat(amountPaid) || 0) - safeTotal), currentCurrency)}
                                     </span>
                                 </div>
                                 <div>
@@ -831,7 +831,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                                 ? !observations
                                                 : method === 'Crédito'
                                                     ? (creditLimitExceeded && creditBlockMode === 'block')
-                                                    : (parseFloat(amountPaid) || 0) < total
+                                                    : (parseFloat(amountPaid) || 0) < safeTotal
                                 )
                             }
                             className={cn(
