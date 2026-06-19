@@ -42,7 +42,7 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
     yPos += 5;
 
     // Dirección
-    doc.setFont('courier', 'normal');
+    doc.setFont('courier', 'bold');
     doc.setFontSize(fmt === 'a4' ? 10 : 8);
     doc.text(config.address || 'Sotomayor 1460-A', centerX, yPos, { align: 'center' });
     yPos += 4;
@@ -90,7 +90,7 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
         yPos += 3;
         doc.text(`Folio N° ${saleDetails.dte_folio}`, centerX, yPos, { align: 'center' });
         yPos += 4;
-        doc.setFont('courier', 'normal');
+        doc.setFont('courier', 'bold');
     }
     doc.text(`Boleta: ${ticketId}`, 2, yPos);
     yPos += 4;
@@ -107,7 +107,7 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
     doc.text('DESCRIPCIÓN', 2, yPos);
     doc.text('TOTAL', rightX, yPos, { align: 'right' });
     yPos += 4;
-    doc.setFont('courier', 'normal');
+    doc.setFont('courier', 'bold');
     doc.text(separator, 2, yPos);
     yPos += 4;
 
@@ -144,7 +144,7 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
         yPos += 6;
     }
 
-    doc.setFont('courier', 'normal');
+    doc.setFont('courier', 'bold');
     doc.setFontSize(fmt === 'a4' ? 10 : 8);
     doc.text('Medio Pago:', 2, yPos);
     doc.text(paymentLabel, rightX, yPos, { align: 'right' });
