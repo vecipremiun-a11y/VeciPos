@@ -1,18 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Building2, UserPlus, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useStore } from '../../store/useStore';
 
 const CreateCompanyModal = ({ onClose, onCreated }) => {
-    const { createCompany } = useStore();
+    const { createCompany, adminFetchUsers } = useStore();
     const [loading, setLoading] = useState(false);
     const [showUserSection, setShowUserSection] = useState(false);
+    const [users, setUsers] = useState([]);
+
+    useEffect(() => {
+        adminFetchUsers?.().then(setUsers).catch(() => {});
+    }, [adminFetchUsers]);
 
     const [form, setForm] = useState({
         id: '',
         name: '',
         country: 'CL',
-        plan: 'basic',
+        plan: 'basico',
+        ownerUserId: '',
         createUser: false,
         username: '',
         password: '',
@@ -61,7 +67,8 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                 id: form.id.trim(),
                 name: form.name.trim(),
                 country: form.country,
-                plan: form.plan
+                plan: form.plan,
+                status: 'active',
             };
 
             if (form.createUser) {
@@ -70,6 +77,8 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                     password: form.password,
                     name: form.fullName.trim() || form.username.trim()
                 };
+            } else if (form.ownerUserId) {
+                companyData.ownerUserId = Number(form.ownerUserId);
             }
 
             const res = await createCompany(companyData);
@@ -193,10 +202,33 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                                 onChange={(e) => handleChange('plan', e.target.value)}
                                 className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 transition-all appearance-none"
                             >
-                                <option value="basic">Básico</option>
+                                <option value="basico">Básico</option>
+                                <option value="medium">Medium</option>
                                 <option value="pro">Pro</option>
                             </select>
                         </div>
+                    </div>
+
+                    {/* Dueño de la empresa (cliente) — el enlace a su cuenta se deduce de aquí */}
+                    <div>
+                        <label className="block text-xs font-medium text-gray-400 mb-1.5">Dueño de la empresa</label>
+                        <select
+                            value={form.ownerUserId}
+                            onChange={(e) => handleChange('ownerUserId', e.target.value)}
+                            disabled={form.createUser}
+                            className={cn(
+                                'w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 transition-all appearance-none',
+                                form.createUser && 'opacity-50 cursor-not-allowed'
+                            )}
+                        >
+                            <option value="">— Yo (super admin) —</option>
+                            {users.map(u => (
+                                <option key={u.id} value={u.id}>{u.username}{u.name ? ` · ${u.name}` : ''}</option>
+                            ))}
+                        </select>
+                        <p className="text-[10px] text-gray-500 mt-1">
+                            Solo clientes (dueños de cuenta). La empresa se enlaza a la cuenta de ese dueño automáticamente. O crea un dueño nuevo abajo.
+                        </p>
                     </div>
 
                     {/* Divider - Create User */}
@@ -212,7 +244,7 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                             <div className="flex items-center gap-2">
                                 <UserPlus size={16} className="text-gray-400 group-hover:text-white transition-colors" />
                                 <span className="text-sm font-medium text-gray-300 group-hover:text-white transition-colors">
-                                    Crear usuario administrador
+                                    Crear dueño nuevo (cliente)
                                 </span>
                             </div>
                             <div className="flex items-center gap-2">
@@ -230,6 +262,9 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
 
                         {showUserSection && (
                             <div className="mt-4 space-y-4 pl-2 border-l-2 border-[var(--color-primary)]/20 ml-2">
+                                <p className="text-[11px] text-amber-400/90">
+                                    Este usuario será el <strong>dueño</strong> de la empresa (acceso y control total; no se puede eliminar). Estos son sus datos de acceso.
+                                </p>
                                 <InputField
                                     label="Username"
                                     field="username"

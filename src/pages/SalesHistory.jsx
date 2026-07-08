@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { turso } from '../lib/turso';
+import { reportCall } from '../lib/dataApi';
 import { Search, Calendar, CreditCard, User, Download, Send, Trash2, Printer, AlertTriangle, FileText, X, RotateCcw, Receipt, CheckCircle2, Clock, Stamp } from 'lucide-react';
 import { generateReceiptPDF, generateWhatsAppLink } from '../utils/receipt';
 import bwipjs from 'bwip-js';
@@ -61,11 +61,7 @@ const SalesHistory = () => {
             if (!activeCompanyId || sales.length === 0) return;
             try {
                 const saleIds = sales.map(s => s.id);
-                const placeholders = saleIds.map(() => '?').join(',');
-                const result = await turso.execute({
-                    sql: `SELECT sale_id, folio, tipo_dte AS tipo, estado AS status FROM sii_dtes WHERE company_id = ? AND sale_id IN (${placeholders})`,
-                    args: [activeCompanyId, ...saleIds]
-                });
+                const result = { rows: await reportCall(activeCompanyId, 'dteMapBySales', { saleIds }) };
                 const map = {};
                 result.rows.forEach(r => { map[r.sale_id] = r; });
                 setDteMap(map);
@@ -110,10 +106,7 @@ const SalesHistory = () => {
         // Load DTE info for this sale
         if (activeCompanyId) {
             try {
-                const dteResult = await turso.execute({
-                    sql: `SELECT folio, tipo_dte AS tipo, estado AS status, track_id, created_at FROM sii_dtes WHERE company_id = ? AND sale_id = ? LIMIT 1`,
-                    args: [activeCompanyId, sale.id]
-                });
+                const dteResult = { rows: await reportCall(activeCompanyId, 'dteForSale', { saleId: sale.id }) };
                 if (dteResult.rows.length > 0) {
                     setSelectedDteInfo(dteResult.rows[0]);
                 }
@@ -157,21 +150,7 @@ const SalesHistory = () => {
         const seller = users.find(u => u.id === selectedSale.user_id);
 
         try {
-            const configResult = await turso.execute({
-                sql: `SELECT 
-                        receipt_business_name as business_name,
-                        receipt_address as address,
-                        receipt_tax_id as tax_id,
-                        receipt_phone as phone,
-                        receipt_email as email,
-                        receipt_header_message as header_message,
-                        receipt_footer_message as footer_message,
-                        receipt_show_tax_id as show_tax_id,
-                        receipt_show_phone as show_phone,
-                        receipt_show_email as show_email
-                      FROM companies WHERE id = ?`,
-                args: [activeCompanyId]
-            });
+            const configResult = { rows: await reportCall(activeCompanyId, 'receiptConfig', {}) };
 
             const receiptConfig = configResult.rows.length > 0 ? {
                 ...configResult.rows[0],
@@ -184,10 +163,7 @@ const SalesHistory = () => {
             let timbreImg = null;
             if (activeCompanyId && selectedSale.id) {
                 try {
-                    const dteResult = await turso.execute({
-                        sql: `SELECT xml_firmado FROM sii_dtes WHERE company_id = ? AND sale_id = ? LIMIT 1`,
-                        args: [activeCompanyId, selectedSale.id]
-                    });
+                    const dteResult = { rows: await reportCall(activeCompanyId, 'dteForSale', { saleId: selectedSale.id }) };
                     if (dteResult.rows.length > 0 && dteResult.rows[0].xml_firmado) {
                         const xmlFirmado = dteResult.rows[0].xml_firmado;
                         const tedMatch = xmlFirmado.match(/<TED[\s\S]*?<\/TED>/);
@@ -231,21 +207,7 @@ const SalesHistory = () => {
         const seller = users.find(u => u.id === selectedSale.user_id);
 
         try {
-            const configResult = await turso.execute({
-                sql: `SELECT 
-                        receipt_business_name as business_name,
-                        receipt_address as address,
-                        receipt_tax_id as tax_id,
-                        receipt_phone as phone,
-                        receipt_email as email,
-                        receipt_header_message as header_message,
-                        receipt_footer_message as footer_message,
-                        receipt_show_tax_id as show_tax_id,
-                        receipt_show_phone as show_phone,
-                        receipt_show_email as show_email
-                      FROM companies WHERE id = ?`,
-                args: [activeCompanyId]
-            });
+            const configResult = { rows: await reportCall(activeCompanyId, 'receiptConfig', {}) };
 
             const receiptConfig = configResult.rows.length > 0 ? {
                 ...configResult.rows[0],

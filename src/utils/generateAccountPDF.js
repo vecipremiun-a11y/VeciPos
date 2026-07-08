@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { turso } from '../lib/turso';
+import { reportCall } from '../lib/dataApi';
 
 export async function generateAccountStatementPDF({
     client,
@@ -17,12 +17,9 @@ export async function generateAccountStatementPDF({
     // 1. Cargar datos de la empresa
     let company = { business_name: 'Mi Empresa', address: '', tax_id: '', phone: '', email: '' };
     try {
-        const res = await turso.execute({
-            sql: `SELECT receipt_business_name as business_name, receipt_address as address, receipt_tax_id as tax_id, receipt_phone as phone, receipt_email as email FROM companies WHERE id = ?`,
-            args: [activeCompanyId]
-        });
-        if (res.rows.length > 0) {
-            const d = res.rows[0];
+        const rows = await reportCall(activeCompanyId, 'receiptConfig');
+        if (rows.length > 0) {
+            const d = rows[0];
             company = { business_name: d.business_name || 'Mi Empresa', address: d.address || '', tax_id: d.tax_id || '', phone: d.phone || '', email: d.email || '' };
         }
     } catch (e) { console.warn('Could not load company info for PDF:', e); }

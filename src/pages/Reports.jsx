@@ -3,9 +3,12 @@ import SalesReports from '../components/reports/SalesReports';
 import PreorderReports from '../components/reports/PreorderReports';
 import { ShoppingBag, TrendingUp } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useStore } from '../store/useStore';
 
 const Reports = () => {
     const [activeTab, setActiveTab] = useState('sales');
+    const hasModule = useStore(state => state.hasModule);
+    const canPreorders = hasModule('preorders');
 
     return (
         <div className="p-4 space-y-6 pb-20 md:pb-4 animate-in fade-in duration-500">
@@ -35,24 +38,26 @@ const Reports = () => {
                         <TrendingUp size={18} />
                         Ventas
                     </button>
-                    <button
-                        onClick={() => setActiveTab('preorders')}
-                        className={cn(
-                            "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all",
-                            activeTab === 'preorders'
-                                ? "bg-[var(--primary)] text-white shadow-lg shadow-[var(--primary)]/20"
-                                : "text-[var(--text-muted)] hover:text-white"
-                        )}
-                    >
-                        <ShoppingBag size={18} />
-                        Encargos
-                    </button>
+                    {canPreorders && (
+                        <button
+                            onClick={() => setActiveTab('preorders')}
+                            className={cn(
+                                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all",
+                                activeTab === 'preorders'
+                                    ? "bg-[var(--primary)] text-white shadow-lg shadow-[var(--primary)]/20"
+                                    : "text-[var(--text-muted)] hover:text-white"
+                            )}
+                        >
+                            <ShoppingBag size={18} />
+                            Encargos
+                        </button>
+                    )}
                 </div>
             </div>
 
             {/* Content Area */}
             <div className="min-h-[500px]">
-                {activeTab === 'sales' ? <SalesReports /> : <PreorderReports />}
+                {(activeTab === 'sales' || !canPreorders) ? <SalesReports /> : <PreorderReports />}
             </div>
         </div>
     );

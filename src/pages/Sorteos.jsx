@@ -4,7 +4,7 @@ import {
     Image as ImageIcon, Users, Copy, Check, Trash2, X, Loader2
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { turso } from '../lib/turso';
+import { dataApiCall } from '../lib/dataApi';
 import { cn } from '../lib/utils';
 import { compressImage, validateImage } from '../lib/imageCompression';
 
@@ -33,13 +33,6 @@ const DEFAULT_FORM = {
     boleta_from_date: '',
 };
 
-function genToken() {
-    const bytes = new Uint8Array(12);
-    crypto.getRandomValues(bytes);
-    let hex = '';
-    for (const b of bytes) hex += b.toString(16).padStart(2, '0');
-    return 'srt_' + hex;
-}
 
 // Toggle reutilizable (estilo del resto de la app).
 const Toggle = ({ checked, onChange }) => (
@@ -80,42 +73,19 @@ const Sorteos = () => {
 
     const loadParticipants = useCallback(async () => {
         if (!activeCompanyId) return;
-        const pr = await turso.execute({
-            sql: `SELECT id, ticket_number, name, phone, rut, email, boleta, address, created_at
-                  FROM sorteo_participants WHERE company_id = ?
-                  ORDER BY id DESC`,
-            args: [activeCompanyId],
-        });
-        setParticipants(pr.rows);
+        const pr = await dataApiCall('sorteoParticipants', { companyId: activeCompanyId });
+        if (pr?.success) setParticipants(pr.rows);
     }, [activeCompanyId]);
 
     const loadAll = useCallback(async () => {
         if (!activeCompanyId) return;
         setLoading(true);
         try {
-            // 1) Token público de la empresa (generar si no existe).
-            const cr = await turso.execute({
-                sql: 'SELECT sorteo_token FROM companies WHERE id = ? LIMIT 1',
-                args: [activeCompanyId],
-            });
-            let tk = cr.rows[0]?.sorteo_token;
-            if (!tk) {
-                tk = genToken();
-                await turso.execute({
-                    sql: 'UPDATE companies SET sorteo_token = ? WHERE id = ?',
-                    args: [tk, activeCompanyId],
-                });
-            }
-            setToken(tk);
-
-            // 2) Configuración del sorteo.
-            const sr = await turso.execute({
-                sql: `SELECT name, draw_date, active, bg_image, field_name, field_phone,
-                             field_rut, field_email, field_boleta, field_address,
-                             boleta_min_amount, boleta_from_date
-                      FROM sorteos WHERE company_id = ? LIMIT 1`,
-                args: [activeCompanyId],
-            });
+            // Token (generado server-side si no existe) + configuración del sorteo
+            const res = await dataApiCall('sorteoLoad', { companyId: activeCompanyId });
+            if (!res?.success) throw new Error(res?.error || 'Error');
+            setToken(res.token);
+            const sr = { rows: res.config ? [res.config] : [] };
             if (sr.rows.length) {
                 const r = sr.rows[0];
                 setForm({
@@ -175,29 +145,8 @@ const Sorteos = () => {
         if (!form.name.trim()) { flash('err', 'El nombre del sorteo es obligatorio.'); return; }
         setSaving(true);
         try {
-            const now = new Date().toISOString();
-            await turso.execute({
-                sql: `INSERT INTO sorteos
-                        (company_id, name, draw_date, active, bg_image,
-                         field_name, field_phone, field_rut, field_email, field_boleta, field_address,
-                         boleta_min_amount, boleta_from_date,
-                         created_at, updated_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                      ON CONFLICT(company_id) DO UPDATE SET
-                        name=excluded.name, draw_date=excluded.draw_date, active=excluded.active,
-                        bg_image=excluded.bg_image, field_name=excluded.field_name,
-                        field_phone=excluded.field_phone, field_rut=excluded.field_rut,
-                        field_email=excluded.field_email, field_boleta=excluded.field_boleta,
-                        field_address=excluded.field_address,
-                        boleta_min_amount=excluded.boleta_min_amount, boleta_from_date=excluded.boleta_from_date,
-                        updated_at=excluded.updated_at`,
-                args: [
-                    activeCompanyId, form.name.trim(), form.draw_date || null, form.active, form.bg_image || null,
-                    form.field_name, form.field_phone, form.field_rut, form.field_email, form.field_boleta, form.field_address,
-                    Number(form.boleta_min_amount) || 0, form.boleta_from_date || null,
-                    now, now,
-                ],
-            });
+            const saveRes = await dataApiCall('sorteoSave', { companyId: activeCompanyId, form });
+            if (!saveRes?.success) throw new Error(saveRes?.error || 'Error guardando');
             flash('ok', 'Configuración guardada.');
 
             // Empujar la config a miniveci (best-effort, no bloquea el guardado).
@@ -273,10 +222,8 @@ const Sorteos = () => {
         if (!activeCompanyId) return;
         if (!window.confirm('¿Vaciar la lista de participantes? Esto elimina TODOS los inscritos del sorteo actual y no se puede deshacer.')) return;
         try {
-            await turso.execute({
-                sql: 'DELETE FROM sorteo_participants WHERE company_id = ?',
-                args: [activeCompanyId],
-            });
+            const clr = await dataApiCall('sorteoClearParticipants', { companyId: activeCompanyId });
+            if (!clr?.success) throw new Error(clr?.error || 'Error');
             await loadParticipants();
             flash('ok', 'Participantes eliminados.');
         } catch (e) {

@@ -25,6 +25,8 @@ const DEFAULT_CONFIG = {
     dataBits: 8,
     stopBits: 1,
     parity: 'none',
+    pollCommand: '',   // '' = la báscula transmite sola; si no, comando a enviar (ej. '\x05', 'W\r')
+    pollIntervalMs: 400,
 };
 
 class ScaleService {
@@ -32,8 +34,15 @@ class ScaleService {
         this.port = null;
         this.reader = null;
         this.listeners = new Set();
+        this.rawListeners = new Set();
         this.lastReading = null;
+        this._reading = false;
+        this.pollTimer = null;
         this.config = this._loadConfig();
+        // Cierra el puerto al recargar/cerrar la pestaña para no dejarlo "abierto"
+        if (typeof window !== 'undefined') {
+            window.addEventListener('pagehide', () => { try { this.port?.close(); } catch { /* noop */ } });
+        }
     }
 
     _loadConfig() {
@@ -78,27 +87,64 @@ class ScaleService {
     }
 
     async _openAndStart(port) {
-        if (this.port) await this.disconnect();
-        await port.open({
-            baudRate: this.config.baudRate,
-            dataBits: this.config.dataBits,
-            stopBits: this.config.stopBits,
-            parity: this.config.parity,
-            flowControl: 'none',
-        });
+        // Si veníamos manejando otro puerto, ciérralo primero
+        if (this.port && this.port !== port) {
+            try { await this.disconnect(); } catch { /* noop */ }
+        }
+
+        // Abrir el puerto. Si ya estaba abierto (recarga/HMR/otra sesión), lo adoptamos
+        // en vez de fallar con "The port is already open".
+        const alreadyOpen = !!(port.readable || port.writable);
+        if (!alreadyOpen) {
+            try {
+                await port.open({
+                    baudRate: this.config.baudRate,
+                    dataBits: this.config.dataBits,
+                    stopBits: this.config.stopBits,
+                    parity: this.config.parity,
+                    flowControl: 'none',
+                });
+            } catch (e) {
+                if (!/already open/i.test(e?.message || '')) throw e;
+                // ya estaba abierto → continuamos y lo adoptamos
+            }
+        }
+
         this.port = port;
         this._startReadingLoop();
+        this._startPolling();
     }
 
     async disconnect() {
         const port = this.port;
         const reader = this.reader;
+        this._stopPolling();
         this.port = null;
         this.reader = null;
         this.lastReading = null;
+        this._reading = false;
         try { await reader?.cancel(); } catch { /* noop */ }
         try { reader?.releaseLock(); } catch { /* noop */ }
         try { await port?.close(); } catch { /* noop */ }
+    }
+
+    // Sondeo: si la báscula no transmite sola, le mandamos el comando cada N ms
+    _startPolling() {
+        this._stopPolling();
+        const cmd = this.config.pollCommand;
+        if (!cmd) return;
+        const interval = this.config.pollIntervalMs || 400;
+        this.pollTimer = setInterval(() => { this.sendCommand(cmd); }, interval);
+    }
+
+    _stopPolling() {
+        if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    }
+
+    // Cambia el comando de sondeo en caliente (lo persiste y reinicia el timer)
+    setPollCommand(cmd) {
+        this.saveConfig({ pollCommand: cmd });
+        if (this.isConnected()) this._startPolling();
     }
 
     subscribe(callback) {
@@ -106,20 +152,57 @@ class ScaleService {
         return () => this.listeners.delete(callback);
     }
 
+    // Diagnóstico: recibe CADA fragmento de texto crudo que llega del puerto,
+    // se parsee o no. Sirve para ver qué envía realmente la báscula.
+    subscribeRaw(callback) {
+        this.rawListeners.add(callback);
+        return () => this.rawListeners.delete(callback);
+    }
+
+    // Envía un comando de texto a la báscula (para básculas que solo responden
+    // cuando se les solicita el peso, ej. "W\r", ENQ, etc.).
+    async sendCommand(text) {
+        if (!this.port?.writable) return false;
+        const writer = this.port.writable.getWriter();
+        try {
+            await writer.write(new TextEncoder().encode(text));
+            return true;
+        } catch (e) {
+            console.warn('[scale] write error:', e?.message || e);
+            return false;
+        } finally {
+            try { writer.releaseLock(); } catch { /* noop */ }
+        }
+    }
+
     // Loop interno. Lee bytes, los acumula y los pasa al parser linea por línea
     // (la mayoría de protocolos delimitan con \r o \n).
     async _startReadingLoop() {
+        if (this._reading) return; // evita dos loops simultáneos (HMR/remount)
+        this._reading = true;
         const decoder = new TextDecoder();
         let buffer = '';
         const parser = parsers[this.config.protocolId] || parsers.generic;
 
+        try {
         while (this.port?.readable) {
-            this.reader = this.port.readable.getReader();
+            try {
+                this.reader = this.port.readable.getReader();
+            } catch (e) {
+                // El stream ya está bloqueado por otro lector (instancia previa)
+                console.warn('[scale] getReader bloqueado:', e?.message || e);
+                break;
+            }
             try {
                 while (true) {
                     const { value, done } = await this.reader.read();
                     if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
+                    const chunk = decoder.decode(value, { stream: true });
+                    buffer += chunk;
+                    // Diagnóstico: notificar el texto crudo (con escape visible de \r \n)
+                    if (chunk && this.rawListeners.size) {
+                        this.rawListeners.forEach(cb => { try { cb(chunk); } catch { /* noop */ } });
+                    }
                     const parts = buffer.split(/[\r\n]+/);
                     buffer = parts.pop() || '';
                     for (const line of parts) {
@@ -138,6 +221,9 @@ class ScaleService {
                 try { this.reader?.releaseLock(); } catch { /* noop */ }
                 this.reader = null;
             }
+        }
+        } finally {
+            this._reading = false;
         }
     }
 

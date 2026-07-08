@@ -3,7 +3,7 @@ import { useStore } from '../store/useStore';
 import { Search, Package, Truck, Box, AlertTriangle, TrendingDown, DollarSign, Barcode, Tag, Info, ChevronDown, Trash2, ArrowLeft } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
-import { turso } from '../lib/turso';
+import { dataApiCall, reportCall } from '../lib/dataApi';
 
 const Orders = () => {
     const {
@@ -193,33 +193,14 @@ const Orders = () => {
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
             const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
 
-            const [profitResult, statsResult, purchaseResult] = await Promise.all([
-                turso.execute({
-                    sql: `SELECT COALESCE(SUM(total_quantity), 0) as total_sold,
-                                 COUNT(DISTINCT day) as days_with_sales
-                          FROM product_daily_profit
-                          WHERE company_id = ? AND product_id = ? AND day >= ? AND day <= ?`,
-                    args: [activeCompanyId, product.id, thirtyDaysAgoStr, today]
-                }),
-                turso.execute({
-                    sql: `SELECT last_sale_date FROM product_movement_stats
-                          WHERE company_id = ? AND product_id = ?`,
-                    args: [activeCompanyId, product.id]
-                }),
-                // Get last two purchases to compare costs
-                turso.execute({
-                    sql: `SELECT 
-                        json_extract(item.value, '$.cost') as item_cost,
-                        json_extract(item.value, '$.supplier_code') as supplier_code,
-                        p.date
-                    FROM purchases p, json_each(p.items) as item
-                    WHERE p.company_id = ? 
-                        AND CAST(json_extract(item.value, '$.id') AS INTEGER) = ?
-                    ORDER BY p.date DESC
-                    LIMIT 2`,
-                    args: [activeCompanyId, product.id]
-                })
+            const [statsRes, purchaseRows] = await Promise.all([
+                dataApiCall('report', { companyId: activeCompanyId, name: 'productSalesStats', params: { productId: product.id, thirtyDaysAgo: thirtyDaysAgoStr, today } }),
+                reportCall(activeCompanyId, 'productLastPurchaseCosts', { productId: product.id }),
             ]);
+            if (!statsRes?.success) throw new Error(statsRes?.error || 'Error');
+            const profitResult = { rows: statsRes.rows[0] };
+            const statsResult = { rows: statsRes.rows[1] };
+            const purchaseResult = { rows: purchaseRows };
 
             const totalSold30d = parseFloat(profitResult.rows[0]?.total_sold) || 0;
 
@@ -317,30 +298,14 @@ const Orders = () => {
         const search = async () => {
             setIsLoading(true);
             try {
-                const conditions = ['company_id = ?'];
-                const args = [activeCompanyId];
-
-                if (selectedSupplierId) {
-                    const sup = suppliers.find(s => s.id === Number(selectedSupplierId));
-                    if (sup) {
-                        conditions.push('supplier = ?');
-                        args.push(sup.name);
-                    }
-                }
-                if (debouncedSearch) {
-                    conditions.push("(LOWER(COALESCE(name,'')) LIKE ? OR LOWER(COALESCE(sku,'')) LIKE ?)");
-                    const like = `%${debouncedSearch.toLowerCase()}%`;
-                    args.push(like, like);
-                }
-                if (filterLowStock) {
-                    conditions.push('stock <= 5');
-                }
-
-                const result = await turso.execute({
-                    sql: `SELECT id, name, sku, price, cost, stock, tax_rate, unit, image, category, supplier, price_ranges
-                          FROM products WHERE ${conditions.join(' AND ')} ORDER BY stock ASC LIMIT 100`,
-                    args
-                });
+                const sup = selectedSupplierId ? suppliers.find(s => s.id === Number(selectedSupplierId)) : null;
+                const result = {
+                    rows: await reportCall(activeCompanyId, 'productsForOrder', {
+                        supplierName: sup?.name || null,
+                        search: debouncedSearch || null,
+                        lowStock: Boolean(filterLowStock),
+                    })
+                };
                 if (!cancelled) {
                     const rows = result.rows || [];
                     supplierCacheRef.current[cacheKey] = rows;

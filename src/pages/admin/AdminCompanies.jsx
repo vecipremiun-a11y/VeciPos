@@ -1,20 +1,50 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../../store/useStore';
 import {
     Building2, CheckCircle, XCircle, Clock, DollarSign,
-    Eye, Ban, AlertCircle, Calendar, CreditCard, Power, Plus
+    Eye, Ban, Calendar, Plus, X
 } from 'lucide-react';
 import CompanyDetailsModal from './CompanyDetailsModal';
 import CreateCompanyModal from './CreateCompanyModal';
 import { cn } from '../../lib/utils';
+import { effectiveCompanyStatus } from '../../lib/companyAccess';
+
+// Estados del ciclo de vida de una empresa (editables por el admin).
+// 'pending_payment' se mantiene solo para mostrar/migrar empresas legacy.
+const STATUS_OPTIONS = [
+    { value: 'trial', label: 'Prueba' },
+    { value: 'active', label: 'Activa' },
+    { value: 'past_due', label: 'Vencida' },
+    { value: 'blocked', label: 'Bloqueada' },
+    { value: 'suspended', label: 'Suspendida' },
+    { value: 'cancelled', label: 'Cancelada' },
+    { value: 'pending_payment', label: 'Pendiente' },
+];
+const STATUS_TEXT = {
+    trial: 'text-blue-400', active: 'text-green-400', past_due: 'text-orange-400',
+    blocked: 'text-red-500', suspended: 'text-rose-400', cancelled: 'text-gray-400', pending_payment: 'text-yellow-400',
+};
+const PLAN_OPTIONS = [
+    { value: 'basico', label: 'Básico' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'pro', label: 'Pro' },
+];
+// Normaliza planes legacy/desconocidos a Básico (ya no existe el plan Gratis).
+const normPlan = (p) => {
+    const k = (p || '').toString().toLowerCase();
+    return (k === 'medium' || k === 'medio') ? 'medium' : (k === 'pro' ? 'pro' : 'basico');
+};
+const SELECT_CLS = 'bg-[#0f0f12] border border-white/10 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-[var(--color-primary)] outline-none cursor-pointer';
 
 const AdminCompanies = () => {
-    const { fetchAllSubscriptions, toggleCompanyStatus, deleteCompany, adminCreateSubscription, createCompany } = useStore();
+    const { fetchAllSubscriptions, toggleCompanyStatus, adminSetCompanyPlan, adminSetCompanyAccess, deleteCompany } = useStore();
     const [companies, setCompanies] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all'); // all, active, trial, suspended, pending
     const [selectedCompany, setSelectedCompany] = useState(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [activateCompany, setActivateCompany] = useState(null); // empresa en el modal de activar/extender
 
     useEffect(() => {
         loadCompanies();
@@ -32,23 +62,71 @@ const AdminCompanies = () => {
         }
     };
 
-    const handleToggleStatus = async (id, currentStatus) => {
-        // Simple toggle for now: Only suspend/activate if implemented in backend
-        // User prompt shows UI logic for toggle, but minimal store logic.
-        // Assuming toggleCompanyStatus exists or we use raw update if not.
-        if (!toggleCompanyStatus) {
-            alert("Función toggleCompanyStatus no implementada en store.");
+    // Nombre de la empresa principal a la que está enlazada (si es secundaria).
+    const parentName = (company) => companies.find(x => x.company_id === company.parent_company_id)?.company_name;
+
+    // Estado efectivo (calculado por fecha) — lo que se muestra y sobre lo que se decide.
+    const effStatus = (company) => effectiveCompanyStatus({
+        status: company.company_status,
+        trial_ends_at: company.trial_ends_at,
+        access_until: company.access_until,
+    });
+
+    const handleStatusChange = async (company, newStatus) => {
+        if (newStatus === effStatus(company)) return;
+
+        // Activar/Extender → abre el modal para elegir hasta cuándo.
+        if (newStatus === 'active') {
+            setActivateCompany(company);
             return;
         }
-        const newStatus = currentStatus === 'active' ? 'suspended' : 'active';
-        if (window.confirm(`¿Estás seguro de cambiar el estado a ${newStatus}?`)) {
-            const res = await toggleCompanyStatus(id, newStatus);
-            if (res.success) {
-                loadCompanies();
-            } else {
-                alert("Error: " + res.error);
-            }
+        // Overrides manuales (bloqueo)
+        if (['suspended', 'cancelled'].includes(newStatus)) {
+            const label = newStatus === 'suspended' ? 'Suspendida' : 'Cancelada';
+            if (!window.confirm(`¿Cambiar "${company.company_name}" a ${label}? El usuario no podrá iniciar sesión.`)) return;
+            const res = await adminSetCompanyAccess(company.company_id, { status: newStatus });
+            if (res.success) loadCompanies(); else alert("Error: " + res.error);
+            return;
         }
+        // Dar/renovar prueba: 30 días desde hoy
+        if (newStatus === 'trial') {
+            const d = new Date(); d.setDate(d.getDate() + 30);
+            const res = await adminSetCompanyAccess(company.company_id, { status: 'trial', accessUntil: d.toISOString() });
+            if (res.success) loadCompanies(); else alert("Error: " + res.error);
+            return;
+        }
+        // Marcar Vencida manualmente (access_until = ahora)
+        if (newStatus === 'past_due') {
+            if (!window.confirm(`¿Marcar "${company.company_name}" como Vencida?`)) return;
+            const res = await adminSetCompanyAccess(company.company_id, { status: 'past_due', accessUntil: new Date().toISOString() });
+            if (res.success) loadCompanies(); else alert("Error: " + res.error);
+            return;
+        }
+        // Bloquear manualmente (se reactiva SOLA cuando pague)
+        if (newStatus === 'blocked') {
+            if (!window.confirm(`¿Bloquear "${company.company_name}"? No podrá ingresar hasta que pague (se reactiva automáticamente al pagar).`)) return;
+            const res = await adminSetCompanyAccess(company.company_id, { status: 'blocked', accessUntil: new Date().toISOString() });
+            if (res.success) loadCompanies(); else alert("Error: " + res.error);
+            return;
+        }
+        // Otros (legacy): set directo
+        const res = await toggleCompanyStatus(company.company_id, newStatus);
+        if (res.success) loadCompanies(); else alert("Error: " + res.error);
+    };
+
+    // Confirmación del modal: activa la empresa hasta la fecha elegida (sigue en el ciclo automático).
+    const handleConfirmActivate = async (accessUntilISO) => {
+        if (!activateCompany) return;
+        const res = await adminSetCompanyAccess(activateCompany.company_id, { status: 'active', accessUntil: accessUntilISO });
+        setActivateCompany(null);
+        if (res.success) loadCompanies(); else alert("Error: " + res.error);
+    };
+
+    const handlePlanChange = async (company, newPlan) => {
+        if (newPlan === normPlan(company.company_plan)) return;
+        const res = await adminSetCompanyPlan(company.company_id, newPlan);
+        if (res.success) loadCompanies();
+        else alert("Error: " + res.error);
     };
 
     const handleDelete = async (company) => {
@@ -62,71 +140,11 @@ const AdminCompanies = () => {
         }
     };
 
-    const handleActivateSubscription = async (company) => {
-        if (window.confirm(`¿Activar suscripción MANUAL para "${company.company_name}"? \n\nEsto le dará acceso completo con el plan Básico (Mensual).`)) {
-            const res = await adminCreateSubscription(company.company_id);
-            if (res.success) {
-                loadCompanies();
-                alert("✅ Suscripción activada correctamente.");
-            } else {
-                alert("Error: " + res.error);
-            }
-        }
-    };
-
 
     const filteredCompanies = companies.filter(company => {
         if (filter === 'all') return true;
-        return company.company_status === filter;
+        return effStatus(company) === filter;
     });
-
-    const getStatusBadge = (status) => {
-        const badges = {
-            active: {
-                label: 'Activa',
-                color: 'bg-green-500/10 text-green-400 border-green-500/30',
-                icon: CheckCircle
-            },
-            trial: {
-                label: 'Prueba',
-                color: 'bg-blue-500/10 text-blue-400 border-blue-500/30',
-                icon: Clock
-            },
-            suspended: {
-                label: 'Suspendida',
-                color: 'bg-red-500/10 text-red-400 border-red-500/30',
-                icon: Ban
-            },
-            past_due: {
-                label: 'Vencida',
-                color: 'bg-orange-500/10 text-orange-400 border-orange-500/30',
-                icon: AlertCircle
-            },
-            pending_payment: {
-                label: 'Pendiente',
-                color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30',
-                icon: Clock
-            },
-            cancelled: {
-                label: 'Cancelada',
-                color: 'bg-gray-500/10 text-gray-400 border-gray-500/30',
-                icon: XCircle
-            }
-        };
-
-        const badge = badges[status] || badges.pending_payment;
-        const Icon = badge.icon;
-
-        return (
-            <span className={cn(
-                'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border',
-                badge.color
-            )}>
-                <Icon size={14} />
-                {badge.label}
-            </span>
-        );
-    };
 
     const formatCurrency = (amount) => {
         return new Intl.NumberFormat('es-CL', {
@@ -158,9 +176,10 @@ const AdminCompanies = () => {
 
     const stats = {
         total: companies.length,
-        active: companies.filter(c => c.company_status === 'active').length,
-        trial: companies.filter(c => c.company_status === 'trial').length,
-        suspended: companies.filter(c => c.company_status === 'suspended').length,
+        active: companies.filter(c => effStatus(c) === 'active').length,
+        trial: companies.filter(c => effStatus(c) === 'trial').length,
+        // "Sin acceso" = bloqueadas (auto) + suspendidas (manual)
+        blocked: companies.filter(c => ['blocked', 'suspended'].includes(effStatus(c))).length,
         revenue: companies
             .filter(c => c.subscription_status === 'active')
             .reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0)
@@ -207,8 +226,8 @@ const AdminCompanies = () => {
                     bgColor="bg-blue-500/10"
                 />
                 <StatCard
-                    title="Suspendidas"
-                    value={stats.suspended}
+                    title="Sin acceso"
+                    value={stats.blocked}
                     icon={<Ban size={20} />}
                     color="text-red-400"
                     bgColor="bg-red-500/10"
@@ -230,6 +249,7 @@ const AdminCompanies = () => {
                     { id: 'active', label: 'Activas' },
                     { id: 'trial', label: 'Prueba' },
                     { id: 'past_due', label: 'Vencidas' },
+                    { id: 'blocked', label: 'Bloqueadas' },
                     { id: 'suspended', label: 'Suspendidas' }
                 ].map(f => (
                     <button
@@ -295,19 +315,37 @@ const AdminCompanies = () => {
                                                     <div className="text-xs text-gray-500">
                                                         ID: {company.company_id.slice(0, 12)}...
                                                     </div>
+                                                    {company.parent_company_id && (
+                                                        <div className="text-[11px] text-sky-400/80 mt-0.5">
+                                                            ↳ de {parentName(company) || 'empresa principal'}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">
-                                            {getStatusBadge(company.company_status)}
+                                            <select
+                                                value={effStatus(company)}
+                                                onChange={(e) => handleStatusChange(company, e.target.value)}
+                                                className={cn(SELECT_CLS, STATUS_TEXT[effStatus(company)] || 'text-gray-300')}
+                                                title="Cambiar estado"
+                                            >
+                                                {STATUS_OPTIONS.map(o => (
+                                                    <option key={o.value} value={o.value} className="bg-[#18181b] text-white">{o.label}</option>
+                                                ))}
+                                            </select>
                                         </td>
                                         <td className="px-6 py-4">
-                                            <div className="text-white font-medium">
-                                                {company.plan_name || 'Sin plan'}
-                                            </div>
-                                            <div className="text-xs text-gray-500">
-                                                {company.plan_id === 'monthly' ? 'Mensual' : 'Anual'}
-                                            </div>
+                                            <select
+                                                value={normPlan(company.company_plan)}
+                                                onChange={(e) => handlePlanChange(company, e.target.value)}
+                                                className={cn(SELECT_CLS, 'text-white')}
+                                                title="Cambiar plan"
+                                            >
+                                                {PLAN_OPTIONS.map(o => (
+                                                    <option key={o.value} value={o.value} className="bg-[#18181b] text-white">{o.label}</option>
+                                                ))}
+                                            </select>
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="font-mono text-green-400">
@@ -316,12 +354,12 @@ const AdminCompanies = () => {
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="text-sm text-gray-400">
-                                                <div className="flex items-center gap-1 mb-1">
+                                                <div className="flex items-center gap-1">
                                                     <Calendar size={14} />
-                                                    {formatDate(company.current_period_start)}
+                                                    <span className="text-xs">Acceso hasta</span>
                                                 </div>
-                                                <div className="text-xs text-gray-500">
-                                                    hasta {formatDate(company.current_period_end)}
+                                                <div className="text-xs text-gray-200 font-medium mt-0.5">
+                                                    {formatDate(company.access_until)}
                                                 </div>
                                             </div>
                                         </td>
@@ -334,30 +372,6 @@ const AdminCompanies = () => {
                                                 >
                                                     <Eye size={18} />
                                                 </button>
-                                                <button
-                                                    onClick={() => handleToggleStatus(company.company_id, company.company_status)}
-                                                    className={cn(
-                                                        'p-2 rounded-lg transition-colors',
-                                                        company.company_status === 'active'
-                                                            ? 'text-yellow-400 hover:bg-yellow-500/10'
-                                                            : 'text-green-400 hover:bg-green-500/10'
-                                                    )}
-                                                    title={company.company_status === 'active' ? "Suspender" : "Activar"}
-                                                >
-                                                    {company.company_status === 'active' ? <Ban size={18} /> : <Power size={18} />}
-                                                </button>
-
-                                                {/* Activate Manual Sub */}
-                                                {!company.subscription_id && company.company_status === 'active' && (
-                                                    <button
-                                                        onClick={() => handleActivateSubscription(company)}
-                                                        className="p-2 rounded-lg transition-colors text-blue-400 hover:bg-blue-500/10"
-                                                        title="Activar Suscripción Manual (Básico)"
-                                                    >
-                                                        <CreditCard size={18} />
-                                                    </button>
-                                                )}
-
                                                 {/* Delete Button (Only for pending/suspended/cancelled) */}
                                                 {['pending_payment', 'suspended', 'cancelled'].includes(company.company_status) && (
                                                     <button
@@ -393,7 +407,82 @@ const AdminCompanies = () => {
                     onCreated={loadCompanies}
                 />
             )}
+
+            {/* Activate / Extend Modal */}
+            {activateCompany && (
+                <ActivateModal
+                    company={activateCompany}
+                    onClose={() => setActivateCompany(null)}
+                    onConfirm={handleConfirmActivate}
+                />
+            )}
         </div>
+    );
+};
+
+// Modal para activar/extender una empresa eligiendo hasta cuándo (duraciones rápidas o fecha exacta).
+const ActivateModal = ({ company, onClose, onConfirm }) => {
+    const [custom, setCustom] = useState('');
+    const [busy, setBusy] = useState(false);
+
+    const endOfDay = (d) => { d.setHours(23, 59, 59, 0); return d; };
+    const addMonths = (n) => { const d = new Date(); d.setMonth(d.getMonth() + n); return endOfDay(d); };
+
+    const apply = async (date) => {
+        setBusy(true);
+        await onConfirm(date.toISOString());
+        setBusy(false);
+    };
+
+    const quick = [
+        { label: '1 mes', months: 1 },
+        { label: '3 meses', months: 3 },
+        { label: '6 meses', months: 6 },
+        { label: '1 año', months: 12 },
+    ];
+
+    return createPortal(
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
+            <div className="bg-[#18181b] border border-white/10 rounded-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-start justify-between mb-1">
+                    <h3 className="text-lg font-bold text-white">Activar / Extender</h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white p-1"><X size={18} /></button>
+                </div>
+                <p className="text-sm text-gray-400 mb-5">{company.company_name} — elige hasta cuándo tendrá acceso. Al llegar esa fecha, vuelve a evaluarse automáticamente.</p>
+
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Duración rápida</p>
+                <div className="grid grid-cols-2 gap-2 mb-5">
+                    {quick.map(q => (
+                        <button
+                            key={q.months}
+                            disabled={busy}
+                            onClick={() => apply(addMonths(q.months))}
+                            className="py-2.5 rounded-lg border border-white/10 text-white text-sm font-bold hover:border-[var(--color-primary)]/60 hover:bg-[var(--color-primary)]/10 disabled:opacity-60"
+                        >
+                            {q.label}
+                        </button>
+                    ))}
+                </div>
+
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">O fecha exacta</p>
+                <div className="flex items-center gap-2">
+                    <input
+                        type="date"
+                        value={custom}
+                        onChange={(e) => setCustom(e.target.value)}
+                        className="flex-1 bg-[#0f0f12] border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm focus:border-[var(--color-primary)] outline-none"
+                    />
+                    <button
+                        disabled={busy || !custom}
+                        onClick={() => apply(endOfDay(new Date(custom + 'T00:00:00')))}
+                        className="px-4 py-2.5 rounded-lg bg-[var(--color-primary)] text-black font-bold text-sm hover:brightness-110 disabled:opacity-50"
+                    >
+                        Aplicar
+                    </button>
+                </div>
+            </div>
+        </div>,
+        document.body
     );
 };
 

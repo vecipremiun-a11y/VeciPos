@@ -32,6 +32,13 @@ import siiLookupRutHandler from './api/sii/lookup-rut.js';
 import siiReservedFoliosHandler from './api/sii/reserved-folios.js';
 import siiReserveFoliosHandler from './api/sii/reserve-folios.js';
 
+import startTrialHandler from './api/start-trial.js';
+import subscribeHandler from './api/subscribe.js';
+import expireCompaniesHandler from './api/cron/expire-companies.js';
+import authLoginHandler from './api/auth/login.js';
+import adminActionsHandler from './api/admin/actions.js';
+import dataActionsHandler from './api/data/actions.js';
+
 dotenv.config({ path: '.env.local' });
 dotenv.config();
 
@@ -228,6 +235,42 @@ app.all('/api/sorteo/public', async (req, res) => {
 app.all('/api/sorteo/register', async (req, res) => {
     try { return await sorteoRegisterHandler(req, res); }
     catch (error) { console.error('❌ /api/sorteo/register error:', error); return res.status(500).json({ error: error.message }); }
+});
+
+// Registro público de prueba gratis (crea cuenta trial sin pago)
+app.all('/api/start-trial', async (req, res) => {
+    try { return await startTrialHandler(req, res); }
+    catch (error) { console.error('❌ /api/start-trial error:', error); return res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Suscripción in-app: crea preferencia de pago MercadoPago (CLP) para empresa existente
+app.all('/api/subscribe', async (req, res) => {
+    try { return await subscribeHandler(req, res); }
+    catch (error) { console.error('❌ /api/subscribe error:', error); return res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Cron: marca Vencidas las empresas con access_until pasado (en prod lo dispara Vercel Cron).
+app.all('/api/cron/expire-companies', async (req, res) => {
+    try { return await expireCompaniesHandler(req, res); }
+    catch (error) { console.error('❌ /api/cron/expire-companies error:', error); return res.status(500).json({ ok: false, error: error.message }); }
+});
+
+// Auth: login server-side (bcrypt + sesión). El navegador ya no consulta la contraseña.
+app.all('/api/auth/login', async (req, res) => {
+    try { return await authLoginHandler(req, res); }
+    catch (error) { console.error('❌ /api/auth/login error:', error); return res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Admin: mutaciones sensibles server-side (exige sesión firmada de super_admin).
+app.all('/api/admin/actions', async (req, res) => {
+    try { return await adminActionsHandler(req, res); }
+    catch (error) { console.error('❌ /api/admin/actions error:', error); return res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Datos del app normal (exige sesión + membresía a la empresa).
+app.all('/api/data/actions', async (req, res) => {
+    try { return await dataActionsHandler(req, res); }
+    catch (error) { console.error('❌ /api/data/actions error:', error); return res.status(500).json({ success: false, error: error.message }); }
 });
 
 app.use('/api', (_req, res) => {

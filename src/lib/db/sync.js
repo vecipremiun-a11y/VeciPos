@@ -8,8 +8,23 @@
 // y leen Dexie y Turso. El store sigue siendo la fuente única de verdad para
 // la UI online — Dexie es el respaldo para offline + arranque rápido.
 
-import { turso } from '../turso';
 import { localDb, pendingOpsApi, siiFoliosApi } from './localdb';
+
+// Llama al endpoint autenticado de datos (sesión + membresía validadas server-side).
+// Desde Fase 1 · Paso 6 el catálogo ya NO se lee con el token de Turso en el navegador.
+async function dataApi(action, payload) {
+  const r = await fetch('/api/data/actions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok || data?.success === false) {
+    throw new Error(data?.error || `HTTP ${r.status}`);
+  }
+  return data.data;
+}
 
 /**
  * Descarga el catálogo completo de una empresa desde Turso a Dexie.
@@ -26,17 +41,10 @@ export async function syncCatalogFromServer(companyId) {
   if (!navigator.onLine) return { ok: false, error: 'offline' };
 
   try {
-    // Lecturas paralelas — todas filtradas por company_id
-    const queries = [
-      { sql: 'SELECT * FROM products WHERE company_id = ?', args: [companyId] },
-      { sql: 'SELECT * FROM product_lots WHERE company_id = ? AND quantity > 0', args: [companyId] },
-      { sql: 'SELECT * FROM clients WHERE company_id = ?', args: [companyId] },
-      { sql: 'SELECT * FROM categories WHERE company_id = ?', args: [companyId] },
-      { sql: 'SELECT * FROM tax_rates WHERE company_id = ?', args: [companyId] },
-    ];
-
-    const results = await turso.batch(queries, 'read');
-    const [productsRes, lotsRes, clientsRes, catsRes, taxesRes] = results;
+    // Lecturas vía API autenticada — el servidor filtra por company_id y
+    // valida membresía. products llega SIN la columna image (carga bajo demanda).
+    const { products, productLots, clients, categories, taxRates } =
+      await dataApi('syncCatalog', { companyId });
 
     const stamp = (rows, extra = {}) =>
       rows.map((r) => ({ ...r, companyId, ...extra }));
@@ -63,13 +71,13 @@ export async function syncCatalogFromServer(companyId) {
         ]);
 
         await Promise.all([
-          localDb.products.bulkPut(stamp(productsRes.rows)),
+          localDb.products.bulkPut(stamp(products)),
           localDb.productLots.bulkPut(
-            stamp(lotsRes.rows.map((r) => ({ ...r, productId: r.product_id })))
+            stamp(productLots.map((r) => ({ ...r, productId: r.product_id })))
           ),
-          localDb.clients.bulkPut(stamp(clientsRes.rows)),
-          localDb.categories.bulkPut(stamp(catsRes.rows)),
-          localDb.taxRates.bulkPut(stamp(taxesRes.rows)),
+          localDb.clients.bulkPut(stamp(clients)),
+          localDb.categories.bulkPut(stamp(categories)),
+          localDb.taxRates.bulkPut(stamp(taxRates)),
         ]);
 
         await localDb.meta.put({
@@ -80,11 +88,11 @@ export async function syncCatalogFromServer(companyId) {
     );
 
     const counts = {
-      products: productsRes.rows.length,
-      productLots: lotsRes.rows.length,
-      clients: clientsRes.rows.length,
-      categories: catsRes.rows.length,
-      taxRates: taxesRes.rows.length,
+      products: products.length,
+      productLots: productLots.length,
+      clients: clients.length,
+      categories: categories.length,
+      taxRates: taxRates.length,
     };
 
     console.log('[sync] Catálogo sincronizado:', counts);
@@ -136,24 +144,17 @@ export async function syncCatalogIncremental(companyId) {
   }
 
   try {
-    const queries = [
-      { sql: 'SELECT * FROM products WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
-      { sql: 'SELECT * FROM product_lots WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
-      { sql: 'SELECT * FROM clients WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
-      { sql: 'SELECT * FROM categories WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
-      { sql: 'SELECT * FROM tax_rates WHERE company_id = ? AND updated_at > ?', args: [companyId, lastSync] },
-    ];
-
-    const results = await turso.batch(queries, 'read');
-    const [productsRes, lotsRes, clientsRes, catsRes, taxesRes] = results;
+    // Incremental vía API autenticada (updated_at > lastSync, server-side)
+    const { products, productLots, clients, categories, taxRates } =
+      await dataApi('syncCatalog', { companyId, since: lastSync });
 
     const stamp = (rows, extra = {}) => rows.map((r) => ({ ...r, companyId, ...extra }));
     const allRows = [
-      ...productsRes.rows,
-      ...lotsRes.rows,
-      ...clientsRes.rows,
-      ...catsRes.rows,
-      ...taxesRes.rows,
+      ...products,
+      ...productLots,
+      ...clients,
+      ...categories,
+      ...taxRates,
     ];
 
     // Avanzar checkpoint solo si efectivamente trajimos filas. Si quedó vacío,
@@ -174,22 +175,22 @@ export async function syncCatalogIncremental(companyId) {
         localDb.meta,
       ],
       async () => {
-        if (productsRes.rows.length) {
-          await localDb.products.bulkPut(stamp(productsRes.rows));
+        if (products.length) {
+          await localDb.products.bulkPut(stamp(products));
         }
-        if (lotsRes.rows.length) {
+        if (productLots.length) {
           await localDb.productLots.bulkPut(
-            stamp(lotsRes.rows.map((r) => ({ ...r, productId: r.product_id })))
+            stamp(productLots.map((r) => ({ ...r, productId: r.product_id })))
           );
         }
-        if (clientsRes.rows.length) {
-          await localDb.clients.bulkPut(stamp(clientsRes.rows));
+        if (clients.length) {
+          await localDb.clients.bulkPut(stamp(clients));
         }
-        if (catsRes.rows.length) {
-          await localDb.categories.bulkPut(stamp(catsRes.rows));
+        if (categories.length) {
+          await localDb.categories.bulkPut(stamp(categories));
         }
-        if (taxesRes.rows.length) {
-          await localDb.taxRates.bulkPut(stamp(taxesRes.rows));
+        if (taxRates.length) {
+          await localDb.taxRates.bulkPut(stamp(taxRates));
         }
         if (maxUpdatedAt !== lastSync) {
           await localDb.meta.put({
@@ -201,11 +202,11 @@ export async function syncCatalogIncremental(companyId) {
     );
 
     const counts = {
-      products: productsRes.rows.length,
-      productLots: lotsRes.rows.length,
-      clients: clientsRes.rows.length,
-      categories: catsRes.rows.length,
-      taxRates: taxesRes.rows.length,
+      products: products.length,
+      productLots: productLots.length,
+      clients: clients.length,
+      categories: categories.length,
+      taxRates: taxRates.length,
     };
 
     if (allRows.length > 0) {

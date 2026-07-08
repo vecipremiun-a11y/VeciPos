@@ -1,0 +1,858 @@
+import { createClient } from '@libsql/client';
+import { getSession, isCompanyMember } from '../_lib/guard.js';
+import { personalActions } from '../_lib/personalActions.js';
+import { saleCommit, saleAggregations, saleAggregationsReverse, saleCancel, saleDetails } from '../_lib/salesActions.js';
+import { registerActions } from '../_lib/registerActions.js';
+import { purchaseActions } from '../_lib/purchaseActions.js';
+import { preorderActions } from '../_lib/preorderActions.js';
+import { reportRun } from '../_lib/reportActions.js';
+import { sorteoActions } from '../_lib/sorteoActions.js';
+import { companyActions } from '../_lib/companyActions.js';
+import { paymentActions } from '../_lib/paymentActions.js';
+import { comboActions } from '../_lib/comboActions.js';
+import { alertActions } from '../_lib/alertActions.js';
+import { roleActions } from '../_lib/roleActions.js';
+import { supportActions } from '../_lib/supportActions.js';
+import { inventoryActions } from '../_lib/inventoryActions.js';
+import { saleAdjustActions } from '../_lib/saleAdjustActions.js';
+import { userActions } from '../_lib/userActions.js';
+import { maintenanceActions } from '../_lib/maintenanceActions.js';
+import { telemetryActions } from '../_lib/telemetryActions.js';
+import { taxActions } from '../_lib/taxActions.js';
+import { bootstrapActions } from '../_lib/bootstrapActions.js';
+
+// Endpoint de datos del app normal (Fase 1 · Paso 4).
+// Exige: sesión firmada + que el usuario sea MIEMBRO de la empresa (companyId).
+// Establece el patrón para migrar el resto de dominios sacando el token del navegador.
+
+let _turso = null;
+function getTurso() {
+    if (_turso) return _turso;
+    const url = process.env.VITE_TURSO_DATABASE_URL;
+    const authToken = process.env.VITE_TURSO_AUTH_TOKEN;
+    if (!url || !authToken) throw new Error('Faltan variables Turso');
+    _turso = createClient({ url, authToken });
+    return _turso;
+}
+
+export default async function handler(req, res) {
+    if (req.method !== 'POST') {
+        return res.status(405).json({ success: false, error: 'Method not allowed' });
+    }
+
+    // 1) Sesión válida
+    const session = getSession(req);
+    if (!session) return res.status(401).json({ success: false, error: 'No autenticado' });
+
+    try {
+        const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+        const { action, companyId } = body;
+
+        const turso = getTurso();
+
+        // Acción de sesión (sin companyId): empresas del usuario (recarga / selector).
+        if (action === 'userCompanies') {
+            return res.status(200).json(await bootstrapActions.userCompanies(turso, session));
+        }
+
+        if (!companyId) return res.status(400).json({ success: false, error: 'Falta companyId' });
+
+        // 2) Membresía: el usuario debe pertenecer a esa empresa (aislamiento multi-empresa)
+        if (!(await isCompanyMember(turso, session.uid, companyId))) {
+            return res.status(403).json({ success: false, error: 'No perteneces a esta empresa' });
+        }
+
+        // 3a) Dominio Personal/Nómina (Fase 1 · Paso 9): acciones 'personal.<clave>'
+        if (typeof action === 'string' && action.startsWith('personal.')) {
+            const handler = personalActions[action.slice('personal.'.length)];
+            if (!handler) return res.status(400).json({ success: false, error: 'Acción no válida' });
+            return res.status(200).json(await handler(turso, companyId, session, body));
+        }
+
+        // 3) Despacho por acción (todas ya con companyId validado)
+        switch (action) {
+            case 'dashboard':
+                return res.status(200).json({ success: true, data: await dashboard(turso, companyId, body) });
+            case 'fetchSales':
+                return res.status(200).json({ success: true, data: await fetchSales(turso, companyId, body) });
+            case 'syncCatalog':
+                return res.status(200).json({ success: true, data: await syncCatalog(turso, companyId, body) });
+            // Carga inicial de la app (Fase 1 · Paso 35)
+            case 'bootstrap':
+                return res.status(200).json(await bootstrapActions.bootstrap(turso, companyId));
+            // Lectura paginada de productos para sync WooCommerce (Fase 1 · Paso 37)
+            case 'productsForStoreSync':
+                return res.status(200).json(await productsForStoreSync(turso, companyId, body));
+            // Recompresión de imágenes: lectura paginada + update (Paso final)
+            case 'productsWithImages':
+                return res.status(200).json(await productsWithImages(turso, companyId, body));
+            case 'productImageUpdate':
+                return res.status(200).json(await productImageUpdate(turso, companyId, body));
+            // Inventario (Fase 1 · Paso 7)
+            case 'productCreate':
+                return res.status(200).json(await productCreate(turso, companyId, session, body.product));
+            case 'productUpdate':
+                return res.status(200).json(await productUpdate(turso, companyId, session, body.id, body.product));
+            case 'productDelete':
+                return res.status(200).json(await productDelete(turso, companyId, session, body.id));
+            case 'categoryCreate':
+                return res.status(200).json(await categoryCreate(turso, companyId, session, body.category));
+            case 'categoryUpdate':
+                return res.status(200).json(await categoryUpdate(turso, companyId, session, body.id, body.category));
+            case 'categoryDelete':
+                return res.status(200).json(await categoryDelete(turso, companyId, session, body.id));
+            // Clientes y cuenta corriente (Fase 1 · Paso 8)
+            case 'clientCreate':
+                return res.status(200).json(await clientCreate(turso, companyId, session, body.client));
+            case 'clientUpdate':
+                return res.status(200).json(await clientUpdate(turso, companyId, session, body.id, body.client));
+            case 'clientDelete':
+                return res.status(200).json(await clientDelete(turso, companyId, session, body.id));
+            case 'clientRegisterPayment':
+                return res.status(200).json(await clientRegisterPayment(turso, companyId, session, body));
+            case 'clientSyncDebt':
+                return res.status(200).json(await clientSyncDebt(turso, companyId, body.clientId));
+            case 'clientCreditStatus':
+                return res.status(200).json(await clientCreditStatus(turso, companyId, body));
+            case 'clientsDebtSummary':
+                return res.status(200).json(await clientsDebtSummary(turso, companyId));
+            // Tasas de impuesto (Fase 1 · Paso 34)
+            case 'taxRateCreate':
+            case 'taxRateUpdate':
+            case 'taxRateDelete':
+                return res.status(200).json(await taxActions[action](turso, companyId, session, body));
+            // Venta (Fase 1 · Paso 10 — corazón del POS, lógica portada tal cual)
+            case 'saleCommit':
+                return res.status(200).json(await saleCommit(turso, companyId, session, body));
+            case 'saleAggregations':
+                return res.status(200).json(await saleAggregations(turso, companyId, session, body));
+            case 'saleAggregationsReverse':
+                return res.status(200).json(await saleAggregationsReverse(turso, companyId, session, body));
+            // Anulación y detalle de venta + caja registradora (Fase 1 · Paso 12)
+            case 'saleCancel':
+                return res.status(200).json(await saleCancel(turso, companyId, session, body));
+            case 'saleDetails':
+                return res.status(200).json(await saleDetails(turso, companyId, session, body));
+            // Caja: mutaciones (Paso 12) + lecturas/stats/conciliación (Paso 13)
+            case 'registerCheck':
+            case 'registerOpen':
+            case 'registerClose':
+            case 'cashMovementAdd':
+            case 'registerActiveList':
+            case 'registerStats':
+            case 'registerMethodTransactions':
+            case 'registersClosed':
+            case 'cashMovementsList':
+            case 'registerReport':
+            case 'terminalCardSales':
+            case 'conciliatedSaleIds':
+            case 'untaggedCardSalesCount':
+            case 'reconciliationsList':
+            case 'reconciliationSave':
+            case 'reconciliationDelete':
+                return res.status(200).json(await registerActions[action](turso, companyId, session, body));
+            // Compras y proveedores (Fase 1 · Paso 14)
+            case 'supplierCreate':
+            case 'supplierUpdate':
+            case 'supplierDelete':
+            case 'supplierOrdersFetch':
+            case 'supplierOrderCreate':
+            case 'supplierOrderDelete':
+            case 'purchaseCreate':
+            case 'purchasesFetch':
+            case 'purchaseDetails':
+            case 'purchaseDelete':
+            case 'invoicePayFull':
+            case 'invoicePayPartial':
+            case 'supplierPurchaseSummaryGet':
+                return res.status(200).json(await purchaseActions[action](turso, companyId, session, body));
+            // Encargos / preorders (Fase 1 · Paso 15)
+            case 'preorderCreate':
+            case 'preordersFetch':
+            case 'pendingWebOrders':
+            case 'preorderDetails':
+            case 'preorderStatusUpdate':
+            case 'preorderPaymentAdd':
+            case 'preorderDeliver':
+            case 'preorderReportsRaw':
+            case 'preorderAnalyticsRaw':
+            case 'preorderableProducts':
+                return res.status(200).json(await preorderActions[action](turso, companyId, session, body));
+            // Reportes generales (catálogo whitelisteado — Fase 1 · Paso 18)
+            case 'report':
+                return res.status(200).json(await reportRun(turso, companyId, session, body));
+            // Sorteos (Fase 1 · Paso 22)
+            case 'sorteoLoad':
+            case 'sorteoParticipants':
+            case 'sorteoSave':
+            case 'sorteoClearParticipants':
+                return res.status(200).json(await sorteoActions[action](turso, companyId, session, body));
+            // Configuración de empresa / folios / DTEs (Fase 1 · Paso 23)
+            case 'companyFieldsUpdate':
+            case 'folioSettingsLoad':
+            case 'folioSettingsSave':
+            case 'dteRetryDelete':
+            case 'companyModuleUpdate':
+            case 'companyLinkedCreate':
+            case 'receiptSettingsLoad':
+            case 'preventaSettingsLoad':
+            case 'receiptSettingsSave':
+            case 'preventaSettingsSave':
+            case 'paymentSettingsGet':
+                return res.status(200).json(await companyActions[action](turso, companyId, session, body));
+            // Telemetría de fallback analítico (Fase 1 · Paso 33)
+            case 'telemetryFlush':
+                return res.status(200).json(await telemetryActions.telemetryFlush(turso, companyId, session, body));
+            // Mantenimiento de agregaciones (Fase 1 · Paso 32)
+            case 'recalculateProductProfits':
+            case 'cleanOldProductStats':
+            case 'recalculateProductAverages':
+                return res.status(200).json(await maintenanceActions[action](turso, companyId, session, body));
+            // Usuarios de la empresa (Fase 1 · Paso 31)
+            case 'userCreate':
+            case 'userUpdate':
+            case 'userDelete':
+                return res.status(200).json(await userActions[action](turso, companyId, session, body));
+            // Medios de pago: config + datáfonos + cuentas (Fase 1 · Paso 25)
+            case 'paymentSettingsLoad':
+            case 'paymentMethodToggle':
+            case 'terminalCreate':
+            case 'terminalUpdate':
+            case 'terminalDelete':
+            case 'bankAccountCreate':
+            case 'bankAccountUpdate':
+            case 'bankAccountDelete':
+            case 'transferIntentCreate':
+                return res.status(200).json(await paymentActions[action](turso, companyId, session, body));
+            // Combos / packs (Fase 1 · Paso 25)
+            case 'combosFetch':
+            case 'combosForPos':
+            case 'comboCreate':
+            case 'comboUpdate':
+            case 'comboDelete':
+            case 'comboToggle':
+                return res.status(200).json(await comboActions[action](turso, companyId, session, body));
+            // Alertas de inventario (Fase 1 · Paso 26)
+            case 'alertSettingsGet':
+            case 'alertSettingsSave':
+            case 'alertsList':
+            case 'alertsUnreadCount':
+            case 'alertMarkRead':
+            case 'alertsMarkAllRead':
+            case 'alertsDeleteOld':
+            case 'alertSummary':
+            case 'alertsCheck':
+            case 'stockPredictionsCheck':
+                return res.status(200).json(await alertActions[action](turso, companyId, session, body));
+            // Roles y permisos (Fase 1 · Paso 27)
+            case 'rolePermissionsList':
+            case 'companyRolesList':
+            case 'rolePermissionUpdate':
+            case 'customRoleCreate':
+            case 'customRoleDelete':
+            case 'customRoleRename':
+            case 'roleResetDefaults':
+            case 'permissionsSeedDefaults':
+                return res.status(200).json(await roleActions[action](turso, companyId, session, body));
+            // Soporte (lado cliente — Fase 1 · Paso 28)
+            case 'supportTicketCreate':
+            case 'supportTicketsList':
+            case 'supportTicketMessages':
+            case 'supportMessageSend':
+            case 'supportMessagesMarkRead':
+            case 'supportAttachmentUpload':
+            case 'supportMessageAttachments':
+                return res.status(200).json(await supportActions[action](turso, companyId, session, body));
+            // Lotes + control de inventario + reconciliación (Fase 1 · Paso 29)
+            case 'lotsReport':
+            case 'lotsGlobalStats':
+            case 'lotWriteOff':
+            case 'lotWriteOffAll':
+            case 'lossesList':
+            case 'lossesStats':
+            case 'controlCreate':
+            case 'controlActive':
+            case 'controlProducts':
+            case 'controlSaveItem':
+            case 'controlRemoveItem':
+            case 'controlComplete':
+            case 'controlCancel':
+            case 'controlReport':
+            case 'controlHistory':
+            case 'reconciliationData':
+            case 'reconciliationLots':
+            case 'reconcileProduct':
+            case 'productProfitReport':
+                return res.status(200).json(await inventoryActions[action](turso, companyId, session, body));
+            // Suspendidas + preventas + devoluciones (Fase 1 · Paso 30)
+            case 'suspendedCount':
+            case 'suspendCreate':
+            case 'suspendedList':
+            case 'suspendRecover':
+            case 'suspendDelete':
+            case 'preventaCreate':
+            case 'preventasPending':
+            case 'preventaByCode':
+            case 'preventaComplete':
+            case 'preventaCancel':
+            case 'preventasCount':
+            case 'saleReturnCommit':
+            case 'saleReturnsList':
+                return res.status(200).json(await saleAdjustActions[action](turso, companyId, session, body));
+            default:
+                return res.status(400).json({ success: false, error: 'Acción no válida' });
+        }
+    } catch (e) {
+        console.error('❌ /api/data/actions error:', e);
+        return res.status(500).json({ success: false, error: e.message });
+    }
+}
+
+// Devuelve los datos crudos del dashboard (el cliente hace la presentación).
+// Las fechas (todayStr/monthStartStr) llegan del cliente ya calculadas en su zona horaria.
+async function dashboard(turso, companyId, { todayStr, monthStartStr }) {
+    const [todayStatsRes, monthStatsRes, todayUtilityRes] = await Promise.all([
+        turso.execute({
+            sql: `SELECT COALESCE(SUM(total_sales), 0) as total_sales, COALESCE(SUM(total_orders), 0) as total_orders
+                  FROM sales_daily_summary WHERE company_id = ? AND day = ?`,
+            args: [companyId, todayStr],
+        }),
+        turso.execute({
+            sql: `SELECT day, total_sales, total_orders FROM sales_daily_summary
+                  WHERE company_id = ? AND day >= ? AND day <= ? ORDER BY day ASC`,
+            args: [companyId, monthStartStr, todayStr],
+        }),
+        turso.execute({
+            sql: `SELECT COALESCE(SUM(total_profit), 0) as total_profit FROM product_daily_profit
+                  WHERE company_id = ? AND day = ?`,
+            args: [companyId, todayStr],
+        }),
+    ]);
+    const [recentSalesRes, lowStockRes, topProductsRes] = await Promise.all([
+        turso.execute({
+            sql: `SELECT s.*, u.name as user_name FROM sales s
+                  LEFT JOIN users u ON s.user_id = u.id
+                  WHERE s.company_id = ? ORDER BY s.date DESC LIMIT 20`,
+            args: [companyId],
+        }),
+        turso.execute({
+            sql: 'SELECT * FROM products WHERE company_id = ? AND stock <= 0 LIMIT 20',
+            args: [companyId],
+        }),
+        turso.execute({
+            sql: `SELECT p.id, p.name, p.category, p.unit, pdp.total_quantity, pdp.total_revenue
+                  FROM product_daily_profit pdp JOIN products p ON pdp.product_id = p.id
+                  WHERE pdp.company_id = ? AND pdp.day = ?
+                  ORDER BY pdp.total_quantity DESC LIMIT 10`,
+            args: [companyId, todayStr],
+        }),
+    ]);
+
+    return {
+        todayStats: todayStatsRes.rows[0] || { total_sales: 0, total_orders: 0 },
+        monthlyStats: monthStatsRes.rows,
+        todayUtility: todayUtilityRes.rows[0]?.total_profit || 0,
+        recentSales: recentSalesRes.rows,
+        lowStockProducts: lowStockRes.rows,
+        topProducts: topProductsRes.rows,
+    };
+}
+
+// Historial de ventas (columnas livianas) con filtros. Las fechas llegan del cliente
+// (ya calculadas en su zona horaria). Devuelve las filas crudas.
+async function fetchSales(turso, companyId, body) {
+    const { start, end, saleIdFilter, paymentMethodFilter, sellerIdFilter } = body;
+    const limit = Math.min(Math.max(parseInt(body.limit, 10) || 30, 1), 200);
+    const offset = Math.max(parseInt(body.offset, 10) || 0, 0);
+
+    let query = 'SELECT id, date, total, status, user_id, payment_method, client_name, client_id FROM sales WHERE company_id = ?';
+    const args = [companyId];
+
+    if (saleIdFilter) {
+        query += ' AND id = ?';
+        args.push(saleIdFilter);
+    } else {
+        query += ' AND date >= ? AND date <= ?';
+        args.push(start, end);
+        if (paymentMethodFilter && paymentMethodFilter !== 'Todos') { query += ' AND payment_method = ?'; args.push(paymentMethodFilter); }
+        if (sellerIdFilter && sellerIdFilter !== 'Todos') { query += ' AND user_id = ?'; args.push(sellerIdFilter); }
+    }
+
+    query += ' ORDER BY id DESC LIMIT ? OFFSET ?';
+    args.push(limit, offset);
+
+    const result = await turso.execute({ sql: query, args });
+    return result.rows;
+}
+
+// Catálogo para el sync offline (Dexie). Sin `since`: full (lots con quantity > 0).
+// Con `since`: incremental (updated_at > since; lots SIN filtro de quantity para
+// detectar lotes que llegan a 0). Mismas queries que hacía el navegador directo.
+// NOTA: products EXCLUYE la columna `image` (base64, ~150MB en empresas grandes):
+// no cabe en una respuesta serverless y las imágenes ya se cargan bajo demanda.
+const PRODUCT_COLS = 'id, name, price, stock, category, sku, cost, tax_rate, unit, supplier, '
+    + 'pending_adjustment, is_offer, offer_price, price_ranges, scale_group_id, company_id, '
+    + 'original_price, sale_mode, allow_item_notes, preorder_unit, preorder_billing_unit, '
+    + 'preorder_price_per_kg, preorder_gram_per_unit, preorder_use_base_price, units_per_box, updated_at';
+
+async function syncCatalog(turso, companyId, { since }) {
+    const queries = since
+        ? [
+            { sql: `SELECT ${PRODUCT_COLS} FROM products WHERE company_id = ? AND updated_at > ?`, args: [companyId, since] },
+            { sql: 'SELECT * FROM product_lots WHERE company_id = ? AND updated_at > ?', args: [companyId, since] },
+            { sql: 'SELECT * FROM clients WHERE company_id = ? AND updated_at > ?', args: [companyId, since] },
+            { sql: 'SELECT * FROM categories WHERE company_id = ? AND updated_at > ?', args: [companyId, since] },
+            { sql: 'SELECT * FROM tax_rates WHERE company_id = ? AND updated_at > ?', args: [companyId, since] },
+        ]
+        : [
+            { sql: `SELECT ${PRODUCT_COLS} FROM products WHERE company_id = ?`, args: [companyId] },
+            { sql: 'SELECT * FROM product_lots WHERE company_id = ? AND quantity > 0', args: [companyId] },
+            { sql: 'SELECT * FROM clients WHERE company_id = ?', args: [companyId] },
+            { sql: 'SELECT * FROM categories WHERE company_id = ?', args: [companyId] },
+            { sql: 'SELECT * FROM tax_rates WHERE company_id = ?', args: [companyId] },
+        ];
+
+    const [productsRes, lotsRes, clientsRes, catsRes, taxesRes] = await turso.batch(queries, 'read');
+    return {
+        products: productsRes.rows,
+        productLots: lotsRes.rows,
+        clients: clientsRes.rows,
+        categories: catsRes.rows,
+        taxRates: taxesRes.rows,
+    };
+}
+
+// Productos con SKU para sincronizar hacia WooCommerce (Paso 37). Paginado porque
+// incluye `image` (base64) y el payload debe caber en la respuesta serverless.
+// El envío a Woo sigue siendo del cliente (loop intacto); esto solo mueve la lectura.
+async function productsForStoreSync(turso, companyId, { offset = 0, limit = 25 }) {
+    const lim = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 100);
+    const off = Math.max(parseInt(offset, 10) || 0, 0);
+    const [rowsRes, countRes] = await turso.batch([
+        {
+            sql: `SELECT id, name, sku, price, stock, category, cost, unit, is_offer, offer_price, tax_rate, image, price_ranges
+                  FROM products WHERE company_id = ? AND sku IS NOT NULL AND TRIM(sku) <> ''
+                  ORDER BY id ASC LIMIT ? OFFSET ?`,
+            args: [companyId, lim, off],
+        },
+        { sql: "SELECT COUNT(*) AS c FROM products WHERE company_id = ? AND sku IS NOT NULL AND TRIM(sku) <> ''", args: [companyId] },
+    ], 'read');
+    return { success: true, products: rowsRes.rows, total: countRes.rows[0].c };
+}
+
+// Productos con imagen (paginado) para la recompresión de imágenes (Paso final).
+// La compresión ocurre en el navegador (canvas); server solo lee y actualiza.
+async function productsWithImages(turso, companyId, { offset = 0, limit = 10 }) {
+    const lim = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50);
+    const off = Math.max(parseInt(offset, 10) || 0, 0);
+    const [rowsRes, countRes] = await turso.batch([
+        {
+            sql: "SELECT id, name, image FROM products WHERE company_id = ? AND image IS NOT NULL AND image != '[object Object]' ORDER BY id ASC LIMIT ? OFFSET ?",
+            args: [companyId, lim, off],
+        },
+        { sql: "SELECT COUNT(*) AS c FROM products WHERE company_id = ? AND image IS NOT NULL AND image != '[object Object]'", args: [companyId] },
+    ], 'read');
+    return { success: true, products: rowsRes.rows, total: countRes.rows[0].c };
+}
+
+async function productImageUpdate(turso, companyId, { id, image }) {
+    if (!id) return { success: false, error: 'Falta id' };
+    await turso.execute({
+        sql: 'UPDATE products SET image = ? WHERE id = ? AND company_id = ?',
+        args: [image, id, companyId],
+    });
+    return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Inventario (Fase 1 · Paso 7) — mutaciones de productos y categorías.
+// Mismas queries que hacía el navegador, ahora con sesión + membresía
+// validadas y el audit_log firmado con el usuario de la sesión.
+// ─────────────────────────────────────────────────────────────────
+
+async function auditLog(turso, companyId, session, action, entity, details) {
+    await turso.execute({
+        sql: 'INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        args: [companyId, session?.uid ?? null, action, entity, JSON.stringify(details), new Date().toISOString()],
+    });
+}
+
+async function productCreate(turso, companyId, session, product) {
+    if (!product?.name) return { success: false, error: 'Falta el nombre del producto' };
+
+    // Pre-check de SKU duplicado (mismo comportamiento que tenía el cliente)
+    if (product.sku && !String(product.sku).startsWith('QUICK-')) {
+        const dup = await turso.execute({
+            sql: 'SELECT id, name FROM products WHERE sku = ? AND company_id = ? LIMIT 1',
+            args: [product.sku, companyId],
+        });
+        if (dup.rows.length > 0) {
+            const existing = dup.rows[0];
+            return {
+                success: false,
+                error: 'SKU_DUPLICATE',
+                message: `Ya existe un producto con SKU ${product.sku}: "${existing.name}" (id=${existing.id}). Ábrelo desde el listado para editarlo.`,
+                existingProductId: existing.id,
+            };
+        }
+    }
+
+    const result = await turso.execute({
+        sql: `INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier,
+                is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes,
+                preorder_unit, preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit,
+                preorder_use_base_price, units_per_box)
+              VALUES (?, ?, ROUND(?, 3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        args: [
+            product.name, product.price, product.stock, product.category, product.sku,
+            product.image || null, product.cost || 0, product.tax_rate || 0, product.unit || 'Und',
+            product.supplier || null, product.is_offer ? 1 : 0, product.offer_price || 0,
+            JSON.stringify(product.price_ranges || []), product.scale_group_id || null, companyId,
+            product.sale_mode || 'sale_only', product.allow_item_notes ? 1 : 0,
+            product.preorder_unit || null, product.preorder_billing_unit || 'unit',
+            product.preorder_price_per_kg || 0, product.preorder_gram_per_unit || 0,
+            product.preorder_use_base_price !== undefined ? (product.preorder_use_base_price ? 1 : 0) : 1,
+            product.units_per_box || 0,
+        ],
+    });
+
+    await auditLog(turso, companyId, session, 'CREATE', 'PRODUCT', { name: product.name, sku: product.sku });
+    return { success: true, product: result.rows[0] };
+}
+
+async function productUpdate(turso, companyId, session, id, product) {
+    if (!id || !product) return { success: false, error: 'Faltan datos' };
+
+    // Stock anterior leído del servidor (fuente de verdad) para el registro de ajuste
+    const prev = await turso.execute({
+        sql: 'SELECT stock FROM products WHERE id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    if (prev.rows.length === 0) return { success: false, error: 'Producto no encontrado' };
+    const oldStock = parseFloat(prev.rows[0].stock) || 0;
+    const newStock = Math.round((parseFloat(product.stock) || 0) * 1000) / 1000;
+
+    await turso.execute({
+        sql: `UPDATE products SET name=?, price=?, stock=ROUND(?, 3), category=?, sku=?, image=?, cost=?, tax_rate=?,
+                unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=?, sale_mode=?,
+                allow_item_notes=?, preorder_unit=?, preorder_billing_unit=?, preorder_price_per_kg=?,
+                preorder_gram_per_unit=?, preorder_use_base_price=?, units_per_box=?
+              WHERE id = ? AND company_id = ?`,
+        args: [
+            product.name, product.price, product.stock, product.category, product.sku, product.image,
+            product.cost || 0, product.tax_rate || 0, product.unit || 'Und', product.supplier || null,
+            product.is_offer ? 1 : 0, product.offer_price || 0, JSON.stringify(product.price_ranges || []),
+            product.scale_group_id || null, product.sale_mode || 'sale_only', product.allow_item_notes ? 1 : 0,
+            product.preorder_unit || null, product.preorder_billing_unit || 'unit',
+            product.preorder_price_per_kg || 0, product.preorder_gram_per_unit || 0,
+            product.preorder_use_base_price !== undefined ? (product.preorder_use_base_price ? 1 : 0) : 1,
+            product.units_per_box || 0,
+            id, companyId,
+        ],
+    });
+
+    if (Math.abs(newStock - oldStock) >= 0.001) {
+        await turso.execute({
+            sql: `INSERT INTO stock_adjustments (company_id, product_id, user_id, user_name, old_stock, new_stock, difference, reason, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [companyId, id, session?.uid ?? null, session?.username || 'Desconocido', oldStock, newStock,
+                Math.round((newStock - oldStock) * 1000) / 1000, 'manual', new Date().toISOString()],
+        });
+    }
+
+    await auditLog(turso, companyId, session, 'UPDATE', 'PRODUCT', { id, name: product.name, sku: product.sku });
+    return { success: true };
+}
+
+async function productDelete(turso, companyId, session, id) {
+    if (!id) return { success: false, error: 'Falta id' };
+    await turso.execute({
+        sql: 'DELETE FROM products WHERE id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    await auditLog(turso, companyId, session, 'DELETE', 'PRODUCT', { id });
+    return { success: true };
+}
+
+async function categoryCreate(turso, companyId, session, category) {
+    if (!category?.name) return { success: false, error: 'Falta el nombre de la categoría' };
+    const result = await turso.execute({
+        sql: 'INSERT INTO categories (name, color, status, show_in_pos, show_in_preorders, company_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING *',
+        args: [
+            category.name, category.color, category.status || 'active',
+            category.showInPos !== false ? 1 : 0, category.showInPreorders !== false ? 1 : 0, companyId,
+        ],
+    });
+    await auditLog(turso, companyId, session, 'CREATE', 'CATEGORY', { name: category.name });
+    return { success: true, category: result.rows[0] };
+}
+
+async function categoryUpdate(turso, companyId, session, id, category) {
+    if (!id || !category) return { success: false, error: 'Faltan datos' };
+
+    const prev = await turso.execute({
+        sql: 'SELECT name FROM categories WHERE id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    if (prev.rows.length === 0) return { success: false, error: 'Categoría no encontrada' };
+    const oldName = prev.rows[0].name;
+    const nameChanged = oldName !== category.name;
+
+    const queries = [
+        {
+            sql: 'UPDATE categories SET name = ?, color = ?, status = ?, show_in_pos = ?, show_in_preorders = ? WHERE id = ? AND company_id = ?',
+            args: [
+                category.name, category.color, category.status,
+                category.showInPos !== false ? 1 : 0, category.showInPreorders !== false ? 1 : 0, id, companyId,
+            ],
+        },
+    ];
+    if (nameChanged) {
+        // Renombrar la categoría en los productos que la usan (mismo batch atómico)
+        queries.push({
+            sql: 'UPDATE products SET category = ? WHERE category = ? AND company_id = ?',
+            args: [category.name, oldName, companyId],
+        });
+    }
+    queries.push({
+        sql: 'INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        args: [companyId, session?.uid ?? null, 'UPDATE', 'CATEGORY', JSON.stringify({ id, name: category.name }), new Date().toISOString()],
+    });
+
+    await turso.batch(queries);
+    return { success: true, nameChanged, oldName };
+}
+
+async function categoryDelete(turso, companyId, session, id) {
+    if (!id) return { success: false, error: 'Falta id' };
+    await turso.execute({
+        sql: 'DELETE FROM categories WHERE id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    await auditLog(turso, companyId, session, 'DELETE', 'CATEGORY', { id });
+    return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Clientes y cuenta corriente (Fase 1 · Paso 8).
+// RUT/email únicos se validan contra la BD (no contra el estado del
+// navegador). El abono de deuda queda estampado con company_id y los
+// UPDATE de ventas filtran por company_id (fix cross-tenant).
+// ─────────────────────────────────────────────────────────────────
+
+const cleanRutSrv = (rut) => (rut ? String(rut).replace(/[.\-\s]/g, '').toUpperCase() : '');
+// Normalización de RUT en SQL, equivalente a cleanRutSrv
+const SQL_RUT_NORM = "UPPER(REPLACE(REPLACE(REPLACE(COALESCE(rut,''),'.',''),'-',''),' ',''))";
+
+async function checkClientDuplicates(turso, companyId, client, excludeId = null) {
+    const rutClean = cleanRutSrv(client.rut);
+    if (rutClean) {
+        const dup = await turso.execute({
+            sql: `SELECT id, name FROM clients WHERE company_id = ? AND ${SQL_RUT_NORM} = ?${excludeId ? ' AND id != ?' : ''} LIMIT 1`,
+            args: excludeId ? [companyId, rutClean, excludeId] : [companyId, rutClean],
+        });
+        if (dup.rows.length) {
+            const d = dup.rows[0];
+            return { success: false, error: 'RUT_DUPLICATE', message: `Ya existe ${excludeId ? 'otro' : 'un'} cliente con ese RUT: ${d.name}`, existingClientId: d.id, existingClientName: d.name };
+        }
+    }
+    const emailClean = (client.email || '').trim().toLowerCase();
+    if (emailClean) {
+        const dup = await turso.execute({
+            sql: `SELECT id, name FROM clients WHERE company_id = ? AND LOWER(TRIM(COALESCE(email,''))) = ?${excludeId ? ' AND id != ?' : ''} LIMIT 1`,
+            args: excludeId ? [companyId, emailClean, excludeId] : [companyId, emailClean],
+        });
+        if (dup.rows.length) {
+            const d = dup.rows[0];
+            return { success: false, error: 'EMAIL_DUPLICATE', message: `Ya existe ${excludeId ? 'otro' : 'un'} cliente con ese correo: ${d.name}`, existingClientId: d.id, existingClientName: d.name };
+        }
+    }
+    return null;
+}
+
+async function clientCreate(turso, companyId, session, client) {
+    if (!client?.name) return { success: false, error: 'Falta el nombre del cliente' };
+    const dup = await checkClientDuplicates(turso, companyId, client);
+    if (dup) return dup;
+
+    const result = await turso.execute({
+        sql: `INSERT INTO clients (name, rut, phone, email, address, razon_social, giro, comuna, ciudad, created_at,
+                company_id, credit_limit, credit_period_days, credit_enabled, client_status)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        args: [
+            client.name, client.rut || '', client.phone || '', client.email || '', client.address || '',
+            client.razon_social || '', client.giro || '', client.comuna || '', client.ciudad || '',
+            new Date().toISOString(), companyId, client.credit_limit || 0, client.credit_period_days || 30,
+            client.credit_enabled !== undefined ? (client.credit_enabled ? 1 : 0) : 1,
+            client.client_status || 'active',
+        ],
+    });
+    await auditLog(turso, companyId, session, 'CREATE', 'CLIENT', { name: client.name });
+    return { success: true, client: result.rows[0] };
+}
+
+async function clientUpdate(turso, companyId, session, id, client) {
+    if (!id || !client) return { success: false, error: 'Faltan datos' };
+    const dup = await checkClientDuplicates(turso, companyId, client, id);
+    if (dup) return dup;
+
+    await turso.execute({
+        sql: `UPDATE clients SET name = ?, rut = ?, phone = ?, email = ?, address = ?, razon_social = ?, giro = ?,
+                comuna = ?, ciudad = ?, credit_limit = ?, credit_period_days = ?, credit_enabled = ?, client_status = ?
+              WHERE id = ? AND company_id = ?`,
+        args: [
+            client.name, client.rut ?? '', client.phone ?? '', client.email ?? '', client.address ?? '',
+            client.razon_social || '', client.giro || '', client.comuna || '', client.ciudad || '',
+            client.credit_limit || 0, client.credit_period_days || 30,
+            client.credit_enabled !== undefined ? (client.credit_enabled ? 1 : 0) : 1,
+            client.client_status || 'active', id, companyId,
+        ],
+    });
+    await auditLog(turso, companyId, session, 'UPDATE', 'CLIENT', { id, name: client.name });
+    return { success: true };
+}
+
+async function clientDelete(turso, companyId, session, id) {
+    if (!id) return { success: false, error: 'Falta id' };
+    await turso.execute({
+        sql: 'DELETE FROM clients WHERE id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    await auditLog(turso, companyId, session, 'DELETE', 'CLIENT', { id });
+    return { success: true };
+}
+
+// Recalcula y persiste la deuda de un cliente (columnas total_debt / pending / overdue).
+async function clientSyncDebt(turso, companyId, clientId) {
+    if (!clientId) return { success: false, error: 'Falta clientId' };
+
+    let debtFormula = 'total';
+    try {
+        const cols = await turso.execute('PRAGMA table_info(sales)');
+        if (cols.rows.some(c => c.name === 'amount_paid')) debtFormula = 'total - COALESCE(amount_paid, 0)';
+    } catch { /* columna probablemente existe */ }
+
+    const res = await turso.execute({
+        sql: `SELECT COALESCE(SUM(${debtFormula}), 0) as total_debt,
+                     COUNT(*) as pending_count,
+                     COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') THEN 1 END) as overdue_count
+              FROM sales
+              WHERE client_id = ? AND company_id = ? AND payment_method = 'Crédito'
+                AND status NOT IN ('paid', 'cancelled')`,
+        args: [clientId, companyId],
+    });
+    const r = res.rows[0] || {};
+    const totalDebt = parseFloat(r.total_debt) || 0;
+    const pendingCount = parseInt(r.pending_count, 10) || 0;
+    const overdueCount = parseInt(r.overdue_count, 10) || 0;
+
+    await turso.execute({
+        sql: 'UPDATE clients SET total_debt = ?, pending_sales_count = ?, overdue_count = ? WHERE id = ? AND company_id = ?',
+        args: [totalDebt, pendingCount, overdueCount, clientId, companyId],
+    });
+
+    return { success: true, totalDebt, pendingCount, overdueCount };
+}
+
+// Estado de crédito de UN cliente (deuda, vencidos, por vencer) — solo agregación;
+// el cliente combina con credit_limit/status desde su estado local.
+async function clientCreditStatus(turso, companyId, { clientId }) {
+    if (!clientId) return { success: false, error: 'Falta clientId' };
+    let debtFormula = 'total';
+    try {
+        const cols = await turso.execute('PRAGMA table_info(sales)');
+        if (cols.rows.some(c => c.name === 'amount_paid')) debtFormula = 'total - COALESCE(amount_paid, 0)';
+    } catch { /* columna probablemente existe */ }
+
+    const result = await turso.execute({
+        sql: `SELECT
+                COALESCE(SUM(${debtFormula}), 0) as total_debt,
+                COUNT(*) as pending_count,
+                MIN(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') AND status NOT IN ('paid','cancelled') THEN payment_due_date END) as oldest_overdue_date,
+                COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') AND status NOT IN ('paid','cancelled') THEN 1 END) as overdue_count,
+                COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date >= datetime('now') AND payment_due_date <= datetime('now', '+3 days') AND status NOT IN ('paid','cancelled') THEN 1 END) as due_soon_count
+              FROM sales
+              WHERE client_id = ? AND company_id = ? AND payment_method = 'Crédito'
+              AND status NOT IN ('paid', 'cancelled')`,
+        args: [clientId, companyId],
+    });
+    return { success: true, row: result.rows[0] || null };
+}
+
+// Resumen de deuda de TODOS los clientes (indicadores del listado).
+async function clientsDebtSummary(turso, companyId) {
+    const result = await turso.execute({
+        sql: `SELECT
+                client_id,
+                COALESCE(SUM(total), 0) as total_debt,
+                COUNT(*) as pending_count,
+                MIN(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') THEN payment_due_date END) as oldest_overdue_date,
+                COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') THEN 1 END) as overdue_count,
+                COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date >= datetime('now') AND payment_due_date <= datetime('now', '+3 days') THEN 1 END) as due_soon_count
+              FROM sales
+              WHERE company_id = ? AND payment_method = 'Crédito'
+              AND status NOT IN ('paid', 'cancelled')
+              AND client_id IS NOT NULL
+              GROUP BY client_id`,
+        args: [companyId],
+    });
+    return { success: true, rows: result.rows };
+}
+
+// Abono / pago de deuda: crea la venta-abono y marca las boletas pagadas.
+// FIX vs versión navegador: el abono se estampa con company_id y los UPDATE
+// de ventas filtran por company_id (antes se podía marcar pagada una boleta ajena).
+async function clientRegisterPayment(turso, companyId, session, body) {
+    const { client, amount, distribution, paymentMethod, date } = body;
+    if (!client?.id || !Array.isArray(distribution) || distribution.length === 0) {
+        return { success: false, error: 'Faltan datos del pago' };
+    }
+
+    // Asegurar columna amount_paid (migración perezosa heredada)
+    try {
+        const cols = await turso.execute('PRAGMA table_info(sales)');
+        if (!cols.rows.some(c => c.name === 'amount_paid')) {
+            await turso.execute('ALTER TABLE sales ADD COLUMN amount_paid REAL DEFAULT 0');
+        }
+    } catch { /* columna probablemente existe */ }
+
+    const partialCount = distribution.filter(d => !d.fullyPaid).length;
+    let summaryDetail = `${distribution.length} boleta${distribution.length > 1 ? 's' : ''}`;
+    if (partialCount > 0) summaryDetail += ` (${partialCount} parcial)`;
+
+    const items = JSON.stringify([{
+        id: 'payment-adj',
+        name: `Abono / Pago de Deuda (${summaryDetail})`,
+        price: amount, quantity: 1, unit: 'Und',
+    }]);
+    const paymentDetails = JSON.stringify({ amount, change: 0, type: 'debt_payment', distribution });
+
+    const queries = [{
+        sql: `INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id, status,
+                has_negative_stock, client_id, client_name, company_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', 0, ?, ?, ?)`,
+        args: [date || new Date().toISOString(), amount, `Abono de Cliente: ${client.name}`, items,
+            paymentMethod, paymentDetails, session?.uid ?? null, client.id, client.name, companyId],
+    }];
+
+    for (const d of distribution) {
+        if (d.fullyPaid) {
+            queries.push({
+                sql: "UPDATE sales SET status = 'paid', amount_paid = total WHERE id = ? AND company_id = ?",
+                args: [Number(d.saleId), companyId],
+            });
+        } else {
+            queries.push({
+                sql: "UPDATE sales SET amount_paid = ?, status = CASE WHEN ? >= total THEN 'paid' ELSE status END WHERE id = ? AND company_id = ?",
+                args: [d.newTotalPaid, d.newTotalPaid, Number(d.saleId), companyId],
+            });
+        }
+    }
+
+    await turso.batch(queries);
+    await auditLog(turso, companyId, session, 'CREATE', 'CLIENT_PAYMENT', { clientId: client.id, amount, boletas: distribution.length });
+
+    // Recalcular deuda del cliente y devolverla para actualizar la UI
+    const debt = await clientSyncDebt(turso, companyId, client.id);
+    return { success: true, debt };
+}

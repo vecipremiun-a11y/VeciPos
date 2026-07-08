@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { FileText, Trash2, Loader, Search, Calendar, DollarSign, CreditCard, Wallet, TrendingUp, AlertTriangle, ChevronDown, ChevronRight, X, Check, Eye, Paperclip } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { turso } from '../lib/turso';
+import { dataApiCall, reportCall } from '../lib/dataApi';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -55,39 +55,20 @@ const Invoices = () => {
         return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
     }, [searchQuery]);
 
-    // Build SQL WHERE clause from current filters
-    const buildFilterClause = useCallback(() => {
-        const conditions = ['company_id = ?'];
-        const args = [activeCompanyId];
-        if (dateFrom) { conditions.push('date >= ?'); args.push(dateFrom); }
-        if (dateTo) { conditions.push('date <= ?'); args.push(dateTo); }
-        if (supplierFilter) { conditions.push('supplier_id = ?'); args.push(parseInt(supplierFilter)); }
-        if (paymentTypeFilter === 'cash') conditions.push('is_credit = 0');
-        if (paymentTypeFilter === 'credit') conditions.push('is_credit = 1');
-        if (debouncedSearch) {
-            conditions.push("(LOWER(COALESCE(invoice_number,'')) LIKE ? OR LOWER(COALESCE(supplier_name,'')) LIKE ?)");
-            const like = `%${debouncedSearch.toLowerCase()}%`;
-            args.push(like, like);
-        }
-        return { where: conditions.join(' AND '), args };
-    }, [activeCompanyId, dateFrom, dateTo, supplierFilter, paymentTypeFilter, debouncedSearch]);
+    // Filtros estructurados — el WHERE se construye en el servidor (Paso 21)
+    const buildFilterParams = useCallback(() => ({
+        dateFrom: dateFrom || null,
+        dateTo: dateTo || null,
+        supplierFilter: supplierFilter || null,
+        paymentType: paymentTypeFilter || null,
+        search: debouncedSearch || null,
+    }), [dateFrom, dateTo, supplierFilter, paymentTypeFilter, debouncedSearch]);
 
     // --- SQL-based data loaders ---
 
     const loadStats = useCallback(async () => {
         try {
-            const { where, args } = buildFilterClause();
-            const result = await turso.execute({
-                sql: `SELECT
-                        COUNT(*) as total_count,
-                        COALESCE(SUM(total), 0) as total_sum,
-                        COALESCE(SUM(CASE WHEN is_credit = 0 THEN total ELSE 0 END), 0) as contado_sum,
-                        COUNT(CASE WHEN is_credit = 0 THEN 1 END) as contado_count,
-                        COALESCE(SUM(CASE WHEN is_credit = 1 THEN total ELSE 0 END), 0) as credito_sum,
-                        COUNT(CASE WHEN is_credit = 1 THEN 1 END) as credito_count
-                      FROM purchases WHERE ${where}`,
-                args
-            });
+            const result = { rows: await reportCall(activeCompanyId, 'invoiceStats', buildFilterParams()) };
             const row = result.rows[0] || {};
             setStats({
                 totalMes: row.total_sum || 0,
@@ -100,23 +81,12 @@ const Invoices = () => {
         } catch (error) {
             console.error('Error loading stats:', error);
         }
-    }, [buildFilterClause]);
+    }, [buildFilterParams]);
 
     const loadMonthlyStats = useCallback(async () => {
         try {
             const sixMonthsAgo = format(startOfMonth(subMonths(new Date(), 5)), 'yyyy-MM-dd');
-            const result = await turso.execute({
-                sql: `SELECT
-                        strftime('%Y-%m', date) as month,
-                        COALESCE(SUM(total), 0) as total,
-                        COALESCE(SUM(CASE WHEN is_credit = 0 THEN total ELSE 0 END), 0) as cash,
-                        COALESCE(SUM(CASE WHEN is_credit = 1 THEN total ELSE 0 END), 0) as credit
-                      FROM purchases
-                      WHERE company_id = ? AND date >= ?
-                      GROUP BY strftime('%Y-%m', date)
-                      ORDER BY month`,
-                args: [activeCompanyId, sixMonthsAgo]
-            });
+            const result = { rows: await reportCall(activeCompanyId, 'invoiceMonthly', { sixMonthsAgo }) };
             const dataMap = {};
             (result.rows || []).forEach(r => { dataMap[r.month] = r; });
             const months = [];
@@ -136,13 +106,7 @@ const Invoices = () => {
 
     const loadPendingInvoices = useCallback(async () => {
         try {
-            const result = await turso.execute({
-                sql: `SELECT id, supplier_id, supplier_name, invoice_number, date, expiry_date, total, is_credit, status, amount_paid
-                      FROM purchases
-                      WHERE company_id = ? AND is_credit = 1 AND status != 'paid'
-                      ORDER BY supplier_name, date DESC`,
-                args: [activeCompanyId]
-            });
+            const result = { rows: await reportCall(activeCompanyId, 'invoicesPending', {}) };
             const grouped = {};
             (result.rows || []).forEach(inv => {
                 const key = inv.supplier_id || 'unknown';
@@ -168,14 +132,7 @@ const Invoices = () => {
         isLoadingRef.current = true;
         setIsLoadingInvoices(true);
         try {
-            const { where, args } = buildFilterClause();
-            const result = await turso.execute({
-                sql: `SELECT id, supplier_id, supplier_name, invoice_number, date, total, is_credit, status, amount_paid
-                      FROM purchases WHERE ${where}
-                      ORDER BY date DESC
-                      LIMIT ? OFFSET ?`,
-                args: [...args, INVOICES_PAGE_SIZE, currentOffset]
-            });
+            const result = { rows: await reportCall(activeCompanyId, 'invoicesList', { ...buildFilterParams(), limit: INVOICES_PAGE_SIZE, offset: currentOffset }) };
             const fetched = result.rows || [];
             if (reset) {
                 setInvoices(fetched);
@@ -191,7 +148,7 @@ const Invoices = () => {
         }
         setIsLoadingInvoices(false);
         isLoadingRef.current = false;
-    }, [buildFilterClause, hasMoreInvoices]);
+    }, [buildFilterParams, hasMoreInvoices]);
 
     // Initial load
     useEffect(() => {
@@ -343,20 +300,21 @@ const Invoices = () => {
         try {
             if (paymentType === 'total') {
                 // Pagar todas las facturas del proveedor
-                for (const inv of paymentModal.supplier.invoices) {
-                    await turso.execute({
-                        sql: `UPDATE purchases SET amount_paid = total, status = 'paid', payment_date = ? WHERE id = ?`,
-                        args: [format(new Date(), 'yyyy-MM-dd'), inv.id]
-                    });
-                }
+                await dataApiCall('invoicePayFull', {
+                    companyId: activeCompanyId,
+                    ids: paymentModal.supplier.invoices.map(inv => inv.id),
+                    paymentDate: format(new Date(), 'yyyy-MM-dd'),
+                });
             } else {
                 const amount = parseFloat(paymentAmount) || 0;
                 const newPaid = (paymentModal.invoice.amount_paid || 0) + amount;
                 const isPaidFull = newPaid >= paymentModal.invoice.total;
 
-                await turso.execute({
-                    sql: `UPDATE purchases SET amount_paid = ?, status = ?, payment_date = ? WHERE id = ?`,
-                    args: [newPaid, isPaidFull ? 'paid' : 'partial', format(new Date(), 'yyyy-MM-dd'), paymentModal.invoice.id]
+                await dataApiCall('invoicePayPartial', {
+                    companyId: activeCompanyId,
+                    id: paymentModal.invoice.id,
+                    newPaid, isPaidFull,
+                    paymentDate: format(new Date(), 'yyyy-MM-dd'),
                 });
             }
 

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import { useStore } from '../store/useStore';
-import { turso } from '../lib/turso';
-import { Moon, Sun, Settings as SettingsIcon, FileText, Smartphone, Wrench, Building2, Save, CreditCard, Volume2, Play, ChefHat, Tv, Copy, Check, ExternalLink, Scale } from 'lucide-react';
+import { dataApiCall, reportCall } from '../lib/dataApi';
+import { Moon, Sun, Settings as SettingsIcon, FileText, Smartphone, Wrench, Building2, Save, CreditCard, Volume2, Play, ChefHat, Tv, Copy, Check, ExternalLink, Scale, Crown } from 'lucide-react';
 import ScaleConfig from '../components/ScaleConfig';
 
 import { recompressAllImages } from '../scripts/recompressImages';
@@ -10,6 +11,7 @@ import PaymentMethodsSettings from '../components/settings/PaymentMethodsSetting
 import PermissionsSettings from '../components/settings/PermissionsSettings';
 import StoreIntegrationSettings from '../components/settings/StoreIntegrationSettings';
 import SiiSettings from '../components/settings/SiiSettings';
+import PlanSettings from '../components/settings/PlanSettings';
 import { Shield, Stamp } from 'lucide-react';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
@@ -17,9 +19,36 @@ import { PRODUCTION_SOUNDS, getProductionSound, setProductionSound, playProducti
 import { cn } from '../lib/utils';
 
 const Settings = () => {
-    const { darkMode, toggleDarkMode, inventoryAdjustmentMode, toggleInventoryAdjustmentMode, activeCompanyId, currentCompanyTimezone, fetchInitialData, updateCurrency } = useStore();
+    const { darkMode, toggleDarkMode, inventoryAdjustmentMode, toggleInventoryAdjustmentMode, activeCompanyId, currentCompanyTimezone, fetchInitialData, updateCurrency, checkSubscriptionStatus, currentUser, currentUserCompanyRole, hasModule } = useStore();
+    const canPreorders = hasModule('preorders');
+
+    // Contratar/gestionar el plan es SOLO del dueño (owner), no del personal (aunque sea Administrador).
+    const isOwner = currentUserCompanyRole === 'owner' || currentUserCompanyRole === 'super_admin' || currentUser?.role === 'super_admin';
     const { can } = usePermissions();
     const [selectedTimezone, setSelectedTimezone] = useState(currentCompanyTimezone);
+
+    // Suscripción / Plan (para mostrar plan y vencimiento en "Información del Sistema")
+    const [subInfo, setSubInfo] = useState(null);
+    useEffect(() => {
+        if (activeCompanyId && checkSubscriptionStatus) {
+            checkSubscriptionStatus(activeCompanyId).then(setSubInfo).catch(() => setSubInfo(null));
+        }
+    }, [activeCompanyId, checkSubscriptionStatus]);
+
+    const formatSubDate = (iso) => {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        return isNaN(d) ? '—' : d.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+    const SUB_STATUS = {
+        trial: { label: 'Prueba', color: 'text-blue-400' },
+        active: { label: 'Activa', color: 'text-[var(--color-primary)]' },
+        past_due: { label: 'Vencida', color: 'text-red-400' },
+        suspended: { label: 'Suspendida', color: 'text-red-400' },
+        cancelled: { label: 'Cancelada', color: 'text-red-400' },
+        pending_payment: { label: 'Pago pendiente', color: 'text-yellow-400' },
+    };
+    const subStatus = SUB_STATUS[subInfo?.status] || { label: 'Activa', color: 'text-[var(--color-primary)]' };
 
     // Estados para información de la empresa
     const [companyInfo, setCompanyInfo] = useState({
@@ -60,7 +89,24 @@ const Settings = () => {
         setTimeout(() => setKdsCopied(false), 2000);
     };
 
-    const [activeTab, setActiveTab] = useState('general');
+    // La sección activa viene de la URL (/settings/:tab); el menú vive en la barra lateral.
+    const { tab } = useParams();
+    const TAB_PERMISSIONS = {
+        general: 'settings.view',
+        plan: 'settings.company',
+        company: 'settings.company',
+        receipts: 'settings.receipts',
+        payments: 'settings.payments',
+        integrations: 'settings.system',
+        scale: 'settings.system',
+        sii: 'settings.system',
+        permissions: 'settings.manage_permissions',
+        system: 'settings.system',
+    };
+    const requested = tab && TAB_PERMISSIONS[tab] ? tab : 'general';
+    // 'plan' requiere ser dueño (no basta el permiso settings.company que tiene el Administrador).
+    const canOpenTab = (t) => t === 'general' ? true : (t === 'plan' ? isOwner : can(TAB_PERMISSIONS[t]));
+    const activeTab = canOpenTab(requested) ? requested : 'general';
 
     // Sonido de nuevos pedidos en Producción
     const [productionSoundId, setProductionSoundId] = useState(getProductionSound());
@@ -72,10 +118,7 @@ const Settings = () => {
         // mismo sonido (la TV no comparte localStorage con el POS).
         try {
             if (activeCompanyId) {
-                await turso.execute({
-                    sql: 'UPDATE companies SET kds_sound = ? WHERE id = ?',
-                    args: [productionSoundId, activeCompanyId]
-                });
+                await dataApiCall('companyFieldsUpdate', { companyId: activeCompanyId, fields: { kds_sound: productionSoundId } });
             }
         } catch (e) {
             console.error('Error guardando sonido KDS en empresa:', e);
@@ -90,23 +133,7 @@ const Settings = () => {
     useEffect(() => {
         const loadCompanyInfo = async () => {
             try {
-                const result = await turso.execute({
-                    sql: `SELECT 
-                            legal_name,
-                            full_address,
-                            tax_id_legal,
-                            phone_main,
-                            email_main,
-                            city,
-                            country,
-                            postal_code,
-                            website,
-                            business_type,
-                            currency,
-                            kds_token
-                          FROM companies WHERE id = ?`,
-                    args: [activeCompanyId]
-                });
+                const result = { rows: await reportCall(activeCompanyId, 'companyInfo', {}) };
 
                 if (result.rows.length > 0) {
                     const data = result.rows[0];
@@ -149,10 +176,7 @@ const Settings = () => {
 
     const handleTimezoneChange = async (newTimezone) => {
         try {
-            await turso.execute({
-                sql: 'UPDATE companies SET timezone = ? WHERE id = ?',
-                args: [newTimezone, activeCompanyId]
-            });
+            await dataApiCall('companyFieldsUpdate', { companyId: activeCompanyId, fields: { timezone: newTimezone } });
             setSelectedTimezone(newTimezone);
             await fetchInitialData(); // Reload to update store
             alert('Zona horaria actualizada correctamente');
@@ -165,34 +189,21 @@ const Settings = () => {
     const handleSaveCompanyInfo = async () => {
         setIsSavingCompanyInfo(true);
         try {
-            await turso.execute({
-                sql: `UPDATE companies SET 
-                        legal_name = ?,
-                        full_address = ?,
-                        tax_id_legal = ?,
-                        phone_main = ?,
-                        email_main = ?,
-                        city = ?,
-                        country = ?,
-                        postal_code = ?,
-                        website = ?,
-                        business_type = ?,
-                        currency = ?
-                      WHERE id = ?`,
-                args: [
-                    companyInfo.legal_name,
-                    companyInfo.full_address,
-                    companyInfo.tax_id_legal,
-                    companyInfo.phone_main,
-                    companyInfo.email_main,
-                    companyInfo.city,
-                    companyInfo.country,
-                    companyInfo.postal_code,
-                    companyInfo.website,
-                    companyInfo.business_type,
-                    companyInfo.currency,
-                    activeCompanyId
-                ]
+            await dataApiCall('companyFieldsUpdate', {
+                companyId: activeCompanyId,
+                fields: {
+                    legal_name: companyInfo.legal_name,
+                    full_address: companyInfo.full_address,
+                    tax_id_legal: companyInfo.tax_id_legal,
+                    phone_main: companyInfo.phone_main,
+                    email_main: companyInfo.email_main,
+                    city: companyInfo.city,
+                    country: companyInfo.country,
+                    postal_code: companyInfo.postal_code,
+                    website: companyInfo.website,
+                    business_type: companyInfo.business_type,
+                    currency: companyInfo.currency,
+                },
             });
             alert('✅ Información de la empresa guardada correctamente');
         } catch (e) {
@@ -204,43 +215,11 @@ const Settings = () => {
     };
 
     return (
-        <div className="max-w-6xl mx-auto space-y-6">
+        <div className="max-w-7xl mx-auto space-y-6">
             <h1 className="text-3xl font-bold text-[var(--color-text)] neon-text mb-6">Configuración</h1>
 
-            <div className="flex flex-col md:flex-row gap-6">
-                {/* SIDEBAR NAVIGATION */}
-                <div className="w-full md:w-64 flex-shrink-0">
-                    <div className="glass-card p-2 space-y-1">
-                        {[
-                            { id: 'general', label: 'General', icon: SettingsIcon, permission: null },
-                            { id: 'company', label: 'Empresa', icon: Building2, permission: 'settings.company' },
-                            { id: 'receipts', label: 'Boletas', icon: FileText, permission: 'settings.receipts' },
-                            { id: 'payments', label: 'Medios de Pago', icon: CreditCard, permission: 'settings.payments' },
-                            { id: 'integrations', label: 'Integraciones', icon: Smartphone, permission: 'settings.system' },
-                            { id: 'scale', label: 'Báscula', icon: Scale, permission: 'settings.system' },
-                            { id: 'sii', label: 'Facturación SII', icon: Stamp, permission: 'settings.system' },
-                            { id: 'permissions', label: 'Permisos', icon: Shield, permission: 'settings.manage_permissions' },
-                            { id: 'system', label: 'Sistema', icon: Wrench, permission: 'settings.system' },
-                        ].filter(item => !item.permission || can(item.permission)).map((item) => {
-                            const Icon = item.icon;
-                            return (
-                                <button
-                                    key={item.id}
-                                    onClick={() => setActiveTab(item.id)}
-                                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${activeTab === item.id
-                                        ? 'bg-[var(--color-primary)] text-white shadow-lg'
-                                        : 'text-[var(--color-text-muted)] hover:bg-[var(--glass-border)] hover:text-[var(--color-text)]'
-                                        }`}
-                                >
-                                    <Icon size={18} />
-                                    <span className="font-medium">{item.label}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                {/* CONTENT AREA */}
+            <div className="flex flex-col gap-6">
+                {/* CONTENT AREA (el menú de secciones vive en la barra lateral izquierda) */}
                 <div className="flex-1 space-y-6">
                     {activeTab === 'general' && (
                         <>
@@ -257,7 +236,24 @@ const Settings = () => {
                                     </div>
                                     <div className="flex justify-between border-b border-[var(--glass-border)] pb-2">
                                         <span className="text-[var(--color-text-muted)]">Estado de Licencia</span>
-                                        <span className="text-[var(--color-primary)] font-bold">Activa</span>
+                                        <span className={cn("font-bold", subStatus.color)}>{subStatus.label}</span>
+                                    </div>
+                                    <div className="flex justify-between border-b border-[var(--glass-border)] pb-2">
+                                        <span className="text-[var(--color-text-muted)]">Plan</span>
+                                        <span className="text-[var(--color-text)] font-bold">{subInfo?.planLabel || '—'}</span>
+                                    </div>
+                                    <div className="flex justify-between border-b border-[var(--glass-border)] pb-2">
+                                        <span className="text-[var(--color-text-muted)]">
+                                            {subInfo?.status === 'trial' ? 'Prueba vence' : 'Vencimiento'}
+                                        </span>
+                                        <span className="text-[var(--color-text)]">
+                                            {formatSubDate(subInfo?.expiresAt)}
+                                            {subInfo?.status === 'trial' && Number.isFinite(subInfo?.daysRemaining) && (
+                                                <span className="text-[var(--color-text-muted)] ml-2">
+                                                    ({subInfo.daysRemaining} días)
+                                                </span>
+                                            )}
+                                        </span>
                                     </div>
                                 </div>
                             </div>
@@ -305,7 +301,8 @@ const Settings = () => {
                                 </div>
                             </div>
 
-                            {/* ===== SONIDO DE NUEVOS PEDIDOS (PRODUCCIÓN) ===== */}
+                            {/* ===== SONIDO DE NUEVOS PEDIDOS (PRODUCCIÓN) — solo con módulo Pedidos (Medium+) ===== */}
+                            {canPreorders && (<>
                             <div className="glass-card animate-in fade-in slide-in-from-bottom-4 duration-500 delay-300">
                                 <div className="flex items-start gap-3 mb-4">
                                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-md shadow-amber-500/25 shrink-0">
@@ -390,7 +387,7 @@ const Settings = () => {
                                 </div>
                             </div>
 
-                            {/* ===== PANTALLA DE COCINA (TV / KDS) ===== */}
+                            {/* ===== PANTALLA DE COCINA (TV / KDS) — solo con módulo Pedidos (Medium+) ===== */}
                             <div className="glass-card animate-in fade-in slide-in-from-bottom-4 duration-500 delay-300">
                                 <div className="flex items-start gap-3 mb-4">
                                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-md shadow-cyan-500/25 shrink-0">
@@ -451,7 +448,12 @@ const Settings = () => {
                                     </p>
                                 )}
                             </div>
+                            </>)}
                         </>
+                    )}
+
+                    {activeTab === 'plan' && (
+                        <PlanSettings />
                     )}
 
                     {activeTab === 'company' && (

@@ -8,6 +8,12 @@
             "maxDuration": 10
         }
     },
+    "crons": [
+        {
+            "path": "/api/cron/expire-companies",
+            "schedule": "0 9 * * *"
+        }
+    ],
     "rewrites": [
         {
             "source": "/api/external/products",

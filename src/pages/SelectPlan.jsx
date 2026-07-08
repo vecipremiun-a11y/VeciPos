@@ -2,11 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, ArrowLeft, CreditCard, Zap, Shield, Star } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { SUBSCRIPTION_PLANS, formatPrice } from '../config/mercadopago';
+import { SUBSCRIPTION_PLANS, BILLING_CYCLES, formatMoney } from '../config/mercadopago';
+
+// En el registro aún no se conoce el país de la empresa → se muestra en CLP por defecto.
+const CURRENCY = 'CLP';
 
 const SelectPlan = () => {
     const navigate = useNavigate();
-    const [selectedPlan, setSelectedPlan] = useState('monthly');
+    const [selectedPlan, setSelectedPlan] = useState('medium');
+    const [billingCycle, setBillingCycle] = useState('monthly'); // 'monthly' | 'annual'
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -35,9 +39,10 @@ const SelectPlan = () => {
                 },
                 body: JSON.stringify({
                     planId: plan.id,
-                    planName: plan.name,
-                    amount: plan.price,
-                    currency: plan.currency,
+                    planName: `${plan.name} (${BILLING_CYCLES[billingCycle].label})`,
+                    billingCycle: billingCycle,
+                    amount: plan.prices[CURRENCY][billingCycle],
+                    currency: CURRENCY,
                     registrationData: registrationData
                 })
             });
@@ -59,16 +64,7 @@ const SelectPlan = () => {
         }
     };
 
-    const plans = [
-        {
-            ...SUBSCRIPTION_PLANS.monthly,
-            popular: false
-        },
-        {
-            ...SUBSCRIPTION_PLANS.yearly,
-            popular: true
-        }
-    ];
+    const plans = Object.values(SUBSCRIPTION_PLANS);
 
     return (
         <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-[var(--color-surface)] dark:bg-[#050505] py-12">
@@ -98,8 +94,36 @@ const SelectPlan = () => {
                     </p>
                 </div>
 
+                {/* Toggle Mensual / Anual */}
+                <div className="flex justify-center mb-8">
+                    <div className="inline-flex items-center bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-1">
+                        {Object.values(BILLING_CYCLES).map((cycle) => (
+                            <button
+                                key={cycle.id}
+                                onClick={() => setBillingCycle(cycle.id)}
+                                className={cn(
+                                    "px-6 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2",
+                                    billingCycle === cycle.id
+                                        ? "bg-[var(--color-primary)] text-black"
+                                        : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                                )}
+                            >
+                                {cycle.label}
+                                {cycle.id === 'annual' && (
+                                    <span className={cn(
+                                        "text-[10px] font-bold px-1.5 py-0.5 rounded-full",
+                                        billingCycle === 'annual' ? "bg-black/20 text-black" : "bg-emerald-500/15 text-emerald-400"
+                                    )}>
+                                        2 meses gratis
+                                    </span>
+                                )}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
                 {/* Plans Grid */}
-                <div className="grid md:grid-cols-2 gap-8 mb-8">
+                <div className="grid md:grid-cols-3 gap-8 mb-8">
                     {plans.map((plan) => (
                         <div
                             key={plan.id}
@@ -140,20 +164,15 @@ const SelectPlan = () => {
                                 <h3 className="text-2xl font-bold text-[var(--color-text)] mb-2">
                                     {plan.name}
                                 </h3>
-                                {plan.discount && (
-                                    <span className="inline-block bg-green-500/20 text-green-400 px-3 py-1 rounded-full text-xs font-bold mb-4">
-                                        {plan.discount}
-                                    </span>
-                                )}
                                 <div className="flex items-baseline gap-2 mb-2">
                                     <span className="text-5xl font-extrabold text-[var(--color-text)]">
-                                        {formatPrice(plan.pricePerMonth || plan.price)}
+                                        {formatMoney(plan.prices[CURRENCY][billingCycle], CURRENCY)}
                                     </span>
-                                    <span className="text-[var(--color-text-muted)]">/mes</span>
+                                    <span className="text-[var(--color-text-muted)]">{BILLING_CYCLES[billingCycle].suffix}</span>
                                 </div>
-                                {plan.frequency === 'yearly' && (
-                                    <p className="text-sm text-[var(--color-text-muted)]">
-                                        Facturado anualmente {formatPrice(plan.price)}
+                                {billingCycle === 'annual' && (
+                                    <p className="text-sm text-emerald-400">
+                                        ≈ {formatMoney(Math.round(plan.prices[CURRENCY].annual / 12), CURRENCY)}/mes · ahorras {formatMoney(plan.prices[CURRENCY].monthly * 12 - plan.prices[CURRENCY].annual, CURRENCY)}
                                     </p>
                                 )}
                             </div>

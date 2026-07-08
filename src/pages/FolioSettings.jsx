@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { turso } from '../lib/turso';
+import { dataApiCall } from '../lib/dataApi';
 import { Receipt, FileText, ToggleLeft, ToggleRight, Save, Loader2, Info } from 'lucide-react';
 
 const DTE_TYPES = [
@@ -28,10 +28,9 @@ const FolioSettings = () => {
         setLoading(true);
         try {
             // Load enabled DTEs from sii_config
-            const configResult = await turso.execute({
-                sql: 'SELECT enabled_dtes, default_dte FROM sii_config WHERE company_id = ?',
-                args: [activeCompanyId]
-            });
+            const _fs = await dataApiCall('folioSettingsLoad', { companyId: activeCompanyId });
+            if (!_fs?.success) throw new Error(_fs?.error || 'Error');
+            const configResult = { rows: _fs.config ? [_fs.config] : [] };
             if (configResult.rows.length > 0) {
                 if (configResult.rows[0].enabled_dtes) {
                     try {
@@ -54,12 +53,7 @@ const FolioSettings = () => {
             }
 
             // Load folio availability info
-            const cafsResult = await turso.execute({
-                sql: `SELECT tipo_dte, folio_desde, folio_hasta, folio_actual, estado 
-                      FROM sii_cafs WHERE company_id = ? AND estado = 'active'
-                      ORDER BY tipo_dte`,
-                args: [activeCompanyId]
-            });
+            const cafsResult = { rows: _fs.cafs };
             const info = {};
             for (const row of cafsResult.rows) {
                 const disponibles = Number(row.folio_hasta) - Number(row.folio_actual) + 1;
@@ -111,21 +105,8 @@ const FolioSettings = () => {
             }
             const saveDefault = validDtes.includes(defaultDte) ? defaultDte : validDtes[0];
 
-            // Try to add the column if it doesn't exist (safe ALTER)
-            try {
-                await turso.execute(`ALTER TABLE sii_config ADD COLUMN enabled_dtes TEXT DEFAULT '[]'`);
-            } catch { /* column already exists */ }
-            try {
-                await turso.execute(`ALTER TABLE sii_config ADD COLUMN default_dte INTEGER DEFAULT 39`);
-            } catch { /* column already exists */ }
-
-            // UPSERT: insert if no sii_config row exists, update if it does
-            await turso.execute({
-                sql: `INSERT INTO sii_config (company_id, enabled_dtes, default_dte, created_at, updated_at)
-                      VALUES (?, ?, ?, datetime('now'), datetime('now'))
-                      ON CONFLICT(company_id) DO UPDATE SET enabled_dtes = excluded.enabled_dtes, default_dte = excluded.default_dte, updated_at = excluded.updated_at`,
-                args: [activeCompanyId, JSON.stringify(validDtes), saveDefault]
-            });
+            const _sv = await dataApiCall('folioSettingsSave', { companyId: activeCompanyId, enabledDtes: validDtes, defaultDte: saveDefault });
+            if (!_sv?.success) throw new Error(_sv?.error || 'Error');
             setSaved(true);
             setTimeout(() => setSaved(false), 3000);
         } catch (err) {

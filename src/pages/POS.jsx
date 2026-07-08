@@ -19,7 +19,7 @@ import ScaleReadButton from '../components/ScaleReadButton';
 import { usePermissions } from '../hooks/usePermissions';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
-import { turso } from '../lib/turso';
+import { dataApiCall, reportCall } from '../lib/dataApi';
 
 // Component for Kg quantity input that allows typing decimals with comma
 const KgQuantityInput = ({ value, onChange, onCommit }) => {
@@ -147,6 +147,9 @@ const POS = () => {
 
     const navigate = useNavigate();
 
+    // Módulo Pedidos/Encargos gateado por plan (Medium+)
+    const canPreorders = useStore((s) => s.hasModule('preorders'));
+
     const cart = React.useMemo(() => {
         const activeCart = carts.find(c => c.id === activeCartId);
         return activeCart?.items || [];
@@ -173,10 +176,8 @@ const POS = () => {
         setDefaultDte(0);
         setCartTipoDte(0);
 
-        turso.execute({
-            sql: "SELECT is_active, enabled_dtes, default_dte FROM sii_config WHERE company_id = ?",
-            args: [activeCompanyId]
-        }).then(r => {
+        reportCall(activeCompanyId, 'siiConfigPos', {}).then(rows => {
+            const r = { rows };
             if (r.rows.length > 0 && Number(r.rows[0].is_active) === 1) {
                 setSiiActive(true);
                 let dtes = [0];
@@ -242,8 +243,8 @@ const POS = () => {
     // PERF: la carga de productos se delega al efecto de [searchTerm, activeCompanyId]
     // (más abajo). Aquí solo pre-calentamos en background el caché de Encargos.
     React.useEffect(() => {
-        const { getPreorderableProducts } = useStore.getState();
-        if (getPreorderableProducts) {
+        const { getPreorderableProducts, hasModule } = useStore.getState();
+        if (getPreorderableProducts && hasModule('preorders')) {
             getPreorderableProducts('', 'Todos').catch(() => {});
         }
     }, []);
@@ -469,11 +470,7 @@ const POS = () => {
             // Get company info for ticket (prefer preventa-specific config, fallback to receipt config)
             let companyInfo = { name: 'POSKEM', phone: '', address: '', headerMessage: '', footerMessage: '', format: '80mm' };
             try {
-                const res = await turso.execute({ sql: `SELECT name, receipt_business_name, receipt_phone, receipt_address,
-                    preventa_business_name, preventa_address, preventa_phone, 
-                    preventa_header_message, preventa_footer_message,
-                    preventa_show_phone, preventa_show_address, preventa_format
-                    FROM companies WHERE id = ?`, args: [activeCompanyId] });
+                const res = { rows: await reportCall(activeCompanyId, 'companyPreventaInfo', {}) };
                 if (res.rows.length > 0) {
                     const r = res.rows[0];
                     companyInfo = {
@@ -671,7 +668,8 @@ const POS = () => {
 
             {/* Left Side: Product Grid */}
             <div className="flex-1 flex flex-col gap-2 lg:gap-4 overflow-hidden min-h-0">
-                {/* Tabs: Venta / Encargos */}
+                {/* Tabs: Venta / Encargos (Encargos solo con módulo Pedidos, Medium+) */}
+                {canPreorders && (
                 <div className="flex shrink-0">
                     <div className="inline-flex p-0.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
                         <button
@@ -689,6 +687,7 @@ const POS = () => {
                         </button>
                     </div>
                 </div>
+                )}
 
                 {/* Search & Categories - Compact on Mobile */}
                 <div className="glass-card p-2 lg:p-4 space-y-2 lg:space-y-4 shrink-0 relative z-0">

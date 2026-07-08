@@ -1,0 +1,19 @@
+{
+  "_comment": "Registro de bases Turso del SaaS. SIN tokens (esto se commitea). Los tokens van en .env.databases.local (gitignoreado), referenciados por 'tokenEnv'. migrate-all/verify-all recorren esta lista.",
+  "databases": [
+    {
+      "name": "demon-oficial",
+      "role": "produccion",
+      "url": "libsql://posveci-official-demo-jasongo.aws-us-east-1.turso.io",
+      "tokenEnv": "DEMON_TOKEN",
+      "notes": "Producción: clientes reales (pool por company_id)."
+    },
+    {
+      "name": "poskem",
+      "role": "desarrollo",
+      "url": "libsql://poskem-db-jasongo.aws-us-east-1.turso.io",
+      "tokenEnv": "POSKEM_TOKEN",
+      "notes": "Base de desarrollo/local."
+    }
+  ]
+}

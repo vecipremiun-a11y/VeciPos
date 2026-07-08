@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../store/useStore';
-import { turso } from '../../lib/turso';
+import { dataApiCall } from '../../lib/dataApi';
 import { FileText, Eye, Save, Building2, Package } from 'lucide-react';
 
 const ReceiptSettings = ({ companyInfo }) => {
@@ -37,37 +37,21 @@ const ReceiptSettings = ({ companyInfo }) => {
     useEffect(() => {
         const loadReceiptConfig = async () => {
             try {
-                const result = await turso.execute({
-                    sql: `SELECT 
-                            receipt_business_name,
-                            receipt_address,
-                            receipt_tax_id,
-                            receipt_phone,
-                            receipt_email,
-                            receipt_header_message,
-                            receipt_footer_message,
-                            receipt_show_tax_id,
-                            receipt_show_phone,
-                            receipt_show_email,
-                            receipt_format
-                          FROM companies WHERE id = ?`,
-                    args: [activeCompanyId]
-                });
-
-                if (result.rows.length > 0) {
-                    const data = result.rows[0];
+                const r = await dataApiCall('receiptSettingsLoad', { companyId: activeCompanyId });
+                const data = r?.config;
+                if (data) {
                     setReceiptConfig({
-                        business_name: data.receipt_business_name || '',
-                        address: data.receipt_address || '',
-                        tax_id: data.receipt_tax_id || '',
-                        phone: data.receipt_phone || '',
-                        email: data.receipt_email || '',
-                        header_message: data.receipt_header_message || '',
-                        footer_message: data.receipt_footer_message || '',
-                        show_tax_id: data.receipt_show_tax_id === 1,
-                        show_phone: data.receipt_show_phone === 1,
-                        show_email: data.receipt_show_email === 1,
-                        format: data.receipt_format || '58mm'
+                        business_name: data.business_name || '',
+                        address: data.address || '',
+                        tax_id: data.tax_id || '',
+                        phone: data.phone || '',
+                        email: data.email || '',
+                        header_message: data.header_message || '',
+                        footer_message: data.footer_message || '',
+                        show_tax_id: data.show_tax_id === 1,
+                        show_phone: data.show_phone === 1,
+                        show_email: data.show_email === 1,
+                        format: data.format || '58mm'
                     });
                 }
             } catch (e) {
@@ -77,30 +61,18 @@ const ReceiptSettings = ({ companyInfo }) => {
 
         const loadPreventaConfig = async () => {
             try {
-                const result = await turso.execute({
-                    sql: `SELECT 
-                            preventa_business_name,
-                            preventa_address,
-                            preventa_phone,
-                            preventa_header_message,
-                            preventa_footer_message,
-                            preventa_show_phone,
-                            preventa_show_address,
-                            preventa_format
-                          FROM companies WHERE id = ?`,
-                    args: [activeCompanyId]
-                });
-                if (result.rows.length > 0) {
-                    const data = result.rows[0];
+                const r = await dataApiCall('preventaSettingsLoad', { companyId: activeCompanyId });
+                const data = r?.config;
+                if (data) {
                     setPreventaConfig({
-                        business_name: data.preventa_business_name || '',
-                        address: data.preventa_address || '',
-                        phone: data.preventa_phone || '',
-                        header_message: data.preventa_header_message || '',
-                        footer_message: data.preventa_footer_message || '',
-                        show_phone: data.preventa_show_phone !== 0,
-                        show_address: data.preventa_show_address !== 0,
-                        format: data.preventa_format || '80mm'
+                        business_name: data.business_name || '',
+                        address: data.address || '',
+                        phone: data.phone || '',
+                        header_message: data.header_message || '',
+                        footer_message: data.footer_message || '',
+                        show_phone: data.show_phone !== 0,
+                        show_address: data.show_address !== 0,
+                        format: data.format || '80mm'
                     });
                 }
             } catch (e) {
@@ -118,35 +90,8 @@ const ReceiptSettings = ({ companyInfo }) => {
     const handleSaveReceiptConfig = async () => {
         setIsSavingReceipt(true);
         try {
-            await turso.execute({
-                sql: `UPDATE companies SET 
-                        receipt_business_name = ?,
-                        receipt_address = ?,
-                        receipt_tax_id = ?,
-                        receipt_phone = ?,
-                        receipt_email = ?,
-                        receipt_header_message = ?,
-                        receipt_footer_message = ?,
-                        receipt_show_tax_id = ?,
-                        receipt_show_phone = ?,
-                        receipt_show_email = ?,
-                        receipt_format = ?
-                      WHERE id = ?`,
-                args: [
-                    receiptConfig.business_name,
-                    receiptConfig.address,
-                    receiptConfig.tax_id,
-                    receiptConfig.phone,
-                    receiptConfig.email,
-                    receiptConfig.header_message,
-                    receiptConfig.footer_message,
-                    receiptConfig.show_tax_id ? 1 : 0,
-                    receiptConfig.show_phone ? 1 : 0,
-                    receiptConfig.show_email ? 1 : 0,
-                    receiptConfig.format,
-                    activeCompanyId
-                ]
-            });
+            const r = await dataApiCall('receiptSettingsSave', { companyId: activeCompanyId, config: receiptConfig });
+            if (!r?.success) throw new Error(r?.error || 'Error');
             alert('✅ Configuración de boletas guardada correctamente');
         } catch (e) {
             console.error('Error saving receipt config:', e);
@@ -159,29 +104,8 @@ const ReceiptSettings = ({ companyInfo }) => {
     const handleSavePreventaConfig = async () => {
         setIsSavingPreventa(true);
         try {
-            await turso.execute({
-                sql: `UPDATE companies SET 
-                        preventa_business_name = ?,
-                        preventa_address = ?,
-                        preventa_phone = ?,
-                        preventa_header_message = ?,
-                        preventa_footer_message = ?,
-                        preventa_show_phone = ?,
-                        preventa_show_address = ?,
-                        preventa_format = ?
-                      WHERE id = ?`,
-                args: [
-                    preventaConfig.business_name,
-                    preventaConfig.address,
-                    preventaConfig.phone,
-                    preventaConfig.header_message,
-                    preventaConfig.footer_message,
-                    preventaConfig.show_phone ? 1 : 0,
-                    preventaConfig.show_address ? 1 : 0,
-                    preventaConfig.format,
-                    activeCompanyId
-                ]
-            });
+            const r = await dataApiCall('preventaSettingsSave', { companyId: activeCompanyId, config: preventaConfig });
+            if (!r?.success) throw new Error(r?.error || 'Error');
             alert('✅ Configuración de preventa guardada correctamente');
         } catch (e) {
             console.error('Error saving preventa config:', e);

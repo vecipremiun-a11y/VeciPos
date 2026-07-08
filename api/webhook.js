@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { createClient } from '@libsql/client';
 import { MercadoPagoConfig, Payment } from 'mercadopago';
 
@@ -13,9 +14,49 @@ const turso = createClient({
     authToken: process.env.VITE_TURSO_AUTH_TOKEN
 });
 
+// Valida la firma del webhook según la spec de MercadoPago:
+//   header x-signature: "ts=<timestamp>,v1=<hmac_sha256>"
+//   manifest firmado:   "id:<data.id>;request-id:<x-request-id>;ts:<ts>;"
+//   HMAC-SHA256(manifest, MERCADOPAGO_WEBHOOK_SECRET) === v1  (comparación en tiempo constante)
+// Si no hay secreto configurado, avisa y deja pasar (para no romper prod hasta configurarlo).
+function validateMpSignature(req) {
+    const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
+    if (!secret) {
+        console.warn('⚠️ MERCADOPAGO_WEBHOOK_SECRET no configurado — firma del webhook NO validada. Configúralo en Vercel y en MercadoPago → Webhooks.');
+        return true;
+    }
+    try {
+        const sig = String(req.headers['x-signature'] || '');
+        const requestId = String(req.headers['x-request-id'] || '');
+        const parts = Object.fromEntries(
+            sig.split(',').map(p => p.split('=').map(s => s.trim())).filter(kv => kv.length === 2)
+        );
+        const ts = parts.ts;
+        const v1 = parts.v1;
+        if (!ts || !v1) return false;
+
+        const dataId = (req.query && (req.query['data.id'] || req.query.id)) || req.body?.data?.id || '';
+        const manifest = `id:${String(dataId).toLowerCase()};request-id:${requestId};ts:${ts};`;
+        const computed = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
+
+        const a = Buffer.from(computed, 'utf8');
+        const b = Buffer.from(v1, 'utf8');
+        return a.length === b.length && crypto.timingSafeEqual(a, b);
+    } catch (e) {
+        console.error('Error validando firma MP:', e.message);
+        return false;
+    }
+}
+
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    // 🔒 Firma del webhook (defensa en profundidad; el pago igual se re-consulta a MP)
+    if (!validateMpSignature(req)) {
+        console.warn('🚫 Webhook con firma inválida — rechazado');
+        return res.status(401).json({ error: 'invalid signature' });
     }
 
     try {
@@ -43,6 +84,65 @@ export default async function handler(req, res) {
 
         const companyId = paymentData.external_reference;
         const metadata = paymentData.metadata;
+
+        // --- Suscripción in-app (la empresa y el usuario YA existen): solo activar el plan ---
+        if (metadata?.type === 'subscription') {
+            if (!companyId) {
+                return res.status(400).json({ error: 'Missing company_id' });
+            }
+
+            // Evitar doble procesamiento
+            const dup = await turso.execute({
+                sql: "SELECT id FROM payments WHERE mercadopago_payment_id = ?",
+                args: [paymentData.id.toString()]
+            });
+            if (dup.rows.length > 0) {
+                console.log('⚠️ Payment already processed');
+                return res.status(200).json({ message: 'Already processed' });
+            }
+
+            const billingCycle = metadata.billing_cycle === 'annual' ? 'annual' : 'monthly';
+            const subPlanId = metadata.plan_id || 'medium';
+            const subNow = new Date();
+            const subPeriodStart = new Date(subNow);
+            const subPeriodEnd = new Date(subNow);
+            if (billingCycle === 'annual') subPeriodEnd.setFullYear(subPeriodEnd.getFullYear() + 1);
+            else subPeriodEnd.setMonth(subPeriodEnd.getMonth() + 1);
+
+            const subId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+            await turso.execute({
+                sql: `INSERT INTO subscriptions (
+                    id, company_id, plan_id, status, amount, currency,
+                    current_period_start, current_period_end, created_at, updated_at
+                ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`,
+                args: [
+                    subId, companyId, subPlanId,
+                    paymentData.transaction_amount,
+                    paymentData.currency_id || 'CLP',
+                    subPeriodStart.toISOString().split('T')[0],
+                    subPeriodEnd.toISOString().split('T')[0],
+                    subNow.toISOString(), subNow.toISOString()
+                ]
+            });
+
+            // Activar empresa + fijar plan y fecha de caducidad (gating y ciclo de vida).
+            await turso.execute({
+                sql: "UPDATE companies SET status = 'active', plan = ?, subscription_id = ?, access_until = ? WHERE id = ?",
+                args: [subPlanId, subId, subPeriodEnd.toISOString(), companyId]
+            });
+
+            // Marcar el pago como aprobado
+            await turso.execute({
+                sql: `UPDATE payments SET status = 'approved', mercadopago_payment_id = ?, payment_method = ?, updated_at = ?
+                      WHERE id = ?`,
+                args: [paymentData.id.toString(), paymentData.payment_method_id, subNow.toISOString(), metadata.payment_id]
+            });
+
+            console.log('🎉 Subscription activated for company:', companyId);
+            return res.status(200).json({ success: true, message: 'Subscription activated' });
+        }
+        // --- Fin suscripción in-app ---
 
         if (!companyId || !metadata || !metadata.registration_data) {
             console.error('❌ Missing required data in payment');

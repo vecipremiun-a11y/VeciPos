@@ -5,8 +5,11 @@ import { cn } from '../lib/utils';
 import { usePermissions } from '../hooks/usePermissions';
 
 const Users = () => {
-    const { users, currentUser, addUser, deleteUser, updateUser, activeCompanyId, fetchCompanyRoles } = useStore();
+    const { users, currentUser, currentUserCompanyRole, addUser, deleteUser, updateUser, activeCompanyId, fetchCompanyRoles } = useStore();
     const { can } = usePermissions();
+
+    // Solo el dueño (o super admin) puede eliminar usuarios; y el dueño no se puede eliminar.
+    const isOwner = currentUserCompanyRole === 'owner' || currentUserCompanyRole === 'super_admin' || currentUser?.role === 'super_admin';
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
@@ -359,12 +362,19 @@ const Users = () => {
                                             {user.email || '-'}
                                         </td>
                                         <td className="px-6 py-4">
-                                            <span className={cn(
-                                                "px-3 py-1 rounded-full text-xs font-medium border",
-                                                getRoleBadgeStyle(user.role)
-                                            )}>
-                                                {user.role}
-                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <span className={cn(
+                                                    "px-3 py-1 rounded-full text-xs font-medium border",
+                                                    getRoleBadgeStyle(user.role)
+                                                )}>
+                                                    {user.role}
+                                                </span>
+                                                {user.company_role === 'owner' && (
+                                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border border-amber-500/40 bg-amber-500/15 text-amber-400 uppercase tracking-wider">
+                                                        Dueño
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-6 py-4">
                                             {getStatusBadge(user)}
@@ -383,7 +393,7 @@ const Users = () => {
                                                         <Pencil size={18} />
                                                     </button>
                                                 )}
-                                                {user.username !== 'admin' && can('users.delete') && (
+                                                {isOwner && user.company_role !== 'owner' && user.username !== 'admin' && (
                                                     <button
                                                         onClick={async () => {
                                                             if (window.confirm(`¿Eliminar usuario ${user.name}?`)) {

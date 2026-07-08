@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../store/useStore';
-import { turso } from '../lib/turso';
+import { dataApiCall, reportCall } from '../lib/dataApi';
 import { formatCurrency } from '../utils/formatCurrency';
 import { formatInCompanyTime, toUTC } from '../lib/dateHelpers';
 import {
@@ -30,35 +30,10 @@ const DocumentosSII = () => {
         if (!activeCompanyId) return;
         setLoading(true);
         try {
-            let sql = `SELECT d.*, d.tipo_dte AS tipo, d.estado AS status, s.total as sale_total, s.payment_method 
-                        FROM sii_dtes d 
-                        LEFT JOIN sales s ON d.sale_id = s.id 
-                        WHERE d.company_id = ?`;
-            const args = [activeCompanyId];
-
             const tz = currentCompanyTimezone || 'America/Santiago';
-            if (dateFrom) {
-                const startUtc = toUTC(new Date(`${dateFrom}T00:00:00`), tz).toISOString();
-                sql += ` AND d.created_at >= ?`;
-                args.push(startUtc);
-            }
-            if (dateTo) {
-                const endUtc = toUTC(new Date(`${dateTo}T23:59:59`), tz).toISOString();
-                sql += ` AND d.created_at <= ?`;
-                args.push(endUtc);
-            }
-            if (tipoFilter) {
-                sql += ` AND d.tipo_dte = ?`;
-                args.push(Number(tipoFilter));
-            }
-            if (statusFilter) {
-                sql += ` AND d.estado = ?`;
-                args.push(statusFilter);
-            }
-
-            sql += ` ORDER BY d.created_at DESC LIMIT 200`;
-
-            const result = await turso.execute({ sql, args });
+            const startUtc = dateFrom ? toUTC(new Date(`${dateFrom}T00:00:00`), tz).toISOString() : null;
+            const endUtc = dateTo ? toUTC(new Date(`${dateTo}T23:59:59`), tz).toISOString() : null;
+            const result = { rows: await reportCall(activeCompanyId, 'dtesList', { startUtc, endUtc, tipoFilter, statusFilter }) };
             setDtes(result.rows);
 
             // Calc stats
@@ -146,10 +121,7 @@ const DocumentosSII = () => {
         setRetrying(dte.id);
         try {
             // Eliminar el DTE con error para poder reemitir
-            await turso.execute({
-                sql: `DELETE FROM sii_dtes WHERE id = ? AND company_id = ? AND estado = 'error'`,
-                args: [dte.id, activeCompanyId]
-            });
+            await dataApiCall('dteRetryDelete', { companyId: activeCompanyId, dteId: dte.id });
             // Re-emitir
             const resp = await fetch('/api/sii/emit', {
                 method: 'POST',

@@ -13,7 +13,7 @@
 //
 // Tabla destino: analytics_telemetry (creada por scripts/optim/phase5_5/01-create-telemetry.mjs)
 
-import { turso } from './turso';
+import { dataApiCall } from './dataApi';
 
 const MAX_BUFFER = 50;
 const FLUSH_THRESHOLD = 20;
@@ -83,13 +83,12 @@ export async function flush() {
   // Tomar snapshot del buffer y vaciarlo (pero conservar si falla)
   const toFlush = buffer.splice(0, buffer.length);
   try {
-    const queries = toFlush.map(e => ({
-      sql: `INSERT INTO analytics_telemetry
-              (company_id, event_type, query_name, error_msg, duration_ms, user_agent, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: [e.company_id, e.event_type, e.query_name, e.error_msg, e.duration_ms, e.user_agent, e.created_at],
-    }));
-    await turso.batch(queries);
+    // El servidor fuerza company_id (endpoint autenticado). Sin empresa activa
+    // no se puede autenticar → se descarta el lote (telemetría no es crítica).
+    const companyId = toFlush[0]?.company_id || getCompanyId();
+    if (!companyId) return;
+    const r = await dataApiCall('telemetryFlush', { companyId, events: toFlush });
+    if (!r?.success) throw new Error(r?.error || 'telemetryFlush falló');
   } catch (e) {
     // Re-encolar (al inicio) para reintentar más tarde, pero limitado
     // a MAX_BUFFER para no acumular indefinidamente.
@@ -100,7 +99,7 @@ export async function flush() {
   }
 }
 
-// Flush al cerrar tab — usa sendBeacon-like fallback con turso.batch
+// Flush al cerrar tab — best-effort al endpoint autenticado
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', () => {
     // Intento best-effort, no podemos esperar Promise en beforeunload

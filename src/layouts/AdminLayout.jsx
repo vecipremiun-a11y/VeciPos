@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useStore } from '../store/useStore';
-import { LogOut, LayoutDashboard, Building2, ArrowLeft, MessageCircle } from 'lucide-react';
+import { LogOut, LayoutDashboard, Building2, ArrowLeft, MessageCircle, DollarSign, Users } from 'lucide-react';
 
 const AdminLayout = () => {
     const { logout, currentUser, unreadSupportCount } = useStore();
@@ -47,6 +47,28 @@ const AdminLayout = () => {
                     >
                         <Building2 size={20} />
                         <span>Empresas</span>
+                    </Link>
+
+                    <Link
+                        to="/admin/clients"
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive('/admin/clients')
+                            ? 'bg-red-500/10 text-red-500 border border-red-500/20'
+                            : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                            }`}
+                    >
+                        <Users size={20} />
+                        <span>Clientes</span>
+                    </Link>
+
+                    <Link
+                        to="/admin/payments"
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive('/admin/payments')
+                            ? 'bg-red-500/10 text-red-500 border border-red-500/20'
+                            : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                            }`}
+                    >
+                        <DollarSign size={20} />
+                        <span>Pagos</span>
                     </Link>
 
                     <Link

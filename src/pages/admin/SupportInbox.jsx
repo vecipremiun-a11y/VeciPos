@@ -6,7 +6,6 @@ import {
     MessageSquare, X
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
-import { turso } from '../../lib/turso';
 import {
     TICKET_STATUS,
     TICKET_PRIORITY,
@@ -23,7 +22,8 @@ const SupportInbox = () => {
         replyToTicket,
         updateTicketStatus,
         updateTicketPriority,
-        markTicketAsReadByAdmin
+        markTicketAsReadByAdmin,
+        adminFetchCompanyContext
     } = useStore();
 
     const [tickets, setTickets] = useState([]);
@@ -111,21 +111,10 @@ const SupportInbox = () => {
     }
 
     async function loadCompanyContext(ticket) {
-        // Cargar contexto de la empresa
+        // Cargar contexto de la empresa (server-side, super_admin)
         try {
-            const result = await turso.execute({
-                sql: `SELECT 
-                        c.*,
-                        (SELECT COUNT(*) FROM users WHERE company_id = c.id) as user_count,
-                        (SELECT MAX(date) FROM sales WHERE company_id = c.id) as last_sale_date
-                      FROM companies c
-                      WHERE c.id = ?`,
-                args: [ticket.company_id]
-            });
-
-            if (result.rows.length > 0) {
-                setCompanyContext(result.rows[0]);
-            }
+            const company = await adminFetchCompanyContext(ticket.company_id);
+            if (company) setCompanyContext(company);
         } catch (e) {
             console.error('Error loading company context:', e);
         }

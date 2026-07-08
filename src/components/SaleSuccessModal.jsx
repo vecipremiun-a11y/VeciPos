@@ -5,7 +5,7 @@ import 'jspdf-autotable';
 import html2canvas from 'html2canvas';
 import bwipjs from 'bwip-js';
 
-import { turso } from '../lib/turso';
+import { reportCall, dataApiCall } from '../lib/dataApi';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
 
@@ -69,14 +69,9 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
 
         const poll = async () => {
             try {
-                const result = await turso.execute({
-                    sql: `SELECT folio, tipo_dte AS tipo, estado AS status, track_id, xml_firmado FROM sii_dtes 
-                          WHERE company_id = ? AND tipo_dte = ?
-                          ORDER BY created_at DESC LIMIT 1`,
-                    args: [activeCompanyId, saleDetails.tipoDte]
-                });
-                if (!cancelled && result.rows.length > 0) {
-                    const row = result.rows[0];
+                const rows = await reportCall(activeCompanyId, 'latestDteByType', { tipoDte: saleDetails.tipoDte });
+                if (!cancelled && rows.length > 0) {
+                    const row = rows[0];
                     setDteInfo(row);
                     // Generar timbre PDF417
                     const ted = extractTED(row.xml_firmado);
@@ -105,33 +100,9 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
             if (!isOpen || !activeCompanyId) return;
 
             try {
-                const runConfigQuery = (includeFormat = true) => turso.execute({
-                    sql: `SELECT
-                            receipt_business_name as business_name,
-                            receipt_address as address,
-                            receipt_tax_id as tax_id,
-                            receipt_phone as phone,
-                            receipt_email as email,
-                            receipt_header_message as header_message,
-                            receipt_footer_message as footer_message,
-                            receipt_show_tax_id as show_tax_id,
-                            receipt_show_phone as show_phone,
-                            receipt_show_email as show_email${includeFormat ? `,
-                            receipt_format as format` : ''}
-                          FROM companies WHERE id = ?`,
-                    args: [activeCompanyId]
-                });
-
-                let result;
-                try {
-                    result = await runConfigQuery(true);
-                } catch (queryError) {
-                    if (!String(queryError?.message || '').includes('receipt_format')) throw queryError;
-                    result = await runConfigQuery(false);
-                }
-
-                if (result.rows.length > 0) {
-                    const data = result.rows[0];
+                const r = await dataApiCall('receiptSettingsLoad', { companyId: activeCompanyId });
+                const data = r?.config;
+                if (data) {
                     setReceiptConfig({
                         business_name: data.business_name || 'VECI',
                         address: data.address || 'Sotomayor 1460-A',

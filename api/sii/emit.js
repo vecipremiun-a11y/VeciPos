@@ -1,4 +1,5 @@
 import { turso } from './_db.js';
+import { requireCompanySession } from '../_lib/guard.js';
 import { loadCertificado, loadCAF, buildBoleta, buildFactura, buildFacturaExenta, enviarDTE } from './_sii.js';
 
 export default async function handler(req, res) {
@@ -6,10 +7,9 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const companyId = req.headers['x-company-id'];
-    if (!companyId) {
-        return res.status(400).json({ error: 'x-company-id header requerido' });
-    }
+    // Sesión firmada + membresía a la empresa (Fase 1 · Paso 6 — blindaje SII)
+    const companyId = await requireCompanySession(turso, req, res);
+    if (!companyId) return;
 
     try {
         const { sale_id, tipo_dte, rut_receptor, razon_social_receptor, giro_receptor, dir_receptor, comuna_receptor, ciudad_receptor, forma_pago, dias_credito, folio: preReservedFolio } = req.body;

@@ -7,7 +7,9 @@ import { compressImage, validateImage } from '../lib/imageCompression';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
-    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings } = useStore();
+    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, hasModule } = useStore();
+    // Sin módulo Pedidos (Medium+) no se pueden crear productos con encargo
+    const canPreorders = hasModule('preorders');
     const { can } = usePermissions();
     const [showSkuScanner, setShowSkuScanner] = useState(false);
     const skuScannerRef = useRef(null);
@@ -206,6 +208,8 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
             offer_price: toNum(formData.offer_price),
             units_per_box: parseInt(formData.units_per_box) || 0,
         };
+        // Sin módulo Pedidos: nunca guardar productos en modo encargo
+        if (!canPreorders) dataToSave.sale_mode = 'sale_only';
         // Save alert settings in background (needs product ID, so we pass alertConfig for the caller to handle)
         dataToSave._alertConfig = alertConfig;
         onSave(dataToSave);
@@ -232,7 +236,8 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     </h2>
                 </div>
 
-                {/* Sale Mode Selector moved to Header */}
+                {/* Sale Mode Selector moved to Header — solo con módulo Pedidos (Medium+) */}
+                {canPreorders && (
                 <div className="flex bg-black/40 rounded-lg p-1 border border-white/10">
                     {[
                         { value: 'sale_only', label: 'Solo Venta', emoji: '🛒' },
@@ -255,6 +260,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                         </button>
                     ))}
                 </div>
+                )}
             </div>
 
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -716,7 +722,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     )}
 
                     {/* AVAILABILITY / PREORDERS SECTION (Only shows specific options if enabled) */}
-                    {(formData.sale_mode === 'preorder_only' || formData.sale_mode === 'both') && (
+                    {canPreorders && (formData.sale_mode === 'preorder_only' || formData.sale_mode === 'both') && (
                         <div className="mt-6 border-t border-white/10 pt-6">
                             <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                                 <span className="w-1 h-6 bg-orange-400 rounded-full"></span>

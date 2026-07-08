@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useStore } from '../store/useStore';
 import { Building2, User, Mail, Lock, ArrowRight, AlertCircle, Check } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const Register = () => {
     const navigate = useNavigate();
+    const { login } = useStore();
     const [step, setStep] = useState(1); // 1: Datos, 2: Selección de plan
 
     // Datos de la empresa
@@ -21,7 +23,7 @@ const Register = () => {
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const handleSubmitStep1 = (e) => {
+    const handleSubmitStep1 = async (e) => {
         e.preventDefault();
         setError('');
 
@@ -51,22 +53,47 @@ const Register = () => {
             return;
         }
 
-        // Guardar datos en sessionStorage para usarlos después del pago
-        sessionStorage.setItem('pendingRegistration', JSON.stringify({
-            company: {
-                name: companyName,
-                type: companyType
-            },
-            admin: {
-                name: adminName,
-                email: adminEmail,
-                username: adminUsername,
-                password: adminPassword
-            }
-        }));
+        // Crear cuenta de prueba gratis (30 días, sin pago) directamente en la BD del sistema
+        setIsLoading(true);
+        try {
+            const response = await fetch('/api/start-trial', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    company: {
+                        name: companyName,
+                        type: companyType
+                    },
+                    admin: {
+                        name: adminName,
+                        email: adminEmail,
+                        username: adminUsername,
+                        password: adminPassword
+                    }
+                })
+            });
 
-        // Pasar al paso 2 (selección de plan)
-        navigate('/select-plan');
+            const data = await response.json();
+
+            if (!data.success) {
+                setError(data.error || 'No se pudo crear la cuenta. Intenta nuevamente.');
+                return;
+            }
+
+            // Cuenta creada: iniciar sesión automáticamente y entrar al sistema
+            const result = await login(adminUsername.trim().toLowerCase(), adminPassword);
+            if (result.success) {
+                navigate('/dashboard');
+            } else {
+                // Cuenta creada pero el auto-login falló: mandar al login manual
+                navigate('/login');
+            }
+        } catch (err) {
+            console.error('Error creando prueba:', err);
+            setError('Error de conexión. Por favor intenta nuevamente.');
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -85,7 +112,7 @@ const Register = () => {
                     </div>
                     <h1 className="text-3xl font-bold text-[var(--color-text)] tracking-tight mb-2">Crear cuenta POSVECI</h1>
                     <p className="text-[var(--color-text-muted)] text-sm">
-                        Comienza tu prueba gratuita de 15 días
+                        Comienza tu prueba gratuita de 30 días
                     </p>
                 </div>
 
@@ -102,7 +129,7 @@ const Register = () => {
                         <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[var(--glass-border)] text-[var(--color-text-muted)] font-bold text-sm">
                             2
                         </div>
-                        <span className="text-[var(--color-text-muted)] font-medium">Seleccionar plan</span>
+                        <span className="text-[var(--color-text-muted)] font-medium">Acceso inmediato</span>
                     </div>
                 </div>
 
@@ -259,7 +286,7 @@ const Register = () => {
                         <p className="text-[var(--color-primary)] font-bold text-sm mb-3">✨ Incluye en tu prueba gratuita:</p>
                         <ul className="space-y-2">
                             {[
-                                '15 días de acceso completo',
+                                '30 días de acceso completo',
                                 'Sin tarjeta de crédito requerida',
                                 'Configuración guiada',
                                 'Soporte por email'
@@ -286,7 +313,7 @@ const Register = () => {
                             disabled={isLoading}
                             className="flex-1 btn-primary py-3 flex items-center justify-center gap-2 group"
                         >
-                            <span>{isLoading ? 'Procesando...' : 'Continuar'}</span>
+                            <span>{isLoading ? 'Creando tu cuenta...' : 'Comenzar prueba gratis'}</span>
                             {!isLoading && <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />}
                         </button>
                     </div>

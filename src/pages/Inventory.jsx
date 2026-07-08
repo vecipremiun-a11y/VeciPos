@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, Plus, Edit, Trash2, Filter, Loader, ScanBarcode, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { turso } from '../lib/turso';
+import { reportCall } from '../lib/dataApi';
 import ProductModal from '../components/ProductModal';
 import OptimizedImage from '../components/OptimizedImage';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -55,14 +55,9 @@ const Inventory = () => {
         let cancelled = false;
         (async () => {
             try {
-                const res = await turso.execute({
-                    sql: `SELECT DISTINCT scale_group_id FROM products
-                          WHERE company_id = ? AND scale_group_id IS NOT NULL AND scale_group_id != ''
-                          ORDER BY scale_group_id ASC`,
-                    args: [activeCompanyId]
-                });
+                const rows = await reportCall(activeCompanyId, 'scaleGroups', {});
                 if (cancelled) return;
-                setScaleGroups(res.rows.map(r => r.scale_group_id).filter(Boolean));
+                setScaleGroups(rows.map(r => r.scale_group_id).filter(Boolean));
             } catch (e) {
                 console.warn('No se pudieron cargar grupos escala:', e?.message);
             }

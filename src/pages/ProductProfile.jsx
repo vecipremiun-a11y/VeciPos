@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 import { Search, Package, ArrowDownCircle, ArrowUpCircle, RefreshCw, Truck, ShoppingCart, RotateCcw, Globe, Smartphone, FileText, User, Calendar, Hash, Eye, AlertTriangle } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { turso } from '../lib/turso';
+import { dataApiCall, reportCall } from '../lib/dataApi';
 import { formatCurrency } from '../utils/formatCurrency';
 import { cn } from '../lib/utils';
 import OptimizedImage from '../components/OptimizedImage';
@@ -11,15 +11,8 @@ import { format, subDays, startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 // FASE 5 · Queries analíticas migradas a tablas normalizadas (sale_items /
 // purchase_items). Cada función tiene fallback automático al JSON legacy.
-import {
-    productSalesHistoryNormalized,
-    productSalesHistoryViaJson,
-    productPurchasesHistoryNormalized,
-    productPurchasesHistoryViaJson,
-} from '../lib/analyticsQueries';
 // FASE 5.5 · Telemetría de fallbacks — cuántas veces la versión normalizada
 // falla y debe usarse la JSON. Si supera ~1%, es señal de problema sistémico.
-import { logAnalyticsEvent } from '../lib/analyticsTelemetry';
 
 const ProductProfile = () => {
     const { activeCompanyId, currentCurrency, searchProductsForDropdown, users, currentCompanyTimezone } = useStore();
@@ -111,20 +104,10 @@ const ProductProfile = () => {
             const today = format(new Date(), 'yyyy-MM-dd');
             const thirtyDaysAgo = format(subDays(new Date(), 30), 'yyyy-MM-dd');
 
-            const [profitRes, statsRes] = await Promise.all([
-                turso.execute({
-                    sql: `SELECT COALESCE(SUM(total_quantity), 0) as total_sold,
-                                 COUNT(DISTINCT day) as days_with_sales
-                          FROM product_daily_profit
-                          WHERE company_id = ? AND product_id = ? AND day >= ? AND day <= ?`,
-                    args: [activeCompanyId, productId, thirtyDaysAgo, today]
-                }),
-                turso.execute({
-                    sql: `SELECT last_sale_date FROM product_movement_stats
-                          WHERE company_id = ? AND product_id = ?`,
-                    args: [activeCompanyId, productId]
-                })
-            ]);
+            const rStats = await dataApiCall('report', { companyId: activeCompanyId, name: 'productSalesStats', params: { productId, thirtyDaysAgo, today } });
+            if (!rStats?.success) throw new Error(rStats?.error || 'Error');
+            const profitRes = { rows: rStats.rows[0] };
+            const statsRes = { rows: rStats.rows[1] };
 
             const totalSold30d = parseFloat(profitRes.rows[0]?.total_sold) || 0;
             const avgDaily = totalSold30d / 30;
@@ -148,11 +131,8 @@ const ProductProfile = () => {
     // Load FEFO lots for product
     const loadProductLots = async (productId) => {
         try {
-            const result = await turso.execute({
-                sql: `SELECT * FROM product_lots WHERE product_id = ? AND company_id = ? ORDER BY expiry_date DESC`,
-                args: [productId, activeCompanyId]
-            });
-            setLots(result.rows || []);
+            const rows = await reportCall(activeCompanyId, 'productLots', { productId });
+            setLots(rows || []);
         } catch (e) {
             console.error('Error loading lots:', e);
             setLots([]);
@@ -170,9 +150,9 @@ const ProductProfile = () => {
         //   1) Intenta tablas normalizadas (sale_items / purchase_items) → rápido (≈25×)
         //   2) Si falla cualquier paso, cae a la versión legacy con LIKE en items JSON
         // Forma de salida IDÉNTICA — la UI no nota la diferencia.
-        const ctxNorm = {
-            turso,
-            companyId: activeCompanyId,
+        // Server-side (Fase 1 · Paso 19): el fallback normalizado→JSON corre en
+        // el API con el MISMO módulo compartido; la forma de salida es idéntica.
+        const histParams = {
             productId,
             dateFrom: dateRange.from,
             dateTo: dateRange.to,
@@ -180,55 +160,8 @@ const ProductProfile = () => {
         try {
             // ─── PURCHASES ──────────────────────────────────────────────
             let productPurchases = [];
-            let purchasesViaNormalized = false;
-            const tPurchStart = Date.now();
-            try {
-                const rows = await productPurchasesHistoryNormalized({ ...ctxNorm, limit: 100 });
-                purchasesViaNormalized = true;
-                productPurchases = rows.map(r => {
-                    const productItem = {
-                        id: productId,
-                        name: r.name,
-                        sku: r.sku,
-                        quantity: r.quantity,
-                        cost: r.cost,
-                        price: r.price,
-                        batchNumber: r.batch_number,
-                        expiryDate: r.expiry_date,
-                    };
-                    return {
-                        id: r.purchase_id,
-                        date: r.full_date || r.purchase_date,
-                        invoice_number: r.invoice_number,
-                        supplier_id: r.supplier_id,
-                        supplier_name: r.supplier_name,
-                        supplier_email: r.supplier_email,
-                        supplier_phone: r.supplier_phone,
-                        purchase_user_name: r.purchase_user_name,
-                        user_id: r.user_id,
-                        productItem,
-                        formattedDate: currentCompanyTimezone
-                            ? formatInCompanyTime((r.full_date || r.purchase_date).length === 10 ? `${r.full_date || r.purchase_date}T12:00:00` : (r.full_date || r.purchase_date), currentCompanyTimezone, 'dd/MM/yyyy HH:mm')
-                            : (r.full_date || r.purchase_date).length === 10
-                                ? (r.full_date || r.purchase_date).split('-').reverse().join('/')
-                                : format(parseISO(r.full_date || r.purchase_date), 'dd/MM/yyyy HH:mm'),
-                        quantity: r.quantity,
-                        cost: r.cost || r.price,
-                    };
-                });
-            } catch (e) {
-                console.warn('[fase5] purchases normalized falló, cae a JSON:', e?.message || e);
-                logAnalyticsEvent({
-                    event_type: 'fallback',
-                    query_name: 'productPurchasesHistory',
-                    error_msg: e?.message || String(e),
-                    duration_ms: Date.now() - tPurchStart,
-                    company_id: activeCompanyId,
-                });
-            }
-
-            if (!purchasesViaNormalized) {
-                const rows = await productPurchasesHistoryViaJson({ ...ctxNorm, limit: 100 });
+            {
+                const rows = await reportCall(activeCompanyId, 'productPurchasesHistory', { ...histParams, limit: 100 });
                 productPurchases = rows.map(r => {
                     const productItem = {
                         id: productId,
@@ -265,51 +198,8 @@ const ProductProfile = () => {
 
             // ─── SALES ──────────────────────────────────────────────────
             let productSales = [];
-            let salesViaNormalized = false;
-            const tSalesStart = Date.now();
-            try {
-                const rows = await productSalesHistoryNormalized({ ...ctxNorm, limit: 200 });
-                salesViaNormalized = true;
-                productSales = rows.map(r => {
-                    const productItem = {
-                        id: productId,
-                        name: r.name,
-                        sku: r.sku,
-                        quantity: r.quantity,
-                        price: r.price,
-                        cost: r.cost,
-                        discountPercent: r.discount_pct,
-                    };
-                    return {
-                        id: r.sale_id,
-                        date: r.full_date || r.sale_date,
-                        user_id: r.user_id,
-                        user_name: r.user_name,
-                        status: r.status,
-                        payment_method: r.payment_method,
-                        client_name: r.client_name,
-                        productItem,
-                        formattedDate: currentCompanyTimezone
-                            ? formatInCompanyTime(r.full_date || r.sale_date, currentCompanyTimezone, 'dd/MM/yyyy HH:mm')
-                            : format(parseISO(r.full_date || r.sale_date), 'dd/MM/yyyy HH:mm'),
-                        quantity: r.quantity,
-                        price: r.price,
-                        subtotal: (Number(r.quantity) || 0) * (Number(r.price) || 0),
-                    };
-                });
-            } catch (e) {
-                console.warn('[fase5] sales normalized falló, cae a JSON:', e?.message || e);
-                logAnalyticsEvent({
-                    event_type: 'fallback',
-                    query_name: 'productSalesHistory',
-                    error_msg: e?.message || String(e),
-                    duration_ms: Date.now() - tSalesStart,
-                    company_id: activeCompanyId,
-                });
-            }
-
-            if (!salesViaNormalized) {
-                const rows = await productSalesHistoryViaJson({ ...ctxNorm, limit: 200 });
+            {
+                const rows = await reportCall(activeCompanyId, 'productSalesHistory', { ...histParams, limit: 200 });
                 productSales = rows.map(r => {
                     const productItem = {
                         id: productId,
@@ -341,13 +231,9 @@ const ProductProfile = () => {
             setSales(productSales);
 
             // Stock Adjustments Query
-            const adjustmentsResult = await turso.execute({
-                sql: `SELECT * FROM stock_adjustments
-                      WHERE company_id = ? AND product_id = ? AND date(created_at) BETWEEN date(?) AND date(?)
-                      ORDER BY created_at DESC
-                      LIMIT 100`,
-                args: [activeCompanyId, productId, dateRange.from, dateRange.to]
-            }).catch(() => ({ rows: [] }));
+            const adjustmentsResult = {
+                rows: await reportCall(activeCompanyId, 'productAdjustments', { productId, dateFrom: dateRange.from, dateTo: dateRange.to }).catch(() => [])
+            };
 
             const reasonLabels = { manual: 'Ajuste Manual', reconciliacion: 'Reconciliación', control_inventario: 'Control Inventario' };
 

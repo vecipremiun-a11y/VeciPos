@@ -1,16 +1,22 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useCompanyFeatures } from '../../hooks/useCompanyFeatures';
 import { getModuleByKey } from '../../constants/modules';
 import { Sparkles, Lock, Crown, ArrowRight } from 'lucide-react';
 
+// Nivel mínimo de módulo → nombre del plan que lo desbloquea
+const PLAN_BY_LEVEL = { 1: 'Básico', 2: 'Medium', 3: 'Pro' };
+
 const FeatureGatePage = ({ moduleKey, children }) => {
     const { isModuleLocked } = useCompanyFeatures();
+    const navigate = useNavigate();
 
     if (!isModuleLocked(moduleKey)) {
         return <>{children}</>;
     }
 
     const moduleInfo = getModuleByKey(moduleKey);
+    const planName = PLAN_BY_LEVEL[moduleInfo?.minLevel] || 'superior';
 
     return (
         <div className="min-h-[70vh] flex items-center justify-center p-4 animate-in fade-in duration-500">
@@ -23,57 +29,54 @@ const FeatureGatePage = ({ moduleKey, children }) => {
                     </div>
                 </div>
 
-                {/* Badge PRO */}
+                {/* Badge del plan requerido */}
                 <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30">
                     <Sparkles size={16} className="text-amber-400" />
-                    <span className="text-amber-400 font-bold text-sm tracking-wider uppercase">Plan PRO</span>
+                    <span className="text-amber-400 font-bold text-sm tracking-wider uppercase">Plan {planName}</span>
                 </div>
 
                 {/* Title */}
                 <div className="space-y-3">
                     <h1 className="text-3xl font-bold text-[var(--color-text)]">
-                        {moduleInfo?.label || 'Este módulo'} es una función <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-yellow-500">Premium</span>
+                        {moduleInfo?.label || 'Este módulo'} está disponible desde el plan <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-yellow-500">{planName}</span>
                     </h1>
                     <p className="text-[var(--color-text-muted)] text-lg leading-relaxed max-w-md mx-auto">
-                        {moduleInfo?.description || 'Este módulo requiere una actualización de plan para ser utilizado.'}
+                        {moduleInfo?.description || 'Esta función requiere una actualización de plan para ser utilizada.'}
                     </p>
                 </div>
 
                 {/* Features */}
                 <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl p-6 text-left space-y-3">
                     <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
-                        <Lock size={14} /> Incluido en el Plan PRO
+                        <Lock size={14} /> Incluido en el Plan {planName}
                     </h3>
                     <ul className="space-y-2 text-[var(--color-text-muted)] text-sm">
                         <li className="flex items-center gap-2">
                             <ArrowRight size={14} className="text-amber-400 flex-shrink-0" />
-                            Acceso completo a {moduleInfo?.label || 'este módulo'}
+                            Acceso completo a {moduleInfo?.label || 'esta función'}
                         </li>
                         <li className="flex items-center gap-2">
                             <ArrowRight size={14} className="text-amber-400 flex-shrink-0" />
-                            Todas las funciones avanzadas incluidas
+                            Todas las funciones del plan incluidas
                         </li>
                         <li className="flex items-center gap-2">
                             <ArrowRight size={14} className="text-amber-400 flex-shrink-0" />
-                            Soporte prioritario y actualizaciones
+                            Actualiza en segundos desde tu cuenta
                         </li>
                     </ul>
                 </div>
 
-                {/* CTA */}
+                {/* CTA → checkout in-app */}
                 <button
-                    onClick={() => {
-                        // Open support/contact - could be a whatsapp link, email, or in-app support
-                        window.open('https://wa.me/56912345678?text=Hola%2C%20me%20interesa%20activar%20el%20módulo%20' + encodeURIComponent(moduleInfo?.label || 'Premium'), '_blank');
-                    }}
+                    onClick={() => navigate('/settings/plan')}
                     className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-bold text-lg shadow-xl shadow-amber-500/20 hover:shadow-amber-500/40 hover:scale-105 transition-all duration-300"
                 >
                     <Sparkles size={20} />
-                    Contactar para activar
+                    Mejorar mi plan
                 </button>
 
                 <p className="text-xs text-[var(--color-text-muted)] opacity-50">
-                    Contacta a tu administrador para habilitar este módulo.
+                    Si crees que esto es un error, contacta a tu administrador.
                 </p>
             </div>
         </div>

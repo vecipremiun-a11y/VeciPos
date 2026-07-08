@@ -7,16 +7,16 @@
 // Body: { tipo_dte: 39, count: 100, user_id?: string }
 
 import { turso } from './_db.js';
+import { requireCompanySession } from '../_lib/guard.js';
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const companyId = req.headers['x-company-id'];
-    if (!companyId) {
-        return res.status(400).json({ error: 'x-company-id header requerido' });
-    }
+    // Sesión firmada + membresía a la empresa (Fase 1 · Paso 6 — blindaje SII)
+    const companyId = await requireCompanySession(turso, req, res);
+    if (!companyId) return;
 
     try {
         const { tipo_dte, count, user_id, force } = req.body || {};

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { FileText, Calendar, Search, Eye, Download, CreditCard, Wallet, Clock, Check, X, Image, FileImage } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { turso } from '../lib/turso';
+import { reportCall } from '../lib/dataApi';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -27,11 +27,8 @@ const InvoicePaymentsReport = () => {
     const loadPurchases = async () => {
         setIsLoading(true);
         try {
-            const result = await turso.execute({
-                sql: `SELECT * FROM purchases WHERE company_id = ? ORDER BY date DESC`,
-                args: [activeCompanyId]
-            });
-            setPurchases(result.rows || []);
+            const rows = await reportCall(activeCompanyId, 'purchasesAll', {});
+            setPurchases(rows || []);
         } catch (e) {
             console.error('Error loading purchases:', e);
         }

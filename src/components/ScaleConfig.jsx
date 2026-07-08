@@ -16,6 +16,7 @@ const ScaleConfig = () => {
     const [busy, setBusy] = useState(false);
     const [testResult, setTestResult] = useState(null);
     const [errorMsg, setErrorMsg] = useState('');
+    const [rawLog, setRawLog] = useState('');
     const supported = scaleService.isSupported();
     const lastRawRef = useRef('');
 
@@ -31,13 +32,27 @@ const ScaleConfig = () => {
             setLiveReading(reading);
             lastRawRef.current = reading.raw;
         });
-        return unsub;
+        // Diagnóstico: acumular datos crudos (con \r \n visibles), capado a ~3000 chars
+        const unsubRaw = scaleService.subscribeRaw(chunk => {
+            setRawLog(prev => {
+                const escaped = chunk.replace(/\r/g, '\\r').replace(/\n/g, '\\n\n');
+                const next = prev + escaped;
+                return next.length > 3000 ? next.slice(-3000) : next;
+            });
+        });
+        return () => { unsub(); unsubRaw(); };
     }, [supported]);
 
     const updateConfig = (partial) => {
         const next = { ...config, ...partial };
         setConfig(next);
         scaleService.saveConfig(partial);
+    };
+
+    const setPoll = (cmd) => {
+        scaleService.setPollCommand(cmd);
+        setConfig(c => ({ ...c, pollCommand: cmd }));
+        setRawLog('');
     };
 
     const handleConnect = async () => {
@@ -240,6 +255,46 @@ const ScaleConfig = () => {
 
             <div className="text-[11px] text-[var(--color-text-muted)]">
                 Si cambias parámetros con la báscula conectada, desconéctala y vuelve a conectarla para aplicar.
+            </div>
+
+            {/* Diagnóstico: datos crudos del puerto */}
+            <div className="rounded-xl border border-[var(--glass-border)] bg-[var(--color-surface)] p-4">
+                <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                    <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+                        Datos crudos (diagnóstico)
+                    </p>
+                    <button
+                        onClick={() => setRawLog('')}
+                        className="text-[11px] px-2 py-1 rounded border border-[var(--glass-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]"
+                    >Limpiar</button>
+                </div>
+
+                {/* Selector de sondeo: si la báscula no transmite sola, prueba estos */}
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                    <span className="text-[11px] text-[var(--color-text-muted)]">Sondeo:</span>
+                    {[
+                        { cmd: '', label: 'Sin sondeo' },
+                        { cmd: '\x05', label: 'ENQ' },
+                        { cmd: 'W\r', label: 'W' },
+                        { cmd: 'P\r', label: 'P' },
+                    ].map(opt => (
+                        <button
+                            key={opt.label}
+                            disabled={!connected}
+                            onClick={() => setPoll(opt.cmd)}
+                            className={`text-[11px] px-2.5 py-1 rounded border transition-colors disabled:opacity-40 ${(config.pollCommand || '') === opt.cmd
+                                ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/15 text-[var(--color-primary)] font-bold'
+                                : 'border-[var(--glass-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]'
+                                }`}
+                        >{opt.label}</button>
+                    ))}
+                    <span className="text-[11px] text-[var(--color-text-muted)]">
+                        Si no aparece nada, prueba ENQ → W → P (uno a la vez).
+                    </span>
+                </div>
+                <pre className="text-[11px] font-mono text-green-300/90 bg-black/40 rounded-lg p-3 max-h-44 overflow-auto whitespace-pre-wrap break-all">
+{rawLog || 'Esperando datos… pon peso en la báscula.\n\nSi NO aparece nada: tu báscula no está transmitiendo sola — prueba los botones "Solicitar" de arriba, o revisa baud rate / puerto.\nSi aparecen datos pero el peso sigue en "—": cópialos y mándamelos para ajustar el lector.'}
+                </pre>
             </div>
         </div>
     );

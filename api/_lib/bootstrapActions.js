@@ -1,0 +1,70 @@
+// Carga inicial de la app server-side (Fase 1 · Paso 35).
+// `bootstrap` = el batch de metadata que fetchInitialData hacía directo contra
+// Turso (12 lecturas en 1 round-trip). `userCompanies` = empresas del usuario
+// (scope de sesión, sin companyId — se usa en recarga de página / selector).
+// SEGURIDAD: el listado de usuarios ya NO devuelve el hash de contraseña.
+
+// Empresas activas del usuario de la sesión (nunca de otro uid).
+async function userCompanies(turso, session) {
+    const r = await turso.execute({
+        sql: `SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, c.currency, c.credit_block_mode, uc.role
+              FROM user_companies uc
+              JOIN companies c ON uc.company_id = c.id
+              WHERE uc.user_id = ? AND c.status = 'active'`,
+        args: [session?.uid ?? null],
+    });
+    return { success: true, companies: r.rows };
+}
+
+// Metadata completa de la empresa activa (mismo set que cargaba el navegador).
+async function bootstrap(turso, companyId) {
+    const results = await turso.batch([
+        { sql: `SELECT pl.id, pl.product_id, pl.batch_number, pl.expiry_date, pl.quantity, pl.cost, pl.supplier_name, pl.created_at, pl.status, pl.company_id, p.name AS product_name, p.unit AS product_unit
+                  FROM product_lots pl
+                  LEFT JOIN products p ON p.id = pl.product_id
+                  WHERE pl.company_id = ? AND pl.quantity > 0
+                  ORDER BY pl.expiry_date ASC
+                  LIMIT 200`, args: [companyId] },
+        { sql: 'SELECT * FROM categories WHERE company_id = ? ORDER BY name ASC', args: [companyId] },
+        { sql: 'SELECT * FROM suppliers WHERE company_id = ? ORDER BY name ASC', args: [companyId] },
+        { sql: 'SELECT u.*, uc.role AS company_role FROM users u LEFT JOIN user_companies uc ON uc.user_id = u.id AND uc.company_id = ? WHERE u.company_id = ?', args: [companyId, companyId] },
+        { sql: 'SELECT * FROM clients WHERE company_id = ? ORDER BY name ASC', args: [companyId] },
+        { sql: 'SELECT * FROM role_permissions WHERE company_id = ?', args: [companyId] },
+        { sql: 'SELECT * FROM tax_rates WHERE company_id = ?', args: [companyId] },
+        { sql: 'SELECT * FROM company_modules WHERE company_id = ?', args: [companyId] },
+        { sql: 'SELECT * FROM payment_methods_config WHERE company_id = ?', args: [companyId] },
+        { sql: 'SELECT * FROM payment_terminals WHERE company_id = ? AND is_active = 1', args: [companyId] },
+        { sql: 'SELECT * FROM bank_accounts WHERE company_id = ? AND is_active = 1', args: [companyId] },
+        { sql: 'SELECT inventory_adjustment_mode, currency, credit_block_mode, plan, status, trial_ends_at FROM companies WHERE id = ?', args: [companyId] },
+    ], 'read');
+
+    const [productLotsRes, categoriesRes, suppliersRes, usersRes, clientsRes, permissionsRes, taxesRes, modulesRes, payConfigRes, payTerminalsRes, bankAccountsRes, companyConfigRes] = results;
+
+    // Asegurar config de medios de pago (default si no existe) — idempotente.
+    let paymentMethodsConfig = payConfigRes.rows[0];
+    if (!paymentMethodsConfig) {
+        try { await turso.execute({ sql: 'INSERT INTO payment_methods_config (company_id) VALUES (?)', args: [companyId] }); } catch { /* carrera / ya existe */ }
+        paymentMethodsConfig = { company_id: companyId, cash_enabled: 1, card_enabled: 1, transfer_enabled: 1, credit_enabled: 1, mixed_enabled: 1 };
+    }
+
+    // El listado de usuarios NUNCA lleva el hash de contraseña al navegador.
+    const users = usersRes.rows.map(({ password: _pw, ...u }) => u);
+
+    return {
+        success: true,
+        productLots: productLotsRes.rows,
+        categories: categoriesRes.rows,
+        suppliers: suppliersRes.rows,
+        users,
+        clients: clientsRes.rows,
+        rolePermissions: permissionsRes.rows,
+        taxRates: taxesRes.rows,
+        companyModules: modulesRes.rows,
+        paymentMethodsConfig,
+        paymentTerminals: payTerminalsRes.rows,
+        bankAccounts: bankAccountsRes.rows,
+        companyConfig: companyConfigRes.rows[0] || null,
+    };
+}
+
+export const bootstrapActions = { bootstrap, userCompanies };

@@ -20,6 +20,7 @@ const OptimizedImage = ({
     // Intersection Observer para lazy loading
     useEffect(() => {
         if (priority || !imgRef.current) return;
+        const el = imgRef.current;
 
         const observer = new IntersectionObserver(
             (entries) => {
@@ -35,14 +36,12 @@ const OptimizedImage = ({
             }
         );
 
-        observer.observe(imgRef.current);
+        observer.observe(el);
 
-        return () => {
-            if (imgRef.current) {
-                observer.unobserve(imgRef.current);
-            }
-        };
-    }, [priority]);
+        return () => observer.unobserve(el);
+        // Incluye `src`: si la imagen llega después (carga diferida), re-observa el
+        // elemento real para que se muestre aunque no estuviera en viewport antes.
+    }, [priority, src]);
 
     const handleLoad = () => {
         setIsLoaded(true);

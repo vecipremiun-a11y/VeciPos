@@ -603,11 +603,12 @@ const SubscriptionBanner = () => {
 
     if (!info || info.status !== 'trial') return null;
 
-    const trialEnd = new Date(info.trial_ends_at);
-    const now = new Date();
-    const daysLeft = Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24));
+    // checkSubscriptionStatus ya calcula los días restantes
+    const daysLeft = Number.isFinite(info.daysRemaining)
+        ? info.daysRemaining
+        : Math.ceil((new Date(info.trial_ends_at) - new Date()) / (1000 * 60 * 60 * 24));
 
-    if (daysLeft < 0) return null;
+    if (!Number.isFinite(daysLeft) || daysLeft < 0) return null;
 
     return (
         <div className="bg-blue-500/10 border border-blue-500/30 p-4 rounded-xl mb-6 flex items-center justify-between">
@@ -623,7 +624,7 @@ const SubscriptionBanner = () => {
                 </div>
             </div>
             <button
-                onClick={() => window.location.href = '/select-plan'}
+                onClick={() => window.location.href = '/settings/plan'}
                 className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold rounded-lg transition-colors"
             >
                 Suscribirme Ahora

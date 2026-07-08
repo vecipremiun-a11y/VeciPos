@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -10,21 +10,30 @@ import SupportWidget from '../components/SupportWidget';
 import WebOrderToast from '../components/WebOrderToast';
 import { usePermissions } from '../hooks/usePermissions';
 import { useCompanyFeatures } from '../hooks/useCompanyFeatures';
+import { getModuleByKey } from '../constants/modules';
 import { createSmartInterval } from '../lib/smartPolling';
+
+// Etiqueta del plan que desbloquea un módulo (para el badge del menú).
+const PLAN_BY_LEVEL = { 1: 'Básico', 2: 'Medium', 3: 'Pro' };
+const planBadgeFor = (moduleKey) => PLAN_BY_LEVEL[getModuleByKey(moduleKey)?.minLevel] || 'Pro';
 
 const MainLayout = () => {
     // Helper to check window width strictly for initial state (avoid hydration mismatch if SSR, but this is SPA)
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
     const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile); // Closed by default on mobile, open on desktop
     // FASE 10 · re-render solo cuando estas claves cambian, no con todo el store.
-    const { currentUser, logout, inventoryAdjustmentMode, fetchRolePermissions } = useStore(
+    const { currentUser, currentUserCompanyRole, logout, inventoryAdjustmentMode, fetchRolePermissions } = useStore(
         useShallow(s => ({
             currentUser: s.currentUser,
+            currentUserCompanyRole: s.currentUserCompanyRole,
             logout: s.logout,
             inventoryAdjustmentMode: s.inventoryAdjustmentMode,
             fetchRolePermissions: s.fetchRolePermissions,
         }))
     );
+
+    // Contratar/gestionar plan = solo el dueño (no el personal, aunque sea Administrador).
+    const isOwner = currentUserCompanyRole === 'owner' || currentUserCompanyRole === 'super_admin' || currentUser?.role === 'super_admin';
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -97,14 +106,14 @@ const MainLayout = () => {
             subItems: [
                 { icon: Box, label: 'Productos', path: '/inventory', permission: 'products.view' },
                 { icon: Tag, label: 'Categorías', path: '/categories', permission: 'categories.view' },
-                { icon: Truck, label: 'Proveedores', path: '/suppliers', permission: 'suppliers.view' },
-                { icon: FileText, label: 'Facturas', path: '/invoices', permission: 'invoices.view' },
-                { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view' },
-                { icon: Percent, label: 'Impuestos', path: '/taxes', permission: 'taxes.view' },
-                { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', permission: 'product_profile.view' },
-                { icon: ShieldCheck, label: 'Conciliación', path: '/inventory/reconciliation', permission: 'products.adjust_stock' },
-                { icon: ClipboardCheck, label: 'Control de Inventario', path: '/inventory/control', permission: 'inventory_control.view' },
-                { icon: Gift, label: 'Combos / Packs', path: '/inventory/combos', permission: 'combos.view' }
+                { icon: Truck, label: 'Proveedores', path: '/suppliers', permission: 'suppliers.view', moduleKey: 'orders' },
+                { icon: FileText, label: 'Facturas', path: '/invoices', permission: 'invoices.view', moduleKey: 'orders' },
+                { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view', moduleKey: 'orders' },
+                { icon: Percent, label: 'Impuestos', path: '/taxes', permission: 'taxes.view', moduleKey: 'taxes' },
+                { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', permission: 'product_profile.view', moduleKey: 'product_profile' },
+                { icon: ShieldCheck, label: 'Conciliación', path: '/inventory/reconciliation', permission: 'products.adjust_stock', moduleKey: 'inventory_control' },
+                { icon: ClipboardCheck, label: 'Control de Inventario', path: '/inventory/control', permission: 'inventory_control.view', moduleKey: 'inventory_control' },
+                { icon: Gift, label: 'Combos / Packs', path: '/inventory/combos', permission: 'combos.view', moduleKey: 'combos' }
             ]
         },
         {
@@ -116,8 +125,8 @@ const MainLayout = () => {
                     icon: ShoppingCart, label: 'Ventas', isSubgroup: true,
                     children: [
                         { icon: FileText, label: 'Venta de Productos', path: '/reports', permission: 'reports.sales' },
-                        { icon: TrendingUp, label: 'Utilidad', path: '/reports/profit', permission: 'reports.profit' },
-                        { icon: PieChartIcon, label: 'Análisis de Ventas', path: '/reports/sales-analytics', permission: 'reports.sales_analytics' },
+                        { icon: TrendingUp, label: 'Utilidad', path: '/reports/profit', permission: 'reports.profit', moduleKey: 'reports_advanced' },
+                        { icon: PieChartIcon, label: 'Análisis de Ventas', path: '/reports/sales-analytics', permission: 'reports.sales_analytics', moduleKey: 'reports_advanced' },
                     ]
                 },
                 { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', permission: 'reports.expiring' },
@@ -126,10 +135,10 @@ const MainLayout = () => {
                     children: [
                         { icon: DollarSign, label: 'Cierre de Caja', path: '/reports/closures', permission: 'reports.closures' },
                         { icon: ArrowLeftRight, label: 'Movimientos de Caja', path: '/reports/movements', permission: 'reports.movements' },
-                        { icon: CreditCard, label: 'Conciliación Datáfonos', path: '/reports/payment-reconciliation', permission: 'reports.closures' },
+                        { icon: CreditCard, label: 'Conciliación Datáfonos', path: '/reports/payment-reconciliation', permission: 'reports.closures', moduleKey: 'reports_advanced' },
                     ]
                 },
-                { icon: Receipt, label: 'Pagos Facturas', path: '/reports/invoice-payments', permission: 'reports.invoice_payments' },
+                { icon: Receipt, label: 'Pagos Facturas', path: '/reports/invoice-payments', permission: 'reports.invoice_payments', moduleKey: 'orders' },
             ]
         },
         {
@@ -144,41 +153,53 @@ const MainLayout = () => {
         { icon: Briefcase, label: 'Personal', path: '/personal', permission: 'personal.view', moduleKey: 'personal' },
         { icon: Trophy, label: 'Sorteos', path: '/sorteos', permission: 'sorteos.view', moduleKey: 'sorteos' },
         { icon: Users, label: 'Usuarios', path: '/users', permission: 'users.view', moduleKey: 'users' },
-        { icon: Settings, label: 'Configuración', path: '/settings', permission: 'settings.view', moduleKey: 'settings' },
+        {
+            icon: Settings,
+            label: 'Configuración',
+            subItems: [
+                { icon: Settings, label: 'General', path: '/settings/general', permission: 'settings.view' },
+                { icon: Crown, label: 'Mi Plan', path: '/settings/plan', permission: 'settings.company', ownerOnly: true },
+                { icon: Building2, label: 'Empresa', path: '/settings/company', permission: 'settings.company' },
+                { icon: FileText, label: 'Boletas', path: '/settings/receipts', permission: 'settings.receipts' },
+                { icon: CreditCard, label: 'Medios de Pago', path: '/settings/payments', permission: 'settings.payments' },
+                { icon: Smartphone, label: 'Integraciones', path: '/settings/integrations', permission: 'settings.system', moduleKey: 'integrations' },
+                { icon: Scale, label: 'Báscula', path: '/settings/scale', permission: 'settings.system', moduleKey: 'scale' },
+                { icon: Stamp, label: 'Facturación SII', path: '/settings/sii', permission: 'settings.system', moduleKey: 'sii' },
+                { icon: ShieldCheck, label: 'Permisos', path: '/settings/permissions', permission: 'settings.manage_permissions' },
+                { icon: Wrench, label: 'Sistema', path: '/settings/system', permission: 'settings.system' },
+            ]
+        },
     ];
 
+    // La VISIBILIDAD se rige por permisos (rol). El bloqueo por PLAN no oculta:
+    // marca el ítem como `isLocked` para mostrarlo con su badge de plan (Medium/Pro)
+    // y que el usuario sepa qué gana al subir de plan.
     const navItems = allNavItems.filter(item => {
-        // If item has subItems, check if AT LEAST ONE subItem is allowed
         if (item.subItems) {
             const visibleSubItems = item.subItems.filter(sub => {
                 if (sub.isSubgroup) {
                     const visibleChildren = sub.children.filter(c => can(c.permission));
-                    if (visibleChildren.length > 0) {
-                        sub.children = visibleChildren;
-                        return true;
-                    }
+                    if (visibleChildren.length > 0) { sub.children = visibleChildren; return true; }
                     return false;
                 }
-                return can(sub.permission);
+                return can(sub.permission) && (!sub.ownerOnly || isOwner);
             });
-            if (visibleSubItems.length > 0) {
-                item.subItems = visibleSubItems; // Only show allowed subitems
-                return true;
-            }
+            if (visibleSubItems.length > 0) { item.subItems = visibleSubItems; return true; }
             return false;
         }
-        // Normal item: show if has permission (even if module is locked — we show PRO badge)
         return can(item.permission);
     }).map(item => {
-        // Mark items as locked if their module is disabled
-        if (item.moduleKey && isModuleLocked(item.moduleKey)) {
-            return { ...item, isLocked: true };
+        const itemLocked = item.moduleKey ? isModuleLocked(item.moduleKey) : false;
+        let subItems = item.subItems;
+        if (subItems) {
+            subItems = subItems.map(sub => {
+                if (sub.isSubgroup) {
+                    return { ...sub, children: sub.children.map(c => ({ ...c, isLocked: c.moduleKey ? isModuleLocked(c.moduleKey) : false })) };
+                }
+                return { ...sub, isLocked: sub.moduleKey ? isModuleLocked(sub.moduleKey) : false };
+            });
         }
-        // For submenu groups, check if the whole group module is locked
-        if (item.subItems && item.moduleKey && isModuleLocked(item.moduleKey)) {
-            return { ...item, isLocked: true };
-        }
-        return item;
+        return { ...item, isLocked: itemLocked, subItems };
     });
 
     const toggleSubmenu = (label) => {
@@ -247,7 +268,7 @@ const MainLayout = () => {
                                         {isSidebarOpen && (
                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30 text-amber-400 text-[10px] font-bold tracking-wider uppercase">
                                                 <Sparkles size={10} />
-                                                PRO
+                                                {planBadgeFor(item.moduleKey)}
                                             </span>
                                         )}
                                         {!isSidebarOpen && (
@@ -336,7 +357,12 @@ const MainLayout = () => {
                                                                 )}
                                                             >
                                                                 <child.icon size={14} />
-                                                                <span className="text-sm">{child.label}</span>
+                                                                <span className="text-sm flex-1">{child.label}</span>
+                                                                {child.isLocked && (
+                                                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-bold tracking-wider uppercase">
+                                                                        {planBadgeFor(child.moduleKey)}
+                                                                    </span>
+                                                                )}
                                                             </NavLink>
                                                         ))}
                                                     </div>
@@ -357,7 +383,12 @@ const MainLayout = () => {
                                                 )}
                                             >
                                                 <subItem.icon size={16} />
-                                                <span className="text-sm">{subItem.label}</span>
+                                                <span className="text-sm flex-1">{subItem.label}</span>
+                                                {subItem.isLocked && (
+                                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-bold tracking-wider uppercase">
+                                                        {planBadgeFor(subItem.moduleKey)}
+                                                    </span>
+                                                )}
                                             </NavLink>
                                         );
                                     })}
@@ -387,7 +418,7 @@ const MainLayout = () => {
                                 {item.isLocked && isSidebarOpen && (
                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30 text-amber-400 text-[10px] font-bold tracking-wider uppercase">
                                         <Sparkles size={10} />
-                                        PRO
+                                        {planBadgeFor(item.moduleKey)}
                                     </span>
                                 )}
                                 {item.isLocked && !isSidebarOpen && (
