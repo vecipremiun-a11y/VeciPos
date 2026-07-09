@@ -31,3 +31,5 @@ dist-ssr
 # Local dev tooling (Claude Code, file backups)
 .claude/
 *.bak
+
+.vercel
