@@ -3,7 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
     Search, ShoppingCart, Trash2, Plus, Minus, X, Clock, Phone, User,
     MapPin, FileText, Calendar, ChevronDown, Check, DollarSign, Package,
-    ClipboardList, Truck, AlertCircle, CreditCard, Banknote, ArrowRight, CakeSlice, Printer
+    ClipboardList, Truck, AlertCircle, CreditCard, Banknote, ArrowRight, CakeSlice, Printer,
+    Store as StoreIcon
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
@@ -862,6 +863,13 @@ const Preorders = () => {
                     >
                         <CakeSlice size={14} />
                         Encargos
+                    </button>
+                    <button
+                        onClick={() => navigate('/store-orders')}
+                        className="px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                    >
+                        <StoreIcon size={14} />
+                        Tienda
                     </button>
                 </div>
 

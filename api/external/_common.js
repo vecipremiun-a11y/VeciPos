@@ -37,7 +37,7 @@ export function setCorsHeaders(req, res, methods = 'GET, OPTIONS') {
     }
 
     res.setHeader('Access-Control-Allow-Methods', methods);
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-company-id, x-api-key');
     res.setHeader('Access-Control-Max-Age', '86400');
 }
 
@@ -53,6 +53,37 @@ export function authenticateRequest(req) {
 
 export function parseCompanyId() {
     return process.env.EXTERNAL_COMPANY_ID || 'default';
+}
+
+/**
+ * Auth multiempresa: si la request trae `x-company-id`, la key (Bearer o
+ * x-api-key) debe coincidir con la api_key de ESA empresa en tienda_config —
+ * sin fallback al camino legacy (una key de la empresa A no sirve para la B).
+ * Sin header, se mantiene el contrato original: Bearer EXTERNAL_API_KEY con
+ * empresa fija EXTERNAL_COMPANY_ID (retrocompatible mientras miniveci migra).
+ * Devuelve { ok, companyId }.
+ */
+export async function authenticateAndResolveCompany(req) {
+    const authHeader = req.headers.authorization || '';
+    const bearer = authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7)
+        : String(req.headers['x-api-key'] || '');
+    const headerCompany = String(req.headers['x-company-id'] || '').trim();
+
+    if (headerCompany) {
+        const { getTiendaConfig } = await import('../integration/_db.js');
+        const config = await getTiendaConfig(headerCompany);
+        if (config && config.is_active !== 0 && config.api_key && bearer && bearer === config.api_key) {
+            return { ok: true, companyId: headerCompany };
+        }
+        return { ok: false, companyId: null };
+    }
+
+    const legacyKey = process.env.EXTERNAL_API_KEY;
+    if (legacyKey && bearer === legacyKey) {
+        return { ok: true, companyId: process.env.EXTERNAL_COMPANY_ID || 'default' };
+    }
+    return { ok: false, companyId: null };
 }
 
 export function normalizeSku(value) {
@@ -100,6 +131,8 @@ export async function ensurePreordersSyncColumns() {
         ['client_external_id', 'TEXT'],
         ['delivery_fee', 'REAL DEFAULT 0'],
         ['payment_method', 'TEXT'],
+        // 'encargo' (pedido de amasandería) | 'store' (pedido normal de la tienda web)
+        ['order_kind', "TEXT DEFAULT 'encargo'"],
     ];
     for (const [col, type] of additions) {
         if (!preorderCols.has(col)) {

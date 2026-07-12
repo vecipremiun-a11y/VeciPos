@@ -5,6 +5,21 @@
 
 const nowIso = () => new Date().toISOString();
 
+// order_kind separa encargos ('encargo') de pedidos de la tienda web ('store').
+// La columna se agrega perezosamente (una vez por proceso) para que reportes y
+// listados funcionen también en bases que aún no reciben pedidos web.
+let _orderKindEnsured = false;
+async function ensureOrderKindColumn(turso) {
+    if (_orderKindEnsured) return;
+    try {
+        await turso.execute("ALTER TABLE preorders ADD COLUMN order_kind TEXT DEFAULT 'encargo'");
+    } catch { /* la columna ya existe */ }
+    _orderKindEnsured = true;
+}
+
+// Filtro para que los reportes/listados de ENCARGOS excluyan pedidos de tienda.
+const ONLY_ENCARGO = (alias = '') => ` AND COALESCE(${alias}order_kind, 'encargo') = 'encargo'`;
+
 // Guard: el encargo debe ser de la empresa. Devuelve la fila o null.
 async function ownPreorder(turso, companyId, preorderId, cols = '*') {
     const r = await turso.execute({
@@ -64,24 +79,32 @@ async function preorderCreate(turso, companyId, session, { preorderData, registe
 }
 
 async function preordersFetch(turso, companyId, session, { filters = {} }) {
+    // kind: 'encargo' (default — Encargos/history no ven pedidos de tienda),
+    // 'store' (pestaña Tienda) o 'all'. COALESCE cubre filas previas a la columna.
+    await ensureOrderKindColumn(turso);
+    const kind = filters.kind || 'encargo';
     let sql = `SELECT p.*,
                 (SELECT GROUP_CONCAT(pi.product_name || ' x' || pi.qty, ', ')
                  FROM preorder_items pi WHERE pi.preorder_id = p.id) as items_summary
                FROM preorders p
                WHERE p.company_id = ?`;
     const args = [companyId];
+    if (kind !== 'all') { sql += " AND COALESCE(p.order_kind, 'encargo') = ?"; args.push(kind); }
     if (filters.date) { sql += ' AND p.due_date = ?'; args.push(filters.date); }
     if (filters.status && filters.status !== 'all') { sql += ' AND p.status = ?'; args.push(filters.status); }
     if (filters.startDate && filters.endDate) { sql += ' AND p.due_date BETWEEN ? AND ?'; args.push(filters.startDate, filters.endDate); }
-    sql += ' ORDER BY p.due_date ASC, p.due_time ASC';
+    // Tienda: lo más reciente primero (fecha del pedido); encargos: por entrega.
+    sql += kind === 'store' ? ' ORDER BY p.created_at DESC' : ' ORDER BY p.due_date ASC, p.due_time ASC';
     const result = await turso.execute({ sql, args });
     return { success: true, preorders: result.rows };
 }
 
 async function pendingWebOrders(turso, companyId) {
+    await ensureOrderKindColumn(turso);
     const result = await turso.execute({
         sql: `SELECT p.id, p.external_public_code as public_code, p.client_name,
                      p.due_date, p.due_time, p.total_amount,
+                     COALESCE(p.order_kind, 'encargo') as order_kind,
                      (SELECT GROUP_CONCAT(pi.product_name || ' x' || pi.qty, ', ')
                       FROM preorder_items pi WHERE pi.preorder_id = p.id) as items_summary
               FROM preorders p
@@ -263,6 +286,7 @@ async function preorderDeliver(turso, companyId, session, { preorderId, itemWeig
 // el post-procesamiento (formatos/cálculos de UI) sigue en el cliente.
 
 async function preorderReportsRaw(turso, companyId, session, { startDate, endDate }) {
+    await ensureOrderKindColumn(turso);
     const df = (col) => `SUBSTR(${col}, 1, 10) BETWEEN ? AND ?`;
     const [summaryRes, byProductRes, byClientRes, detailsRes] = await turso.batch([
         {
@@ -272,7 +296,7 @@ async function preorderReportsRaw(turso, companyId, session, { startDate, endDat
                     COUNT(*) as delivered_count,
                     AVG(COALESCE(real_total, total_amount)) as avg_ticket
                   FROM preorders
-                  WHERE status = 'delivered' AND ${df('delivered_at')} AND company_id = ?`,
+                  WHERE status = 'delivered' AND ${df('delivered_at')} AND company_id = ?${ONLY_ENCARGO()}`,
             args: [startDate, endDate, companyId],
         },
         {
@@ -284,7 +308,7 @@ async function preorderReportsRaw(turso, companyId, session, { startDate, endDat
                   FROM preorder_items pi
                   JOIN preorders po ON pi.preorder_id = po.id
                   JOIN products p ON pi.product_id = p.id
-                  WHERE po.status = 'delivered' AND ${df('po.delivered_at')} AND po.company_id = ?
+                  WHERE po.status = 'delivered' AND ${df('po.delivered_at')} AND po.company_id = ?${ONLY_ENCARGO('po.')}
                   GROUP BY pi.product_id ORDER BY revenue DESC`,
             args: [startDate, endDate, companyId],
         },
@@ -294,7 +318,7 @@ async function preorderReportsRaw(turso, companyId, session, { startDate, endDat
                     SUM(COALESCE(po.real_total, po.total_amount)) as total_spend,
                     MAX(po.delivered_at) as last_order_date
                   FROM preorders po
-                  WHERE po.status = 'delivered' AND ${df('po.delivered_at')} AND po.company_id = ?
+                  WHERE po.status = 'delivered' AND ${df('po.delivered_at')} AND po.company_id = ?${ONLY_ENCARGO('po.')}
                   GROUP BY COALESCE(po.client_id, po.client_name)
                   ORDER BY total_spend DESC LIMIT 100`,
             args: [startDate, endDate, companyId],
@@ -306,7 +330,7 @@ async function preorderReportsRaw(turso, companyId, session, { startDate, endDat
                      FROM preorder_items pi JOIN products p ON pi.product_id = p.id
                      WHERE pi.preorder_id = po.id) as items_summary
                   FROM preorders po
-                  WHERE po.status = 'delivered' AND ${df('po.delivered_at')} AND po.company_id = ?
+                  WHERE po.status = 'delivered' AND ${df('po.delivered_at')} AND po.company_id = ?${ONLY_ENCARGO('po.')}
                   ORDER BY po.delivered_at DESC`,
             args: [startDate, endDate, companyId],
         },
@@ -321,10 +345,11 @@ async function preorderReportsRaw(turso, companyId, session, { startDate, endDat
 }
 
 async function preorderAnalyticsRaw(turso, companyId, session, { startDate, endDate, prevStartStr, prevEndStr }) {
+    await ensureOrderKindColumn(turso);
     const results = await turso.batch([
         {
             sql: `SELECT status, COUNT(*) as count, SUM(COALESCE(real_total, total_amount)) as amount
-                  FROM preorders WHERE due_date BETWEEN ? AND ? AND company_id = ? GROUP BY status`,
+                  FROM preorders WHERE due_date BETWEEN ? AND ? AND company_id = ?${ONLY_ENCARGO()} GROUP BY status`,
             args: [startDate, endDate, companyId],
         },
         {
@@ -336,13 +361,13 @@ async function preorderAnalyticsRaw(turso, companyId, session, { startDate, endD
                     SUM(CASE WHEN status IN ('pending','confirmed','preparing','ready') THEN COALESCE(estimated_total, total_amount) ELSE 0 END) as pipeline_value,
                     SUM(deposit_amount) as total_deposits,
                     AVG(CASE WHEN status='delivered' THEN COALESCE(real_total, total_amount) END) as avg_ticket
-                  FROM preorders WHERE due_date BETWEEN ? AND ? AND company_id = ?`,
+                  FROM preorders WHERE due_date BETWEEN ? AND ? AND company_id = ?${ONLY_ENCARGO()}`,
             args: [startDate, endDate, companyId],
         },
         {
             sql: `SELECT pp.method, COUNT(DISTINCT pp.preorder_id) as orders, SUM(pp.amount) as total
                   FROM preorder_payments pp JOIN preorders po ON pp.preorder_id = po.id
-                  WHERE po.status = 'delivered' AND po.due_date BETWEEN ? AND ? AND po.company_id = ?
+                  WHERE po.status = 'delivered' AND po.due_date BETWEEN ? AND ? AND po.company_id = ?${ONLY_ENCARGO('po.')}
                   GROUP BY pp.method ORDER BY total DESC`,
             args: [startDate, endDate, companyId],
         },
@@ -350,7 +375,7 @@ async function preorderAnalyticsRaw(turso, companyId, session, { startDate, endD
             sql: `SELECT due_date as day, COUNT(*) as orders,
                     SUM(CASE WHEN status='delivered' THEN COALESCE(real_total, total_amount) ELSE 0 END) as revenue,
                     SUM(CASE WHEN status='delivered' THEN 1 ELSE 0 END) as delivered
-                  FROM preorders WHERE due_date BETWEEN ? AND ? AND company_id = ?
+                  FROM preorders WHERE due_date BETWEEN ? AND ? AND company_id = ?${ONLY_ENCARGO()}
                   GROUP BY due_date ORDER BY due_date`,
             args: [startDate, endDate, companyId],
         },
@@ -362,7 +387,7 @@ async function preorderAnalyticsRaw(turso, companyId, session, { startDate, endD
                   FROM preorder_items pi
                   JOIN preorders po ON pi.preorder_id = po.id
                   JOIN products p ON pi.product_id = p.id
-                  WHERE po.status != 'canceled' AND po.due_date BETWEEN ? AND ? AND po.company_id = ?
+                  WHERE po.status != 'canceled' AND po.due_date BETWEEN ? AND ? AND po.company_id = ?${ONLY_ENCARGO('po.')}
                   GROUP BY pi.product_id ORDER BY quantity DESC LIMIT 15`,
             args: [startDate, endDate, companyId],
         },
@@ -373,7 +398,7 @@ async function preorderAnalyticsRaw(turso, companyId, session, { startDate, endD
                     SUM(CASE WHEN po.status='canceled' THEN 1 ELSE 0 END) as canceled_count,
                     SUM(CASE WHEN po.status='delivered' THEN COALESCE(po.real_total, po.total_amount) ELSE 0 END) as total_spend
                   FROM preorders po
-                  WHERE po.due_date BETWEEN ? AND ? AND po.company_id = ?
+                  WHERE po.due_date BETWEEN ? AND ? AND po.company_id = ?${ONLY_ENCARGO('po.')}
                   GROUP BY COALESCE(po.client_id, po.client_name)
                   ORDER BY total_spend DESC LIMIT 15`,
             args: [startDate, endDate, companyId],
@@ -381,7 +406,7 @@ async function preorderAnalyticsRaw(turso, companyId, session, { startDate, endD
         {
             sql: `SELECT COUNT(*) as total_orders,
                     SUM(CASE WHEN status='delivered' THEN COALESCE(real_total, total_amount) ELSE 0 END) as revenue
-                  FROM preorders WHERE due_date BETWEEN ? AND ? AND company_id = ?`,
+                  FROM preorders WHERE due_date BETWEEN ? AND ? AND company_id = ?${ONLY_ENCARGO()}`,
             args: [prevStartStr, prevEndStr, companyId],
         },
     ], 'read');

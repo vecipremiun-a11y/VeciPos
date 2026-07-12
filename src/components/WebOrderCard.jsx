@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
-import { CakeSlice, Check, X, Eye, Clock } from 'lucide-react';
+import { CakeSlice, Store, Check, X, Eye, Clock } from 'lucide-react';
 import { formatCurrency } from '../utils/formatCurrency';
 
-// Tarjeta de "Encargo amasandería": aviso de un encargo que entró desde la web.
+// Tarjeta de aviso de pedido web (encargo de amasandería o pedido de tienda).
 // Se usa igual en el toast (abajo-izquierda) y dentro de la campanita.
 // Props:
-//   order        { id, public_code, client_name, items_summary, due_date, due_time, total }
+//   order        { id, public_code, client_name, items_summary, due_date, due_time, total, order_kind }
 //   currency     código de moneda activo (ej. 'CLP')
-//   onAccept(id) confirmar el encargo
-//   onReject(id) rechazar el encargo
-//   onView(id)   ir a Encargos a ver detalles
+//   onAccept(id) confirmar el pedido
+//   onReject(id) rechazar el pedido
+//   onView(id)   ir a Encargos/Tienda a ver detalles
 //   onClose(id)  cerrar (X) — solo en el toast; en la campanita se omite
 const WebOrderCard = ({ order, currency = 'CLP', onAccept, onReject, onView, onClose }) => {
     const [busy, setBusy] = useState(false);
@@ -21,18 +21,20 @@ const WebOrderCard = ({ order, currency = 'CLP', onAccept, onReject, onView, onC
     };
 
     const dateLabel = [order.due_date, order.due_time].filter(Boolean).join(' · ');
+    const isStore = order.order_kind === 'store';
+    const KindIcon = isStore ? Store : CakeSlice;
 
     return (
         <div className="rounded-xl border border-[var(--glass-border)] bg-[var(--color-surface)] overflow-hidden">
             {/* Header */}
             <div className="flex items-start gap-3 px-4 pt-3">
-                <div className="w-9 h-9 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0">
-                    <CakeSlice size={18} />
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${isStore ? 'bg-cyan-500/15 text-cyan-400' : 'bg-amber-500/15 text-amber-400'}`}>
+                    <KindIcon size={18} />
                 </div>
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                        <p className="font-semibold text-sm text-[var(--color-text)]">Encargo amasandería</p>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                        <p className="font-semibold text-sm text-[var(--color-text)]">{isStore ? 'Pedido tienda' : 'Encargo amasandería'}</p>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${isStore ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>
                             Web
                         </span>
                     </div>

@@ -48,13 +48,18 @@ const NotificationBell = () => {
         removeWebOrder(id);
     };
     const handleRejectWebOrder = async (id) => {
-        if (!window.confirm('¿Rechazar este encargo? El cliente verá que fue rechazado.')) return;
-        await updatePreorderStatus(id, 'canceled', 'Rechazado desde el aviso de encargo web');
+        if (!window.confirm('¿Rechazar este pedido? El cliente verá que fue rechazado.')) return;
+        await updatePreorderStatus(id, 'canceled', 'Rechazado desde el aviso de pedido web');
         removeWebOrder(id);
     };
     const handleViewWebOrder = (id) => {
         setIsOpen(false);
-        navigate('/preorders', { state: { tab: 'list', focusPreorderId: id } });
+        const order = webOrders.find(o => o.id === id);
+        if (order?.order_kind === 'store') {
+            navigate('/store-orders');
+        } else {
+            navigate('/preorders', { state: { tab: 'list', focusPreorderId: id } });
+        }
     };
 
     // FASE 9 · Polling inteligente del badge de alertas:

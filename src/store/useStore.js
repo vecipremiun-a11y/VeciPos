@@ -5275,6 +5275,7 @@ export const useStore = create(persist((set, get) => ({
             due_date: data.due_date || null,
             due_time: data.due_time || null,
             total: Number(data.total ?? data.total_amount) || 0,
+            order_kind: data.order_kind === 'store' ? 'store' : 'encargo',
         };
         set((state) => ({ webOrders: [order, ...state.webOrders] }));
         return true;
@@ -5307,6 +5308,7 @@ export const useStore = create(persist((set, get) => ({
                 due_date: r.due_date || null,
                 due_time: r.due_time || null,
                 total: Number(r.total_amount) || 0,
+                order_kind: r.order_kind === 'store' ? 'store' : 'encargo',
             }));
             set((state) => {
                 const pendingIds = new Set(rows.map(r => r.id));
@@ -5330,7 +5332,7 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    updatePreorderStatus: async (preorderId, newStatus, reason = null) => {
+    updatePreorderStatus: async (preorderId, newStatus, reason = null, refetchFilters = undefined) => {
         try {
             // Server-side (con guard de empresa): update + cálculo de efectivo a devolver
             const r = await userApiCall('preorderStatusUpdate', { companyId: get().activeCompanyId, preorderId, newStatus, reason });
@@ -5345,7 +5347,9 @@ export const useStore = create(persist((set, get) => ({
                 });
             }
 
-            await get().fetchPreorders();
+            // refetchFilters: la pestaña Tienda pasa { kind: 'store', ... } para
+            // que el refetch no pise la lista con encargos (default del server).
+            await get().fetchPreorders(refetchFilters);
 
             // Aviso saliente a miniveci si el encargo está sincronizado con la web.
             const info = { external_public_code: r.externalPublicCode };
@@ -6160,6 +6164,18 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // Horario Fijo: graba todos los turnos generados en UNA llamada (batch server-side)
+    bulkSaveShifts: async (shifts, deletes = []) => {
+        const { activeCompanyId } = get();
+        try {
+            const r = await userApiCall('personal.shiftsBulkSave', { companyId: activeCompanyId, shifts, deletes });
+            return r?.success ? r : (r || { success: false, error: 'Error' });
+        } catch (e) {
+            console.error("Error bulk saving shifts:", e);
+            return { success: false, error: e.message };
+        }
+    },
+
     deleteShift: async (id) => {
         try {
             const r = await userApiCall('personal.shiftDelete', { companyId: get().activeCompanyId, id });
@@ -6170,19 +6186,6 @@ export const useStore = create(persist((set, get) => ({
             return { success: true };
         } catch (e) {
             console.error("Error deleting shift:", e);
-            return { success: false, error: e.message };
-        }
-    },
-
-    deleteShiftByDate: async (userId, shiftDate) => {
-        try {
-            const r = await userApiCall('personal.shiftDeleteByDate', { companyId: get().activeCompanyId, userId, shiftDate });
-            if (!r?.success) return r || { success: false, error: 'Error' };
-            const { workShifts } = get();
-            set({ workShifts: workShifts.filter(s => !(String(s.user_id) === String(userId) && s.shift_date === shiftDate)) });
-            return { success: true };
-        } catch (e) {
-            console.error("Error deleting shift by date:", e);
             return { success: false, error: e.message };
         }
     },

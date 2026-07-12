@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect as useEffectReact } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift, FileText, Receipt, ScanBarcode, Package } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift, FileText, Receipt, ScanBarcode, Package, Store } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -684,6 +684,13 @@ const POS = () => {
                         >
                             <Gift size={14} />
                             Encargos
+                        </button>
+                        <button
+                            onClick={() => navigate('/store-orders')}
+                            className="px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                        >
+                            <Store size={14} />
+                            Tienda
                         </button>
                     </div>
                 </div>

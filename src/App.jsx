@@ -29,6 +29,7 @@ const Purchases = lazy(() => import('./pages/Purchases'));
 const ProductProfile = lazy(() => import('./pages/ProductProfile'));
 const Users = lazy(() => import('./pages/Users'));
 const Personal = lazy(() => import('./pages/Personal'));
+const Administration = lazy(() => import('./pages/Administration'));
 const PersonalKiosk = lazy(() => import('./pages/PersonalKiosk'));
 const Reports = lazy(() => import('./pages/Reports'));
 const ExpiringProductsReport = lazy(() => import('./pages/ExpiringProductsReport'));
@@ -41,6 +42,7 @@ const Clients = lazy(() => import('./pages/Clients'));
 const Orders = lazy(() => import('./pages/Orders'));
 const SupplierOrders = lazy(() => import('./pages/SupplierOrders'));
 const Preorders = lazy(() => import('./pages/Preorders'));
+const StoreOrders = lazy(() => import('./pages/StoreOrders'));
 const Production = lazy(() => import('./pages/Production'));
 const PreorderHistory = lazy(() => import('./pages/PreorderHistory'));
 const InventoryReconciliation = lazy(() => import('./pages/InventoryReconciliation'));
@@ -323,11 +325,13 @@ function App() {
           <Route path="product-profile" element={<ProtectedPage permission="product_profile.view"><FeatureGatePage moduleKey="product_profile"><ProductProfile /></FeatureGatePage></ProtectedPage>} />
           <Route path="users" element={<ProtectedPage permission="users.view"><Users /></ProtectedPage>} />
           <Route path="personal" element={<ProtectedPage permission="personal.view"><FeatureGatePage moduleKey="personal"><Personal /></FeatureGatePage></ProtectedPage>} />
+          <Route path="administration" element={<ProtectedPage permission="finance.view"><FeatureGatePage moduleKey="finance"><Administration /></FeatureGatePage></ProtectedPage>} />
           <Route path="clients" element={<ProtectedPage permission="clients.view"><Clients /></ProtectedPage>} />
           <Route path="orders" element={<ProtectedPage permission="supplier_orders.create"><FeatureGatePage moduleKey="orders"><Orders /></FeatureGatePage></ProtectedPage>} />
           <Route path="orders/history" element={<ProtectedPage permission="supplier_orders.view"><FeatureGatePage moduleKey="orders"><SupplierOrders /></FeatureGatePage></ProtectedPage>} />
           <Route path="preorders" element={<ProtectedPage permission="preorders.view"><FeatureGatePage moduleKey="preorders"><Preorders /></FeatureGatePage></ProtectedPage>} />
           <Route path="preorders/history" element={<ProtectedPage permission="preorders.view"><FeatureGatePage moduleKey="preorders"><PreorderHistory /></FeatureGatePage></ProtectedPage>} />
+          <Route path="store-orders" element={<ProtectedPage permission="preorders.view"><FeatureGatePage moduleKey="preorders"><StoreOrders /></FeatureGatePage></ProtectedPage>} />
           <Route path="production" element={<ProtectedPage permission="production.view"><FeatureGatePage moduleKey="production"><Production /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/reconciliation" element={<ProtectedPage permission="products.adjust_stock"><FeatureGatePage moduleKey="inventory_control"><InventoryReconciliation /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/control" element={<ProtectedPage permission="inventory_control.view"><FeatureGatePage moduleKey="inventory_control"><InventoryControl /></FeatureGatePage></ProtectedPage>} />

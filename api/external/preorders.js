@@ -1,9 +1,8 @@
 import {
-    authenticateRequest,
+    authenticateAndResolveCompany,
     emitCatalogWebhook,
     ensureClientsSyncColumns,
     ensurePreordersSyncColumns,
-    parseCompanyId,
     parseJsonBody,
     resolveOrCreateClient,
     setCorsHeaders,
@@ -57,16 +56,19 @@ async function resolveProductId(externalProductId, productName, companyId) {
     }
 }
 
-async function createPreorder(req, res) {
+async function createPreorder(req, res, companyId) {
     await ensurePreordersSyncColumns();
     await ensureClientsSyncColumns();
-    const companyId = parseCompanyId();
     const payload = parseJsonBody(req);
+
+    // 'store' = pedido normal de la tienda web (pagado online, retiro/entrega
+    // inmediata); 'encargo' = pedido de amasandería con fecha programada.
+    const orderKind = payload.order_type === 'store' ? 'store' : 'encargo';
 
     if (!Array.isArray(payload.items) || payload.items.length === 0) {
         return res.status(400).json({ success: false, error: 'Missing items[]' });
     }
-    if (!payload.scheduled_for) {
+    if (!payload.scheduled_for && orderKind === 'encargo') {
         return res.status(400).json({ success: false, error: 'Missing scheduled_for (ISO 8601)' });
     }
     if (!payload.external_order_id) {
@@ -89,7 +91,9 @@ async function createPreorder(req, res) {
         });
     }
 
-    const { date: due_date, time: due_time } = splitScheduledFor(payload.scheduled_for);
+    // Pedidos de tienda sin fecha programada: usan la fecha/hora del pedido.
+    const scheduledIso = payload.scheduled_for || (orderKind === 'store' ? new Date().toISOString() : null);
+    const { date: due_date, time: due_time } = splitScheduledFor(scheduledIso);
     if (!due_date || !due_time) {
         return res.status(400).json({ success: false, error: 'Invalid scheduled_for format' });
     }
@@ -124,6 +128,14 @@ async function createPreorder(req, res) {
         }
     }
 
+    // Pedidos de tienda pagados online: depósito = total, saldo = 0 (sin fila en
+    // preorder_payments; cancelar no mueve caja). Contra entrega ('contra_entrega')
+    // queda con saldo = total, igual que un encargo: se cobra al entregar.
+    const paidOnline = orderKind === 'store'
+        && String(payload.payment_method || 'online').toLowerCase() !== 'contra_entrega';
+    const depositAmount = paidOnline ? total : 0;
+    const remainingAmount = paidOnline ? 0 : total;
+
     // Insert preorder (todas las columnas ya garantizadas por ensurePreordersSyncColumns)
     const insertRes = await turso.execute({
         sql: `INSERT INTO preorders
@@ -133,13 +145,13 @@ async function createPreorder(req, res) {
                delivery_type, delivery_address, notes, created_by, created_at, updated_at,
                external_order_id, external_public_code, external_source,
                client_email, client_rut, client_external_id,
-               delivery_fee, payment_method)
+               delivery_fee, payment_method, order_kind)
               VALUES (?, ?, ?, ?, ?, ?, 'pending',
-                      ?, ?, 0, ?,
+                      ?, ?, ?, ?,
                       ?, ?, ?, ?, ?, ?,
                       ?, ?, 'miniveci',
                       ?, ?, ?,
-                      ?, ?)
+                      ?, ?, ?)
               RETURNING *`,
         args: [
             companyId,
@@ -150,7 +162,8 @@ async function createPreorder(req, res) {
             due_time,
             total,
             total,
-            total,
+            depositAmount,
+            remainingAmount,
             payload.method === 'delivery' ? 'delivery' : 'pickup',
             payload.address || null,
             payload.general_notes || null,
@@ -163,7 +176,8 @@ async function createPreorder(req, res) {
             displayRut,
             client.external_id || null,
             deliveryFee,
-            payload.payment_method || 'pending_on_pickup',
+            payload.payment_method || (orderKind === 'store' ? 'online' : 'pending_on_pickup'),
+            orderKind,
         ],
     });
 
@@ -207,6 +221,7 @@ async function createPreorder(req, res) {
         external_order_id: preorder.external_order_id,
         public_code: preorder.external_public_code,
         status: 'pending',
+        order_kind: orderKind,
         due_date,
         due_time,
         total,
@@ -221,7 +236,7 @@ async function createPreorder(req, res) {
         })),
     };
 
-    console.log(`✅ [preorders] Encargo creado #${preorderId} (${out.public_code || 's/código'}) · ${payload.items.length} items · entrega ${due_date} ${due_time}`);
+    console.log(`✅ [preorders] ${orderKind === 'store' ? 'Pedido tienda' : 'Encargo'} creado #${preorderId} (${out.public_code || 's/código'}) · ${payload.items.length} items · entrega ${due_date} ${due_time}`);
 
     // Empuje en vivo a la pantalla de Producción (SSE). No bloquea la respuesta.
     broadcastPreorderEvent('order.created', { ...out, company_id: companyId });
@@ -232,9 +247,8 @@ async function createPreorder(req, res) {
     return res.status(201).json({ success: true, preorder: out });
 }
 
-async function cancelPreorder(req, res) {
+async function cancelPreorder(req, res, companyId) {
     await ensurePreordersSyncColumns();
-    const companyId = parseCompanyId();
     const payload = parseJsonBody(req);
 
     if (!payload.external_order_id) {
@@ -295,15 +309,18 @@ export default async function handler(req, res) {
     setCorsHeaders(req, res, 'POST, PATCH, OPTIONS');
 
     if (req.method === 'OPTIONS') return res.status(204).end();
-    if (!authenticateRequest(req)) {
-        console.warn(`⚠️  [preorders] ${req.method} rechazado: Bearer inválido o ausente`);
+    // Multiempresa: con header x-company-id valida la api_key de esa empresa
+    // (tienda_config); sin header aplica el contrato legacy (key global + env).
+    const auth = await authenticateAndResolveCompany(req);
+    if (!auth.ok) {
+        console.warn(`⚠️  [preorders] ${req.method} rechazado: credenciales inválidas o ausentes`);
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    console.log(`📥 [preorders] ${req.method} recibido`);
+    console.log(`📥 [preorders] ${req.method} recibido (empresa ${auth.companyId})`);
     try {
-        if (req.method === 'POST') return await createPreorder(req, res);
-        if (req.method === 'PATCH') return await cancelPreorder(req, res);
+        if (req.method === 'POST') return await createPreorder(req, res, auth.companyId);
+        if (req.method === 'PATCH') return await cancelPreorder(req, res, auth.companyId);
         return res.status(405).json({ error: 'Method not allowed' });
     } catch (error) {
         console.error('❌ External preorders API error:', error);

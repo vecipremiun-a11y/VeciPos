@@ -72,14 +72,19 @@ const WebOrderToast = () => {
     };
 
     const handleReject = async (id) => {
-        if (!window.confirm('¿Rechazar este encargo? El cliente verá que fue rechazado.')) return;
+        if (!window.confirm('¿Rechazar este pedido? El cliente verá que fue rechazado.')) return;
         await updatePreorderStatus(id, 'canceled', 'Rechazado desde el aviso de encargo web');
         removeWebOrder(id);
     };
 
     const handleView = (id) => {
         dismissWebOrderToast(id); // pasa a la campanita
-        navigate('/preorders', { state: { tab: 'list', focusPreorderId: id } });
+        const order = webOrders.find(o => o.id === id);
+        if (order?.order_kind === 'store') {
+            navigate('/store-orders');
+        } else {
+            navigate('/preorders', { state: { tab: 'list', focusPreorderId: id } });
+        }
     };
 
     const visible = webOrders.filter(o => !dismissedWebOrderToasts.includes(o.id));
@@ -104,7 +109,7 @@ const WebOrderToast = () => {
             ))}
             {hidden > 0 && (
                 <div className="pointer-events-auto text-center text-[11px] text-[var(--color-text-muted)] bg-[var(--color-surface)] border border-[var(--glass-border)] rounded-lg py-1.5">
-                    +{hidden} encargo{hidden > 1 ? 's' : ''} más en la campanita 🔔
+                    +{hidden} pedido{hidden > 1 ? 's' : ''} más en la campanita 🔔
                 </div>
             )}
         </div>
