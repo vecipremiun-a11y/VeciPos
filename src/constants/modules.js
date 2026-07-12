@@ -75,6 +75,14 @@ export const ALL_MODULES = [
         plan: 'basico',
         minLevel: 0,
     },
+    {
+        key: 'finance',
+        label: 'Administración financiera',
+        description: 'Gastos, servicios recurrentes y utilidad operacional por empresa.',
+        defaultEnabled: true,
+        plan: 'basico',
+        minLevel: 0,
+    },
 
     // ── Nivel 1 · Básico ──────────────────────────────────────────────
     {

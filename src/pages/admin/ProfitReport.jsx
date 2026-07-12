@@ -166,10 +166,10 @@ const ProfitReport = () => {
             <div className="flex items-center justify-between mb-6">
                 <div>
                     <h1 className="text-3xl font-bold text-[var(--color-text)] mb-2">
-                        Reporte de Utilidad
+                        Reporte de Utilidad Bruta
                     </h1>
                     <p className="text-[var(--color-text-muted)]">
-                        Análisis completo de ganancias y rentabilidad
+                        Ventas menos impuestos y costo de productos. Los gastos operacionales se muestran en Administración.
                     </p>
                 </div>
 
@@ -293,7 +293,7 @@ const ProfitReport = () => {
                         {/* Utilidad Total */}
                         <div className="glass-card p-6 border-2 border-green-500/30">
                             <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm text-[var(--color-text-muted)]">Utilidad Total</span>
+                                <span className="text-sm text-[var(--color-text-muted)]">Utilidad Bruta Total</span>
                                 <TrendingUp className="text-green-400" size={20} />
                             </div>
                             <div className="text-2xl font-bold text-green-400 mb-1">

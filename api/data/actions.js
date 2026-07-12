@@ -20,6 +20,7 @@ import { maintenanceActions } from '../_lib/maintenanceActions.js';
 import { telemetryActions } from '../_lib/telemetryActions.js';
 import { taxActions } from '../_lib/taxActions.js';
 import { bootstrapActions } from '../_lib/bootstrapActions.js';
+import { financeActions } from '../_lib/financeActions.js';
 
 // Endpoint de datos del app normal (Fase 1 · Paso 4).
 // Exige: sesión firmada + que el usuario sea MIEMBRO de la empresa (companyId).
@@ -67,6 +68,12 @@ export default async function handler(req, res) {
             const handler = personalActions[action.slice('personal.'.length)];
             if (!handler) return res.status(400).json({ success: false, error: 'Acción no válida' });
             return res.status(200).json(await handler(turso, companyId, session, body));
+        }
+
+        if (typeof action === 'string' && action.startsWith('finance.')) {
+            const financeHandler = financeActions[action.slice('finance.'.length)];
+            if (!financeHandler) return res.status(400).json({ success: false, error: 'Acción financiera no válida' });
+            return res.status(200).json(await financeHandler(turso, companyId, session, body));
         }
 
         // 3) Despacho por acción (todas ya con companyId validado)

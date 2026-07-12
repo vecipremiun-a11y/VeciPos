@@ -61,7 +61,8 @@ const DEFAULT_PERMS = {
         'combos.view',
         'inventory_control.view',
         'alerts.view',
-        'sii.view', 'sii.folios'
+        'sii.view', 'sii.folios',
+        'finance.view'
     ]
 };
 
@@ -87,7 +88,8 @@ const ALL_PERMS = [
     'combos.view', 'combos.create', 'combos.edit', 'combos.delete',
     'inventory_control.view', 'inventory_control.create', 'inventory_control.manage',
     'alerts.view', 'alerts.manage',
-    'sii.view', 'sii.folios'
+    'sii.view', 'sii.folios',
+    'finance.view', 'finance.manage'
 ];
 
 export default async function handler(req, res) {

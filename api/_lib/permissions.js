@@ -44,6 +44,7 @@ export const DEFAULT_PERMS = {
         'inventory_control.view',
         'alerts.view',
         'sii.view', 'sii.folios',
+        'finance.view',
     ],
 };
 
@@ -70,6 +71,7 @@ export const ALL_PERMS = [
     'inventory_control.view', 'inventory_control.create', 'inventory_control.manage',
     'alerts.view', 'alerts.manage',
     'sii.view', 'sii.folios',
+    'finance.view', 'finance.manage',
 ];
 
 // Siembra las plantillas de permisos por rol para una empresa nueva (INSERT OR IGNORE, por lotes).

@@ -182,7 +182,7 @@ const SalesProfitReport = () => {
         <div className="space-y-6 relative z-10 p-6">
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-[var(--color-text)] neon-text">Reporte de Utilidad</h1>
+                    <h1 className="text-3xl font-bold text-[var(--color-text)] neon-text">Reporte de Utilidad Bruta</h1>
                     <p className="text-[var(--color-text-muted)]">Análisis de costos, ventas y márgenes</p>
                 </div>
 
@@ -220,7 +220,7 @@ const SalesProfitReport = () => {
                 <StatCard title="Descuentos" value={stats.totalDiscount} color="text-orange-400" icon={<Percent size={16} />} currency={currentCurrency} />
                 <StatCard title="Impuestos" value={stats.totalTax} color="text-yellow-400" icon={<DollarSign size={16} />} currency={currentCurrency} />
                 <StatCard title="Total Ventas" value={stats.totalSales} color="text-blue-400" icon={<DollarSign size={16} />} currency={currentCurrency} />
-                <StatCard title="Total Utilidad" value={stats.totalProfit} color="text-green-400" icon={<DollarSign size={16} />} currency={currentCurrency} />
+                <StatCard title="Utilidad Bruta" value={stats.totalProfit} color="text-green-400" icon={<DollarSign size={16} />} currency={currentCurrency} />
                 <StatCard title="% Utilidad" value={`${stats.profitMargin.toFixed(2)}%`} isCurrency={false} color="text-purple-400" icon={<Percent size={16} />} currency={currentCurrency} />
             </div>
 
