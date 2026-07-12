@@ -119,7 +119,7 @@ const AbsenceModal = ({ isOpen, onClose, onSuccess, editData = null }) => {
             <div className="glass-card w-full max-w-lg p-0 flex flex-col max-h-[90vh]">
                 <div className="p-4 border-b border-[var(--glass-border)] flex justify-between items-center">
                     <h2 className="text-lg font-bold text-[var(--color-text)]">
-                        {editData ? 'Editar Ausencia' : 'Registrar Ausencia'}
+                        {editData?.id ? 'Editar Ausencia' : 'Registrar Ausencia'}
                     </h2>
                     <button onClick={onClose} className="p-1 hover:bg-[var(--glass-bg)] rounded-full transition-colors">
                         <X size={20} className="text-[var(--color-text-muted)]" />

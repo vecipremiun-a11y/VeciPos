@@ -78,7 +78,7 @@ const buildShiftPayload = (shiftDate, userId, startTime, endTime, isDayOff = fal
 };
 
 const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, onSuccess, isLocked = false, isPast = false, isToday = false, hasRealAttendance = false }) => {
-    const { createShift, deleteShift, deleteShiftByDate, staffMembers } = useStore();
+    const { createShift, deleteShift, bulkSaveShifts, staffMembers } = useStore();
     const [loading, setLoading] = useState(false);
 
     // Form State
@@ -150,53 +150,47 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
             }
 
             const baseWeekStart = startOfWeek(new Date(`${date}T00:00:00`), { weekStartsOn: 1 });
-            let successCount = 0;
-            let failedCount = 0;
 
             // Get disabled days to delete existing shifts
             const disabledDays = DAY_OPTIONS
                 .filter((day) => !weeklyConfig[day.value]?.enabled)
                 .map((day) => day.value);
 
+            // Genera todo el horario en memoria y lo graba en UNA sola llamada (batch).
+            const shiftsToSave = [];
+            const shiftsToDelete = [];
+
             for (let w = 0; w < repeatWeeks; w += 1) {
                 const weekDate = addWeeks(baseWeekStart, w);
 
-                // Delete shifts for disabled days
                 for (const dayIndex of disabledDays) {
                     const dayOffset = dayIndex === 0 ? 6 : dayIndex - 1;
                     const shiftDay = addDays(weekDate, dayOffset);
-                    const shiftDate = format(shiftDay, 'yyyy-MM-dd');
-                    await deleteShiftByDate(userId, shiftDate);
+                    shiftsToDelete.push({ user_id: userId, shift_date: format(shiftDay, 'yyyy-MM-dd') });
                 }
 
-                // Create shifts for active days
                 for (const dayIndex of activeDays) {
                     const dayConfig = weeklyConfig[dayIndex];
-                    if (!dayConfig?.start || !dayConfig?.end) {
-                        failedCount += 1;
-                        continue;
-                    }
+                    if (!dayConfig?.start || !dayConfig?.end) continue;
 
                     const dayOffset = dayIndex === 0 ? 6 : dayIndex - 1;
                     const shiftDay = addDays(weekDate, dayOffset);
                     const shiftDate = format(shiftDay, 'yyyy-MM-dd');
 
                     const isDayOffDay = dayConfig.template === 'dayoff';
-                    const result = await createShift(
-                        buildShiftPayload(shiftDate, userId, dayConfig.start, dayConfig.end, isDayOffDay)
-                    );
-
-                    if (result.success) {
-                        successCount += 1;
-                    } else {
-                        failedCount += 1;
-                    }
+                    shiftsToSave.push(buildShiftPayload(shiftDate, userId, dayConfig.start, dayConfig.end, isDayOffDay));
                 }
             }
 
-            onSuccess();
-            onClose();
-            alert(`Horario guardado. Turnos generados: ${successCount}${failedCount > 0 ? ` | Fallidos: ${failedCount}` : ''}`);
+            const result = await bulkSaveShifts(shiftsToSave, shiftsToDelete);
+
+            if (result.success) {
+                onSuccess();
+                onClose();
+                alert(`Horario guardado. Turnos generados: ${result.created ?? shiftsToSave.length}`);
+            } else {
+                alert(result.error || 'Error al guardar el horario');
+            }
         } else {
             const result = await createShift(buildShiftPayload(date, userId, startTime, endTime, isDayOff));
 

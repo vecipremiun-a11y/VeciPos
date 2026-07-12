@@ -308,12 +308,37 @@ async function shiftDelete(turso, companyId, session, { id }) {
     return { success: true };
 }
 
-async function shiftDeleteByDate(turso, companyId, session, { userId, shiftDate }) {
-    await turso.execute({
-        sql: 'DELETE FROM work_shifts WHERE user_id = ? AND shift_date = ? AND company_id = ?',
-        args: [userId, shiftDate, companyId],
-    });
-    return { success: true };
+// Guarda un horario completo en un solo batch (el Horario Fijo genera hasta ~730
+// turnos; hacerlo de a uno tardaba minutos por la latencia de cada round-trip).
+async function shiftsBulkSave(turso, companyId, session, { shifts = [], deletes = [] }) {
+    if (!Array.isArray(shifts) || !Array.isArray(deletes)) {
+        return { success: false, error: 'Formato inválido' };
+    }
+    if (shifts.length + deletes.length === 0) return { success: true, created: 0, deleted: 0 };
+    if (shifts.length + deletes.length > 1500) {
+        return { success: false, error: 'Demasiados turnos en una sola operación' };
+    }
+    const statements = [];
+    for (const item of deletes) {
+        if (!item?.user_id || !item?.shift_date) continue;
+        statements.push({
+            sql: 'DELETE FROM work_shifts WHERE user_id = ? AND shift_date = ? AND company_id = ?',
+            args: [item.user_id, item.shift_date, companyId],
+        });
+    }
+    for (const data of shifts) {
+        if (!data?.user_id || !data?.start_time) continue;
+        const shiftDate = data.shift_date || String(data.start_time).split('T')[0];
+        statements.push({
+            sql: `INSERT OR REPLACE INTO work_shifts
+                  (company_id, user_id, shift_date, start_time, end_time, branch, notes, created_by, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [companyId, data.user_id, shiftDate, data.start_time, data.end_time,
+                data.branch || 'Principal', data.notes || '', session?.username || 'System', nowIso()],
+        });
+    }
+    if (statements.length) await turso.batch(statements);
+    return { success: true, created: shifts.length, deleted: deletes.length };
 }
 
 // ── Ausencias ────────────────────────────────────────────────────
@@ -699,7 +724,7 @@ export const personalActions = {
     shiftsFetch,
     shiftCreate,
     shiftDelete,
-    shiftDeleteByDate,
+    shiftsBulkSave,
     absencesFetch,
     absenceCreate,
     absenceDelete,
