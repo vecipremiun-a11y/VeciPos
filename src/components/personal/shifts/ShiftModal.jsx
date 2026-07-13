@@ -49,6 +49,45 @@ const timeFromIso = (isoDate) => {
     return format(date, 'HH:mm');
 };
 
+// Detecta la plantilla que corresponde a las horas guardadas (o 'custom').
+const templateFromTimes = (start, end) => {
+    const match = Object.entries(SHIFT_TEMPLATES).find(([key, t]) =>
+        key !== 'custom' && key !== 'dayoff' && t.start === start && t.end === end
+    );
+    return match ? match[0] : 'custom';
+};
+
+// Reconstruye la config semanal desde los turnos ya guardados del empleado
+// para la semana base. Devuelve null si no tiene ningún turno esa semana
+// (empleado nuevo → se usan los defaults).
+const weeklyConfigFromShifts = (shifts, userId, baseDate) => {
+    const baseWeekStart = startOfWeek(new Date(`${baseDate}T00:00:00`), { weekStartsOn: 1 });
+    const config = buildDefaultWeeklyConfig();
+    let found = false;
+
+    DAY_OPTIONS.forEach((day) => {
+        const dayOffset = day.value === 0 ? 6 : day.value - 1;
+        const dateStr = format(addDays(baseWeekStart, dayOffset), 'yyyy-MM-dd');
+        const shift = shifts.find(s => String(s.user_id) === String(userId) && s.shift_date === dateStr);
+
+        if (!shift) {
+            config[day.value] = { ...config[day.value], enabled: false };
+            return;
+        }
+
+        found = true;
+        const start = timeFromIso(shift.start_time);
+        const end = timeFromIso(shift.end_time);
+        const isOff = shift.notes === 'LIBRE' || (start === '00:00' && end === '00:00');
+
+        config[day.value] = isOff
+            ? { enabled: true, template: 'dayoff', start: '00:00', end: '00:00' }
+            : { enabled: true, template: templateFromTimes(start, end), start, end };
+    });
+
+    return found ? config : null;
+};
+
 const buildShiftPayload = (shiftDate, userId, startTime, endTime, isDayOff = false) => {
     if (isDayOff) {
         return {
@@ -78,7 +117,7 @@ const buildShiftPayload = (shiftDate, userId, startTime, endTime, isDayOff = fal
 };
 
 const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, onSuccess, isLocked = false, isPast = false, isToday = false, hasRealAttendance = false }) => {
-    const { createShift, deleteShift, bulkSaveShifts, staffMembers } = useStore();
+    const { createShift, deleteShift, bulkSaveShifts, staffMembers, workShifts } = useStore();
     const [loading, setLoading] = useState(false);
 
     // Form State
@@ -113,6 +152,15 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
             setWeeklyConfig(buildDefaultWeeklyConfig());
         }
     }, [shiftData, selectedDate, selectedUser, isOpen]);
+
+    // Precarga la semana guardada del empleado al abrir en modo Horario Fijo:
+    // sin esto el modal mostraba siempre la plantilla por defecto y parecía
+    // que los cambios (p. ej. un Descanso el sábado) no se habían guardado.
+    useEffect(() => {
+        if (!isOpen || shiftData || scheduleMode !== 'fixed' || !userId) return;
+        const saved = weeklyConfigFromShifts(workShifts, userId, date);
+        setWeeklyConfig(saved || buildDefaultWeeklyConfig());
+    }, [isOpen, shiftData, scheduleMode, userId, date, workShifts]);
 
     const toggleDayEnabled = (dayValue) => {
         setWeeklyConfig((prev) => upsertDayConfig(prev, dayValue, { enabled: !prev[dayValue].enabled }));
