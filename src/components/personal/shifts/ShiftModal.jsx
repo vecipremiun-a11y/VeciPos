@@ -112,7 +112,9 @@ const buildShiftPayload = (shiftDate, userId, startTime, endTime, isDayOff = fal
         user_id: userId,
         shift_date: shiftDate,
         start_time: startISO,
-        end_time: endBase.toISOString().slice(0, 19)
+        // format() local, NUNCA toISOString(): convertía a UTC y un fin de 23:00
+        // (UTC-4) quedaba guardado como 03:00 del día siguiente.
+        end_time: format(endBase, "yyyy-MM-dd'T'HH:mm:ss")
     };
 };
 

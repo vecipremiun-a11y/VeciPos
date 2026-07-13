@@ -124,7 +124,9 @@ const shiftTypeStyles = {
 const remapShiftToCell = (shift, newUserId, newDate) => {
     const originalStart = new Date(shift.start_time);
     const originalEnd = new Date(shift.end_time);
-    const overnight = originalEnd <= originalStart || originalEnd.toISOString().slice(0, 10) !== originalStart.toISOString().slice(0, 10);
+    // Comparar fechas en hora LOCAL: con toISOString() (UTC) un turno que termina
+    // 23:00 en UTC-4 parecía cruzar al día siguiente y se movía con +1 día.
+    const overnight = originalEnd <= originalStart || format(originalEnd, 'yyyy-MM-dd') !== format(originalStart, 'yyyy-MM-dd');
 
     const startTime = format(originalStart, 'HH:mm:ss');
     const endTime = format(originalEnd, 'HH:mm:ss');
@@ -504,7 +506,7 @@ const ShiftCalendar = () => {
                                     const lastExit = [...sortedAttendance].reverse().find(a => a.type === 'exit');
 
                                     const isOvernightShift = shift
-                                        ? new Date(shift.end_time).toISOString().slice(0, 10) !== shift.shift_date
+                                        ? format(new Date(shift.end_time), 'yyyy-MM-dd') !== shift.shift_date
                                         : false;
 
                                     let overnightExit = null;
