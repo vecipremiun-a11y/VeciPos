@@ -20,6 +20,7 @@ const PaymentPending = lazy(() => import('./pages/PaymentPending'));
 const PaymentFailure = lazy(() => import('./pages/PaymentFailure'));
 const RenewSubscription = lazy(() => import('./pages/RenewSubscription'));
 const PrivacyPolicy = lazy(() => import('./pages/legal/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('./pages/legal/TermsOfService'));
 const SalesHistory = lazy(() => import('./pages/SalesHistory'));
 const Inventory = lazy(() => import('./pages/Inventory'));
 const Taxes = lazy(() => import('./pages/Taxes'));
@@ -292,6 +293,7 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/registro" element={<Register />} />
         <Route path="/privacidad" element={<PrivacyPolicy />} />
+        <Route path="/terminos" element={<TermsOfService />} />
         <Route path="/select-plan" element={<SelectPlan />} />
         <Route path="/payment-success" element={<PaymentSuccess />} />
         <Route path="/payment-pending" element={<PaymentPending />} />

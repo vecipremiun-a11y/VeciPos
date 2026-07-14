@@ -322,7 +322,7 @@ const Register = () => {
                 {/* Footer */}
                 <div className="mt-8 text-center text-xs text-[var(--color-text-muted)]">
                     Al continuar, aceptas nuestros{' '}
-                    <a href="#" className="text-[var(--color-primary)] hover:underline">Términos de Servicio</a>
+                    <a href="/terminos" target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline">Términos de Servicio</a>
                     {' '}y{' '}
                     <a href="/privacidad" target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline">Política de Privacidad</a>
                 </div>
