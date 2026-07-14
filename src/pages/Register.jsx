@@ -324,7 +324,7 @@ const Register = () => {
                     Al continuar, aceptas nuestros{' '}
                     <a href="#" className="text-[var(--color-primary)] hover:underline">Términos de Servicio</a>
                     {' '}y{' '}
-                    <a href="#" className="text-[var(--color-primary)] hover:underline">Política de Privacidad</a>
+                    <a href="/privacidad" target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline">Política de Privacidad</a>
                 </div>
             </div>
         </div>
