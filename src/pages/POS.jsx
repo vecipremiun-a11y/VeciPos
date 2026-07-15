@@ -622,9 +622,14 @@ const POS = () => {
 
     return (
         <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-100px)]">
-            {can('pos.open_register') && (
-                <CashOpeningModal isOpen={!cashRegister && !!currentUser} />
-            )}
+            {/* Candado de caja: SIEMPRE que no haya caja abierta. El permiso solo
+                decide si el usuario puede abrirla él mismo o debe pedirla. Antes
+                el modal solo se montaba con can('pos.open_register'), así que un
+                rol sin ese permiso (p. ej. Vendedor) entraba a vender sin caja. */}
+            <CashOpeningModal
+                isOpen={!cashRegister && !!currentUser}
+                canOpen={can('pos.open_register')}
+            />
 
             {/* Banner offline — visible cuando se cae internet */}
             {!online && (

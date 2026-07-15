@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { DollarSign, ArrowRight, Wallet, ArrowLeft, AlertTriangle } from 'lucide-react';
+import { DollarSign, ArrowRight, Wallet, ArrowLeft, AlertTriangle, Lock } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 
-const CashOpeningModal = ({ isOpen }) => {
+// canOpen: si el rol tiene el permiso pos.open_register. Sin él, el modal
+// bloquea el POS igualmente pero sin formulario (debe pedir la apertura).
+const CashOpeningModal = ({ isOpen, canOpen = true }) => {
     const { openRegister, currentUser, currentCurrency } = useStore();
     const navigate = useNavigate();
     const [amount, setAmount] = useState('');
@@ -11,6 +13,35 @@ const CashOpeningModal = ({ isOpen }) => {
     const [error, setError] = useState(null);
 
     if (!isOpen) return null;
+
+    // Rol sin permiso de abrir caja: candado sin salida hacia el POS.
+    if (!canOpen) {
+        return (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md">
+                <div className="glass-card w-full max-w-md p-8 text-center">
+                    <div className="w-16 h-16 mx-auto mb-4 bg-amber-500/15 rounded-full flex items-center justify-center text-amber-400">
+                        <Lock size={32} />
+                    </div>
+                    <h2 className="text-2xl font-bold text-white mb-2">Caja no abierta</h2>
+                    <p className="text-gray-400 text-sm leading-relaxed">
+                        Para usar el punto de venta necesitas una caja abierta con un monto inicial,
+                        y tu rol no tiene permiso para abrir caja.
+                    </p>
+                    <p className="text-gray-500 text-xs mt-3">
+                        Pide a un administrador que abra tu caja o que habilite el permiso
+                        «Abrir Caja» para tu rol en Configuración → Permisos.
+                    </p>
+                    <button
+                        onClick={() => navigate('/dashboard')}
+                        className="btn-primary w-full py-3 mt-6 flex items-center justify-center gap-2"
+                    >
+                        <ArrowLeft size={18} />
+                        Volver al Dashboard
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     const handleSubmit = async (e) => {
         e.preventDefault();
