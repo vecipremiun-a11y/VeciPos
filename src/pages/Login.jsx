@@ -43,46 +43,68 @@ const Login = () => {
     };
 
     return (
-        <div className="min-h-screen w-full flex bg-[#0b1120] text-white">
+        <div className="min-h-screen w-full flex relative bg-[#0b1120] text-white">
+            {/* Separador diagonal único (va sobre el borde real de los paneles) */}
+            <svg
+                className="hidden lg:block absolute inset-y-0 z-10 pointer-events-none"
+                style={{ left: 'calc(54% - 90px)', width: '90px', height: '100%' }}
+                viewBox="0 0 90 100"
+                preserveAspectRatio="none"
+            >
+                <defs>
+                    <linearGradient id="sep-glow" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" stopColor="rgba(96,165,250,0.15)" />
+                        <stop offset="0.5" stopColor="rgba(96,165,250,0.85)" />
+                        <stop offset="1" stopColor="rgba(96,165,250,0.15)" />
+                    </linearGradient>
+                </defs>
+                <line x1="90" y1="0" x2="0" y2="100" stroke="url(#sep-glow)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+            </svg>
+
             {/* ══════════ Panel izquierdo · marca (solo desktop) ══════════ */}
-            <div className="hidden lg:flex flex-col flex-1 relative overflow-hidden bg-[#080d1a] px-14 py-10">
-                {/* Fondo: foto de comercio + velo azul oscuro para legibilidad */}
+            <div
+                className="hidden lg:flex flex-col items-center text-center flex-1 relative overflow-hidden bg-[#080d1a] px-14 py-10"
+                style={{ clipPath: 'polygon(0 0, 100% 0, calc(100% - 90px) 100%, 0 100%)' }}
+            >
+                {/* Fondo: minimarket real + velo azul oscuro para legibilidad */}
                 <div className="absolute inset-0 pointer-events-none">
                     <img
                         src="/login-bg.jpg"
                         alt=""
-                        className="absolute inset-0 w-full h-full object-cover blur-[2px] scale-105"
+                        className="absolute inset-0 w-full h-full object-cover blur-[3px] scale-105"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-br from-[#080d1a]/95 via-[#0a1224]/85 to-[#080d1a]/95" />
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent to-[#0b1120]/70" />
+                    <div className="absolute inset-0 bg-[#080d1a]/72" />
+                    <div className="absolute inset-0 bg-gradient-to-b from-[#080d1a]/85 via-transparent to-[#080d1a]/90" />
                 </div>
 
-                {/* Logo / marca */}
-                <div className="relative flex items-center gap-3">
-                    <img src="/icon-192.png" alt="POSVECI" className="w-12 h-12 rounded-xl shadow-lg shadow-blue-900/40" />
-                    <div>
-                        <p className="text-xl font-bold tracking-[0.18em]">
+                {/* Logo / marca (completo: ícono + nombre + tagline) */}
+                <div className="relative flex items-center gap-5 mt-6">
+                    <img src="/icon-192.png" alt="POSVECI" className="w-28 h-28 rounded-2xl shadow-lg shadow-blue-900/50" />
+                    <div className="text-left">
+                        <p className="text-4xl font-bold tracking-[0.18em] drop-shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
                             POS<span className="text-blue-400">VECI</span>
                         </p>
-                        <p className="text-[11px] text-slate-400 -mt-0.5">Sistema POS Inteligente</p>
+                        <p className="text-base text-slate-300 mt-1 drop-shadow-[0_1px_4px_rgba(0,0,0,0.7)]">
+                            Sistema POS Inteligente
+                        </p>
                     </div>
                 </div>
 
-                {/* Mensaje principal (centrado vertical entre logo y sellos) */}
-                <div className="relative flex-1 flex flex-col justify-center max-w-md">
-                    <h1 className="text-4xl xl:text-[2.75rem] font-bold leading-tight">
+                {/* Mensaje principal */}
+                <div className="relative flex-1 flex flex-col justify-center max-w-xl">
+                    <h1 className="text-4xl xl:text-[2.75rem] font-bold leading-tight drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">
                         Gestiona tu negocio
                         <span className="block text-blue-400">con control total.</span>
                     </h1>
-                    <div className="w-14 h-1 bg-blue-500 rounded-full mt-5" />
-                    <p className="mt-5 text-slate-300/90 text-[15px] leading-relaxed">
+                    <div className="w-14 h-1 bg-blue-500 rounded-full mt-5 mx-auto" />
+                    <p className="mt-5 text-slate-200 text-[15px] leading-relaxed max-w-md mx-auto drop-shadow-[0_1px_6px_rgba(0,0,0,0.8)]">
                         Ventas, inventario, clientes y reportes en tiempo real,
                         desde cualquier dispositivo.
                     </p>
                 </div>
 
                 {/* Sellos de confianza */}
-                <div className="relative mt-auto pt-10 flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] text-slate-400">
+                <div className="relative mt-auto pt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[11px] text-slate-400">
                     <span className="inline-flex items-center gap-1.5">
                         <ShieldCheck size={13} className="text-blue-400" /> Datos cifrados
                     </span>
@@ -96,7 +118,7 @@ const Login = () => {
             </div>
 
             {/* ══════════ Panel derecho · formulario ══════════ */}
-            <div className="flex-1 lg:max-w-[46%] flex flex-col items-center justify-center relative px-4 py-10 bg-[#0b1120] lg:border-l lg:border-blue-500/25">
+            <div className="flex-1 lg:max-w-[46%] flex flex-col items-center justify-center relative px-4 py-10 bg-[#0b1120]">
                 {/* Textura sutil de puntos */}
                 <div
                     className="absolute inset-0 opacity-[0.25] pointer-events-none"
@@ -110,9 +132,9 @@ const Login = () => {
                     <div className="rounded-2xl border border-white/10 bg-[#0e1628]/90 backdrop-blur-xl shadow-[0_20px_70px_-20px_rgba(2,6,23,0.9)] p-8">
                         {/* Marca */}
                         <div className="flex flex-col items-center mb-7">
-                            <div className="flex items-center gap-2.5">
-                                <img src="/icon-192.png" alt="POSVECI" className="w-9 h-9 rounded-lg" />
-                                <p className="text-lg font-bold tracking-[0.18em]">
+                            <div className="flex items-center gap-3">
+                                <img src="/icon-192.png" alt="POSVECI" className="w-12 h-12 rounded-xl" />
+                                <p className="text-xl font-bold tracking-[0.18em]">
                                     POS<span className="text-blue-400">VECI</span>
                                 </p>
                             </div>

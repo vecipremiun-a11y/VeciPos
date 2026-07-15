@@ -97,11 +97,16 @@ const Register = () => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-[var(--color-surface)] dark:bg-[#050505] py-12">
-            {/* Background Elements */}
-            <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10">
-                <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-[var(--color-secondary)] opacity-10 blur-[120px] animate-[float_10s_ease-in-out_infinite]"></div>
-                <div className="absolute bottom-[10%] right-[10%] w-[40%] h-[40%] rounded-full bg-[var(--color-primary)] opacity-10 blur-[120px] animate-[float_12s_ease-in-out_infinite_reverse]"></div>
+        <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-[#0b1120] py-12">
+            {/* Fondo: minimarket real + velo azul oscuro (mismo que el login) */}
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                <img
+                    src="/login-bg.jpg"
+                    alt=""
+                    className="absolute inset-0 w-full h-full object-cover blur-[3px] scale-105"
+                />
+                <div className="absolute inset-0 bg-[#080d1a]/78" />
+                <div className="absolute inset-0 bg-gradient-to-b from-[#080d1a]/85 via-transparent to-[#080d1a]/90" />
             </div>
 
             <div className="glass-card w-full max-w-2xl p-8 relative z-10 border border-[var(--glass-border)] shadow-[0_0_50px_rgba(0,0,0,0.5)] mx-4">
