@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
-import { Lock, User, Eye, EyeOff, AlertCircle, ShieldCheck, WifiOff, FileCheck2, TrendingUp } from 'lucide-react';
+import { Lock, User, Eye, EyeOff, AlertCircle, ShieldCheck, WifiOff, FileCheck2 } from 'lucide-react';
 
 // Login split-screen: panel de marca (izquierda, solo desktop) + formulario.
 // El "dashboard" del panel izquierdo es ilustrativo, dibujado en CSS puro
@@ -46,22 +46,16 @@ const Login = () => {
         <div className="min-h-screen w-full flex bg-[#0b1120] text-white">
             {/* ══════════ Panel izquierdo · marca (solo desktop) ══════════ */}
             <div className="hidden lg:flex flex-col flex-1 relative overflow-hidden bg-[#080d1a] px-14 py-10">
-                {/* Fondo: gradiente profundo + trama sutil */}
+                {/* Fondo: foto de comercio + velo azul oscuro para legibilidad */}
                 <div className="absolute inset-0 pointer-events-none">
-                    <div className="absolute inset-0 bg-gradient-to-br from-[#0c1428] via-[#080d1a] to-[#060a14]" />
-                    <div
-                        className="absolute inset-0 opacity-[0.35]"
-                        style={{
-                            backgroundImage: 'radial-gradient(rgba(59,130,246,0.14) 1px, transparent 1px)',
-                            backgroundSize: '28px 28px',
-                        }}
+                    <img
+                        src="/login-bg.jpg"
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-cover blur-[2px] scale-105"
                     />
-                    <div className="absolute -top-32 -left-32 w-[480px] h-[480px] bg-blue-600/10 rounded-full blur-[140px]" />
-                    <div className="absolute bottom-0 right-0 w-[420px] h-[420px] bg-indigo-500/10 rounded-full blur-[140px]" />
+                    <div className="absolute inset-0 bg-gradient-to-br from-[#080d1a]/95 via-[#0a1224]/85 to-[#080d1a]/95" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent to-[#0b1120]/70" />
                 </div>
-
-                {/* Separador diagonal con brillo hacia el panel derecho */}
-                <div className="absolute top-[-10%] right-0 h-[120%] w-[2px] bg-gradient-to-b from-transparent via-blue-500/60 to-transparent rotate-[4deg] origin-top" />
 
                 {/* Logo / marca */}
                 <div className="relative flex items-center gap-3">
@@ -74,8 +68,8 @@ const Login = () => {
                     </div>
                 </div>
 
-                {/* Mensaje principal */}
-                <div className="relative mt-16 max-w-md">
+                {/* Mensaje principal (centrado vertical entre logo y sellos) */}
+                <div className="relative flex-1 flex flex-col justify-center max-w-md">
                     <h1 className="text-4xl xl:text-[2.75rem] font-bold leading-tight">
                         Gestiona tu negocio
                         <span className="block text-blue-400">con control total.</span>
@@ -85,72 +79,6 @@ const Login = () => {
                         Ventas, inventario, clientes y reportes en tiempo real,
                         desde cualquier dispositivo.
                     </p>
-                </div>
-
-                {/* Mini dashboard ilustrativo */}
-                <div className="relative mt-12 max-w-lg" style={{ perspective: '1200px' }}>
-                    <div
-                        className="rounded-2xl border border-white/10 bg-[#0d1526]/90 backdrop-blur shadow-[0_30px_80px_-20px_rgba(2,6,23,0.9)] p-5"
-                        style={{ transform: 'rotateX(4deg) rotateY(-4deg)' }}
-                    >
-                        <div className="flex items-center justify-between mb-4">
-                            <p className="text-xs font-semibold text-slate-300">Dashboard</p>
-                            <div className="flex gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-slate-600" />
-                                <span className="w-2 h-2 rounded-full bg-slate-600" />
-                                <span className="w-2 h-2 rounded-full bg-blue-500" />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-3">
-                            {/* Ventas hoy */}
-                            <div className="col-span-1 rounded-xl bg-[#111c33] border border-white/5 p-3">
-                                <p className="text-[10px] text-slate-400">Ventas hoy</p>
-                                <p className="text-sm font-bold mt-1">$1.250.000</p>
-                                <p className="text-[10px] text-emerald-400 flex items-center gap-1 mt-1">
-                                    <TrendingUp size={10} /> +12,5%
-                                </p>
-                            </div>
-                            {/* Tickets */}
-                            <div className="col-span-1 rounded-xl bg-[#111c33] border border-white/5 p-3">
-                                <p className="text-[10px] text-slate-400">Tickets hoy</p>
-                                <p className="text-sm font-bold mt-1">156</p>
-                                <p className="text-[10px] text-emerald-400 mt-1">+8,3%</p>
-                            </div>
-                            {/* Mini gráfico de barras */}
-                            <div className="col-span-1 rounded-xl bg-[#111c33] border border-white/5 p-3 flex flex-col">
-                                <p className="text-[10px] text-slate-400 mb-2">Últimos 7 días</p>
-                                <div className="flex items-end gap-1 flex-1 min-h-[34px]">
-                                    {[35, 55, 42, 70, 58, 85, 100].map((h, i) => (
-                                        <span
-                                            key={i}
-                                            className={`flex-1 rounded-sm ${i === 6 ? 'bg-blue-400' : 'bg-blue-500/45'}`}
-                                            style={{ height: `${h}%` }}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Productos más vendidos */}
-                        <div className="mt-3 rounded-xl bg-[#111c33] border border-white/5 p-3">
-                            <p className="text-[10px] text-slate-400 mb-2.5">Productos más vendidos</p>
-                            <div className="space-y-2">
-                                {[
-                                    { name: 'Coca Cola 1.5L', w: '92%' },
-                                    { name: 'Pan de Molde Blanco', w: '74%' },
-                                    { name: 'Leche Entera 1L', w: '58%' },
-                                ].map((p) => (
-                                    <div key={p.name} className="flex items-center gap-3">
-                                        <span className="text-[10px] text-slate-300 w-36 truncate">{p.name}</span>
-                                        <span className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden">
-                                            <span className="block h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-400" style={{ width: p.w }} />
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
                 </div>
 
                 {/* Sellos de confianza */}
@@ -168,7 +96,7 @@ const Login = () => {
             </div>
 
             {/* ══════════ Panel derecho · formulario ══════════ */}
-            <div className="flex-1 lg:max-w-[46%] flex flex-col items-center justify-center relative px-4 py-10 bg-[#0b1120]">
+            <div className="flex-1 lg:max-w-[46%] flex flex-col items-center justify-center relative px-4 py-10 bg-[#0b1120] lg:border-l lg:border-blue-500/25">
                 {/* Textura sutil de puntos */}
                 <div
                     className="absolute inset-0 opacity-[0.25] pointer-events-none"
