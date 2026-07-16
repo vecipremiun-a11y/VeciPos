@@ -99,6 +99,7 @@ const POS = () => {
         updateSuspendedCount,
         createPreventa,
         fetchPreventaByCode,
+        loadPreventaCart,
         completePreventa,
         pendingPreventasCount,
         updatePreventasCount,
@@ -133,6 +134,7 @@ const POS = () => {
             updateSuspendedCount: s.updateSuspendedCount,
             createPreventa: s.createPreventa,
             fetchPreventaByCode: s.fetchPreventaByCode,
+            loadPreventaCart: s.loadPreventaCart,
             completePreventa: s.completePreventa,
             pendingPreventasCount: s.pendingPreventasCount,
             updatePreventasCount: s.updatePreventasCount,
@@ -262,14 +264,9 @@ const POS = () => {
                 const preventa = await fetchPreventaByCode(scannedCode.toUpperCase());
                 if (preventa) {
                     clearCart();
-                    preventa.items.forEach(item => {
-                        addToCart({
-                            id: item.id, name: item.name, price: item.price,
-                            cost: item.cost || 0, quantity: item.quantity,
-                            tax_rate: item.tax_rate || 0, image: item.image || null,
-                            sku: item.sku || '', stock: item.stock || 0
-                        });
-                    });
+                    // Restaurar TAL CUAL (cantidad/gramaje, precio editado, dcto);
+                    // addToCart reseteaba todo a 1 unidad y precio de catálogo.
+                    loadPreventaCart(preventa.items);
                     if (preventa.client_data) setPosSelectedClient(preventa.client_data);
                     // Store the preventa code so completePreventa is called on sale
                     // We'll use a ref since this is an async callback
@@ -296,7 +293,7 @@ const POS = () => {
         } catch (error) {
             console.error("Error scanning:", error);
         }
-    }, [addToCart, searchProducts, getProductByBarcode, fetchPreventaByCode, clearCart, setPosSelectedClient]);
+    }, [addToCart, searchProducts, getProductByBarcode, fetchPreventaByCode, loadPreventaCart, clearCart, setPosSelectedClient]);
 
     useBarcodeScanner(handleBarcodeScan);
 
@@ -504,19 +501,9 @@ const POS = () => {
 
     const handleLoadPreventa = (preventa) => {
         clearCart();
-        preventa.items.forEach(item => {
-            addToCart({
-                id: item.id,
-                name: item.name,
-                price: item.price,
-                cost: item.cost || 0,
-                quantity: item.quantity,
-                tax_rate: item.tax_rate || 0,
-                image: item.image || null,
-                sku: item.sku || '',
-                stock: item.stock || 0
-            });
-        });
+        // Restaurar TAL CUAL (cantidad/gramaje, precio editado, dcto);
+        // addToCart reseteaba todo a 1 unidad y precio de catálogo.
+        loadPreventaCart(preventa.items);
         if (preventa.client_data) {
             setPosSelectedClient(preventa.client_data);
         }

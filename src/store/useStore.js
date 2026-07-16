@@ -4163,20 +4163,9 @@ export const useStore = create(persist((set, get) => ({
             // Limpiar carrito actual
             get().clearCart();
 
-            // Restaurar items en carrito
-            items.forEach(item => {
-                get().addToCart({
-                    id: item.id,
-                    name: item.name,
-                    price: item.price,
-                    cost: item.cost || 0,
-                    quantity: item.quantity,
-                    tax_rate: item.tax_rate || 0,
-                    image: item.image || null,
-                    sku: item.sku || '',
-                    stock: item.stock || 0
-                });
-            });
+            // Restaurar items TAL CUAL se suspendieron (cantidad/gramaje, precio
+            // editado, dcto); addToCart reseteaba a 1 unidad y precio de catálogo.
+            get().loadPreventaCart(items);
 
             // Restaurar cliente
             if (clientData) {
@@ -4232,6 +4221,35 @@ export const useStore = create(persist((set, get) => ({
             console.error('Error creating preventa:', e);
             return { success: false, error: e.message };
         }
+    },
+
+    // Restaura el carrito guardado de una preventa TAL CUAL se creó: respeta
+    // cantidad/gramaje, precio editado y % de descuento. No pasa por addToCart
+    // (que resetea a 1 unidad, precio de catálogo y 0% dcto) ni re-calcula
+    // ofertas/escalas — el ticket impreso es el contrato con el cliente.
+    loadPreventaCart: (items) => {
+        const { carts, activeCartId } = get();
+        const restored = (items || []).map(item => ({
+            discountPercent: 0,
+            unit: 'Und',
+            category: '',
+            price_ranges: [],
+            scale_group_id: null,
+            is_combo: false,
+            combo_id: null,
+            combo_items: null,
+            ...item,
+            price: Number(item.price) || 0,
+            quantity: Number(item.quantity) || 1,
+            cost: Number(item.cost) || 0,
+            tax_rate: Number(item.tax_rate) || 0,
+            original_price: item.original_price ?? item.price,
+        }));
+        set({
+            carts: carts.map(c =>
+                c.id === activeCartId ? { ...c, items: restored } : c
+            ),
+        });
     },
 
     fetchPendingPreventas: async () => {
