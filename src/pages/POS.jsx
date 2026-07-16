@@ -622,12 +622,13 @@ const POS = () => {
 
     return (
         <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-100px)]">
-            {/* Candado de caja: SIEMPRE que no haya caja abierta. El permiso solo
-                decide si el usuario puede abrirla él mismo o debe pedirla. Antes
-                el modal solo se montaba con can('pos.open_register'), así que un
-                rol sin ese permiso (p. ej. Vendedor) entraba a vender sin caja. */}
+            {/* Candado de caja: aplica a quien COBRA (pos.sell = maneja efectivo).
+                Los roles de solo-preventa (Vendedor: arma ticket, el cliente paga
+                en Caja) entran sin caja — no reciben dinero. Con permiso de abrir
+                caja se muestra el formulario; con pos.sell pero sin ese permiso,
+                pantalla bloqueante para pedir la apertura a un admin. */}
             <CashOpeningModal
-                isOpen={!cashRegister && !!currentUser}
+                isOpen={!cashRegister && !!currentUser && can('pos.sell')}
                 canOpen={can('pos.open_register')}
             />
 
