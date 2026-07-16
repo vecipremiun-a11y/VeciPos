@@ -46,7 +46,8 @@ const SuspendedSalesModal = ({ isOpen, onClose }) => {
 
     return createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-            <div className="glass-card w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+            {/* Fondo sólido (no glass): con transparencia se traslucía el grid de productos. */}
+            <div className="w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col rounded-2xl border border-[var(--glass-border)] bg-[var(--color-surface)] shadow-2xl">
                 {/* Header */}
                 <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
                     <div>

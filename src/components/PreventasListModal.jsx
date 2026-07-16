@@ -64,8 +64,10 @@ const PreventasListModal = ({ isOpen, onClose, onLoadPreventa }) => {
 
     return createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-            <div className="relative glass-card rounded-2xl w-full max-w-lg max-h-[85vh] shadow-2xl border border-[var(--glass-border)] animate-in zoom-in-95 duration-200 flex flex-col">
+            <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={onClose} />
+            {/* Fondo sólido (no glass): el modal se superpone al grid de productos
+                y con transparencia se traslucían las tarjetas de atrás. */}
+            <div className="relative rounded-2xl w-full max-w-lg max-h-[85vh] shadow-2xl border border-[var(--glass-border)] bg-[var(--color-surface)] animate-in zoom-in-95 duration-200 flex flex-col">
                 {/* Header */}
                 <div className="flex items-center justify-between p-4 border-b border-[var(--glass-border)]">
                     <div className="flex items-center gap-2">
