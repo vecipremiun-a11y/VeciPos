@@ -32,13 +32,14 @@ async function bootstrap(turso, companyId) {
         { sql: 'SELECT * FROM role_permissions WHERE company_id = ?', args: [companyId] },
         { sql: 'SELECT * FROM tax_rates WHERE company_id = ?', args: [companyId] },
         { sql: 'SELECT * FROM company_modules WHERE company_id = ?', args: [companyId] },
+        { sql: 'SELECT * FROM company_apps WHERE company_id = ?', args: [companyId] },
         { sql: 'SELECT * FROM payment_methods_config WHERE company_id = ?', args: [companyId] },
         { sql: 'SELECT * FROM payment_terminals WHERE company_id = ? AND is_active = 1', args: [companyId] },
         { sql: 'SELECT * FROM bank_accounts WHERE company_id = ? AND is_active = 1', args: [companyId] },
         { sql: 'SELECT inventory_adjustment_mode, currency, credit_block_mode, plan, status, trial_ends_at FROM companies WHERE id = ?', args: [companyId] },
     ], 'read');
 
-    const [productLotsRes, categoriesRes, suppliersRes, usersRes, clientsRes, permissionsRes, taxesRes, modulesRes, payConfigRes, payTerminalsRes, bankAccountsRes, companyConfigRes] = results;
+    const [productLotsRes, categoriesRes, suppliersRes, usersRes, clientsRes, permissionsRes, taxesRes, modulesRes, appsRes, payConfigRes, payTerminalsRes, bankAccountsRes, companyConfigRes] = results;
 
     // Asegurar config de medios de pago (default si no existe) — idempotente.
     let paymentMethodsConfig = payConfigRes.rows[0];
@@ -60,6 +61,7 @@ async function bootstrap(turso, companyId) {
         rolePermissions: permissionsRes.rows,
         taxRates: taxesRes.rows,
         companyModules: modulesRes.rows,
+        companyApps: appsRes.rows,
         paymentMethodsConfig,
         paymentTerminals: payTerminalsRes.rows,
         bankAccounts: bankAccountsRes.rows,

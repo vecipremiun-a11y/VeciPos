@@ -87,7 +87,7 @@ async function companyModuleUpdate(turso, companyId, session, { moduleKey, enabl
 // Crea una empresa ADICIONAL enlazada a la cuenta del usuario (multi-empresa).
 // SEGURIDAD: el actor debe ser 'owner' de la empresa actual; el owner de la nueva
 // empresa se fuerza a session.uid (el cliente ya no decide a quién enlazar).
-async function companyLinkedCreate(turso, companyId, session, { name, plan = 'basico' }) {
+async function companyLinkedCreate(turso, companyId, session, { name, plan = 'professional' }) {
     // El actor debe ser dueño de la empresa desde la que crea la nueva.
     const own = await turso.execute({
         sql: "SELECT role FROM user_companies WHERE user_id = ? AND company_id = ? LIMIT 1",
@@ -127,6 +127,28 @@ async function companyLinkedCreate(turso, companyId, session, { name, plan = 'ba
     });
 
     return { success: true, companyId: id };
+}
+
+// Lista todas las sucursales de la cuenta (raíz + enlazadas) de las que el
+// usuario de la sesión es miembro, con su plan/estado/vencimiento. Para el
+// panel "Mi Plan" (Fase B). No expone empresas de otros dueños.
+async function companyBranches(turso, companyId, session) {
+    const cur = (await turso.execute({
+        sql: 'SELECT id, parent_company_id FROM companies WHERE id = ?',
+        args: [companyId],
+    })).rows[0];
+    if (!cur) return { success: true, branches: [] };
+    const rootId = cur.parent_company_id || cur.id;
+
+    const r = await turso.execute({
+        sql: `SELECT c.id, c.name, c.plan, c.status, c.access_until, c.trial_ends_at, c.parent_company_id, c.created_at
+              FROM companies c
+              INNER JOIN user_companies uc ON uc.company_id = c.id AND uc.user_id = ?
+              WHERE c.id = ? OR c.parent_company_id = ?
+              ORDER BY (c.parent_company_id IS NOT NULL), c.created_at`,
+        args: [session?.uid ?? null, rootId, rootId],
+    });
+    return { success: true, branches: r.rows, rootId };
 }
 
 // ── Config de boleta / preventa (ReceiptSettings, SaleSuccessModal) ──
@@ -231,6 +253,7 @@ export const companyActions = {
     dteRetryDelete,
     companyModuleUpdate,
     companyLinkedCreate,
+    companyBranches,
     receiptSettingsLoad,
     preventaSettingsLoad,
     receiptSettingsSave,

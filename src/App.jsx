@@ -12,6 +12,12 @@ import AdminLayout from './layouts/AdminLayout';
 import RequireAdmin from './components/RequireAdmin';
 import ProtectedPage from './components/auth/ProtectedPage';
 import FeatureGatePage from './components/auth/FeatureGatePage';
+import ToastHost from './components/ToastHost';
+import { installAlertBridge } from './lib/toast';
+
+// Los alert() nativos ("app.posveci.com dice...") pasan a ser notificaciones
+// del sistema. Se instala al cargar el módulo, antes de montar cualquier página.
+installAlertBridge();
 
 // FASE 10 · Resto de páginas: lazy. Reduce dramáticamente el bundle inicial.
 // Cada ruta solo descarga su chunk al navegar a ella.
@@ -21,6 +27,7 @@ const PaymentFailure = lazy(() => import('./pages/PaymentFailure'));
 const RenewSubscription = lazy(() => import('./pages/RenewSubscription'));
 const PrivacyPolicy = lazy(() => import('./pages/legal/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('./pages/legal/TermsOfService'));
+const Marketplace = lazy(() => import('./pages/Marketplace'));
 const SalesHistory = lazy(() => import('./pages/SalesHistory'));
 const Inventory = lazy(() => import('./pages/Inventory'));
 const Taxes = lazy(() => import('./pages/Taxes'));
@@ -281,6 +288,7 @@ function App() {
   return (
     <Router>
       <PWAUpdatePrompt />
+      <ToastHost />
       <Suspense fallback={
         <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)]">
           <div className="flex flex-col items-center gap-3">
@@ -322,20 +330,20 @@ function App() {
           <Route path="sales-history" element={<ProtectedPage permission="sales.view"><SalesHistory /></ProtectedPage>} />
           <Route path="inventory" element={<ProtectedPage permission="products.view"><Inventory /></ProtectedPage>} />
           <Route path="taxes" element={<ProtectedPage permission="taxes.view"><FeatureGatePage moduleKey="taxes"><Taxes /></FeatureGatePage></ProtectedPage>} />
-          <Route path="invoices" element={<ProtectedPage permission="invoices.view"><FeatureGatePage moduleKey="orders"><Invoices /></FeatureGatePage></ProtectedPage>} />
+          <Route path="invoices" element={<ProtectedPage permission="invoices.view"><FeatureGatePage moduleKey="purchases"><Invoices /></FeatureGatePage></ProtectedPage>} />
           <Route path="categories" element={<ProtectedPage permission="categories.view"><Categories /></ProtectedPage>} />
-          <Route path="suppliers" element={<ProtectedPage permission="suppliers.view"><FeatureGatePage moduleKey="orders"><Suppliers /></FeatureGatePage></ProtectedPage>} />
-          <Route path="purchases" element={<ProtectedPage permission="purchases.view"><FeatureGatePage moduleKey="orders"><Purchases /></FeatureGatePage></ProtectedPage>} />
+          <Route path="suppliers" element={<ProtectedPage permission="suppliers.view"><FeatureGatePage moduleKey="purchases"><Suppliers /></FeatureGatePage></ProtectedPage>} />
+          <Route path="purchases" element={<ProtectedPage permission="purchases.view"><FeatureGatePage moduleKey="purchases"><Purchases /></FeatureGatePage></ProtectedPage>} />
           <Route path="product-profile" element={<ProtectedPage permission="product_profile.view"><FeatureGatePage moduleKey="product_profile"><ProductProfile /></FeatureGatePage></ProtectedPage>} />
           <Route path="users" element={<ProtectedPage permission="users.view"><Users /></ProtectedPage>} />
           <Route path="personal" element={<ProtectedPage permission="personal.view"><FeatureGatePage moduleKey="personal"><Personal /></FeatureGatePage></ProtectedPage>} />
           <Route path="administration" element={<ProtectedPage permission="finance.view"><FeatureGatePage moduleKey="finance"><Administration /></FeatureGatePage></ProtectedPage>} />
           <Route path="clients" element={<ProtectedPage permission="clients.view"><Clients /></ProtectedPage>} />
-          <Route path="orders" element={<ProtectedPage permission="supplier_orders.create"><FeatureGatePage moduleKey="orders"><Orders /></FeatureGatePage></ProtectedPage>} />
-          <Route path="orders/history" element={<ProtectedPage permission="supplier_orders.view"><FeatureGatePage moduleKey="orders"><SupplierOrders /></FeatureGatePage></ProtectedPage>} />
+          <Route path="orders" element={<ProtectedPage permission="supplier_orders.create"><FeatureGatePage moduleKey="supplier_orders"><Orders /></FeatureGatePage></ProtectedPage>} />
+          <Route path="orders/history" element={<ProtectedPage permission="supplier_orders.view"><FeatureGatePage moduleKey="supplier_orders"><SupplierOrders /></FeatureGatePage></ProtectedPage>} />
           <Route path="preorders" element={<ProtectedPage permission="preorders.view"><FeatureGatePage moduleKey="preorders"><Preorders /></FeatureGatePage></ProtectedPage>} />
           <Route path="preorders/history" element={<ProtectedPage permission="preorders.view"><FeatureGatePage moduleKey="preorders"><PreorderHistory /></FeatureGatePage></ProtectedPage>} />
-          <Route path="store-orders" element={<ProtectedPage permission="preorders.view"><FeatureGatePage moduleKey="preorders"><StoreOrders /></FeatureGatePage></ProtectedPage>} />
+          <Route path="store-orders" element={<ProtectedPage permission="preorders.view"><FeatureGatePage moduleKey="web"><StoreOrders /></FeatureGatePage></ProtectedPage>} />
           <Route path="production" element={<ProtectedPage permission="production.view"><FeatureGatePage moduleKey="production"><Production /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/reconciliation" element={<ProtectedPage permission="products.adjust_stock"><FeatureGatePage moduleKey="inventory_control"><InventoryReconciliation /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/control" element={<ProtectedPage permission="inventory_control.view"><FeatureGatePage moduleKey="inventory_control"><InventoryControl /></FeatureGatePage></ProtectedPage>} />
@@ -345,19 +353,21 @@ function App() {
 
           {/* Reports */}
           <Route path="reports" element={<ProtectedPage permission="reports.sales"><Reports /></ProtectedPage>} />
-          <Route path="reports/expiring" element={<ProtectedPage permission="reports.expiring"><ExpiringProductsReport /></ProtectedPage>} />
+          <Route path="reports/expiring" element={<ProtectedPage permission="reports.expiring"><FeatureGatePage moduleKey="vencimientos"><ExpiringProductsReport /></FeatureGatePage></ProtectedPage>} />
           <Route path="reports/closures" element={<ProtectedPage permission="reports.closures"><CashClosuresReport /></ProtectedPage>} />
           <Route path="reports/movements" element={<ProtectedPage permission="reports.movements"><CashMovementsReport /></ProtectedPage>} />
-          <Route path="reports/invoice-payments" element={<ProtectedPage permission="reports.invoice_payments"><FeatureGatePage moduleKey="orders"><InvoicePaymentsReport /></FeatureGatePage></ProtectedPage>} />
+          <Route path="reports/invoice-payments" element={<ProtectedPage permission="reports.invoice_payments"><FeatureGatePage moduleKey="invoice_payments"><InvoicePaymentsReport /></FeatureGatePage></ProtectedPage>} />
           <Route path="reports/payment-reconciliation" element={<ProtectedPage permission="reports.closures"><FeatureGatePage moduleKey="reports_advanced"><PaymentReconciliation /></FeatureGatePage></ProtectedPage>} />
           <Route path="reports/profit" element={<ProtectedPage permission="reports.profit"><FeatureGatePage moduleKey="reports_advanced"><ProfitReport /></FeatureGatePage></ProtectedPage>} />
           <Route path="reports/sales-analytics" element={<ProtectedPage permission="reports.sales_analytics"><FeatureGatePage moduleKey="reports_advanced"><SalesAnalytics /></FeatureGatePage></ProtectedPage>} />
 
           <Route path="sorteos" element={<ProtectedPage permission="sorteos.view"><FeatureGatePage moduleKey="sorteos"><Sorteos /></FeatureGatePage></ProtectedPage>} />
 
+          <Route path="marketplace" element={<ProtectedPage permission="settings.company"><Marketplace /></ProtectedPage>} />
+
           <Route path="settings" element={<ProtectedPage permission="settings.view"><Settings /></ProtectedPage>} />
           <Route path="settings/:tab" element={<ProtectedPage permission="settings.view"><Settings /></ProtectedPage>} />
-          <Route path="offline-sales" element={<ProtectedPage permission="pos.access"><OfflineSync /></ProtectedPage>} />
+          <Route path="offline-sales" element={<ProtectedPage permission="pos.access"><FeatureGatePage moduleKey="offline_sales"><OfflineSync /></FeatureGatePage></ProtectedPage>} />
         </Route>
 
         {/* Super Admin Routes */}

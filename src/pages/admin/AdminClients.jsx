@@ -14,8 +14,11 @@ const STATUS = {
     cancelled: { label: 'Cancelada', cls: 'bg-gray-500/15 text-gray-400 border-gray-500/30' },
     pending_payment: { label: 'Pendiente', cls: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' },
 };
-const PLAN_LABEL = { basico: 'Básico', basic: 'Básico', medium: 'Medium', medio: 'Medium', pro: 'Pro', free: 'Gratis' };
-const normPlan = (p) => (p === 'basic' ? 'basico' : (p || 'basico'));
+const PLAN_LABEL = { standard: 'Standard', professional: 'Profesional', basico: 'Standard', basic: 'Standard', medium: 'Profesional', medio: 'Profesional', pro: 'Profesional' };
+const normPlan = (p) => {
+    const k = (p || '').toString().toLowerCase();
+    return (k === 'professional' || k === 'medium' || k === 'medio' || k === 'pro') ? 'professional' : 'standard';
+};
 
 const formatDate = (iso) => {
     if (!iso) return '—';

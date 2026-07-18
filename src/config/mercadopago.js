@@ -4,83 +4,84 @@ export const MERCADOPAGO_CONFIG = {
     locale: 'es-CL'
 };
 
-// Planes de suscripción (3 niveles). Cada plan tiene precio en CLP y en USD.
+// Planes de suscripción — modelo definitivo de 2 niveles POR SUCURSAL.
+// Standard (nivel 1) y Profesional (nivel 2). Cada plan tiene precio CLP y USD.
 // Chile (CL) se muestra/cobra en CLP; el resto de países en USD.
-// NOTA: las features son provisionales, ajústalas a tu producto real.
+// Los complementos (Apps) se venden aparte desde el Marketplace (ver src/constants/apps.js).
 export const SUBSCRIPTION_PLANS = {
-    basico: {
-        id: 'basico',
+    standard: {
+        id: 'standard',
         level: 1, // jerarquía: solo se ofrecen planes de nivel superior al actual
-        name: 'Plan Básico',
+        name: 'Plan Standard',
         prices: {
             CLP: { monthly: 15000, annual: 150000 },
             USD: { monthly: 15, annual: 150 },
         },
-        description: 'Para empezar a vender en serio',
+        description: 'Para administrar un local, sin límites de registros',
         popular: false,
         features: [
-            'Todo lo del plan Gratis, sin límites',
-            'Facturación electrónica SII',
-            'Compras, proveedores y facturas',
-            'Encargos / preventas + producción',
-            'Reportes avanzados y balanza',
-            'Usuarios y cajas ilimitados'
+            'Punto de venta, clientes e historial de ventas',
+            'Inventario: productos, categorías, proveedores, compras y facturas',
+            'Impuestos y facturación electrónica SII',
+            'Reportes de ventas y de cajas',
+            'Usuarios, productos, clientes y ventas ilimitados',
         ]
     },
-    medium: {
-        id: 'medium',
+    professional: {
+        id: 'professional',
         level: 2,
-        name: 'Plan Medium',
+        name: 'Plan Profesional',
         prices: {
             CLP: { monthly: 30000, annual: 300000 },
             USD: { monthly: 30, annual: 300 },
         },
-        description: 'El más elegido por negocios en crecimiento',
+        description: 'Todo el poder de POSVECI + Marketplace de complementos',
         popular: true,
         features: [
-            'Todo lo del plan Básico',
-            'Gestión de Personal (asistencia + nómina)',
-            'Sorteos y fidelización',
-            'Multi-sucursal: crea más empresas (cada una con su plan)',
-            'Integración WooCommerce y Shopify',
-            'Combos, conciliación de inventario y app del sistema'
-        ]
-    },
-    pro: {
-        id: 'pro',
-        level: 3,
-        name: 'Plan Pro',
-        prices: {
-            CLP: { monthly: 60000, annual: 600000 },
-            USD: { monthly: 60, annual: 600 },
-        },
-        description: 'Para operaciones completas',
-        popular: false,
-        features: [
-            'Todo lo del plan Medium',
-            'Página web propia (empresa principal)',
-            'Delivery + app de repartidores (Próximamente)',
-            'App del sistema',
-            'Soporte prioritario 24h'
+            'Todo lo del plan Standard',
+            'Ventas offline y órdenes de compra',
+            'Personal (asistencia + nómina) y administración financiera',
+            'Sorteos, perfil de producto, combos y control de inventario',
+            'Reportes avanzados: utilidad, análisis y vencimientos',
+            'Marketplace de complementos + sucursales adicionales',
+            'Soporte prioritario 24/7 y 2 h de capacitación',
         ]
     }
 };
 
-// Jerarquía de planes para el gating por plan (Básico=1, Medium=2, Pro=3).
-// Tolera variantes legacy (basic/medio). Devuelve null si el plan es desconocido
+// Jerarquía de planes para el gating por plan (Standard=1, Profesional=2).
+// Tolera variantes legacy (basico/basic=1, medium/medio/pro=2) para no romper
+// datos previos a la migración 0008. Devuelve null si el plan es desconocido
 // (el gating trata "desconocido" como acceso completo, para no romper legacy).
-export const PLAN_LEVEL = { basico: 1, basic: 1, medium: 2, medio: 2, pro: 3 };
+export const PLAN_LEVEL = {
+    standard: 1,
+    professional: 2,
+    // Aliases legacy (pre-migración a 2 planes)
+    basico: 1, basic: 1,
+    medium: 2, medio: 2, pro: 2,
+};
 export const getPlanLevel = (planId) => {
     const k = (planId || '').toString().trim().toLowerCase();
     return Object.prototype.hasOwnProperty.call(PLAN_LEVEL, k) ? PLAN_LEVEL[k] : null;
 };
 
-// Cantidad de empresas incluidas y costo por empresa adicional (multi-sucursal).
+// Sucursales incluidas y costo por sucursal adicional.
+// Solo Profesional puede agregar sucursales; cada adicional cuesta US$20/mes
+// (CLP 20.000) y tiene el servicio Profesional completo. Standard no agrega.
 export const PLAN_COMPANIES = {
-    basico: { included: 1 },
-    medium: { included: 2, extraUsd: 20 },
-    pro: { included: 2, extraUsd: 20 },
+    standard: { included: 1, canAddBranches: false },
+    professional: { included: 1, canAddBranches: true, extraUsd: 20, extraClp: 20000 },
 };
+
+// ¿El plan permite agregar sucursales? (Solo Profesional.)
+export const planCanAddBranches = (planId) => {
+    const lvl = getPlanLevel(planId);
+    return lvl != null && lvl >= 2;
+};
+
+// Precio de una sucursal adicional en la moneda indicada.
+export const getExtraBranchAmount = (currency = 'CLP') =>
+    currency === 'USD' ? PLAN_COMPANIES.professional.extraUsd : PLAN_COMPANIES.professional.extraClp;
 
 // Ciclos de facturación disponibles
 export const BILLING_CYCLES = {

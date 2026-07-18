@@ -142,12 +142,13 @@ export default async function handler(req, res) {
         let userId;
         const tx = await turso.transaction('write');
         try {
-            // Empresa en 'trial' sobre el plan Básico (30 días). access_until = fin de
-            // la prueba. Al vencer sin pago, el login/cron la bloquea (pasa a 'past_due').
+            // Empresa en 'trial' con acceso completo (plan Profesional, 30 días) para que
+            // el cliente pruebe todo el sistema. access_until = fin de la prueba; al vencer
+            // sin pago el login/cron la bloquea (pasa a 'past_due').
             await tx.execute({
                 sql: `INSERT INTO companies
                         (id, name, status, created_at, timezone, country_code, plan, trial_ends_at, access_until, email_main, business_type)
-                      VALUES (?, ?, 'trial', ?, 'America/Santiago', 'CL', 'basico', ?, ?, ?, ?)`,
+                      VALUES (?, ?, 'trial', ?, 'America/Santiago', 'CL', 'professional', ?, ?, ?, ?)`,
                 args: [companyId, company.name.trim(), now.toISOString(), trialEnd.toISOString(), trialEnd.toISOString(), email, company.type || null]
             });
 

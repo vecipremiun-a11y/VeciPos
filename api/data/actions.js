@@ -21,6 +21,7 @@ import { telemetryActions } from '../_lib/telemetryActions.js';
 import { taxActions } from '../_lib/taxActions.js';
 import { bootstrapActions } from '../_lib/bootstrapActions.js';
 import { financeActions } from '../_lib/financeActions.js';
+import { appActions } from '../_lib/appActions.js';
 
 // Endpoint de datos del app normal (Fase 1 · Paso 4).
 // Exige: sesión firmada + que el usuario sea MIEMBRO de la empresa (companyId).
@@ -199,8 +200,13 @@ export default async function handler(req, res) {
             case 'folioSettingsLoad':
             case 'folioSettingsSave':
             case 'dteRetryDelete':
+            case 'appList':
+            case 'appActivate':
+            case 'appCancel':
+                return res.status(200).json(await appActions[action](turso, companyId, session, body));
             case 'companyModuleUpdate':
             case 'companyLinkedCreate':
+            case 'companyBranches':
             case 'receiptSettingsLoad':
             case 'preventaSettingsLoad':
             case 'receiptSettingsSave':

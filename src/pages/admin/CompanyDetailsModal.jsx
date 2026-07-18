@@ -186,10 +186,10 @@ const CompanyDetailsModal = ({ company, onClose }) => {
                                         <div className="flex-1 mr-4">
                                             <div className="flex items-center gap-2">
                                                 <span className="text-white font-medium text-sm">{mod.label}</span>
-                                                {mod.plan === 'pro' && (
+                                                {mod.plan === 'professional' && (
                                                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/20">
                                                         <Sparkles size={8} />
-                                                        PRO
+                                                        PROFESIONAL
                                                     </span>
                                                 )}
                                             </div>

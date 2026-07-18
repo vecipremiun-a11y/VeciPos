@@ -4,6 +4,7 @@ import { AlertTriangle, TrendingDown, Clock, Bell, AlertCircle, Users, CalendarC
 import { useStore } from '../store/useStore';
 import { format, subDays, parseISO } from 'date-fns';
 import { usePermissions } from '../hooks/usePermissions';
+import { useCompanyFeatures } from '../hooks/useCompanyFeatures';
 import { es } from 'date-fns/locale';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -26,6 +27,7 @@ const Dashboard = () => {
     } = useStore();
 
     const { can } = usePermissions();
+    const { hasModule } = useCompanyFeatures();
 
     // Separate state for different data needs
     const [todayUtility, setTodayUtility] = React.useState(0);        // ← NUEVO
@@ -511,7 +513,8 @@ const Dashboard = () => {
                         </div>
                     </div>
 
-                    {/* 6. Productos Vencidos / Por Vencer (FEFO) */}
+                    {/* 6. Productos Vencidos / Por Vencer (FEFO) — solo si el plan tiene Vencimientos */}
+                    {hasModule('vencimientos') && (
                     <div className="glass-card flex flex-col h-[300px] border-l-4 border-l-purple-500 p-0 overflow-hidden xl:col-span-2">
                         <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] flex justify-between items-center">
                             <h4 className="text-purple-400 font-bold flex items-center gap-2 text-sm uppercase tracking-wider">
@@ -583,6 +586,7 @@ const Dashboard = () => {
                             })()}
                         </div>
                     </div>
+                    )}
 
                 </div>
             </div>

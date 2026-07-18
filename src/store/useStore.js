@@ -79,6 +79,7 @@ export const useStore = create(persist((set, get) => ({
     users: [],
     rolePermissions: [], // 🔒 Permissions State (Initialized)
     companyModules: [], // 🏷️ Feature Flags per company
+    companyApps: [], // 🧩 Complementos (Apps) contratados por la empresa/sucursal
     currentPlanLevel: null, // 🎚️ Nivel del plan activo (Free=0…Pro=3). null = aún sin cargar → sin restricción.
     purchases: [],
     sales: [],
@@ -310,6 +311,7 @@ export const useStore = create(persist((set, get) => ({
             users: [],
             rolePermissions: [], // 🔒 Permissions State
             companyModules: [], // 🏷️ Clear feature flags
+            companyApps: [], // 🧩 Clear apps
             clients: [],
             purchases: [],
             sales: [],
@@ -494,10 +496,10 @@ export const useStore = create(persist((set, get) => ({
                 const freshCurrency = cfg.currency || 'CLP';
                 const freshCreditBlockMode = cfg.credit_block_mode || 'warn';
 
-                // Nivel de plan para el gating (Básico=1, Medium=2, Pro=3).
-                // El trial corre sobre su plan (Básico). Plan desconocido/legacy → 3 (no romper acceso existente).
+                // Nivel de plan para el gating (Standard=1, Profesional=2).
+                // Plan desconocido/legacy → 2 (Profesional) para no romper acceso existente.
                 const lvl = getPlanLevel(cfg.plan);
-                const planLevel = (lvl == null) ? 3 : lvl;
+                const planLevel = (lvl == null) ? 2 : lvl;
 
                 set({ inventoryAdjustmentMode: freshMode, currentCurrency: freshCurrency, creditBlockMode: freshCreditBlockMode, currentPlanLevel: planLevel });
             }
@@ -517,6 +519,7 @@ export const useStore = create(persist((set, get) => ({
                 rolePermissions: boot.rolePermissions,
                 taxRates: boot.taxRates,
                 companyModules: boot.companyModules,
+                companyApps: boot.companyApps || [],
                 paymentMethodsConfig: payConfig,
                 paymentTerminals: boot.paymentTerminals,
                 bankAccounts: boot.bankAccounts
@@ -2319,10 +2322,18 @@ export const useStore = create(persist((set, get) => ({
     // Nace limpia y en 'pending_payment'; aparece en el selector recién al activarse el pago.
     // Hereda zona horaria, moneda y país de la empresa actual; nombre por defecto "Empresa N".
     // Server-side (exige ser owner de la empresa actual). Ver companyActions.js
-    createLinkedCompany: async ({ name, plan = 'basico' }) => {
+    createLinkedCompany: async ({ name, plan = 'professional' }) => {
         const { activeCompanyId } = get();
         if (!activeCompanyId) return { success: false, error: 'Sesión no válida' };
         return userApiCall('companyLinkedCreate', { companyId: activeCompanyId, name, plan });
+    },
+
+    // Sucursales de la cuenta (raíz + enlazadas) con su plan/estado. Panel "Mi Plan".
+    fetchMyBranches: async () => {
+        const { activeCompanyId } = get();
+        if (!activeCompanyId) return [];
+        const r = await userApiCall('companyBranches', { companyId: activeCompanyId });
+        return r?.success ? (r.branches || []) : [];
     },
 
     // Server-side (exige sesión super_admin). Ver api/admin/actions.js
@@ -4330,19 +4341,20 @@ export const useStore = create(persist((set, get) => ({
             // Etiqueta legible del plan (según la suscripción contratada o el plan base)
             const planLabel = (() => {
                 const map = {
-                    basico: 'Plan Básico', basic: 'Plan Básico',
-                    medium: 'Plan Medium', pro: 'Plan Pro',
+                    standard: 'Plan Standard', professional: 'Plan Profesional',
+                    // Legacy (pre-migración a 2 planes)
+                    basico: 'Plan Standard', basic: 'Plan Standard',
+                    medium: 'Plan Profesional', medio: 'Plan Profesional', pro: 'Plan Profesional',
                     monthly: 'Plan Mensual', yearly: 'Plan Anual',
                 };
                 return map[company.plan_id] || map[company.plan] || company.plan_id || company.plan || null;
             })();
 
-            // Id de plan normalizado (basico|medium|pro) para comparar jerarquía en la UI
+            // Id de plan normalizado (standard|professional) para comparar jerarquía en la UI
             const planId = (() => {
                 const r = (company.plan_id || company.plan || '').toString().trim().toLowerCase();
-                if (r === 'basic' || r === 'basico') return 'basico';
-                if (r === 'medium' || r === 'medio') return 'medium';
-                if (r === 'pro') return 'pro';
+                if (r === 'standard' || r === 'basic' || r === 'basico') return 'standard';
+                if (r === 'professional' || r === 'medium' || r === 'medio' || r === 'pro') return 'professional';
                 return null;
             })();
 
@@ -4995,22 +5007,70 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // ¿La empresa/sucursal activa tiene una App activa o con prueba vigente?
+    // Los complementos son exclusivos de cuentas Profesional: si el plan baja a
+    // Standard, sus Apps dejan de aplicar (aunque quede la fila de prueba).
+    hasApp: (appKey) => {
+        if (!appKey) return false;
+        const { companyApps, currentPlanLevel } = get();
+        if ((currentPlanLevel ?? 2) < 2) return false;
+        const a = companyApps?.find(x => x.app_key === appKey);
+        if (!a) return false;
+        if (a.status === 'active') return true;
+        if (a.status === 'trial') {
+            if (!a.trial_ends_at) return true;
+            return new Date(a.trial_ends_at) >= new Date();
+        }
+        return false; // cancelled / desconocido
+    },
+
     hasModule: (moduleKey) => {
         const { companyModules, currentPlanLevel } = get();
 
         // El acceso a módulos en la app lo gobierna el PLAN de la empresa activa
-        // (también para super_admin/owner: si entra a una empresa Básico, ve Básico).
+        // (también para super_admin/owner: si entra a una empresa Standard, ve Standard).
         // La gestión de plataforma (god-mode) vive en el panel /admin, que no usa hasModule.
 
         // 1) Override explícito por empresa (el admin puede otorgar/revocar un módulo puntual).
         const record = companyModules?.find(m => m.module_key === moduleKey);
         if (record) return Number(record.enabled) === 1;
 
-        // 2) Gate por plan: el plan activo debe alcanzar el nivel mínimo del módulo.
+        // 2) Módulo vendido como complemento (App) → el gate es la App contratada,
+        //    no el plan. (Cocina, Integración, Báscula, Tienda Web…)
+        const mod = getModuleByKey(moduleKey);
+        if (mod?.appKey) return get().hasApp(mod.appKey);
+
+        // 3) Gate por plan: el plan activo debe alcanzar el nivel mínimo del módulo.
         //    currentPlanLevel null (aún sin cargar) → no restringir, para no parpadear bloqueos.
-        const minLevel = getModuleByKey(moduleKey)?.minLevel ?? 0;
-        const level = (currentPlanLevel == null) ? 3 : currentPlanLevel;
+        const minLevel = mod?.minLevel ?? 0;
+        const level = (currentPlanLevel == null) ? 2 : currentPlanLevel;
         return level >= minLevel;
+    },
+
+    // Complementos (Apps): listar/activar (prueba 30 días)/cancelar. Ver appActions.js
+    fetchCompanyApps: async () => {
+        const { activeCompanyId } = get();
+        if (!activeCompanyId) return [];
+        const r = await userApiCall('appList', { companyId: activeCompanyId });
+        const apps = r?.success ? (r.apps || []) : [];
+        set({ companyApps: apps });
+        return apps;
+    },
+
+    activateApp: async (appKey) => {
+        const { activeCompanyId, currentCurrency } = get();
+        if (!activeCompanyId) return { success: false, error: 'Sesión no válida' };
+        const r = await userApiCall('appActivate', { companyId: activeCompanyId, appKey, currency: currentCurrency || 'CLP' });
+        if (r?.success) await get().fetchCompanyApps();
+        return r || { success: false, error: 'Error' };
+    },
+
+    cancelApp: async (appKey) => {
+        const { activeCompanyId } = get();
+        if (!activeCompanyId) return { success: false, error: 'Sesión no válida' };
+        const r = await userApiCall('appCancel', { companyId: activeCompanyId, appKey });
+        if (r?.success) await get().fetchCompanyApps();
+        return r || { success: false, error: 'Error' };
     },
 
     // Admin (server-side): todas las empresas con su suscripción. Ver api/admin/actions.js
@@ -5026,7 +5086,7 @@ export const useStore = create(persist((set, get) => ({
     // Admin: fijar estado y/o fecha de caducidad (access_until). Activar/extender u overrides manuales.
     adminSetCompanyAccess: async (companyId, { status, accessUntil } = {}) => adminApiCall('setCompanyAccess', { companyId, status, accessUntil }),
 
-    // Admin: cambiar el PLAN de una empresa (basico/medium/pro). Define el gating por plan.
+    // Admin: cambiar el PLAN de una empresa (standard/professional). Define el gating por plan.
     adminSetCompanyPlan: async (companyId, plan) => adminApiCall('setCompanyPlan', { companyId, plan }),
 
     // Server-side (exige sesión super_admin): borra la empresa y sus datos. Ver api/admin/actions.js

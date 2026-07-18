@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -13,9 +13,14 @@ import { useCompanyFeatures } from '../hooks/useCompanyFeatures';
 import { getModuleByKey } from '../constants/modules';
 import { createSmartInterval } from '../lib/smartPolling';
 
-// Etiqueta del plan que desbloquea un módulo (para el badge del menú).
-const PLAN_BY_LEVEL = { 1: 'Básico', 2: 'Medium', 3: 'Pro' };
-const planBadgeFor = (moduleKey) => PLAN_BY_LEVEL[getModuleByKey(moduleKey)?.minLevel] || 'Pro';
+// Etiqueta que desbloquea un módulo (para el badge del menú): un plan, o
+// "Complemento" si el módulo se vende como App del Marketplace.
+const PLAN_BY_LEVEL = { 1: 'Standard', 2: 'Profesional' };
+const planBadgeFor = (moduleKey) => {
+    const mod = getModuleByKey(moduleKey);
+    if (mod?.appKey) return 'Complemento';
+    return PLAN_BY_LEVEL[mod?.minLevel] || 'Profesional';
+};
 
 const MainLayout = () => {
     // Helper to check window width strictly for initial state (avoid hydration mismatch if SSR, but this is SPA)
@@ -77,7 +82,7 @@ const MainLayout = () => {
     const allNavItems = [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: 'dashboard.view', moduleKey: 'dashboard' },
         { icon: ShoppingCart, label: 'Ventas (POS)', path: '/pos', permission: 'pos.access', moduleKey: 'pos' },
-        { icon: CloudOff, label: 'Ventas Offline', path: '/offline-sales', permission: 'pos.access', moduleKey: 'pos' },
+        { icon: CloudOff, label: 'Ventas Offline', path: '/offline-sales', permission: 'pos.access', moduleKey: 'offline_sales' },
         { icon: Users, label: 'Clientes', path: '/clients', permission: 'clients.view', moduleKey: 'clients' },
         { icon: History, label: 'Historial', path: '/sales-history', permission: 'sales.view', moduleKey: 'sales_history' },
         {
@@ -93,7 +98,7 @@ const MainLayout = () => {
         {
             icon: ShoppingBag,
             label: 'Órdenes de Compra',
-            moduleKey: 'orders',
+            moduleKey: 'supplier_orders',
             subItems: [
                 { icon: ClipboardList, label: 'Pedido', path: '/orders', permission: 'supplier_orders.create' },
                 { icon: ClipboardList, label: 'Pedidos Realizados', path: '/orders/history', permission: 'supplier_orders.view' }
@@ -106,9 +111,9 @@ const MainLayout = () => {
             subItems: [
                 { icon: Box, label: 'Productos', path: '/inventory', permission: 'products.view' },
                 { icon: Tag, label: 'Categorías', path: '/categories', permission: 'categories.view' },
-                { icon: Truck, label: 'Proveedores', path: '/suppliers', permission: 'suppliers.view', moduleKey: 'orders' },
-                { icon: FileText, label: 'Facturas', path: '/invoices', permission: 'invoices.view', moduleKey: 'orders' },
-                { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view', moduleKey: 'orders' },
+                { icon: Truck, label: 'Proveedores', path: '/suppliers', permission: 'suppliers.view', moduleKey: 'purchases' },
+                { icon: FileText, label: 'Facturas', path: '/invoices', permission: 'invoices.view', moduleKey: 'purchases' },
+                { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view', moduleKey: 'purchases' },
                 { icon: Percent, label: 'Impuestos', path: '/taxes', permission: 'taxes.view', moduleKey: 'taxes' },
                 { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', permission: 'product_profile.view', moduleKey: 'product_profile' },
                 { icon: ShieldCheck, label: 'Conciliación', path: '/inventory/reconciliation', permission: 'products.adjust_stock', moduleKey: 'inventory_control' },
@@ -129,7 +134,7 @@ const MainLayout = () => {
                         { icon: PieChartIcon, label: 'Análisis de Ventas', path: '/reports/sales-analytics', permission: 'reports.sales_analytics', moduleKey: 'reports_advanced' },
                     ]
                 },
-                { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', permission: 'reports.expiring' },
+                { icon: Clock, label: 'Vencimientos', path: '/reports/expiring', permission: 'reports.expiring', moduleKey: 'vencimientos' },
                 {
                     icon: DollarSign, label: 'Cajas', isSubgroup: true,
                     children: [
@@ -138,7 +143,7 @@ const MainLayout = () => {
                         { icon: CreditCard, label: 'Conciliación Datáfonos', path: '/reports/payment-reconciliation', permission: 'reports.closures', moduleKey: 'reports_advanced' },
                     ]
                 },
-                { icon: Receipt, label: 'Pagos Facturas', path: '/reports/invoice-payments', permission: 'reports.invoice_payments', moduleKey: 'orders' },
+                { icon: Receipt, label: 'Pagos Facturas', path: '/reports/invoice-payments', permission: 'reports.invoice_payments', moduleKey: 'invoice_payments' },
             ]
         },
         {
@@ -153,6 +158,7 @@ const MainLayout = () => {
         { icon: Briefcase, label: 'Personal', path: '/personal', permission: 'personal.view', moduleKey: 'personal' },
         { icon: WalletCards, label: 'Administración', path: '/administration', permission: 'finance.view', moduleKey: 'finance' },
         { icon: Trophy, label: 'Sorteos', path: '/sorteos', permission: 'sorteos.view', moduleKey: 'sorteos' },
+        { icon: Store, label: 'Marketplace', path: '/marketplace', permission: 'settings.company', ownerOnly: true },
         { icon: Users, label: 'Usuarios', path: '/users', permission: 'users.view', moduleKey: 'users' },
         {
             icon: Settings,
@@ -188,7 +194,7 @@ const MainLayout = () => {
             if (visibleSubItems.length > 0) { item.subItems = visibleSubItems; return true; }
             return false;
         }
-        return can(item.permission);
+        return can(item.permission) && (!item.ownerOnly || isOwner);
     }).map(item => {
         const itemLocked = item.moduleKey ? isModuleLocked(item.moduleKey) : false;
         let subItems = item.subItems;

@@ -24,12 +24,21 @@ function getPreferenceClient() {
 
 // Precios (fuente de verdad del cobro, no se confía en el cliente).
 // Chile (CL) se cobra en CLP; el resto de países en USD.
+// Modelo de 2 planes por sucursal + tarifa de sucursal adicional ($20/mes, solo Profesional).
 const PLAN_PRICES = {
+    standard: { CLP: { monthly: 15000, annual: 150000 }, USD: { monthly: 15, annual: 150 } },
+    professional: { CLP: { monthly: 30000, annual: 300000 }, USD: { monthly: 30, annual: 300 } },
+    // Sucursal adicional (misma funcionalidad Profesional a tarifa reducida)
+    branch_extra: { CLP: { monthly: 20000, annual: 200000 }, USD: { monthly: 20, annual: 200 } },
+    // Aliases legacy (pre-migración) para no romper cobros en curso
     basico: { CLP: { monthly: 15000, annual: 150000 }, USD: { monthly: 15, annual: 150 } },
     medium: { CLP: { monthly: 30000, annual: 300000 }, USD: { monthly: 30, annual: 300 } },
-    pro: { CLP: { monthly: 60000, annual: 600000 }, USD: { monthly: 60, annual: 600 } },
+    pro: { CLP: { monthly: 30000, annual: 300000 }, USD: { monthly: 30, annual: 300 } },
 };
-const PLAN_NAMES = { basico: 'Plan Básico', medium: 'Plan Medium', pro: 'Plan Pro' };
+const PLAN_NAMES = {
+    standard: 'Plan Standard', professional: 'Plan Profesional', branch_extra: 'Sucursal adicional',
+    basico: 'Plan Standard', medium: 'Plan Profesional', pro: 'Plan Profesional',
+};
 
 const displayCurrency = (countryCode) => {
     const cc = (countryCode || '').toString().trim().toUpperCase();

@@ -102,7 +102,16 @@ export default async function handler(req, res) {
             }
 
             const billingCycle = metadata.billing_cycle === 'annual' ? 'annual' : 'monthly';
-            const subPlanId = metadata.plan_id || 'medium';
+            const subPlanId = metadata.plan_id || 'professional';
+            // El plan efectivo de la empresa: una sucursal adicional es Profesional;
+            // los alias legacy se normalizan a standard/professional.
+            const normalizePlan = (p) => {
+                const k = (p || '').toString().toLowerCase();
+                if (k === 'branch_extra' || k === 'professional' || k === 'medium' || k === 'medio' || k === 'pro') return 'professional';
+                if (k === 'standard' || k === 'basico' || k === 'basic') return 'standard';
+                return 'professional';
+            };
+            const companyPlan = normalizePlan(subPlanId);
             const subNow = new Date();
             const subPeriodStart = new Date(subNow);
             const subPeriodEnd = new Date(subNow);
@@ -129,7 +138,7 @@ export default async function handler(req, res) {
             // Activar empresa + fijar plan y fecha de caducidad (gating y ciclo de vida).
             await turso.execute({
                 sql: "UPDATE companies SET status = 'active', plan = ?, subscription_id = ?, access_until = ? WHERE id = ?",
-                args: [subPlanId, subId, subPeriodEnd.toISOString(), companyId]
+                args: [companyPlan, subId, subPeriodEnd.toISOString(), companyId]
             });
 
             // Marcar el pago como aprobado

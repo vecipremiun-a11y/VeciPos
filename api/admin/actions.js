@@ -19,7 +19,14 @@ function getTurso() {
 }
 
 const VALID_STATUS = ['trial', 'active', 'past_due', 'blocked', 'suspended', 'cancelled', 'pending_payment'];
-const VALID_PLAN = ['basico', 'medium', 'pro'];
+const VALID_PLAN = ['standard', 'professional'];
+// Normaliza planes legacy (pre-migración) a los 2 planes actuales.
+const normalizePlan = (p) => {
+    const k = (p || '').toString().trim().toLowerCase();
+    if (k === 'standard' || k === 'basico' || k === 'basic') return 'standard';
+    if (k === 'professional' || k === 'medium' || k === 'medio' || k === 'pro') return 'professional';
+    return null;
+};
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
@@ -104,7 +111,9 @@ async function approvePayment(turso, paymentId) {
     const p = res.rows[0];
 
     const billingCycle = p.billing_cycle === 'annual' ? 'annual' : 'monthly';
-    const planId = p.plan_id || 'medium';
+    const planId = p.plan_id || 'professional';
+    // Plan efectivo de la empresa (una sucursal adicional es Profesional).
+    const companyPlan = normalizePlan(planId) || 'professional';
     const now = new Date();
     const periodEnd = new Date(now);
     if (billingCycle === 'annual') periodEnd.setFullYear(periodEnd.getFullYear() + 1);
@@ -123,7 +132,7 @@ async function approvePayment(turso, paymentId) {
     });
     await turso.execute({
         sql: "UPDATE companies SET status = 'active', plan = ?, subscription_id = ?, access_until = ? WHERE id = ?",
-        args: [planId, subId, periodEnd.toISOString(), p.company_id],
+        args: [companyPlan, subId, periodEnd.toISOString(), p.company_id],
     });
     await turso.execute({
         sql: "UPDATE payments SET status = 'approved', subscription_id = ?, updated_at = ? WHERE id = ?",
@@ -163,8 +172,9 @@ async function setCompanyAccess(turso, companyId, status, accessUntil) {
 }
 
 async function setCompanyPlan(turso, companyId, plan) {
-    if (!companyId || !VALID_PLAN.includes(plan)) return { success: false, error: 'Datos inválidos' };
-    await turso.execute({ sql: 'UPDATE companies SET plan = ? WHERE id = ?', args: [plan, companyId] });
+    const norm = normalizePlan(plan);
+    if (!companyId || !norm) return { success: false, error: 'Datos inválidos' };
+    await turso.execute({ sql: 'UPDATE companies SET plan = ? WHERE id = ?', args: [norm, companyId] });
     return { success: true };
 }
 
@@ -202,7 +212,7 @@ async function createCompany(turso, companyData, session) {
     await turso.execute({
         sql: `INSERT INTO companies (id, name, status, created_at, timezone, currency, country_code, plan, parent_company_id, trial_ends_at, access_until)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [id, name, stt, nowIso, timezone, currency, countryCode, VALID_PLAN.includes(plan) ? plan : 'basico', resolvedParentId, trialEnds, accessUntil],
+        args: [id, name, stt, nowIso, timezone, currency, countryCode, normalizePlan(plan) || 'standard', resolvedParentId, trialEnds, accessUntil],
     });
 
     // Asignar dueño: usuario existente, usuario nuevo, o (fallback) el super admin de la sesión.

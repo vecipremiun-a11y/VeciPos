@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { useStore } from '../../store/useStore';
-import { SUBSCRIPTION_PLANS, BILLING_CYCLES, getDisplayCurrency, formatMoney } from '../../config/mercadopago';
-import { Crown, Check, Star, Clock, Receipt, AlertCircle, Building2, Plus, X } from 'lucide-react';
+import {
+    SUBSCRIPTION_PLANS, BILLING_CYCLES, PLAN_COMPANIES,
+    getDisplayCurrency, formatMoney,
+} from '../../config/mercadopago';
+import { getAppByKey } from '../../constants/apps';
+import { Crown, Check, Star, Clock, Receipt, AlertCircle, Building2, Plus, X, Lock, Store, ArrowRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import PlanCheckoutModal from './PlanCheckoutModal';
 
@@ -12,6 +17,7 @@ const STATUS_STYLES = {
     past_due: { label: 'Vencida', cls: 'bg-red-500/15 text-red-400 border-red-500/30' },
     suspended: { label: 'Suspendida', cls: 'bg-red-500/15 text-red-400 border-red-500/30' },
     cancelled: { label: 'Cancelada', cls: 'bg-red-500/15 text-red-400 border-red-500/30' },
+    blocked: { label: 'Bloqueada', cls: 'bg-red-500/15 text-red-400 border-red-500/30' },
     pending_payment: { label: 'Pago pendiente', cls: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' },
 };
 
@@ -28,41 +34,68 @@ const formatDate = (iso) => {
     return isNaN(d) ? '—' : d.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
 };
 
+// Etiqueta legible del plan de una sucursal (tolera valores legacy).
+const planLabelOf = (plan) => {
+    const k = (plan || '').toString().toLowerCase();
+    if (k === 'professional' || k === 'medium' || k === 'medio' || k === 'pro') return 'Profesional';
+    if (k === 'standard' || k === 'basico' || k === 'basic') return 'Standard';
+    return plan || '—';
+};
+
+// Plan sintético "sucursal adicional" ($20/mes, funcionalidad Profesional).
+const branchExtraPlan = () => ({
+    id: 'branch_extra',
+    name: 'Sucursal adicional',
+    prices: {
+        CLP: { monthly: PLAN_COMPANIES.professional.extraClp, annual: PLAN_COMPANIES.professional.extraClp * 10 },
+        USD: { monthly: PLAN_COMPANIES.professional.extraUsd, annual: PLAN_COMPANIES.professional.extraUsd * 10 },
+    },
+});
+
 const PlanSettings = () => {
-    const { activeCompanyId, checkSubscriptionStatus, fetchPaymentHistory, hasModule, availableCompanies } = useStore();
+    const navigate = useNavigate();
+    const {
+        activeCompanyId, checkSubscriptionStatus, fetchPaymentHistory,
+        currentPlanLevel, fetchMyBranches, companyApps,
+    } = useStore();
 
     const [subInfo, setSubInfo] = useState(null);
     const [payments, setPayments] = useState([]);
+    const [branches, setBranches] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [billingCycle, setBillingCycle] = useState('monthly'); // 'monthly' | 'annual'
-    const [checkoutPlanId, setCheckoutPlanId] = useState(null); // plan con modal de pago abierto
-    const [showCreateCompany, setShowCreateCompany] = useState(false); // modal "crear otra empresa"
-    const [newCheckout, setNewCheckout] = useState(null); // { companyId, planId, billingCycle } de la empresa recién creada
+    const [billingCycle, setBillingCycle] = useState('monthly');
+    const [checkoutPlanId, setCheckoutPlanId] = useState(null);      // upgrade del plan actual
+    const [showCreateBranch, setShowCreateBranch] = useState(false); // modal "agregar sucursal"
+    const [branchCheckout, setBranchCheckout] = useState(null);      // { companyId } sucursal recién creada
 
-    useEffect(() => {
-        let alive = true;
+    const reload = React.useCallback(() => {
         if (!activeCompanyId) return;
         setLoading(true);
         Promise.all([
             checkSubscriptionStatus ? checkSubscriptionStatus(activeCompanyId) : Promise.resolve(null),
             fetchPaymentHistory ? fetchPaymentHistory(activeCompanyId) : Promise.resolve([]),
-        ]).then(([info, hist]) => {
-            if (!alive) return;
+            fetchMyBranches ? fetchMyBranches() : Promise.resolve([]),
+        ]).then(([info, hist, brs]) => {
             setSubInfo(info);
             setPayments(Array.isArray(hist) ? hist : []);
-        }).finally(() => alive && setLoading(false));
-        return () => { alive = false; };
-    }, [activeCompanyId, checkSubscriptionStatus, fetchPaymentHistory]);
+            setBranches(Array.isArray(brs) ? brs : []);
+        }).finally(() => setLoading(false));
+    }, [activeCompanyId, checkSubscriptionStatus, fetchPaymentHistory, fetchMyBranches]);
+
+    useEffect(() => { reload(); }, [reload]);
 
     const status = STATUS_STYLES[subInfo?.status] || STATUS_STYLES.active;
     const isTrial = subInfo?.status === 'trial';
-
-    // Moneda según el país de la empresa: Chile → CLP, resto → USD
     const currency = getDisplayCurrency(subInfo?.country_code);
 
-    // Solo se ofrecen planes de nivel superior al actual: básico → ve medium/pro,
-    // medium → ve pro, pro → no ve ninguno (ya tiene el más alto). En trial (sin
-    // planId) el nivel es 0, así que ve los 3.
+    // Plan efectivo de la sucursal activa (según el gating cargado en el store):
+    // nivel 2 = Profesional, 1 = Standard. Es la fuente para "puede agregar sucursales".
+    const isProfessional = (currentPlanLevel ?? 2) >= 2;
+    const currentPlanId = isProfessional ? 'professional' : 'standard';
+    const currentPlanMonthly = SUBSCRIPTION_PLANS[currentPlanId]?.prices?.[currency]?.monthly;
+
+    // Solo se ofrecen planes de nivel superior al actual. En trial (sin planId con
+    // suscripción) mostramos ambos para que elija al terminar la prueba.
     const currentLevel = SUBSCRIPTION_PLANS[subInfo?.planId]?.level || 0;
     const plans = Object.values(SUBSCRIPTION_PLANS).filter((p) => p.level > currentLevel);
     const hasUpgrades = plans.length > 0;
@@ -84,14 +117,22 @@ const PlanSettings = () => {
                 {loading ? (
                     <p className="text-[var(--color-text-muted)] text-sm">Cargando…</p>
                 ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                         <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-4">
                             <p className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Plan</p>
-                            <p className="text-[var(--color-text)] font-bold">{subInfo?.planLabel || '—'}</p>
+                            <p className="text-[var(--color-text)] font-bold">
+                                {isTrial ? 'Prueba (acceso Profesional)' : (subInfo?.planLabel || planLabelOf(currentPlanId))}
+                            </p>
+                        </div>
+                        <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-4">
+                            <p className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">Precio mensual</p>
+                            <p className="text-[var(--color-text)] font-bold">
+                                {isTrial ? 'Gratis' : (currentPlanMonthly ? `${formatMoney(currentPlanMonthly, currency)}` : '—')}
+                            </p>
                         </div>
                         <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-4">
                             <p className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider mb-1">
-                                {isTrial ? 'Prueba vence' : 'Vencimiento'}
+                                {isTrial ? 'Prueba vence' : 'Próximo cobro'}
                             </p>
                             <p className="text-[var(--color-text)] font-bold">{formatDate(subInfo?.expiresAt)}</p>
                         </div>
@@ -108,19 +149,77 @@ const PlanSettings = () => {
                 {isTrial && (
                     <div className="mt-4 bg-blue-500/5 border border-blue-500/20 rounded-xl p-3 text-sm text-blue-300/90 flex items-start gap-2">
                         <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
-                        <span>Estás en período de prueba gratuito. Elige un plan abajo para continuar usando POSVECI cuando termine.</span>
+                        <span>Estás en período de prueba con acceso completo. Elige un plan abajo para continuar usando POSVECI cuando termine.</span>
                     </div>
                 )}
             </div>
 
-            {/* 2. PLANES DISPONIBLES (solo upgrades respecto al plan actual) */}
+            {/* 2. MIS SUCURSALES */}
+            <div className="glass-card animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                    <h2 className="text-xl font-bold text-[var(--color-text)] flex items-center gap-2">
+                        <Building2 size={20} className="text-[var(--color-primary)]" /> Mis sucursales
+                    </h2>
+                    {isProfessional ? (
+                        <button
+                            onClick={() => setShowCreateBranch(true)}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--color-primary)] text-black font-bold text-sm hover:brightness-110 transition-all"
+                        >
+                            <Plus size={16} /> Agregar sucursal · {formatMoney(PLAN_COMPANIES.professional[currency === 'USD' ? 'extraUsd' : 'extraClp'], currency)}/mes
+                        </button>
+                    ) : (
+                        <span className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-400 font-bold text-xs">
+                            <Lock size={14} /> Mejora a Profesional para agregar sucursales
+                        </span>
+                    )}
+                </div>
+
+                {loading ? (
+                    <p className="text-[var(--color-text-muted)] text-sm">Cargando…</p>
+                ) : (
+                    <div className="space-y-2">
+                        {branches.map((b) => {
+                            const bst = STATUS_STYLES[b.status] || STATUS_STYLES.active;
+                            const isRoot = !b.parent_company_id;
+                            return (
+                                <div key={b.id} className="flex items-center justify-between gap-3 p-3 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)]">
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-[var(--color-text)] truncate flex items-center gap-2">
+                                            {b.name}
+                                            {isRoot && <span className="text-[10px] font-bold text-[var(--color-text-muted)] border border-[var(--glass-border)] rounded px-1.5 py-0.5">PRINCIPAL</span>}
+                                            {b.id === activeCompanyId && <span className="text-[10px] font-bold text-[var(--color-primary)]">· activa</span>}
+                                        </p>
+                                        <p className="text-xs text-[var(--color-text-muted)]">
+                                            Plan {planLabelOf(b.plan)} · vence {formatDate(b.access_until || b.trial_ends_at)}
+                                        </p>
+                                    </div>
+                                    <span className={cn('text-[10px] font-bold px-2.5 py-1 rounded-full border flex-shrink-0', bst.cls)}>
+                                        {bst.label}
+                                    </span>
+                                </div>
+                            );
+                        })}
+                        {branches.length === 0 && (
+                            <p className="text-[var(--color-text-muted)] text-sm">No hay sucursales para mostrar.</p>
+                        )}
+                    </div>
+                )}
+
+                {!isProfessional && (
+                    <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+                        Las sucursales adicionales cuestan {formatMoney(PLAN_COMPANIES.professional[currency === 'USD' ? 'extraUsd' : 'extraClp'], currency)}/mes cada una e incluyen todas las funciones Profesional. Disponible solo para cuentas Profesional.
+                    </p>
+                )}
+            </div>
+
+            {/* 3. PLANES DISPONIBLES (solo upgrades respecto al plan actual) */}
             {!loading && !hasUpgrades ? (
                 <div className="glass-card animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <h2 className="text-xl font-bold text-[var(--color-text)] mb-1">Planes disponibles</h2>
                     <div className="mt-4 flex items-center gap-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4">
                         <Crown size={22} className="text-[var(--color-primary)] flex-shrink-0" />
                         <p className="text-sm text-[var(--color-text)]">
-                            Ya cuentas con el <strong>plan más alto</strong> ({subInfo?.planLabel || 'Plan Pro'}). No hay planes superiores para contratar.
+                            Ya cuentas con el <strong>plan más alto</strong> ({subInfo?.planLabel || 'Plan Profesional'}). No hay planes superiores para contratar.
                         </p>
                     </div>
                 </div>
@@ -163,9 +262,7 @@ const PlanSettings = () => {
 
                 <div className={cn(
                     'grid grid-cols-1 gap-5',
-                    plans.length === 1 ? 'max-w-sm mx-auto'
-                        : plans.length === 2 ? 'sm:grid-cols-2 max-w-3xl mx-auto'
-                        : 'md:grid-cols-3'
+                    plans.length === 1 ? 'max-w-sm mx-auto' : 'sm:grid-cols-2 max-w-3xl mx-auto'
                 )}>
                     {plans.map((plan) => (
                         <div
@@ -190,7 +287,7 @@ const PlanSettings = () => {
                                     {formatMoney(plan.prices[currency][billingCycle], currency)}
                                 </span>
                                 <span className="text-[var(--color-text-muted)] text-sm">
-                                    {BILLING_CYCLES[billingCycle].suffix}
+                                    {BILLING_CYCLES[billingCycle].suffix} · por sucursal
                                 </span>
                             </div>
                             {billingCycle === 'annual' && (
@@ -215,7 +312,7 @@ const PlanSettings = () => {
                                         : 'border border-[var(--color-primary)]/40 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10'
                                 )}
                             >
-                                Contratar este plan
+                                {currentLevel > 0 ? 'Mejorar a este plan' : 'Contratar este plan'}
                             </button>
                         </div>
                     ))}
@@ -223,25 +320,61 @@ const PlanSettings = () => {
             </div>
             )}
 
-            {/* CREAR OTRA EMPRESA (multi-sucursal · solo Medium+) */}
-            {hasModule && hasModule('multisucursal') && (
-                <div className="glass-card animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <h2 className="text-xl font-bold text-[var(--color-text)] mb-1 flex items-center gap-2">
-                        <Building2 size={20} className="text-[var(--color-primary)]" /> Tus empresas
+            {/* 4. COMPLEMENTOS (Marketplace) */}
+            <div className="glass-card animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                    <h2 className="text-xl font-bold text-[var(--color-text)] flex items-center gap-2">
+                        <Store size={20} className="text-[var(--color-primary)]" /> Complementos (Apps)
                     </h2>
-                    <p className="text-sm text-[var(--color-text-muted)] mb-4">
-                        Multi-sucursal: crea otra empresa enlazada a tu cuenta. Cada empresa tiene su propio plan y pago, y se administra por separado.
-                    </p>
                     <button
-                        onClick={() => setShowCreateCompany(true)}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--color-primary)] text-black font-bold text-sm hover:brightness-110 transition-all"
+                        onClick={() => navigate('/marketplace')}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--color-primary)]/40 text-[var(--color-primary)] font-bold text-sm hover:bg-[var(--color-primary)]/10 transition-all"
                     >
-                        <Plus size={16} /> Crear otra empresa
+                        Ir al Marketplace <ArrowRight size={15} />
                     </button>
                 </div>
-            )}
 
-            {/* HISTORIAL DE PAGOS */}
+                {(() => {
+                    const now = new Date();
+                    const contracted = (companyApps || []).filter((a) =>
+                        a.status === 'active' || (a.status === 'trial' && (!a.trial_ends_at || new Date(a.trial_ends_at) >= now))
+                    );
+                    if (contracted.length === 0) {
+                        return (
+                            <p className="text-sm text-[var(--color-text-muted)]">
+                                {isProfessional
+                                    ? 'Aún no tienes complementos activos. Actívalos con 30 días de prueba gratis desde el Marketplace.'
+                                    : 'El Marketplace de complementos (Cocina, Integración, Báscula, Tienda Web…) está disponible para cuentas Profesional.'}
+                            </p>
+                        );
+                    }
+                    return (
+                        <div className="space-y-2">
+                            {contracted.map((a) => {
+                                const app = getAppByKey(a.app_key);
+                                const isTrial = a.status === 'trial';
+                                const dl = a.trial_ends_at ? Math.ceil((new Date(a.trial_ends_at) - now) / 86400000) : null;
+                                return (
+                                    <div key={a.app_key} className="flex items-center justify-between gap-3 p-3 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)]">
+                                        <div>
+                                            <p className="font-bold text-[var(--color-text)]">{app?.name || a.app_key}</p>
+                                            <p className="text-xs text-[var(--color-text-muted)]">
+                                                {isTrial ? `Prueba · ${dl ?? 0} días restantes` : `Activa · ${formatMoney(a.price || 0, a.currency || currency)}/mes`}
+                                            </p>
+                                        </div>
+                                        <span className={cn('text-[10px] font-bold px-2.5 py-1 rounded-full border',
+                                            isTrial ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30')}>
+                                            {isTrial ? 'En prueba' : 'Activa'}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    );
+                })()}
+            </div>
+
+            {/* 5. HISTORIAL DE PAGOS */}
             <div className="glass-card animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <h2 className="text-xl font-bold text-[var(--color-text)] mb-4 flex items-center gap-2">
                     <Receipt size={20} className="text-[var(--color-primary)]" />
@@ -285,7 +418,7 @@ const PlanSettings = () => {
                 )}
             </div>
 
-            {/* Modal de medios de pago (plan de la empresa actual) */}
+            {/* Modal de medios de pago (upgrade del plan de la empresa actual) */}
             {checkoutPlanId && SUBSCRIPTION_PLANS[checkoutPlanId] && (
                 <PlanCheckoutModal
                     plan={SUBSCRIPTION_PLANS[checkoutPlanId]}
@@ -296,107 +429,81 @@ const PlanSettings = () => {
                 />
             )}
 
-            {/* Modal: crear otra empresa (elige plan) */}
-            {showCreateCompany && (
-                <CreateAnotherCompanyModal
-                    defaultName={`Empresa ${(availableCompanies?.length || 1) + 1}`}
+            {/* Modal: agregar sucursal (Profesional, $20/mes) */}
+            {showCreateBranch && (
+                <CreateBranchModal
+                    defaultName={`Sucursal ${(branches?.length || 1) + 1}`}
                     currency={currency}
-                    onClose={() => setShowCreateCompany(false)}
-                    onConfirm={({ companyId, planId, billingCycle: cyc }) => {
-                        setShowCreateCompany(false);
-                        setNewCheckout({ companyId, planId, billingCycle: cyc });
+                    onClose={() => setShowCreateBranch(false)}
+                    onConfirm={({ companyId }) => {
+                        setShowCreateBranch(false);
+                        setBranchCheckout({ companyId });
+                        reload();
                     }}
                 />
             )}
 
-            {/* Pago de la empresa recién creada (se activa al confirmar el pago) */}
-            {newCheckout && SUBSCRIPTION_PLANS[newCheckout.planId] && (
+            {/* Pago de la sucursal recién creada ($20/mes, tarifa branch_extra) */}
+            {branchCheckout && (
                 <PlanCheckoutModal
-                    plan={SUBSCRIPTION_PLANS[newCheckout.planId]}
-                    billingCycle={newCheckout.billingCycle}
+                    plan={branchExtraPlan()}
+                    billingCycle="monthly"
                     currency={currency}
-                    companyId={newCheckout.companyId}
-                    onClose={() => setNewCheckout(null)}
+                    companyId={branchCheckout.companyId}
+                    onClose={() => { setBranchCheckout(null); reload(); }}
                 />
             )}
         </div>
     );
 };
 
-// Modal para crear una empresa adicional enlazada: elige nombre + plan + ciclo,
-// crea la empresa (limpia, en pending_payment) y continúa al pago.
-const CreateAnotherCompanyModal = ({ defaultName, currency, onClose, onConfirm }) => {
+// Modal para agregar una sucursal: nombre + confirma. Siempre Profesional a la
+// tarifa de sucursal adicional ($20/mes). Crea la empresa (pending_payment) y
+// continúa al pago.
+const CreateBranchModal = ({ defaultName, currency, onClose, onConfirm }) => {
     const { createLinkedCompany } = useStore();
-    const [name, setName] = useState(defaultName || 'Empresa nueva');
-    const [planId, setPlanId] = useState('medium');
-    const [billingCycle, setBillingCycle] = useState('monthly');
+    const [name, setName] = useState(defaultName || 'Sucursal nueva');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-
-    const plans = Object.values(SUBSCRIPTION_PLANS);
+    const price = PLAN_COMPANIES.professional[currency === 'USD' ? 'extraUsd' : 'extraClp'];
 
     const handleContinue = async () => {
-        if (!name.trim()) { setError('Ponle un nombre a la empresa.'); return; }
+        if (!name.trim()) { setError('Ponle un nombre a la sucursal.'); return; }
         setError('');
         setBusy(true);
-        const r = await createLinkedCompany({ name: name.trim(), plan: planId });
+        const r = await createLinkedCompany({ name: name.trim(), plan: 'professional' });
         setBusy(false);
-        if (r?.success) onConfirm({ companyId: r.companyId, planId, billingCycle });
-        else setError(r?.error || 'No se pudo crear la empresa.');
+        if (r?.success) onConfirm({ companyId: r.companyId });
+        else setError(r?.error || 'No se pudo crear la sucursal.');
     };
 
     return createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
             <div className="glass-card w-full max-w-md max-h-[90vh] overflow-y-auto border border-white/10 shadow-2xl !bg-[#18181b] !backdrop-blur-none" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-start justify-between mb-1">
-                    <h3 className="text-lg font-bold text-[var(--color-text)]">Crear otra empresa</h3>
+                    <h3 className="text-lg font-bold text-[var(--color-text)]">Agregar sucursal</h3>
                     <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] p-1"><X size={20} /></button>
                 </div>
                 <p className="text-sm text-[var(--color-text-muted)] mb-4">
-                    Se creará una empresa nueva enlazada a tu cuenta. Hereda zona horaria y moneda; el resto (datos, usuarios) lo configuras después. Aparecerá en el selector al confirmar el pago.
+                    Se creará una sucursal nueva enlazada a tu cuenta con todas las funciones Profesional.
+                    Hereda zona horaria y moneda; el resto (datos, usuarios) lo configuras después. Aparecerá en el selector al confirmar el pago.
                 </p>
 
-                <label className="block text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5">Nombre de la empresa</label>
+                <label className="block text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5">Nombre de la sucursal</label>
                 <input
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="w-full bg-[#0f0f12] border border-white/10 rounded-lg px-3 py-2.5 text-[var(--color-text)] text-sm focus:border-[var(--color-primary)] outline-none mb-4"
-                    placeholder="Ej: Sucursal Centro"
+                    placeholder="Ej: Sucursal Norte"
                 />
 
-                {/* Ciclo */}
-                <div className="flex justify-center mb-4">
-                    <div className="inline-flex items-center bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-1">
-                        {Object.values(BILLING_CYCLES).map((c) => (
-                            <button
-                                key={c.id}
-                                onClick={() => setBillingCycle(c.id)}
-                                className={cn('px-4 py-1.5 rounded-lg text-sm font-bold transition-colors',
-                                    billingCycle === c.id ? 'bg-[var(--color-primary)] text-black' : 'text-[var(--color-text-muted)]')}
-                            >
-                                {c.label}
-                            </button>
-                        ))}
+                <div className="flex items-center justify-between p-3 rounded-xl border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 mb-4">
+                    <div>
+                        <p className="font-bold text-[var(--color-text)]">Sucursal Profesional</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">Todas las funciones incluidas</p>
                     </div>
-                </div>
-
-                {/* Plan */}
-                <label className="block text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5">Plan de la nueva empresa</label>
-                <div className="space-y-2 mb-4">
-                    {plans.map((p) => (
-                        <button
-                            key={p.id}
-                            onClick={() => setPlanId(p.id)}
-                            className={cn('w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all',
-                                planId === p.id ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10' : 'border-[var(--glass-border)] hover:border-[var(--color-primary)]/50')}
-                        >
-                            <span className="font-bold text-[var(--color-text)]">{p.name}</span>
-                            <span className="text-sm font-bold text-[var(--color-primary)]">
-                                {formatMoney(p.prices[currency][billingCycle], currency)}{BILLING_CYCLES[billingCycle].suffix}
-                            </span>
-                        </button>
-                    ))}
+                    <span className="text-lg font-extrabold text-[var(--color-primary)]">{formatMoney(price, currency)}<span className="text-xs font-medium text-[var(--color-text-muted)]">/mes</span></span>
                 </div>
 
                 {error && (

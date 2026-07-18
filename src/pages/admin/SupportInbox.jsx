@@ -470,7 +470,7 @@ const SupportInbox = () => {
                                 </div>
                                 <div>
                                     <span className="text-[var(--color-text-muted)]">Plan:</span>
-                                    <span className={`ml-2 px-2 py-0.5 rounded ${companyContext.plan === 'pro' ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'
+                                    <span className={`ml-2 px-2 py-0.5 rounded ${['professional', 'pro', 'medium'].includes((companyContext.plan || '').toLowerCase()) ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'
                                         }`}>
                                         {companyContext.plan || 'Demo'}
                                     </span>

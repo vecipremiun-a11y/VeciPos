@@ -17,7 +17,7 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
         id: '',
         name: '',
         country: 'CL',
-        plan: 'basico',
+        plan: 'standard',
         ownerUserId: '',
         createUser: false,
         username: '',
@@ -202,9 +202,8 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                                 onChange={(e) => handleChange('plan', e.target.value)}
                                 className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 transition-all appearance-none"
                             >
-                                <option value="basico">Básico</option>
-                                <option value="medium">Medium</option>
-                                <option value="pro">Pro</option>
+                                <option value="standard">Standard</option>
+                                <option value="professional">Profesional</option>
                             </select>
                         </div>
                     </div>

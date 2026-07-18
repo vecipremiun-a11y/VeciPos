@@ -9,7 +9,7 @@ const CURRENCY = 'CLP';
 
 const SelectPlan = () => {
     const navigate = useNavigate();
-    const [selectedPlan, setSelectedPlan] = useState('medium');
+    const [selectedPlan, setSelectedPlan] = useState('professional');
     const [billingCycle, setBillingCycle] = useState('monthly'); // 'monthly' | 'annual'
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');

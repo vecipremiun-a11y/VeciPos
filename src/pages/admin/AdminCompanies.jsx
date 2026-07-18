@@ -26,14 +26,13 @@ const STATUS_TEXT = {
     blocked: 'text-red-500', suspended: 'text-rose-400', cancelled: 'text-gray-400', pending_payment: 'text-yellow-400',
 };
 const PLAN_OPTIONS = [
-    { value: 'basico', label: 'Básico' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'pro', label: 'Pro' },
+    { value: 'standard', label: 'Standard' },
+    { value: 'professional', label: 'Profesional' },
 ];
-// Normaliza planes legacy/desconocidos a Básico (ya no existe el plan Gratis).
+// Normaliza planes (incl. legacy) a los 2 planes actuales: standard | professional.
 const normPlan = (p) => {
     const k = (p || '').toString().toLowerCase();
-    return (k === 'medium' || k === 'medio') ? 'medium' : (k === 'pro' ? 'pro' : 'basico');
+    return (k === 'professional' || k === 'medium' || k === 'medio' || k === 'pro') ? 'professional' : 'standard';
 };
 const SELECT_CLS = 'bg-[#0f0f12] border border-white/10 rounded-lg px-2 py-1.5 text-xs font-bold focus:border-[var(--color-primary)] outline-none cursor-pointer';
 
