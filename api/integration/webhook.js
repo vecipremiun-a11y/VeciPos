@@ -142,9 +142,11 @@ export default async function handler(req, res) {
             return res.status(401).json({ success: false, error: 'api_key inválida' });
         }
 
+        // Blindaje: si la empresa tiene webhook_secret, la firma es OBLIGATORIA
+        // (antes bastaba omitir el header para saltarse la validación).
         const signature = req.headers['x-signature'] || req.headers['x-wc-webhook-signature'];
-        if (signature && config.webhook_secret) {
-            const validSignature = validateSignature(rawBody, signature, config.webhook_secret);
+        if (config.webhook_secret) {
+            const validSignature = signature && validateSignature(rawBody, signature, config.webhook_secret);
             if (!validSignature) {
                 await logSync({
                     company_id: companyId,

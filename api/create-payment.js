@@ -19,7 +19,17 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { planId, planName, amount, currency, registrationData } = req.body;
+        const { planId, planName, billingCycle, currency: reqCurrency, registrationData } = req.body;
+
+        // Blindaje: el MONTO lo decide el servidor según el plan (antes venía
+        // del cliente y se podía pagar cualquier cifra por cualquier plan).
+        const PLAN_PRICES = {
+            standard: { CLP: { monthly: 15000, annual: 150000 }, USD: { monthly: 15, annual: 150 } },
+            professional: { CLP: { monthly: 30000, annual: 300000 }, USD: { monthly: 30, annual: 300 } },
+        };
+        const cycle = billingCycle === 'annual' ? 'annual' : 'monthly';
+        const currency = reqCurrency === 'USD' ? 'USD' : 'CLP';
+        const amount = PLAN_PRICES[planId]?.[currency]?.[cycle];
 
         console.log('📝 Creating payment preference:', { planId, amount });
 

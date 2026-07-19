@@ -15,7 +15,7 @@
 // La INSCRIPCIÓN no pasa por aquí: miniveci la reenvía directo al endpoint
 // público /api/sorteo/register, que valida contra las ventas reales del local.
 
-import { getTiendaConfig, turso, logSync, resolveCompanyId } from './_db.js';
+import { getTiendaConfig, turso, logSync, requireMemberForIntegration } from './_db.js';
 
 function setCors(res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -37,7 +37,9 @@ export default async function handler(req, res) {
     }
 
     try {
-        const companyId = resolveCompanyId(req);
+        // Blindaje: sesión + membresía (antes cualquiera disparaba el push).
+        const companyId = await requireMemberForIntegration(req, res);
+        if (!companyId) return;
 
         // 1. Config del sorteo + token (fuente de verdad: Turso).
         const sr = await turso.execute({

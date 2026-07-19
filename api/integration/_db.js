@@ -99,6 +99,45 @@ export function resolveCompanyId(req) {
     return req.query?.company_id || req.headers['x-company-id'] || process.env.EXTERNAL_COMPANY_ID || 'default';
 }
 
+// ── Guards (blindaje C1) ─────────────────────────────────────────────
+// Los endpoints de /api/integration los llama el NAVEGADOR del POS (misma
+// origin, cookie pv_session). Antes no exigían nada: cualquiera podía leer o
+// sobreescribir la tienda_config de cualquier empresa, o disparar pushes.
+
+// Sesión firmada o null (respondiendo 401). El handler debe hacer `return`.
+export async function requireIntegrationSession(req, res) {
+    const { getSession } = await import('../_lib/guard.js');
+    const session = getSession(req);
+    if (!session) {
+        res.status(401).json({ success: false, error: 'No autenticado' });
+        return null;
+    }
+    return session;
+}
+
+// Sesión + membresía sobre la empresa resuelta de query/header. Devuelve el
+// companyId validado o null (ya respondió 401/403 — el handler debe `return`).
+export async function requireMemberForIntegration(req, res) {
+    const session = await requireIntegrationSession(req, res);
+    if (!session) return null;
+    const companyId = resolveCompanyId(req);
+    if (session.role === 'super_admin') return companyId;
+    const { isCompanyMember } = await import('../_lib/guard.js');
+    if (!(await isCompanyMember(turso, session.uid, companyId))) {
+        res.status(403).json({ success: false, error: 'No perteneces a esta empresa' });
+        return null;
+    }
+    return companyId;
+}
+
+// Membresía sobre una empresa ya resuelta desde la BD (push-preorder/notify).
+export async function sessionIsMemberOf(session, companyId) {
+    if (!session || !companyId) return false;
+    if (session.role === 'super_admin') return true;
+    const { isCompanyMember } = await import('../_lib/guard.js');
+    return isCompanyMember(turso, session.uid, companyId);
+}
+
 export function parseBody(req) {
     if (typeof req.body === 'string') {
         try {

@@ -58,10 +58,19 @@ export default async function handler(req, res) {
                 return res.status(400).json({ ok: false, error: 'Falta token' });
             }
             const cr = await turso.execute({
-                sql: 'SELECT kds_sound FROM companies WHERE id = ? LIMIT 1',
+                sql: 'SELECT kds_sound, kds_token FROM companies WHERE id = ? LIMIT 1',
                 args: [companyId]
             });
-            if (cr.rows.length && cr.rows[0].kds_sound) kdsSound = cr.rows[0].kds_sound;
+            if (!cr.rows.length) {
+                return res.status(403).json({ ok: false, error: 'Empresa no encontrada' });
+            }
+            // Blindaje: si la empresa YA tiene token de KDS, el company_id pelado
+            // deja de valer (antes exponía los pedidos del día de cualquier empresa).
+            // Solo se tolera para empresas que nunca generaron token (legacy).
+            if (cr.rows[0].kds_token) {
+                return res.status(403).json({ ok: false, error: 'Esta empresa requiere el link con token. Regenera el enlace del KDS en Configuración.' });
+            }
+            if (cr.rows[0].kds_sound) kdsSound = cr.rows[0].kds_sound;
         }
 
         // Pedidos activos del día (due_date) — los que cocina debe ver.

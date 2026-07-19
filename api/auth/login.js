@@ -11,6 +11,33 @@ function getTurso() {
     return _turso;
 }
 
+// Rate limiting best-effort (memoria por instancia serverless): N intentos
+// fallidos por IP+usuario en la ventana → 429. No reemplaza un WAF, pero
+// frena fuerza bruta simple contra el login.
+const ATTEMPTS = new Map(); // key → { count, resetAt }
+const RL_WINDOW_MS = 10 * 60_000;
+const RL_MAX_FAILS = 8;
+
+function rateKey(req, username) {
+    const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+        || req.socket?.remoteAddress || '?';
+    return `${ip}|${username.toLowerCase()}`;
+}
+function tooManyAttempts(key) {
+    const e = ATTEMPTS.get(key);
+    return !!e && Date.now() <= e.resetAt && e.count >= RL_MAX_FAILS;
+}
+function registerFail(key) {
+    const now = Date.now();
+    const e = ATTEMPTS.get(key);
+    if (!e || now > e.resetAt) {
+        if (ATTEMPTS.size > 5000) ATTEMPTS.clear(); // tope de memoria
+        ATTEMPTS.set(key, { count: 1, resetAt: now + RL_WINDOW_MS });
+    } else {
+        e.count += 1;
+    }
+}
+
 // Autenticación server-side: verifica credenciales con bcrypt (soporta legacy en
 // texto plano y lo re-hashea al vuelo) y emite una cookie de sesión firmada.
 export default async function handler(req, res) {
@@ -25,6 +52,11 @@ export default async function handler(req, res) {
             return res.status(400).json({ success: false, error: 'Faltan credenciales' });
         }
 
+        const rlKey = rateKey(req, username);
+        if (tooManyAttempts(rlKey)) {
+            return res.status(429).json({ success: false, error: 'Demasiados intentos. Espera unos minutos e intenta de nuevo.' });
+        }
+
         const turso = getTurso();
         const r = await turso.execute({
             sql: 'SELECT * FROM users WHERE username = ? LIMIT 1',
@@ -34,8 +66,10 @@ export default async function handler(req, res) {
 
         // Respuesta genérica (no revela si el usuario existe)
         if (!user || !(await verifyPassword(password, user.password))) {
+            registerFail(rlKey);
             return res.status(401).json({ success: false, error: 'Usuario o contraseña incorrectos' });
         }
+        ATTEMPTS.delete(rlKey);
 
         // Migración al vuelo: si estaba en texto plano, guardarla hasheada.
         if (!isHashed(user.password)) {

@@ -5,7 +5,7 @@
 // Las credenciales se leen de `tienda_config` (la misma tabla que ya usa la
 // sincronización de productos), por lo que no requiere env vars adicionales.
 
-import { getTiendaConfig, turso, logSync } from './_db.js';
+import { getTiendaConfig, turso, logSync, requireIntegrationSession, sessionIsMemberOf } from './_db.js';
 
 const STATUS_MAP = {
     pending: 'pending',
@@ -83,6 +83,10 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
+    // Blindaje: sesión firmada; membresía tras resolver la empresa del preorder.
+    const session = await requireIntegrationSession(req, res);
+    if (!session) return;
+
     const { public_code, status, reason } = parseJsonBody(req);
 
     if (!public_code) {
@@ -102,6 +106,9 @@ export default async function handler(req, res) {
     const preorder = preorderRow.rows?.[0];
     if (!preorder) {
         return res.status(404).json({ sent: false, error: 'Preorder not found for public_code' });
+    }
+    if (!(await sessionIsMemberOf(session, preorder.company_id))) {
+        return res.status(403).json({ sent: false, error: 'No perteneces a esta empresa' });
     }
 
     const config = await getTiendaConfig(preorder.company_id);

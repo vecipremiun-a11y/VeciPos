@@ -1,4 +1,4 @@
-import { getTiendaConfig, parseBody, resolveCompanyId, saveTiendaConfig } from './_db.js';
+import { getTiendaConfig, parseBody, requireMemberForIntegration, saveTiendaConfig } from './_db.js';
 
 function setCorsHeaders(res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -25,7 +25,10 @@ export default async function handler(req, res) {
     }
 
     try {
-        const companyId = resolveCompanyId(req);
+        // Blindaje: sesión + membresía. Antes cualquiera leía/sobreescribía la
+        // config de tienda de cualquier empresa (incluida su tienda_url).
+        const companyId = await requireMemberForIntegration(req, res);
+        if (!companyId) return;
 
         if (req.method === 'GET') {
             const config = await getTiendaConfig(companyId);

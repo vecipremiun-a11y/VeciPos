@@ -20,7 +20,7 @@
 // Las credenciales (api_key/secret) están en tienda_config y NUNCA salen al
 // browser (mismo patrón que notify-miniveci-status).
 
-import { getTiendaConfig, turso, logSync } from './_db.js';
+import { getTiendaConfig, turso, logSync, requireIntegrationSession, sessionIsMemberOf } from './_db.js';
 
 function setCors(res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -58,6 +58,11 @@ export default async function handler(req, res) {
     }
 
     try {
+        // Blindaje: sesión firmada; la membresía se valida tras resolver la
+        // empresa dueña del preorder (no se confía en el cliente).
+        const session = await requireIntegrationSession(req, res);
+        if (!session) return;
+
         const body = parseJsonBody(req);
         const preorderId = Number(body.preorder_id || body.preorderId);
         if (!preorderId) {
@@ -81,6 +86,9 @@ export default async function handler(req, res) {
         }
         const preorder = pr.rows[0];
         const companyId = preorder.company_id;
+        if (!(await sessionIsMemberOf(session, companyId))) {
+            return res.status(403).json({ ok: false, error: 'No perteneces a esta empresa' });
+        }
 
         // 2. Skips defensivos (no son errores, son no-aplica)
         if (preorder.external_source === 'miniveci') {
