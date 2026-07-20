@@ -81,7 +81,7 @@ const REPORTS = {
         args: (cid) => [cid],
     }],
     subscriptionRow: () => [{
-        sql: `SELECT c.status, c.trial_ends_at, c.plan, c.country_code, s.current_period_end, s.plan_id
+        sql: `SELECT c.status, c.trial_ends_at, c.access_until, c.plan, c.country_code, s.current_period_end, s.plan_id
               FROM companies c LEFT JOIN subscriptions s ON c.subscription_id = s.id WHERE c.id = ?`,
         args: (cid) => [cid],
     }],

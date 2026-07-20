@@ -169,6 +169,9 @@ async function setCompanyAccess(turso, companyId, status, accessUntil) {
         sets.push('status = ?'); args.push(status);
     }
     if (accessUntil !== undefined) { sets.push('access_until = ?'); args.push(accessUntil); }
+    // Prueba: trial_ends_at debe reflejar el fin de la prueba (lo usa el panel
+    // "Mi Plan" para el aviso y los días restantes).
+    if (status === 'trial' && accessUntil !== undefined) { sets.push('trial_ends_at = ?'); args.push(accessUntil); }
     if (sets.length === 0) return { success: true };
     args.push(companyId);
     await turso.execute({ sql: `UPDATE companies SET ${sets.join(', ')} WHERE id = ?`, args });

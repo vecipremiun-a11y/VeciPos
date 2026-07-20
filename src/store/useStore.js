@@ -4359,16 +4359,20 @@ export const useStore = create(persist((set, get) => ({
             })();
 
             // Si está en trial
-            if (company.status === 'trial' && company.trial_ends_at) {
-                const trialEnd = new Date(company.trial_ends_at);
+            // Fin de la prueba: trial_ends_at, o access_until como respaldo (el admin
+            // al poner "Prueba" setea access_until; empresas viejas pueden no tener
+            // trial_ends_at). Sin esto, "Mi Plan" mostraba vence/días en "—".
+            const trialEndIso = company.trial_ends_at || company.access_until;
+            if (company.status === 'trial' && trialEndIso) {
+                const trialEnd = new Date(trialEndIso);
                 if (now <= trialEnd) {
                     return {
                         isActive: true,
                         status: 'trial',
                         planLabel: 'Prueba gratis',
                         country_code: company.country_code,
-                        trial_ends_at: company.trial_ends_at,
-                        expiresAt: company.trial_ends_at,
+                        trial_ends_at: trialEndIso,
+                        expiresAt: trialEndIso,
                         daysRemaining: Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24))
                     };
                 }
