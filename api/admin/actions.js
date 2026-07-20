@@ -182,6 +182,18 @@ async function createCompany(turso, companyData, session) {
     const { id, name, country, plan, newUser, parentId, ownerUserId, status } = companyData || {};
     if (!id || !name) return { success: false, error: 'Faltan id o nombre' };
 
+    // VALIDACIÓN DE DUEÑO ANTES DE CREAR (evita el bug de asignación silenciosa a
+    // Kevin/super_admin): si se pidió un dueño existente que no existe, se aborta.
+    // El usuario nuevo NO se valida contra unicidad global: el username es único
+    // por sucursal y la empresa es nueva (vacía) → siempre está disponible.
+    const wantsNewUser = !!(newUser && newUser.username && newUser.password);
+    if (ownerUserId && !wantsNewUser) {
+        const ex = await turso.execute({ sql: 'SELECT id FROM users WHERE id = ?', args: [ownerUserId] });
+        if (ex.rows.length === 0) {
+            return { success: false, error: 'El dueño seleccionado no existe.' };
+        }
+    }
+
     // El enlace se deduce del dueño: si se asigna a un cliente existente, se cuelga de su raíz.
     let resolvedParentId = parentId || null;
     if (ownerUserId) {
@@ -221,22 +233,23 @@ async function createCompany(turso, companyData, session) {
         await turso.execute({ sql: "INSERT INTO user_companies (user_id, company_id, role) VALUES (?, ?, 'owner')", args: [ownerUserId, id] });
         ownerLinked = true;
     }
-    if (newUser && newUser.username && newUser.password) {
-        const exists = await turso.execute({ sql: 'SELECT id FROM users WHERE username = ?', args: [newUser.username] });
-        if (exists.rows.length === 0) {
-            const hashedPw = await bcrypt.hash(String(newUser.password), 10);
-            const ins = await turso.execute({
-                sql: "INSERT INTO users (username, password, name, role, company_id) VALUES (?, ?, ?, 'Administrador', ?) RETURNING id",
-                args: [newUser.username, hashedPw, newUser.name || newUser.username, id],
-            });
-            const uid = ins.rows[0]?.id;
-            if (uid) {
-                await turso.execute({ sql: "INSERT INTO user_companies (user_id, company_id, role) VALUES (?, ?, 'owner')", args: [uid, id] });
-                ownerLinked = true;
-            }
+    if (!ownerLinked && wantsNewUser) {
+        // Crear el usuario nuevo como dueño de ESTA empresa. Como el username es
+        // único por sucursal y la empresa recién nace vacía, no hay colisión.
+        const hashedPw = await bcrypt.hash(String(newUser.password), 10);
+        const ins = await turso.execute({
+            sql: "INSERT INTO users (username, password, name, role, company_id) VALUES (?, ?, ?, 'Administrador', ?) RETURNING id",
+            args: [newUser.username, hashedPw, newUser.name || newUser.username, id],
+        });
+        const uid = ins.rows[0]?.id;
+        if (uid) {
+            await turso.execute({ sql: "INSERT INTO user_companies (user_id, company_id, role) VALUES (?, ?, 'owner')", args: [uid, id] });
+            ownerLinked = true;
         }
     }
-    if (!ownerLinked && session?.uid) {
+    // Fallback SOLO cuando el admin no indicó ningún dueño (crea la empresa para sí
+    // mismo). Si se pidió un dueño y no se pudo enlazar, ya se abortó arriba.
+    if (!ownerLinked && !ownerUserId && !wantsNewUser && session?.uid) {
         await turso.execute({ sql: "INSERT INTO user_companies (user_id, company_id, role) VALUES (?, ?, 'owner')", args: [session.uid, id] });
     }
 

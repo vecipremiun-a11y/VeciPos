@@ -4,13 +4,16 @@
 // (scope de sesión, sin companyId — se usa en recarga de página / selector).
 // SEGURIDAD: el listado de usuarios ya NO devuelve el hash de contraseña.
 
-// Empresas activas del usuario de la sesión (nunca de otro uid).
+// Empresas del usuario de la sesión (nunca de otro uid). MISMO filtro de estado
+// que /api/auth/login: incluye trial/past_due/blocked además de active, para que
+// una empresa en prueba o vencida NO desaparezca del selector tras recargar la
+// página (antes filtraba solo 'active' → las trials creadas se volvían inentrables).
 async function userCompanies(turso, session) {
     const r = await turso.execute({
         sql: `SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, c.currency, c.credit_block_mode, uc.role
               FROM user_companies uc
               JOIN companies c ON uc.company_id = c.id
-              WHERE uc.user_id = ? AND c.status = 'active'`,
+              WHERE uc.user_id = ? AND c.status IN ('active', 'trial', 'past_due', 'blocked')`,
         args: [session?.uid ?? null],
     });
     return { success: true, companies: r.rows };

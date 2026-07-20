@@ -900,11 +900,11 @@ CREATE TABLE IF NOT EXISTS user_companies (
 
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT UNIQUE NOT NULL,
+  username TEXT NOT NULL,
   password TEXT NOT NULL,
   name TEXT NOT NULL,
   role TEXT NOT NULL
-, company_id TEXT DEFAULT 'default', has_labor_profile INTEGER DEFAULT 0, labor_position TEXT, labor_branch TEXT, labor_start_date TEXT, labor_status TEXT DEFAULT 'active', labor_pin TEXT, pay_type TEXT DEFAULT 'monthly', pay_method TEXT DEFAULT 'cash', pay_day TEXT, pay_base_amount REAL DEFAULT 0, pay_fixed_bonus REAL DEFAULT 0, pay_fixed_discount REAL DEFAULT 0, pay_bank_name TEXT, pay_bank_account TEXT, pay_bank_account_type TEXT, pay_bank_owner TEXT);
+, company_id TEXT DEFAULT 'default', has_labor_profile INTEGER DEFAULT 0, labor_position TEXT, labor_branch TEXT, labor_start_date TEXT, labor_status TEXT DEFAULT 'active', labor_pin TEXT, pay_type TEXT DEFAULT 'monthly', pay_method TEXT DEFAULT 'cash', pay_day TEXT, pay_base_amount REAL DEFAULT 0, pay_fixed_bonus REAL DEFAULT 0, pay_fixed_discount REAL DEFAULT 0, pay_bank_name TEXT, pay_bank_account TEXT, pay_bank_account_type TEXT, pay_bank_owner TEXT, UNIQUE(company_id, username));
 
 CREATE TABLE IF NOT EXISTS vacation_balances (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -59,17 +59,33 @@ export default async function handler(req, res) {
 
         const turso = getTurso();
         const r = await turso.execute({
-            sql: 'SELECT * FROM users WHERE username = ? LIMIT 1',
+            sql: 'SELECT * FROM users WHERE username = ?',
             args: [username],
         });
-        const user = r.rows[0];
+
+        // El username es único POR SUCURSAL, no global: puede haber varios usuarios
+        // con el mismo nombre (uno por empresa). Se desambigua por CONTRASEÑA: entra
+        // el usuario cuya contraseña coincide.
+        const matches = [];
+        for (const cand of r.rows) {
+            if (await verifyPassword(password, cand.password)) matches.push(cand);
+        }
 
         // Respuesta genérica (no revela si el usuario existe)
-        if (!user || !(await verifyPassword(password, user.password))) {
+        if (matches.length === 0) {
             registerFail(rlKey);
             return res.status(401).json({ success: false, error: 'Usuario o contraseña incorrectos' });
         }
+        // Caso raro: dos usuarios con el MISMO username y la MISMA contraseña en
+        // sucursales distintas → no se puede saber a cuál entrar.
+        if (matches.length > 1) {
+            return res.status(409).json({
+                success: false,
+                error: 'Hay usuarios con el mismo nombre y contraseña en distintas sucursales. Pide al administrador que cambie una de las contraseñas.',
+            });
+        }
         ATTEMPTS.delete(rlKey);
+        const user = matches[0];
 
         // Migración al vuelo: si estaba en texto plano, guardarla hasheada.
         if (!isHashed(user.password)) {

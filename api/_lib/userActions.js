@@ -32,6 +32,14 @@ async function userCreate(turso, companyId, session, { user }) {
     if (!isAdmin) return { success: false, error: 'Acceso denegado. Solo administradores pueden crear usuarios.' };
     if (!user?.username) return { success: false, error: 'Falta username' };
 
+    // Unicidad POR SUCURSAL (no global): el mismo nombre puede existir en otra
+    // empresa, pero no dos veces en ESTA. Mensaje claro antes que el error de BD.
+    const dup = await turso.execute({
+        sql: 'SELECT id FROM users WHERE company_id = ? AND username = ? LIMIT 1',
+        args: [companyId, user.username],
+    });
+    if (dup.rows.length > 0) return { success: false, error: 'Ya existe un usuario con ese nombre en esta sucursal.' };
+
     const hashedPw = await hashPassword(String(user.password || '123456'));
     const result = await turso.execute({
         sql: `INSERT INTO users (
@@ -63,6 +71,15 @@ async function userUpdate(turso, companyId, session, { id, user }) {
     const { isAdmin } = await actorRoles(turso, companyId, session);
     if (!isAdmin) return { success: false, error: 'Acceso denegado. Solo administradores pueden modificar usuarios.' };
     if (!id || !user) return { success: false, error: 'Faltan datos' };
+
+    // Al renombrar: no chocar con otro usuario de ESTA sucursal.
+    if (user.username) {
+        const dup = await turso.execute({
+            sql: 'SELECT id FROM users WHERE company_id = ? AND username = ? AND id != ? LIMIT 1',
+            args: [companyId, user.username, id],
+        });
+        if (dup.rows.length > 0) return { success: false, error: 'Ya existe otro usuario con ese nombre en esta sucursal.' };
+    }
 
     await turso.execute({
         sql: `UPDATE users SET name = ?, username = ?, role = ?,

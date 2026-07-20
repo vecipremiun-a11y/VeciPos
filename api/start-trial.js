@@ -115,14 +115,9 @@ export default async function handler(req, res) {
         const username = admin.username.trim().toLowerCase();
         const email = admin.email.trim().toLowerCase();
 
-        // 2. Unicidad de usuario (users.username es UNIQUE; el login busca por username global)
-        const userCheck = await turso.execute({
-            sql: 'SELECT id FROM users WHERE username = ?',
-            args: [username]
-        });
-        if (userCheck.rows.length > 0) {
-            return res.status(409).json({ success: false, error: 'Ese usuario ya está en uso. Elige otro.' });
-        }
+        // 2. Username: ya NO se exige unicidad global. Es único POR SUCURSAL y esta
+        // empresa recién se crea (vacía), así que cualquier nombre está disponible;
+        // el login desambigua por contraseña si el nombre existe en otra empresa.
 
         // 3. Anti-abuso simple: rechazar email ya registrado en otra empresa
         const emailCheck = await turso.execute({
