@@ -55,6 +55,10 @@ export default async function handler(req, res) {
                 return res.status(200).json(await setCompanyAccess(turso, body.companyId, body.status, body.accessUntil));
             case 'setCompanyPlan':
                 return res.status(200).json(await setCompanyPlan(turso, body.companyId, body.plan));
+            case 'setCompanyModule':
+                return res.status(200).json(await setCompanyModule(turso, body.companyId, body.moduleKey, body.enabled));
+            case 'listCompanyModules':
+                return res.status(200).json(await listCompanyModules(turso, body.companyId));
             case 'createCompany':
                 return res.status(200).json(await createCompany(turso, body.companyData, session));
             case 'createManualSubscription':
@@ -168,6 +172,28 @@ async function setCompanyAccess(turso, companyId, status, accessUntil) {
     if (sets.length === 0) return { success: true };
     args.push(companyId);
     await turso.execute({ sql: `UPDATE companies SET ${sets.join(', ')} WHERE id = ?`, args });
+    return { success: true };
+}
+
+// Super_admin: overrides de módulos de CUALQUIER empresa (para el panel).
+async function listCompanyModules(turso, companyId) {
+    if (!companyId) return { success: false, error: 'Falta companyId' };
+    const r = await turso.execute({ sql: 'SELECT * FROM company_modules WHERE company_id = ?', args: [companyId] });
+    return { success: true, data: r.rows };
+}
+
+// Super_admin: activa/desactiva un módulo o complemento (App) de CUALQUIER empresa
+// desde el panel, sin exigir membresía (god-mode). Escribe el override en
+// company_modules, que hasModule respeta por encima del plan/App.
+async function setCompanyModule(turso, companyId, moduleKey, enabled) {
+    if (!companyId || !moduleKey) return { success: false, error: 'Faltan datos' };
+    const now = new Date().toISOString();
+    await turso.execute({
+        sql: `INSERT INTO company_modules (company_id, module_key, enabled, updated_at)
+              VALUES (?, ?, ?, ?)
+              ON CONFLICT(company_id, module_key) DO UPDATE SET enabled = ?, updated_at = ?`,
+        args: [companyId, moduleKey, enabled ? 1 : 0, now, enabled ? 1 : 0, now],
+    });
     return { success: true };
 }
 

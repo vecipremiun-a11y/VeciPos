@@ -5007,6 +5007,20 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // Panel super_admin: activa/desactiva módulos/complementos de CUALQUIER empresa
+    // sin exigir membresía (god-mode). Va por /api/admin/actions (gate super_admin).
+    adminSetCompanyModule: async (companyId, moduleKey, enabled) => {
+        const r = await adminApiCall('setCompanyModule', { companyId, moduleKey, enabled });
+        if (r?.success && companyId === get().activeCompanyId) await get().fetchCompanyModules();
+        return r || { success: false, error: 'Error' };
+    },
+
+    // Panel super_admin: overrides de módulos de una empresa (para el modal admin).
+    adminFetchCompanyModules: async (companyId) => {
+        const r = await adminApiCall('listCompanyModules', { companyId });
+        return r?.success ? (r.data || []) : [];
+    },
+
     // ¿La empresa/sucursal activa tiene una App activa o con prueba vigente?
     // Los complementos son exclusivos de cuentas Profesional: si el plan baja a
     // Standard, sus Apps dejan de aplicar (aunque quede la fila de prueba).

@@ -180,6 +180,8 @@ const StoreIntegrationSettings = () => {
                         </label>
                         <input
                             type="url"
+                            name="wc_store_url"
+                            autoComplete="off"
                             value={form.tienda_url}
                             onChange={(e) => handleChange('tienda_url', e.target.value)}
                             placeholder="https://mitienda.com"
@@ -193,6 +195,8 @@ const StoreIntegrationSettings = () => {
                         </label>
                         <input
                             type="text"
+                            name="wc_consumer_key"
+                            autoComplete="off"
                             value={form.api_key}
                             onChange={(e) => handleChange('api_key', e.target.value)}
                             placeholder="ck_xxxxxxxxxxxxxxxxx"
@@ -206,6 +210,8 @@ const StoreIntegrationSettings = () => {
                         </label>
                         <input
                             type="password"
+                            name="wc_consumer_secret"
+                            autoComplete="new-password"
                             value={form.api_secret}
                             onChange={(e) => handleChange('api_secret', e.target.value)}
                             placeholder="cs_xxxxxxxxxxxxxxxxx"
@@ -220,6 +226,8 @@ const StoreIntegrationSettings = () => {
                         </label>
                         <input
                             type="password"
+                            name="wc_webhook_secret"
+                            autoComplete="new-password"
                             value={form.webhook_secret}
                             onChange={(e) => handleChange('webhook_secret', e.target.value)}
                             placeholder="Tu secreto para validar HMAC"

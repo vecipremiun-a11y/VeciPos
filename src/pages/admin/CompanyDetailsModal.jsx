@@ -17,7 +17,7 @@ const ToggleSwitch = ({ enabled, onChange, disabled }) => (
 );
 
 const CompanyDetailsModal = ({ company, onClose }) => {
-    const { fetchCompanyModules, updateCompanyModule } = useStore();
+    const { adminFetchCompanyModules, adminSetCompanyModule } = useStore();
     const [modules, setModules] = useState([]);
     const [loadingModules, setLoadingModules] = useState(true);
     const [updatingModule, setUpdatingModule] = useState(null);
@@ -30,7 +30,7 @@ const CompanyDetailsModal = ({ company, onClose }) => {
 
     const loadModules = async () => {
         setLoadingModules(true);
-        const dbModules = await fetchCompanyModules(company.company_id);
+        const dbModules = await adminFetchCompanyModules(company.company_id);
 
         // Merge DB records with ALL_MODULES definition
         const merged = ALL_MODULES.map(mod => {
@@ -46,7 +46,7 @@ const CompanyDetailsModal = ({ company, onClose }) => {
 
     const handleToggleModule = async (moduleKey, newValue) => {
         setUpdatingModule(moduleKey);
-        const res = await updateCompanyModule(company.company_id, moduleKey, newValue);
+        const res = await adminSetCompanyModule(company.company_id, moduleKey, newValue);
         if (res.success) {
             setModules(prev => prev.map(m =>
                 m.key === moduleKey ? { ...m, enabled: newValue } : m
