@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, Sparkles, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -13,13 +13,21 @@ import { useCompanyFeatures } from '../hooks/useCompanyFeatures';
 import { getModuleByKey } from '../constants/modules';
 import { createSmartInterval } from '../lib/smartPolling';
 
-// Etiqueta que desbloquea un módulo (para el badge del menú): un plan, o
-// "Complemento" si el módulo se vende como App del Marketplace.
-const PLAN_BY_LEVEL = { 1: 'Standard', 2: 'Profesional' };
-const planBadgeFor = (moduleKey) => {
+// Badge de bloqueo del menú: corona dorada = requiere plan Profesional;
+// "APP" = complemento del Marketplace. Compacto para no cortar el label.
+const LockBadge = ({ moduleKey }) => {
     const mod = getModuleByKey(moduleKey);
-    if (mod?.appKey) return 'Complemento';
-    return PLAN_BY_LEVEL[mod?.minLevel] || 'Profesional';
+    if (mod?.appKey) {
+        return (
+            <span
+                title="Complemento del Marketplace"
+                className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-bold tracking-wider uppercase flex-shrink-0"
+            >
+                App
+            </span>
+        );
+    }
+    return <Crown size={15} fill="currentColor" title="Plan Profesional" className="text-amber-400 flex-shrink-0" />;
 };
 
 const MainLayout = () => {
@@ -272,12 +280,7 @@ const MainLayout = () => {
                                         <span className={cn("whitespace-nowrap transition-all duration-300 flex-1", !isSidebarOpen && "opacity-0 w-0 overflow-hidden")}>
                                             {item.label}
                                         </span>
-                                        {isSidebarOpen && (
-                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30 text-amber-400 text-[10px] font-bold tracking-wider uppercase">
-                                                <Sparkles size={10} />
-                                                {planBadgeFor(item.moduleKey)}
-                                            </span>
-                                        )}
+                                        {isSidebarOpen && <LockBadge moduleKey={item.moduleKey} />}
                                         {!isSidebarOpen && (
                                             <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 shadow-lg shadow-amber-400/50" />
                                         )}
@@ -365,11 +368,7 @@ const MainLayout = () => {
                                                             >
                                                                 <child.icon size={14} />
                                                                 <span className="text-sm flex-1">{child.label}</span>
-                                                                {child.isLocked && (
-                                                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-bold tracking-wider uppercase">
-                                                                        {planBadgeFor(child.moduleKey)}
-                                                                    </span>
-                                                                )}
+                                                                {child.isLocked && <LockBadge moduleKey={child.moduleKey} />}
                                                             </NavLink>
                                                         ))}
                                                     </div>
@@ -391,11 +390,7 @@ const MainLayout = () => {
                                             >
                                                 <subItem.icon size={16} />
                                                 <span className="text-sm flex-1">{subItem.label}</span>
-                                                {subItem.isLocked && (
-                                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-bold tracking-wider uppercase">
-                                                        {planBadgeFor(subItem.moduleKey)}
-                                                    </span>
-                                                )}
+                                                {subItem.isLocked && <LockBadge moduleKey={subItem.moduleKey} />}
                                             </NavLink>
                                         );
                                     })}
@@ -422,12 +417,7 @@ const MainLayout = () => {
                                 <span className={cn("whitespace-nowrap transition-all duration-300 flex-1", !isSidebarOpen && "opacity-0 w-0 overflow-hidden")}>
                                     {item.label}
                                 </span>
-                                {item.isLocked && isSidebarOpen && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30 text-amber-400 text-[10px] font-bold tracking-wider uppercase">
-                                        <Sparkles size={10} />
-                                        {planBadgeFor(item.moduleKey)}
-                                    </span>
-                                )}
+                                {item.isLocked && isSidebarOpen && <LockBadge moduleKey={item.moduleKey} />}
                                 {item.isLocked && !isSidebarOpen && (
                                     <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 shadow-lg shadow-amber-400/50" />
                                 )}

@@ -149,8 +149,10 @@ const POS = () => {
 
     const navigate = useNavigate();
 
-    // Módulo Pedidos/Encargos gateado por plan (Medium+)
+    // Encargos = App Cocina (preorders); Tienda = App Tienda Web (web). Cada
+    // pestaña se muestra según su propia App contratada (son complementos aparte).
     const canPreorders = useStore((s) => s.hasModule('preorders'));
+    const canStore = useStore((s) => s.hasModule('web'));
 
     const cart = React.useMemo(() => {
         const activeCart = carts.find(c => c.id === activeCartId);
@@ -661,8 +663,10 @@ const POS = () => {
 
             {/* Left Side: Product Grid */}
             <div className="flex-1 flex flex-col gap-2 lg:gap-4 overflow-hidden min-h-0">
-                {/* Tabs: Venta / Encargos (Encargos solo con módulo Pedidos, Medium+) */}
-                {canPreorders && (
+                {/* Tabs: Venta / Encargos (App Cocina) / Tienda (App Tienda Web).
+                    Cada pestaña especializada aparece según su App; la barra se
+                    muestra si hay al menos una de ellas activa. */}
+                {(canPreorders || canStore) && (
                 <div className="flex shrink-0">
                     <div className="inline-flex p-0.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
                         <button
@@ -671,6 +675,7 @@ const POS = () => {
                             <ShoppingCart size={14} />
                             Venta
                         </button>
+                        {canPreorders && (
                         <button
                             onClick={() => navigate('/preorders')}
                             className="px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
@@ -678,6 +683,8 @@ const POS = () => {
                             <Gift size={14} />
                             Encargos
                         </button>
+                        )}
+                        {canStore && (
                         <button
                             onClick={() => navigate('/store-orders')}
                             className="px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
@@ -685,6 +692,7 @@ const POS = () => {
                             <Store size={14} />
                             Tienda
                         </button>
+                        )}
                     </div>
                 </div>
                 )}
