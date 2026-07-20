@@ -2,6 +2,8 @@
 // Los UPDATE a `companies` usan whitelist de columnas — el cliente nunca
 // decide qué columna se escribe.
 
+import crypto from 'crypto';
+
 // Columnas de companies que el usuario puede editar desde Configuración
 const COMPANY_FIELDS = new Set([
     'legal_name', 'full_address', 'tax_id_legal', 'phone_main', 'email_main',
@@ -129,6 +131,19 @@ async function companyLinkedCreate(turso, companyId, session, { name, plan = 'pr
     return { success: true, companyId: id };
 }
 
+// Devuelve el token del KDS (Pantalla de Cocina) de la empresa, generándolo si
+// falta. Antes solo lo tenía la empresa que corrió un script manual → las nuevas
+// se quedaban con la Pantalla de Cocina "Cargando…" para siempre.
+async function kdsTokenEnsure(turso, companyId) {
+    const r = await turso.execute({ sql: 'SELECT kds_token FROM companies WHERE id = ? LIMIT 1', args: [companyId] });
+    let token = r.rows[0]?.kds_token;
+    if (!token) {
+        token = 'kds_' + crypto.randomBytes(12).toString('hex');
+        await turso.execute({ sql: 'UPDATE companies SET kds_token = ? WHERE id = ?', args: [token, companyId] });
+    }
+    return { success: true, kds_token: token };
+}
+
 // Lista todas las sucursales de la cuenta (raíz + enlazadas) de las que el
 // usuario de la sesión es miembro, con su plan/estado/vencimiento. Para el
 // panel "Mi Plan" (Fase B). No expone empresas de otros dueños.
@@ -254,6 +269,7 @@ export const companyActions = {
     companyModuleUpdate,
     companyLinkedCreate,
     companyBranches,
+    kdsTokenEnsure,
     receiptSettingsLoad,
     preventaSettingsLoad,
     receiptSettingsSave,

@@ -150,7 +150,16 @@ const Settings = () => {
                         business_type: data.business_type || '',
                         currency: data.currency || 'CLP'
                     });
-                    setKdsToken(data.kds_token || '');
+                    // Si la empresa aún no tiene token de Pantalla de Cocina, se
+                    // genera al vuelo (antes se quedaba "Cargando…" para siempre).
+                    let token = data.kds_token || '';
+                    if (!token) {
+                        try {
+                            const ensured = await dataApiCall('kdsTokenEnsure', { companyId: activeCompanyId });
+                            if (ensured?.success && ensured.kds_token) token = ensured.kds_token;
+                        } catch { /* si falla, queda vacío y se reintenta al recargar */ }
+                    }
+                    setKdsToken(token);
                 }
             } catch (e) {
                 console.error('Error loading company info:', e);

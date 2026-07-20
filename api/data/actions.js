@@ -207,6 +207,7 @@ export default async function handler(req, res) {
             case 'companyModuleUpdate':
             case 'companyLinkedCreate':
             case 'companyBranches':
+            case 'kdsTokenEnsure':
             case 'receiptSettingsLoad':
             case 'preventaSettingsLoad':
             case 'receiptSettingsSave':
