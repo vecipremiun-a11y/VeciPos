@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { createClient } from '@libsql/client';
 import { MercadoPagoConfig, Payment } from 'mercadopago';
+import { APP_PRICES, displayCurrency } from './_lib/billing.js';
 
 // Configurar MercadoPago
 const client = new MercadoPagoConfig({
@@ -85,6 +86,46 @@ export default async function handler(req, res) {
         const companyId = paymentData.external_reference;
         const metadata = paymentData.metadata;
 
+        // --- Cobro de complemento (App): activar y alinear a la fecha del plan ---
+        if (metadata?.type === 'app_charge') {
+            const appKey = metadata.app_key;
+            if (!companyId || !appKey) {
+                return res.status(400).json({ error: 'Missing app data' });
+            }
+            const dup = await turso.execute({
+                sql: "SELECT id FROM payments WHERE mercadopago_payment_id = ?",
+                args: [paymentData.id.toString()],
+            });
+            if (dup.rows.length > 0) {
+                return res.status(200).json({ message: 'Already processed' });
+            }
+
+            const now = new Date();
+            const nowIso = now.toISOString();
+            const periodEnd = metadata.period_end || null;
+            // Precio MENSUAL de catálogo (no el prorrateo cobrado) para el resumen.
+            const cur = displayCurrency((await turso.execute({ sql: 'SELECT country_code FROM companies WHERE id = ?', args: [companyId] })).rows[0]?.country_code);
+            const monthly = APP_PRICES[appKey]?.[cur] ?? paymentData.transaction_amount;
+
+            await turso.execute({
+                sql: `INSERT INTO company_apps (company_id, app_key, scope, status, period_end, trial_used, will_renew, source, granted_free, activated_at, price, currency, created_at, updated_at)
+                      VALUES (?, ?, 'branch', 'active', ?, 1, 1, 'marketplace', 0, ?, ?, ?, ?, ?)
+                      ON CONFLICT(company_id, app_key) DO UPDATE SET
+                        status = 'active', period_end = excluded.period_end, trial_used = 1, will_renew = 1,
+                        granted_free = 0, cancelled_at = NULL, activated_at = excluded.activated_at,
+                        price = excluded.price, currency = excluded.currency, updated_at = excluded.updated_at`,
+                args: [companyId, appKey, periodEnd, nowIso, monthly, cur, nowIso, nowIso],
+            });
+
+            await turso.execute({
+                sql: `UPDATE payments SET status = 'approved', mercadopago_payment_id = ?, payment_method = ?, updated_at = ? WHERE id = ?`,
+                args: [paymentData.id.toString(), paymentData.payment_method_id, nowIso, metadata.payment_id],
+            });
+
+            console.log('🧩 App activada por pago:', companyId, appKey);
+            return res.status(200).json({ success: true, message: 'App activated' });
+        }
+
         // --- Suscripción in-app (la empresa y el usuario YA existen): solo activar el plan ---
         if (metadata?.type === 'subscription') {
             if (!companyId) {
@@ -140,6 +181,20 @@ export default async function handler(req, res) {
                 sql: "UPDATE companies SET status = 'active', plan = ?, subscription_id = ?, access_until = ? WHERE id = ?",
                 args: [companyPlan, subId, subPeriodEnd.toISOString(), companyId]
             });
+
+            // Pago unificado (plan mensual): realinear las Apps pagadas a la nueva
+            // fecha del plan y dar de baja las canceladas (will_renew=0). En anual,
+            // las Apps corren en su propio ciclo mensual y no se tocan aquí.
+            if (billingCycle === 'monthly') {
+                await turso.execute({
+                    sql: "UPDATE company_apps SET period_end = ?, updated_at = ? WHERE company_id = ? AND status = 'active' AND will_renew = 1",
+                    args: [subPeriodEnd.toISOString(), subNow.toISOString(), companyId],
+                });
+                await turso.execute({
+                    sql: "UPDATE company_apps SET status = 'cancelled', updated_at = ? WHERE company_id = ? AND status = 'active' AND will_renew = 0",
+                    args: [subNow.toISOString(), companyId],
+                });
+            }
 
             // Marcar el pago como aprobado
             await turso.execute({

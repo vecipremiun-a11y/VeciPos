@@ -6,6 +6,7 @@ import { ALL_APPS, getAppPrice } from '../constants/apps';
 import { formatMoney } from '../config/mercadopago';
 import { toast } from '../lib/toast';
 import { cn } from '../lib/utils';
+import PlanCheckoutModal from '../components/settings/PlanCheckoutModal';
 import {
     Store, Crown, Check, Clock, Lock, Sparkles, ArrowRight,
     ChefHat, Plug, Scale, Globe, Bike, Gift, MessageCircle, Utensils, Scissors,
@@ -29,18 +30,21 @@ const fmtDate = (iso) => {
 const Marketplace = () => {
     const navigate = useNavigate();
     const {
-        currentPlanLevel, companyApps, currentCurrency,
-        fetchCompanyApps, activateApp, cancelApp,
+        currentPlanLevel, companyApps, currentCurrency, activeCompanyId,
+        fetchCompanyApps, activateApp, cancelApp, fetchAppChargeQuote,
     } = useStore(useShallow((s) => ({
         currentPlanLevel: s.currentPlanLevel,
         companyApps: s.companyApps,
         currentCurrency: s.currentCurrency,
+        activeCompanyId: s.activeCompanyId,
         fetchCompanyApps: s.fetchCompanyApps,
         activateApp: s.activateApp,
         cancelApp: s.cancelApp,
+        fetchAppChargeQuote: s.fetchAppChargeQuote,
     })));
 
     const [busy, setBusy] = useState(null); // app_key en proceso
+    const [appCheckout, setAppCheckout] = useState(null); // { plan, appKey } para el modal de pago
     const currency = currentCurrency === 'USD' ? 'USD' : 'CLP';
     const isProfessional = (currentPlanLevel ?? 2) >= 2;
 
@@ -78,6 +82,21 @@ const Marketplace = () => {
         } else {
             toast(r?.error || 'No se pudo activar el complemento', 'error');
         }
+    };
+
+    // Prueba ya usada → pago prorrateado. Cotiza y abre el checkout (App mode).
+    const onActivatePaid = async (app) => {
+        if (!isProfessional) { toast('Necesitas el Plan Profesional para activar complementos.', 'error'); return; }
+        setBusy(app.key);
+        const q = await fetchAppChargeQuote(app.key);
+        setBusy(null);
+        if (!q?.success) { toast(q?.error || 'No se pudo calcular el monto', 'error'); return; }
+        // Plan sintético con el monto prorrateado para reutilizar el checkout.
+        const syntheticPlan = {
+            id: app.key, name: app.name,
+            prices: { [q.currency]: { monthly: q.amount, annual: q.amount } },
+        };
+        setAppCheckout({ plan: syntheticPlan, appKey: app.key, currency: q.currency });
     };
 
     const onCancel = async (app, activeUntilIso) => {
@@ -207,7 +226,7 @@ const Marketplace = () => {
                                     </button>
                                 ) : st.trialUsed ? (
                                     <button
-                                        onClick={() => onActivate(app)}
+                                        onClick={() => onActivatePaid(app)}
                                         disabled={busy === app.key}
                                         className="w-full py-2.5 rounded-lg bg-[var(--color-primary)] text-black font-bold text-sm hover:brightness-110 transition-all disabled:opacity-60 inline-flex items-center justify-center gap-1.5"
                                     >
@@ -231,6 +250,19 @@ const Marketplace = () => {
                     );
                 })}
             </div>
+
+            {/* Checkout de complemento (prorrateo, App mode) */}
+            {appCheckout && (
+                <PlanCheckoutModal
+                    kind="app"
+                    appKey={appCheckout.appKey}
+                    plan={appCheckout.plan}
+                    billingCycle="monthly"
+                    currency={appCheckout.currency}
+                    companyId={activeCompanyId}
+                    onClose={() => { setAppCheckout(null); fetchCompanyApps?.(); }}
+                />
+            )}
         </div>
     );
 };

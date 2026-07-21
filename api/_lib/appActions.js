@@ -3,6 +3,8 @@
 // de verdad del precio y valida que la cuenta sea Profesional. El gating efectivo
 // lo aplica hasApp() en el cliente (mismo modelo que hasModule/plan).
 
+import { appChargeQuote as _appChargeQuote } from './billing.js';
+
 const APP_TRIAL_DAYS = 30;
 
 // Apps comprables (allowlist server-side; precio autoritativo aquí, no del cliente).
@@ -122,5 +124,11 @@ async function appExpireDue(turso) {
     return { success: true };
 }
 
-export const appActions = { appList, appActivate, appCancel };
+// Cotización del prorrateo para el modal de pago (el cobro real lo recalcula
+// /api/subscribe). Firma homogénea (turso, companyId, session, body).
+async function appChargeQuote(turso, companyId, session, { appKey } = {}) {
+    return _appChargeQuote(turso, companyId, appKey);
+}
+
+export const appActions = { appList, appActivate, appCancel, appChargeQuote };
 export { appExpireDue };

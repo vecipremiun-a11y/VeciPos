@@ -5096,6 +5096,15 @@ export const useStore = create(persist((set, get) => ({
         return r || { success: false, error: 'Error' };
     },
 
+    // Cotización del prorrateo de una App (para el modal de pago). El cobro real
+    // lo recalcula /api/subscribe (kind:'app'); esto es solo para mostrar el monto.
+    fetchAppChargeQuote: async (appKey) => {
+        const { activeCompanyId } = get();
+        if (!activeCompanyId) return null;
+        const r = await userApiCall('appChargeQuote', { companyId: activeCompanyId, appKey });
+        return r?.success ? r : null;
+    },
+
     // Admin (server-side): todas las empresas con su suscripción. Ver api/admin/actions.js
     fetchAllSubscriptions: async () => {
         const r = await adminApiCall('listSubscriptions');

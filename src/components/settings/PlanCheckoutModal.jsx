@@ -66,7 +66,8 @@ async function processReceiptFile(file) {
     return dataUrl;
 }
 
-const PlanCheckoutModal = ({ plan, billingCycle, currency, companyId, onClose }) => {
+const PlanCheckoutModal = ({ plan, billingCycle, currency, companyId, onClose, kind = 'plan', appKey = null }) => {
+    const isApp = kind === 'app';
     const { registerTransferIntent, fetchPaymentSettings } = useStore();
     const [loading, setLoading] = useState(null); // 'mp' mientras redirige
     const [error, setError] = useState('');
@@ -135,7 +136,9 @@ const PlanCheckoutModal = ({ plan, billingCycle, currency, companyId, onClose })
             const res = await fetch('/api/subscribe', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ companyId, planId: plan.id, billingCycle }),
+                body: JSON.stringify(isApp
+                    ? { companyId, kind: 'app', appKey }
+                    : { companyId, planId: plan.id, billingCycle }),
             });
             const data = await res.json();
             if (data.success && data.init_point) {
@@ -186,8 +189,8 @@ const PlanCheckoutModal = ({ plan, billingCycle, currency, companyId, onClose })
                 {/* Header */}
                 <div className="flex items-start justify-between mb-1">
                     <div>
-                        <h3 className="text-lg font-bold text-[var(--color-text)]">Contratar {plan.name}</h3>
-                        <p className="text-sm text-[var(--color-text-muted)]">Facturación {cycleLabel.toLowerCase()}</p>
+                        <h3 className="text-lg font-bold text-[var(--color-text)]">{isApp ? 'Activar' : 'Contratar'} {plan.name}</h3>
+                        <p className="text-sm text-[var(--color-text-muted)]">{isApp ? 'Prorrateo hasta tu próxima fecha de cobro' : `Facturación ${cycleLabel.toLowerCase()}`}</p>
                     </div>
                     <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] p-1">
                         <X size={20} />
@@ -197,7 +200,7 @@ const PlanCheckoutModal = ({ plan, billingCycle, currency, companyId, onClose })
                 {/* Monto */}
                 <div className="flex items-baseline gap-1 my-4">
                     <span className="text-3xl font-extrabold text-[var(--color-text)]">{formatMoney(amount, currency)}</span>
-                    <span className="text-[var(--color-text-muted)] text-sm">{BILLING_CYCLES[billingCycle].suffix} · {currency}</span>
+                    <span className="text-[var(--color-text-muted)] text-sm">{isApp ? 'pago único' : BILLING_CYCLES[billingCycle].suffix} · {currency}</span>
                 </div>
 
                 <p className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-3">Elige cómo pagar</p>
@@ -221,8 +224,16 @@ const PlanCheckoutModal = ({ plan, billingCycle, currency, companyId, onClose })
                         </button>
                     )}
 
-                    {/* PayPal (USD) */}
-                    {showPaypal && (
+                    {/* Complementos en USD: por ahora solo pago automático en CLP */}
+                    {isApp && !showMercadoPago && (
+                        <div className="flex items-start gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+                            <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+                            <span>Por ahora los complementos se activan al instante pagando con MercadoPago (CLP). Para pago en USD, escríbenos y lo activamos.</span>
+                        </div>
+                    )}
+
+                    {/* PayPal (USD) — solo para planes */}
+                    {showPaypal && !isApp && (
                         <button
                             onClick={payWithPaypal}
                             disabled={!payConfig.paypalUser}
@@ -239,7 +250,8 @@ const PlanCheckoutModal = ({ plan, billingCycle, currency, companyId, onClose })
                         </button>
                     )}
 
-                    {/* Transferencia bancaria (siempre) */}
+                    {/* Transferencia bancaria (solo para planes; los complementos se activan al instante con MercadoPago) */}
+                    {!isApp && (
                     <div className="rounded-xl border border-[var(--glass-border)] overflow-hidden">
                         <button
                             onClick={() => setOpenTransfer(v => !v)}
@@ -335,6 +347,7 @@ const PlanCheckoutModal = ({ plan, billingCycle, currency, companyId, onClose })
                             </div>
                         )}
                     </div>
+                    )}
                 </div>
 
                 {error && (

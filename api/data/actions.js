@@ -203,6 +203,7 @@ export default async function handler(req, res) {
             case 'appList':
             case 'appActivate':
             case 'appCancel':
+            case 'appChargeQuote':
                 return res.status(200).json(await appActions[action](turso, companyId, session, body));
             case 'companyModuleUpdate':
             case 'companyLinkedCreate':

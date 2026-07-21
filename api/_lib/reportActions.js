@@ -6,9 +6,12 @@ import {
     productSalesHistoryNormalized, productSalesHistoryViaJson,
     productPurchasesHistoryNormalized, productPurchasesHistoryViaJson,
 } from '../../src/lib/analyticsQueries.js';
+import { billingSummary } from './billing.js';
 
 // Reportes con lógica (fallback normalizado→JSON, Fase 5) — módulo compartido
 const SPECIAL = {
+    // Resumen de facturación (plan + Apps + total mensual + próximo cobro). Solo lectura.
+    billingSummary: async (turso, companyId) => billingSummary(turso, companyId),
     productSalesHistory: async (turso, companyId, { productId, dateFrom, dateTo, limit = 200 }) => {
         const ctx = { turso, companyId, productId, dateFrom, dateTo, limit };
         try { return await productSalesHistoryNormalized(ctx); }

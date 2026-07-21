@@ -7,8 +7,9 @@ import {
     getDisplayCurrency, formatMoney,
 } from '../../config/mercadopago';
 import { getAppByKey } from '../../constants/apps';
-import { Crown, Check, Star, Clock, Receipt, AlertCircle, Building2, Plus, X, Lock, Store, ArrowRight } from 'lucide-react';
+import { Crown, Check, Star, Clock, Receipt, AlertCircle, Building2, Plus, X, Lock, Store, ArrowRight, Wallet } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { reportCall } from '../../lib/dataApi';
 import PlanCheckoutModal from './PlanCheckoutModal';
 
 const STATUS_STYLES = {
@@ -62,6 +63,7 @@ const PlanSettings = () => {
     const [subInfo, setSubInfo] = useState(null);
     const [payments, setPayments] = useState([]);
     const [branches, setBranches] = useState([]);
+    const [billing, setBilling] = useState(null);
     const [loading, setLoading] = useState(true);
     const [billingCycle, setBillingCycle] = useState('monthly');
     const [checkoutPlanId, setCheckoutPlanId] = useState(null);      // upgrade del plan actual
@@ -75,10 +77,12 @@ const PlanSettings = () => {
             checkSubscriptionStatus ? checkSubscriptionStatus(activeCompanyId) : Promise.resolve(null),
             fetchPaymentHistory ? fetchPaymentHistory(activeCompanyId) : Promise.resolve([]),
             fetchMyBranches ? fetchMyBranches() : Promise.resolve([]),
-        ]).then(([info, hist, brs]) => {
+            reportCall(activeCompanyId, 'billingSummary', {}).catch(() => null),
+        ]).then(([info, hist, brs, bill]) => {
             setSubInfo(info);
             setPayments(Array.isArray(hist) ? hist : []);
             setBranches(Array.isArray(brs) ? brs : []);
+            setBilling(bill && bill.success ? bill : null);
         }).finally(() => setLoading(false));
     }, [activeCompanyId, checkSubscriptionStatus, fetchPaymentHistory, fetchMyBranches]);
 
@@ -153,6 +157,83 @@ const PlanSettings = () => {
                     </div>
                 )}
             </div>
+
+            {/* 1b. RESUMEN DE FACTURACIÓN (plan + complementos = un solo pago mensual) */}
+            {!loading && billing && (
+                <div className="glass-card animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <h2 className="text-xl font-bold text-[var(--color-text)] mb-1 flex items-center gap-2">
+                        <Wallet size={20} className="text-[var(--color-primary)]" /> Resumen de facturación
+                    </h2>
+                    <p className="text-sm text-[var(--color-text-muted)] mb-4">
+                        Un solo pago mensual reúne tu plan y tus complementos activos.
+                    </p>
+
+                    {isTrial && (
+                        <div className="mb-3 bg-blue-500/5 border border-blue-500/20 rounded-xl p-2.5 text-xs text-blue-300/90 flex items-start gap-2">
+                            <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+                            <span>Durante tu prueba no se cobra nada. Este resumen es el total mensual que pagarás al contratar.</span>
+                        </div>
+                    )}
+
+                    <div className="rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] divide-y divide-[var(--glass-border)]">
+                        {/* Plan */}
+                        <div className="flex items-center justify-between p-3.5">
+                            <div>
+                                <p className="font-bold text-[var(--color-text)]">Plan {planLabelOf(billing.planKey)}</p>
+                                {billing.planCycle === 'annual' && (
+                                    <p className="text-xs text-[var(--color-text-muted)]">Pagado anualmente (prepagado)</p>
+                                )}
+                            </div>
+                            <span className="font-bold text-[var(--color-text)] text-sm">
+                                {billing.planCycle === 'annual'
+                                    ? <span className="text-emerald-400">Anual pagado</span>
+                                    : `${formatMoney(billing.planPrice, billing.currency)}/mes`}
+                            </span>
+                        </div>
+
+                        {/* Complementos */}
+                        {billing.apps.map((a) => {
+                            const app = getAppByKey(a.app_key);
+                            const tag = a.trial ? { t: 'En prueba', c: 'text-blue-400' }
+                                : a.granted_free ? { t: 'Incluida', c: 'text-emerald-400' }
+                                : !a.will_renew ? { t: 'No renueva', c: 'text-amber-400' }
+                                : null;
+                            const amount = a.trial ? '$0 (prueba)' : a.granted_free ? 'Incluida'
+                                : `${formatMoney(a.price, billing.currency)}/mes`;
+                            return (
+                                <div key={a.app_key} className="flex items-center justify-between p-3.5">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <p className="text-[var(--color-text)] truncate">{app?.name || a.app_key}</p>
+                                        {tag && <span className={cn('text-[10px] font-bold flex-shrink-0', tag.c)}>· {tag.t}</span>}
+                                    </div>
+                                    <span className="text-sm text-[var(--color-text-muted)] flex-shrink-0">{amount}</span>
+                                </div>
+                            );
+                        })}
+
+                        {/* Total */}
+                        <div className="flex items-center justify-between p-3.5 bg-[var(--color-primary)]/[0.05]">
+                            <div>
+                                <p className="font-bold text-[var(--color-text)]">Total mensual</p>
+                                {billing.planCycle === 'annual' && billing.monthlyTotal > 0 && (
+                                    <p className="text-xs text-[var(--color-text-muted)]">Solo complementos (tu plan anual ya está pagado)</p>
+                                )}
+                            </div>
+                            <span className="text-xl font-extrabold text-[var(--color-primary)]">
+                                {formatMoney(billing.monthlyTotal, billing.currency)}
+                                <span className="text-xs font-medium text-[var(--color-text-muted)]">/mes</span>
+                            </span>
+                        </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                        <Clock size={13} />
+                        {billing.nextChargeDate
+                            ? <span>Próximo cobro: <strong className="text-[var(--color-text)]">{formatDate(billing.nextChargeDate)}</strong></span>
+                            : <span>Sin cobros mensuales pendientes.</span>}
+                    </div>
+                </div>
+            )}
 
             {/* 2. MIS SUCURSALES */}
             <div className="glass-card animate-in fade-in slide-in-from-bottom-4 duration-500">

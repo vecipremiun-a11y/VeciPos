@@ -1,5 +1,8 @@
 import { createClient } from '@libsql/client';
 import { MercadoPagoConfig, Preference } from 'mercadopago';
+import { appChargeQuote, APP_PRICES } from './_lib/billing.js';
+
+const APP_NAMES = { cocina: 'Cocina', integracion: 'Integración tienda', bascula: 'Báscula', tienda_web: 'Tienda Web' };
 
 // Turso lazy (las env se leen en request porque server.js carga dotenv tras los imports)
 let _turso = null;
@@ -45,6 +48,57 @@ const displayCurrency = (countryCode) => {
     return (cc === 'CL' || cc === 'CHILE' || cc === '') ? 'CLP' : 'USD';
 };
 
+// Crea la preferencia de pago de un complemento por su monto PRORRATEADO hasta la
+// fecha del plan (una sola vez). El servidor recalcula el monto (autoritativo).
+async function chargeApp(res, turso, companyId, appKey) {
+    if (!companyId || !APP_PRICES[appKey]) {
+        return res.status(400).json({ success: false, error: 'Datos de complemento inválidos' });
+    }
+    const c = await turso.execute({ sql: 'SELECT id, name, email_main FROM companies WHERE id = ?', args: [companyId] });
+    if (c.rows.length === 0) return res.status(404).json({ success: false, error: 'Empresa no encontrada' });
+    const company = c.rows[0];
+
+    const quote = await appChargeQuote(turso, companyId, appKey);
+    if (!quote.success) return res.status(400).json(quote);
+    const { amount, currency, periodEnd } = quote;
+    if (!amount || amount <= 0) {
+        return res.status(400).json({ success: false, error: 'Este complemento ya está cubierto en el período actual.' });
+    }
+
+    const appName = APP_NAMES[appKey] || appKey;
+    const appUrl = process.env.VITE_APP_URL || '';
+    const paymentId = `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    await turso.execute({
+        sql: `INSERT INTO payments (id, company_id, amount, currency, status, payment_method, description, payer_email, plan_id, billing_cycle, created_at)
+              VALUES (?, ?, ?, ?, 'pending', 'mercadopago', ?, ?, ?, 'app', ?)`,
+        args: [paymentId, companyId, amount, currency, `Complemento: ${appName} (prorrateo)`, company.email_main || null, `app:${appKey}`, new Date().toISOString()],
+    });
+
+    const preference = {
+        items: [{
+            title: `POSVECI - Complemento ${appName}`,
+            description: 'Activación de complemento (prorrateo del mes en curso)',
+            quantity: 1, unit_price: amount, currency_id: currency,
+        }],
+        ...(company.email_main ? { payer: { email: company.email_main } } : {}),
+        back_urls: {
+            success: `${appUrl}/payment-success`,
+            failure: `${appUrl}/payment-failure`,
+            pending: `${appUrl}/payment-pending`,
+        },
+        auto_return: 'approved',
+        external_reference: companyId,
+        metadata: { type: 'app_charge', company_id: companyId, payment_id: paymentId, app_key: appKey, period_end: periodEnd },
+        notification_url: `${appUrl}/api/webhook`,
+    };
+
+    const response = await getPreferenceClient().create({ body: preference });
+    await turso.execute({ sql: 'UPDATE payments SET mercadopago_preference_id = ? WHERE id = ?', args: [response.id, paymentId] });
+
+    return res.status(200).json({ success: true, init_point: response.init_point, amount, currency, plan_name: `Complemento ${appName}` });
+}
+
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ success: false, error: 'Method not allowed' });
@@ -52,9 +106,16 @@ export default async function handler(req, res) {
 
     try {
         const turso = getTurso();
-        const { companyId, planId, billingCycle } = req.body || {};
+        const body = req.body || {};
+        const { companyId, planId, billingCycle } = body;
 
-        // Validaciones
+        // --- Cobro de un complemento (App) a mitad de ciclo: monto PRORRATEADO ---
+        // Reutiliza el mismo checkout; solo cambia el monto (regla dura respetada).
+        if (body.kind === 'app') {
+            return await chargeApp(res, turso, companyId, body.appKey);
+        }
+
+        // Validaciones (plan)
         if (!companyId || !PLAN_PRICES[planId] || !['monthly', 'annual'].includes(billingCycle)) {
             return res.status(400).json({ success: false, error: 'Datos de plan inválidos' });
         }
