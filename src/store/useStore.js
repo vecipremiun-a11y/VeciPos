@@ -5034,10 +5034,15 @@ export const useStore = create(persist((set, get) => ({
         if ((currentPlanLevel ?? 2) < 2) return false;
         const a = companyApps?.find(x => x.app_key === appKey);
         if (!a) return false;
-        if (a.status === 'active') return true;
+        const now = new Date();
+        // Fin del período vigente (pagado o de prueba). NULL = sin vencimiento
+        // (grandfather). Una App cancelada (will_renew=0) sigue activa hasta aquí.
+        const periodEnd = a.period_end || a.trial_ends_at || null;
+        if (a.status === 'active') {
+            return !periodEnd || new Date(periodEnd) >= now;
+        }
         if (a.status === 'trial') {
-            if (!a.trial_ends_at) return true;
-            return new Date(a.trial_ends_at) >= new Date();
+            return !periodEnd || new Date(periodEnd) >= now;
         }
         return false; // cancelled / desconocido
     },

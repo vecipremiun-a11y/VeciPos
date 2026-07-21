@@ -1,4 +1,5 @@
 import { createClient } from '@libsql/client';
+import { appExpireDue } from '../_lib/appActions.js';
 
 // Turso lazy (las env se leen en tiempo de request).
 let _turso = null;
@@ -60,6 +61,10 @@ export default async function handler(req, res) {
                   WHERE status = 'active' AND access_until IS NOT NULL AND access_until < ? AND access_until >= ?`,
             args: [nowIso, graceCutoffIso],
         });
+
+        // 4) Complementos (Apps): dar de baja pruebas vencidas y cancelaciones cuyo
+        //    período ya pasó (no toca las que esperan renovación del plan).
+        await appExpireDue(turso);
 
         const result = {
             ok: true,

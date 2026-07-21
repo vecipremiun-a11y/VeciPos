@@ -20,6 +20,12 @@ const daysLeft = (iso) => {
     return Number.isFinite(d) ? d : null;
 };
 
+const fmtDate = (iso) => {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit' }); }
+    catch { return ''; }
+};
+
 const Marketplace = () => {
     const navigate = useNavigate();
     const {
@@ -43,14 +49,20 @@ const Marketplace = () => {
     // Estado de una App para la empresa/sucursal activa.
     const appState = (appKey) => {
         const row = companyApps?.find((a) => a.app_key === appKey);
-        if (!row) return { state: 'none' };
-        if (row.status === 'active') return { state: 'active' };
-        if (row.status === 'trial') {
-            const dl = daysLeft(row.trial_ends_at);
-            if (dl == null || dl >= 0) return { state: 'trial', daysLeft: dl };
-            return { state: 'expired' };
+        if (!row) return { state: 'none', trialUsed: false };
+        const trialUsed = Number(row.trial_used) === 1;
+        const willRenew = Number(row.will_renew) !== 0;
+        const grantedFree = Number(row.granted_free) === 1;
+        const periodEnd = row.period_end || row.trial_ends_at || null;
+        const dl = daysLeft(periodEnd);
+        const expired = periodEnd != null && dl != null && dl < 0;
+        if (row.status === 'active' && !expired) {
+            return { state: 'active', willRenew, grantedFree, periodEnd, daysLeft: dl, trialUsed };
         }
-        return { state: 'none' }; // cancelled
+        if (row.status === 'trial' && !expired) {
+            return { state: 'trial', daysLeft: dl, willRenew, trialUsed };
+        }
+        return { state: expired ? 'expired' : 'none', trialUsed }; // cancelled / prueba vencida
     };
 
     const onActivate = async (app) => {
@@ -58,16 +70,23 @@ const Marketplace = () => {
         setBusy(app.key);
         const r = await activateApp(app.key);
         setBusy(null);
-        if (r?.success) toast(r.already ? `${app.name} ya estaba activo` : `${app.name} activado · 30 días de prueba gratis`, 'success');
-        else toast(r?.error || 'No se pudo activar el complemento', 'error');
+        if (r?.success) {
+            toast(r.already ? `${app.name} ya estaba activo` : `${app.name} activado · 30 días de prueba gratis`, 'success');
+        } else if (r?.needsPayment) {
+            // Prueba ya usada → requiere pago. El cobro/prorrateo se cablea en Fase 3.
+            toast('Ya usaste la prueba de este complemento. El pago estará disponible en breve.', 'info');
+        } else {
+            toast(r?.error || 'No se pudo activar el complemento', 'error');
+        }
     };
 
-    const onCancel = async (app) => {
-        if (!window.confirm(`¿Cancelar ${app.name}? Perderás el acceso a sus funciones.`)) return;
+    const onCancel = async (app, activeUntilIso) => {
+        const untilTxt = activeUntilIso ? ` Seguirá activo hasta el ${fmtDate(activeUntilIso)} y no se renovará.` : ' Perderás el acceso a sus funciones.';
+        if (!window.confirm(`¿Cancelar ${app.name}?${untilTxt}`)) return;
         setBusy(app.key);
         const r = await cancelApp(app.key);
         setBusy(null);
-        if (r?.success) toast(`${app.name} cancelado`, 'info');
+        if (r?.success) toast(r.activeUntil ? `${app.name}: activo hasta el ${fmtDate(r.activeUntil)}, no se renueva` : `${app.name} cancelado`, 'info');
         else toast(r?.error || 'No se pudo cancelar', 'error');
     };
 
@@ -146,8 +165,14 @@ const Marketplace = () => {
                                         {formatMoney(price, currency)}<span className="text-xs font-medium text-[var(--color-text-muted)]">/mes</span>
                                     </span>
                                 )}
-                                {isProfessional && st.state === 'active' && (
+                                {isProfessional && st.state === 'active' && st.grantedFree && (
+                                    <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-400"><Gift size={14} /> Incluida</span>
+                                )}
+                                {isProfessional && st.state === 'active' && !st.grantedFree && st.willRenew && (
                                     <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-400"><Check size={14} /> Activa</span>
+                                )}
+                                {isProfessional && st.state === 'active' && !st.grantedFree && !st.willRenew && (
+                                    <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-400"><Clock size={14} /> No renueva</span>
                                 )}
                                 {isProfessional && st.state === 'trial' && (
                                     <span className="inline-flex items-center gap-1 text-xs font-bold text-blue-400"><Clock size={14} /> Prueba · {st.daysLeft ?? 0}d</span>
@@ -164,13 +189,29 @@ const Marketplace = () => {
                                     <button disabled className="w-full py-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 text-amber-400 font-bold text-sm cursor-not-allowed inline-flex items-center justify-center gap-1.5">
                                         <Lock size={14} /> Requiere Profesional
                                     </button>
+                                ) : (st.state === 'active' && st.grantedFree) ? (
+                                    <div className="w-full py-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 text-emerald-400 font-bold text-sm text-center">
+                                        Incluida en tu plan
+                                    </div>
+                                ) : (st.state === 'active' && !st.willRenew) ? (
+                                    <div className="w-full py-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 text-amber-400 font-bold text-xs text-center">
+                                        Activo hasta el {fmtDate(st.periodEnd)} · no se renueva
+                                    </div>
                                 ) : (st.state === 'active' || st.state === 'trial') ? (
                                     <button
-                                        onClick={() => onCancel(app)}
+                                        onClick={() => onCancel(app, st.periodEnd)}
                                         disabled={busy === app.key}
                                         className="w-full py-2.5 rounded-lg border border-[var(--glass-border)] text-[var(--color-text-muted)] font-bold text-sm hover:border-red-500/40 hover:text-red-400 transition-colors disabled:opacity-60"
                                     >
                                         {busy === app.key ? '…' : 'Cancelar complemento'}
+                                    </button>
+                                ) : st.trialUsed ? (
+                                    <button
+                                        onClick={() => onActivate(app)}
+                                        disabled={busy === app.key}
+                                        className="w-full py-2.5 rounded-lg bg-[var(--color-primary)] text-black font-bold text-sm hover:brightness-110 transition-all disabled:opacity-60 inline-flex items-center justify-center gap-1.5"
+                                    >
+                                        {busy === app.key ? '…' : <>Activar (pago) <ArrowRight size={15} /></>}
                                     </button>
                                 ) : (
                                     <button
@@ -178,7 +219,7 @@ const Marketplace = () => {
                                         disabled={busy === app.key}
                                         className="w-full py-2.5 rounded-lg bg-[var(--color-primary)] text-black font-bold text-sm hover:brightness-110 transition-all disabled:opacity-60 inline-flex items-center justify-center gap-1.5"
                                     >
-                                        {busy === app.key ? 'Activando…' : <>{st.state === 'expired' ? 'Reactivar' : 'Activar · 30 días gratis'} <ArrowRight size={15} /></>}
+                                        {busy === app.key ? 'Activando…' : <>Activar · 30 días gratis <ArrowRight size={15} /></>}
                                     </button>
                                 )}
                             </div>
