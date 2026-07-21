@@ -5025,6 +5025,18 @@ export const useStore = create(persist((set, get) => ({
         return r?.success ? (r.data || []) : [];
     },
 
+    // Panel super_admin: activar/desactivar complementos (Apps) de cualquier empresa
+    // con precio/prueba/gratis (god-mode). Escribe en company_apps (como el Marketplace).
+    adminSetCompanyApp: async (companyId, appKey, mode, opts = {}) => {
+        const r = await adminApiCall('setCompanyApp', { companyId, appKey, mode, opts });
+        if (r?.success && companyId === get().activeCompanyId) await get().fetchCompanyApps();
+        return r || { success: false, error: 'Error' };
+    },
+    adminFetchCompanyApps: async (companyId) => {
+        const r = await adminApiCall('listCompanyApps', { companyId });
+        return r?.success ? (r.data || []) : [];
+    },
+
     // ¿La empresa/sucursal activa tiene una App activa o con prueba vigente?
     // Los complementos son exclusivos de cuentas Profesional: si el plan baja a
     // Standard, sus Apps dejan de aplicar (aunque quede la fila de prueba).

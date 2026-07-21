@@ -2,6 +2,7 @@ import { createClient } from '@libsql/client';
 import bcrypt from 'bcryptjs';
 import { getSession } from '../_lib/auth.js';
 import { seedRolePermissions } from '../_lib/permissions.js';
+import { APP_PRICES, displayCurrency } from '../_lib/billing.js';
 
 // Endpoint admin autenticado (Fase 1 · Paso 2).
 // Las mutaciones sensibles (aprobar pagos, cambiar estado/plan/acceso de empresas)
@@ -59,6 +60,10 @@ export default async function handler(req, res) {
                 return res.status(200).json(await setCompanyModule(turso, body.companyId, body.moduleKey, body.enabled));
             case 'listCompanyModules':
                 return res.status(200).json(await listCompanyModules(turso, body.companyId));
+            case 'setCompanyApp':
+                return res.status(200).json(await setCompanyApp(turso, body.companyId, body.appKey, body.mode, body.opts));
+            case 'listCompanyApps':
+                return res.status(200).json(await listCompanyApps(turso, body.companyId));
             case 'createCompany':
                 return res.status(200).json(await createCompany(turso, body.companyData, session));
             case 'createManualSubscription':
@@ -198,6 +203,61 @@ async function setCompanyModule(turso, companyId, moduleKey, enabled) {
         args: [companyId, moduleKey, enabled ? 1 : 0, now, enabled ? 1 : 0, now],
     });
     return { success: true };
+}
+
+// Super_admin god-mode: activa/desactiva un COMPLEMENTO (App) de cualquier empresa
+// escribiendo en company_apps (igual que una compra del Marketplace, source='admin').
+// Modos:
+//   trial → prueba de N días (opts.trialDays, def 30)
+//   paid  → activa a precio de marketplace (suma al mensual), alineada al plan
+//   free  → activa gratis ($0, granted_free=1), no suma al mensual, sin vencimiento
+//   off   → baja inmediata (cancelled)
+async function setCompanyApp(turso, companyId, appKey, mode, opts = {}) {
+    if (!companyId || !APP_PRICES[appKey]) return { success: false, error: 'Datos de complemento inválidos' };
+    if (!['trial', 'paid', 'free', 'off'].includes(mode)) return { success: false, error: 'Modo inválido' };
+
+    const c = (await turso.execute({ sql: 'SELECT access_until, country_code FROM companies WHERE id = ? LIMIT 1', args: [companyId] })).rows[0];
+    if (!c) return { success: false, error: 'Empresa no encontrada' };
+    const currency = displayCurrency(c.country_code);
+    const monthly = APP_PRICES[appKey][currency];
+    const nowIso = new Date().toISOString();
+
+    if (mode === 'off') {
+        await turso.execute({
+            sql: "UPDATE company_apps SET status = 'cancelled', will_renew = 0, cancelled_at = ?, updated_at = ? WHERE company_id = ? AND app_key = ?",
+            args: [nowIso, nowIso, companyId, appKey],
+        });
+        return { success: true, mode };
+    }
+
+    let status, trialEnds = null, periodEnd = null, price, grantedFree = 0;
+    if (mode === 'trial') {
+        const days = Number(opts.trialDays) > 0 ? Number(opts.trialDays) : 30;
+        const t = new Date(); t.setDate(t.getDate() + days);
+        status = 'trial'; trialEnds = t.toISOString(); periodEnd = trialEnds; price = monthly;
+    } else if (mode === 'paid') {
+        status = 'active'; periodEnd = c.access_until || null; price = monthly; grantedFree = 0;
+    } else { // free
+        status = 'active'; periodEnd = null; price = 0; grantedFree = 1;
+    }
+
+    await turso.execute({
+        sql: `INSERT INTO company_apps (company_id, app_key, scope, status, trial_ends_at, period_end, trial_used, will_renew, source, granted_free, activated_at, price, currency, created_at, updated_at)
+              VALUES (?, ?, 'branch', ?, ?, ?, 1, 1, 'admin', ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(company_id, app_key) DO UPDATE SET
+                status = excluded.status, trial_ends_at = excluded.trial_ends_at, period_end = excluded.period_end,
+                trial_used = 1, will_renew = 1, source = 'admin', granted_free = excluded.granted_free,
+                cancelled_at = NULL, activated_at = excluded.activated_at, price = excluded.price,
+                currency = excluded.currency, updated_at = excluded.updated_at`,
+        args: [companyId, appKey, status, trialEnds, periodEnd, grantedFree, nowIso, price, currency, nowIso, nowIso],
+    });
+    return { success: true, mode };
+}
+
+async function listCompanyApps(turso, companyId) {
+    if (!companyId) return { success: false, error: 'Falta companyId' };
+    const r = await turso.execute({ sql: 'SELECT * FROM company_apps WHERE company_id = ?', args: [companyId] });
+    return { success: true, data: r.rows };
 }
 
 async function setCompanyPlan(turso, companyId, plan) {
