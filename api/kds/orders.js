@@ -74,12 +74,15 @@ export default async function handler(req, res) {
         }
 
         // Pedidos activos del día (due_date) — los que cocina debe ver.
+        // Solo ENCARGOS: la Pantalla de Cocina es para preparar alimentos, no
+        // para alistar pedidos de la tienda web (esos van en la pestaña Tienda).
         const ordersRes = await turso.execute({
             sql: `SELECT id, client_name, client_phone, status, due_date, due_time,
                          total_amount, deposit_amount, created_at, notes
                   FROM preorders
                   WHERE company_id = ?
                     AND due_date = ?
+                    AND COALESCE(order_kind, 'encargo') = 'encargo'
                     AND status IN ('pending', 'confirmed', 'preparing', 'ready')
                   ORDER BY due_time ASC, id ASC`,
             args: [companyId, day]
