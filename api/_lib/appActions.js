@@ -9,7 +9,7 @@ const APP_TRIAL_DAYS = 30;
 
 // Apps comprables (allowlist server-side; precio autoritativo aquí, no del cliente).
 const AVAILABLE_APPS = {
-    cocina: { scope: 'branch', priceClp: 10000, priceUsd: 10 },
+    cocina: { scope: 'branch', priceClp: 5000, priceUsd: 5 },
     integracion: { scope: 'branch', priceClp: 10000, priceUsd: 10 },
     bascula: { scope: 'branch', priceClp: 10000, priceUsd: 10 },
     tienda_web: { scope: 'branch', priceClp: 15000, priceUsd: 15 },

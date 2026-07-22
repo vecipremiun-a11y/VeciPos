@@ -178,7 +178,9 @@ export default async function handler(req, res) {
             case 'preorderCreate':
             case 'preordersFetch':
             case 'pendingWebOrders':
+            case 'preorderActiveCounts':
             case 'preorderDetails':
+            case 'preorderItemsEdit':
             case 'preorderStatusUpdate':
             case 'preorderPaymentAdd':
             case 'preorderDeliver':

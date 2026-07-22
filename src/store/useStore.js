@@ -5337,6 +5337,7 @@ export const useStore = create(persist((set, get) => ({
 
             // Refresh list
             await get().fetchPreorders();
+            get().fetchOrderBadges(); // nuevo encargo → actualizar contador de la pestaña
             set({ preorderCart: [] });
 
             // Empuje a miniveci (best-effort, no bloquea). Si el cliente tiene
@@ -5378,6 +5379,7 @@ export const useStore = create(persist((set, get) => ({
     // recargas y caerse sola cuando alguien ya lo atendió.
     webOrders: [],                 // encargos web pendientes (toast + campanita)
     dismissedWebOrderToasts: [],   // ids cuyo toast se cerró con la X (siguen en campanita)
+    orderBadges: { encargo: 0, store: 0 }, // conteo de pedidos activos por tipo (badges de pestañas)
 
     // Devuelve true solo si agregó un encargo NUEVO (para sonar el aviso una vez,
     // no en duplicados ni en encargos de otra empresa).
@@ -5414,6 +5416,22 @@ export const useStore = create(persist((set, get) => ({
             webOrders: state.webOrders.filter(o => o.id !== id),
             dismissedWebOrderToasts: state.dismissedWebOrderToasts.filter(x => x !== id),
         }));
+    },
+
+    // Conteo de pedidos activos por tipo, para los badges de las pestañas
+    // Encargos/Tienda. Se refresca en el mismo ciclo que los pedidos web (canal
+    // en vivo + montaje de páginas) y tras cambios de estado.
+    fetchOrderBadges: async () => {
+        const { activeCompanyId } = get();
+        if (!activeCompanyId) return;
+        try {
+            // "Hoy" en hora local (mismo criterio que la pestaña Encargos).
+            const today = new Date().toLocaleDateString('en-CA');
+            const r = await userApiCall('preorderActiveCounts', { companyId: activeCompanyId, today });
+            if (r?.success && r.counts) set({ orderBadges: r.counts });
+        } catch (e) {
+            console.error('Error fetching order badges:', e);
+        }
     },
 
     fetchPendingWebOrders: async () => {
@@ -5454,6 +5472,19 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // Edita los productos de un pedido de tienda (agregar/quitar/cambiar cantidad).
+    // Recalcula total y saldo server-side; el saldo se cobra/devuelve al entregar.
+    editPreorderItems: async (preorderId, items, refetchFilters = undefined) => {
+        try {
+            const r = await userApiCall('preorderItemsEdit', { companyId: get().activeCompanyId, preorderId, items });
+            if (r?.success) await get().fetchPreorders(refetchFilters);
+            return r || { success: false, error: 'Error' };
+        } catch (e) {
+            console.error('Error editing preorder items:', e);
+            return { success: false, error: e.message };
+        }
+    },
+
     updatePreorderStatus: async (preorderId, newStatus, reason = null, refetchFilters = undefined) => {
         try {
             // Server-side (con guard de empresa): update + cálculo de efectivo a devolver
@@ -5472,6 +5503,7 @@ export const useStore = create(persist((set, get) => ({
             // refetchFilters: la pestaña Tienda pasa { kind: 'store', ... } para
             // que el refetch no pise la lista con encargos (default del server).
             await get().fetchPreorders(refetchFilters);
+            get().fetchOrderBadges(); // el cambio de estado altera el conteo activo
 
             // Aviso saliente a miniveci si el encargo está sincronizado con la web.
             const info = { external_public_code: r.externalPublicCode };

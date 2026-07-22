@@ -4,6 +4,7 @@ import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageO
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
+import OrderTabBadge from '../components/OrderTabBadge';
 import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
 import PaymentModal from '../components/PaymentModal';
 import CashOpeningModal from '../components/CashOpeningModal';
@@ -153,6 +154,13 @@ const POS = () => {
     // pestaña se muestra según su propia App contratada (son complementos aparte).
     const canPreorders = useStore((s) => s.hasModule('preorders'));
     const canStore = useStore((s) => s.hasModule('web'));
+    const orderBadges = useStore((s) => s.orderBadges);
+    const fetchOrderBadges = useStore((s) => s.fetchOrderBadges);
+
+    // Contadores de pedidos activos para las pestañas Encargos/Tienda.
+    useEffectReact(() => {
+        if (canPreorders || canStore) fetchOrderBadges();
+    }, [canPreorders, canStore, fetchOrderBadges]);
 
     const cart = React.useMemo(() => {
         const activeCart = carts.find(c => c.id === activeCartId);
@@ -682,6 +690,7 @@ const POS = () => {
                         >
                             <Gift size={14} />
                             Encargos
+                            <OrderTabBadge count={orderBadges?.encargo} />
                         </button>
                         )}
                         {canStore && (
@@ -691,6 +700,7 @@ const POS = () => {
                         >
                             <Store size={14} />
                             Tienda
+                            <OrderTabBadge count={orderBadges?.store} />
                         </button>
                         )}
                     </div>

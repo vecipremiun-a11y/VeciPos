@@ -15,7 +15,7 @@ export const ALL_APPS = [
         key: 'cocina',
         name: 'Cocina',
         description: 'Encargos, preventas y pantalla de producción para tu cocina.',
-        priceClp: 10000, priceUsd: 10,
+        priceClp: 5000, priceUsd: 5,
         scope: 'branch',
         status: 'available',
         moduleKeys: ['preorders', 'production'],

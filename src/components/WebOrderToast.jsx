@@ -26,6 +26,7 @@ const WebOrderToast = () => {
         removeWebOrder,
         dismissWebOrderToast,
         fetchPendingWebOrders,
+        fetchOrderBadges,
         updatePreorderStatus,
     } = useStore(useShallow(s => ({
         webOrders: s.webOrders,
@@ -35,12 +36,14 @@ const WebOrderToast = () => {
         removeWebOrder: s.removeWebOrder,
         dismissWebOrderToast: s.dismissWebOrderToast,
         fetchPendingWebOrders: s.fetchPendingWebOrders,
+        fetchOrderBadges: s.fetchOrderBadges,
         updatePreorderStatus: s.updatePreorderStatus,
     })));
 
     // Reconciliar al montar (sobrevive recargas).
     useEffect(() => {
         fetchPendingWebOrders();
+        fetchOrderBadges();
     }, []);
 
     // Canal Pusher en vivo.
@@ -51,11 +54,18 @@ const WebOrderToast = () => {
 
         const pusher = new Pusher(key, { cluster, forceTLS: true, enabledTransports: ['ws', 'wss'] });
         const channel = pusher.subscribe('preorders');
+        // El canal es global; solo reaccionamos a eventos de la empresa activa
+        // (evita consultas innecesarias por pedidos de otras empresas).
+        const isForActiveCompany = (data) => !data?.company_id || data.company_id === useStore.getState().activeCompanyId;
+
         channel.bind('order.created', (data) => {
             const added = pushWebOrder(data);
             if (added) playProductionSound('zen-chime'); // campanita (no toca el sonido de Producción)
+            if (isForActiveCompany(data)) fetchOrderBadges(); // refrescar contadores de las pestañas
         });
-        channel.bind('order.updated', () => fetchPendingWebOrders());
+        channel.bind('order.updated', (data) => {
+            if (isForActiveCompany(data)) { fetchPendingWebOrders(); fetchOrderBadges(); }
+        });
 
         return () => {
             try {

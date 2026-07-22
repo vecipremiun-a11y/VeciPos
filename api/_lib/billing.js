@@ -12,7 +12,7 @@ export const PLAN_PRICES = {
 const PLAN_ALIASES = { basico: 'standard', basic: 'standard', medium: 'professional', medio: 'professional', pro: 'professional' };
 
 export const APP_PRICES = {
-    cocina: { CLP: 10000, USD: 10 },
+    cocina: { CLP: 5000, USD: 5 },
     integracion: { CLP: 10000, USD: 10 },
     bascula: { CLP: 10000, USD: 10 },
     tienda_web: { CLP: 15000, USD: 15 },

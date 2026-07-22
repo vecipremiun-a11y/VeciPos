@@ -3,6 +3,8 @@
 // ahora verifican que el encargo pertenezca a la empresa de la sesión
 // (antes UPDATE/SELECT iban solo por id).
 
+import { broadcastPreorderEvent } from '../events/preorders-stream.js';
+
 const nowIso = () => new Date().toISOString();
 
 // order_kind separa encargos ('encargo') de pedidos de la tienda web ('store').
@@ -75,6 +77,11 @@ async function preorderCreate(turso, companyId, session, { preorderData, registe
         });
     }
 
+    // Señal en vivo (Pusher) para que los badges se actualicen en todos los
+    // dispositivos sin recargar. Usamos 'order.updated' (refresca contadores,
+    // sin el toast de "nuevo pedido web" que es exclusivo del canal web).
+    await broadcastPreorderEvent('order.updated', { company_id: companyId, id: preorderId, kind: 'encargo' });
+
     return { success: true, preorderId };
 }
 
@@ -115,6 +122,38 @@ async function pendingWebOrders(turso, companyId) {
     return { success: true, rows: result.rows };
 }
 
+// Conteo de pedidos ACTIVOS (no entregados/cancelados) para los badges:
+//   - Encargos: solo los de HOY (due_date = today) que faltan por finalizar,
+//     igual que la vista por defecto de la pestaña Encargos.
+//   - Tienda: todos los activos (esa pestaña no filtra por fecha).
+async function preorderActiveCounts(turso, companyId, session, { today = null } = {}) {
+    await ensureOrderKindColumn(turso);
+
+    const encSql = `SELECT COUNT(*) AS n FROM preorders
+                    WHERE company_id = ? AND COALESCE(order_kind, 'encargo') = 'encargo'
+                      AND status NOT IN ('delivered', 'canceled')`;
+    const enc = await turso.execute(
+        today
+            ? { sql: encSql + ' AND due_date = ?', args: [companyId, today] }
+            : { sql: encSql, args: [companyId] }
+    );
+
+    const sto = await turso.execute({
+        sql: `SELECT COUNT(*) AS n FROM preorders
+              WHERE company_id = ? AND order_kind = 'store'
+                AND status NOT IN ('delivered', 'canceled')`,
+        args: [companyId],
+    });
+
+    return {
+        success: true,
+        counts: {
+            encargo: Number(enc.rows[0]?.n) || 0,
+            store: Number(sto.rows[0]?.n) || 0,
+        },
+    };
+}
+
 async function preorderDetails(turso, companyId, session, { preorderId }) {
     const preorder = await ownPreorder(turso, companyId, preorderId);
     if (!preorder) return { success: true, preorder: null, items: [], payments: [] };
@@ -123,6 +162,65 @@ async function preorderDetails(turso, companyId, session, { preorderId }) {
         { sql: 'SELECT * FROM preorder_payments WHERE preorder_id = ? ORDER BY created_at ASC', args: [preorderId] },
     ], 'read');
     return { success: true, preorder, items: itemsRes.rows, payments: paymentsRes.rows };
+}
+
+// Edita los productos de un pedido (pestaña Tienda): reemplaza los items y
+// recalcula el total. deposit_amount NO se toca (es lo ya pagado); el saldo
+// (remaining_amount = total - deposit) puede quedar negativo = a devolver al
+// entregar. NO toca stock (el stock de tienda lo maneja el webhook sale.created).
+async function preorderItemsEdit(turso, companyId, session, { preorderId, items }) {
+    const pr = await ownPreorder(turso, companyId, preorderId, 'status, deposit_amount, delivery_fee');
+    if (!pr) return { success: false, error: 'Pedido no encontrado' };
+    if (['delivered', 'canceled'].includes(pr.status)) {
+        return { success: false, error: 'No se puede editar un pedido entregado o cancelado' };
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+        return { success: false, error: 'El pedido debe tener al menos un producto' };
+    }
+
+    const norm = items.map(it => {
+        const qty = Number(it.qty) || 0;
+        const unitPrice = Number(it.unit_price) || 0;
+        const lineTotal = it.line_total !== undefined ? Number(it.line_total) : qty * unitPrice;
+        return {
+            product_id: it.product_id || 0,
+            product_name: it.product_name || 'Producto',
+            qty,
+            unit: it.unit || 'Und',
+            unit_price: unitPrice,
+            line_total: lineTotal,
+            note: it.note || '',
+            billing_unit: it.billing_unit || 'unit',
+            external_product_id: it.external_product_id || null,
+        };
+    });
+
+    const itemsTotal = norm.reduce((acc, it) => acc + it.line_total, 0);
+    const deliveryFee = Number(pr.delivery_fee) || 0;
+    const total = itemsTotal + deliveryFee;
+    const deposit = Number(pr.deposit_amount) || 0;
+    const remaining = total - deposit;
+
+    // Reemplazo atómico de items + recálculo de totales.
+    const queries = [
+        { sql: 'DELETE FROM preorder_items WHERE preorder_id = ?', args: [preorderId] },
+        ...norm.map(it => ({
+            sql: `INSERT INTO preorder_items
+                  (preorder_id, product_id, product_name, qty, unit, unit_price, line_total, note,
+                   billing_unit, estimated_total, external_product_id)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [preorderId, it.product_id, it.product_name, it.qty, it.unit, it.unit_price,
+                it.line_total, it.note, it.billing_unit, it.line_total, it.external_product_id],
+        })),
+        {
+            sql: `UPDATE preorders SET total_amount = ?, estimated_total = ?, remaining_amount = ?, updated_at = datetime('now')
+                  WHERE id = ? AND company_id = ?`,
+            args: [total, total, remaining, preorderId, companyId],
+        },
+    ];
+    await turso.batch(queries);
+
+    return { success: true, total, remaining, deposit };
 }
 
 async function preorderStatusUpdate(turso, companyId, session, { preorderId, newStatus, reason = null }) {
@@ -152,6 +250,10 @@ async function preorderStatusUpdate(turso, companyId, session, { preorderId, new
         });
         cashPaid = Number(cashRes.rows[0]?.cash_paid) || 0;
     }
+
+    // Señal en vivo (Pusher): un cambio de estado altera el conteo activo → los
+    // badges de otros dispositivos/pestañas se actualizan sin recargar ni pollear.
+    await broadcastPreorderEvent('order.updated', { company_id: companyId, id: preorderId, status: newStatus });
 
     return {
         success: true,
@@ -439,7 +541,9 @@ export const preorderActions = {
     preorderCreate,
     preordersFetch,
     pendingWebOrders,
+    preorderActiveCounts,
     preorderDetails,
+    preorderItemsEdit,
     preorderStatusUpdate,
     preorderPaymentAdd,
 };

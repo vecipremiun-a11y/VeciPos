@@ -15,6 +15,7 @@ import DeliveryCheckoutModal from '../components/DeliveryCheckoutModal';
 import QuickPreorderProductModal from '../components/QuickPreorderProductModal';
 import PaymentDetailPicker from '../components/PaymentDetailPicker';
 import { printPreorder } from '../utils/printPreorder';
+import OrderTabBadge from '../components/OrderTabBadge';
 
 const STATUS_CONFIG = {
     pending: { label: 'Pendiente', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30', icon: Clock, next: 'preparing' },
@@ -620,7 +621,7 @@ const Preorders = () => {
         addToPreorderCart, updatePreorderCartItem, removeFromPreorderCart,
         clearPreorderCart, createPreorder, fetchPreorders,
         updatePreorderStatus, getPreorderableProducts, currentCurrency, clients,
-        deliverPreorder, getPreorderDetails
+        deliverPreorder, getPreorderDetails, orderBadges, fetchOrderBadges
     } = useStore();
 
     const navigate = useNavigate();
@@ -738,6 +739,7 @@ const Preorders = () => {
         // Carga inicial (sin debounce) — mostrar lo que se tenga rápido.
         loadProducts();
         fetchPreorders(getListFilters());
+        fetchOrderBadges();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -863,6 +865,7 @@ const Preorders = () => {
                     >
                         <CakeSlice size={14} />
                         Encargos
+                        <OrderTabBadge count={orderBadges?.encargo} />
                     </button>
                     <button
                         onClick={() => navigate('/store-orders')}
@@ -870,6 +873,7 @@ const Preorders = () => {
                     >
                         <StoreIcon size={14} />
                         Tienda
+                        <OrderTabBadge count={orderBadges?.store} />
                     </button>
                 </div>
 
