@@ -12,6 +12,40 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="description" content="Sistema POS POSVECI — ventas, inventario y reportes" />
     <title>POSVECI</title>
+    <script>
+      // Auto-recuperación tras un deploy.
+      //
+      // Cada build genera nombres nuevos para los archivos JS. Una pestaña que
+      // lleva horas abierta conserva el index.html viejo y pide archivos que ya
+      // no existen: el navegador recibe HTML donde espera JavaScript y la página
+      // queda EN BLANCO. Pasó el 23-jul-2026 en producción.
+      //
+      // Este script corre antes que el bundle (única forma de reaccionar: si el
+      // archivo de entrada falla, nada del bundle llega a ejecutarse). Si un
+      // script o estilo no carga, borra el service worker y sus cachés, y recarga
+      // una sola vez para tomar el index.html nuevo. La bandera evita un bucle
+      // infinito si el fallo fuese otro; main.jsx la limpia al arrancar bien.
+      (function () {
+        var KEY = 'pv_chunk_reload';
+        window.addEventListener('error', function (e) {
+          var el = e.target;
+          if (!el || (el.tagName !== 'SCRIPT' && el.tagName !== 'LINK')) return;
+          if (sessionStorage.getItem(KEY)) return; // ya se intentó: no insistir
+          sessionStorage.setItem(KEY, '1');
+          var done = function () { location.reload(); };
+          try {
+            var jobs = [];
+            if (window.caches) jobs.push(caches.keys().then(function (ks) {
+              return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+            }));
+            if (navigator.serviceWorker) jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+              return Promise.all(rs.map(function (r) { return r.unregister(); }));
+            }));
+            Promise.all(jobs).then(done, done);
+          } catch (err) { done(); }
+        }, true); // captura: los errores de recursos no burbujean
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
