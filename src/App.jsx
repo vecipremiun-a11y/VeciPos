@@ -73,6 +73,7 @@ import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncCatalogIncrementa
 import { createSmartInterval } from './lib/smartPolling';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 import SessionTakeoverModal from './components/SessionTakeoverModal';
+import { setTabUserId } from './lib/sessionGuard';
 
 // Protected Route Component - ROBUST RESTORE
 const ProtectedRoute = ({ children }) => {
@@ -170,6 +171,14 @@ function App() {
   const darkMode = useStore(state => state.darkMode);
   const currentUser = useStore(state => state.currentUser);
   const activeCompanyId = useStore(state => state.activeCompanyId);
+
+  // Esta pestaña actúa a nombre de `currentUser`. Se mantiene sincronizado aquí
+  // —y no solo al rehidratar el store— porque la cookie de sesión es del navegador
+  // entero: sin esto, las pestañas que quedaron con otra cuenta no se detectan.
+  // Va el primero para que quede fijado antes de las cargas de datos.
+  useEffect(() => {
+    setTabUserId(currentUser?.id ?? null);
+  }, [currentUser]);
 
   // FASE 5.5 · Exponer activeCompanyId a la capa lib (pwaUpdate) para que
   // pueda verificar ops offline pendientes antes de aplicar un refresh.

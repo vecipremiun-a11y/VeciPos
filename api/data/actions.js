@@ -70,9 +70,14 @@ export default async function handler(req, res) {
 
         const turso = getTurso();
 
-        // Acción de sesión (sin companyId): empresas del usuario (recarga / selector).
+        // Acciones de sesión (sin companyId): empresas del usuario (recarga / selector)
+        // y reconstrucción de la sesión desde la cookie (pestaña que quedó con otra
+        // cuenta y necesita adoptar la que realmente está activa).
         if (action === 'userCompanies') {
             return res.status(200).json(await bootstrapActions.userCompanies(turso, session));
+        }
+        if (action === 'sessionUser') {
+            return res.status(200).json(await bootstrapActions.sessionUser(turso, session));
         }
 
         if (!companyId) return res.status(400).json({ success: false, error: 'Falta companyId' });

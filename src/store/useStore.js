@@ -4,7 +4,7 @@ import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFrom
 import { localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
 import { syncCatalogIncremental } from '../lib/db/sync';
 import { markActivity } from '../lib/smartPolling';
-import { setTabUserId, getTabUserId, broadcastLogin } from '../lib/sessionGuard';
+import { setTabUserId, getTabUserId, broadcastLogin, broadcastLogout } from '../lib/sessionGuard';
 import { getModuleByKey } from '../constants/modules';
 import { getPlanLevel } from '../config/mercadopago';
 import bcrypt from 'bcryptjs';
@@ -35,13 +35,28 @@ async function userApiCall(action, payload = {}) {
             credentials: 'include',
             // expectedUserId va al final: identifica a nombre de quién cree actuar ESTA
             // pestaña. El servidor lo compara con la cookie y corta si no coinciden.
-            body: JSON.stringify({ action, ...payload, expectedUserId: getTabUserId() }),
+            //
+            // Se toma del estado del store, con sessionGuard como respaldo: depender
+            // solo de sessionGuard hacía que las primeras llamadas tras recargar
+            // salieran con null (la rehidratación aún no lo había fijado) y el candado
+            // no se activaba nunca.
+            body: JSON.stringify({
+                action,
+                ...payload,
+                expectedUserId: useStore.getState().currentUser?.id ?? getTabUserId(),
+            }),
         });
         const data = await r.json().catch(() => ({ success: false, error: 'Respuesta inválida del servidor' }));
         if (data && typeof data === 'object') data._status = r.status;
-        // La sesión del navegador ya es de otro usuario: esta pestaña quedó zombi.
         if (data?.error === 'SESSION_MISMATCH') {
+            // La sesión del navegador ya es de otro usuario: esta pestaña se alinea.
             try { useStore.getState().flagSessionTakeover(data); } catch { /* noop */ }
+        } else {
+            // Llamada normal: la identidad de la pestaña coincide con la sesión, así
+            // que el contador anti-bucle de adopción vuelve a cero. Se limpia AQUÍ y
+            // no al arrancar: si lo hiciera main.jsx, cada recarga lo reiniciaría y
+            // el tope nunca frenaría un ciclo adoptar→recargar→adoptar.
+            try { sessionStorage.removeItem('pv_adopt_tries'); } catch { /* noop */ }
         }
         return data;
     } catch (e) {
@@ -189,8 +204,8 @@ export const useStore = create(persist((set, get) => ({
     sessionTakeover: null,
 
     flagSessionTakeover: (info = {}) => {
-        if (get().sessionTakeover) return; // ya avisado, no repetir
-        console.warn('⚠️ Sesión tomada por otro usuario en otra pestaña:', info);
+        if (get().sessionTakeover) return; // ya en marcha, no repetir
+        console.warn('⚠️ La sesión del navegador cambió en otra pestaña:', info);
         set({
             sessionTakeover: {
                 previousUserName: get().currentUser?.name || get().currentUser?.username || null,
@@ -198,6 +213,116 @@ export const useStore = create(persist((set, get) => ({
                 at: new Date().toISOString(),
             },
         });
+        // No basta con bloquear: la pestaña debe SEGUIR a la sesión real. Si hay una
+        // cuenta activa, se adopta; si se cerró sesión, se cierra aquí también.
+        get().adoptServerSession();
+    },
+
+    /**
+     * Alinea esta pestaña con la sesión que realmente tiene el navegador.
+     *
+     * La cookie es del navegador entero: si en otra pestaña entraron con otra cuenta,
+     * esta se queda mostrando una cuenta que ya no existe. En vez de dejarla pegada,
+     * se le pregunta al servidor de quién es la sesión y se adopta esa cuenta.
+     * Si ya no hay sesión válida (cierre de sesión), se cierra aquí también.
+     *
+     * Se llama SIN expectedUserId a propósito: es justamente la llamada que resuelve
+     * la discrepancia, así que no debe ser rechazada por el candado del servidor.
+     */
+    adoptServerSession: async () => {
+        // Tope anti-bucle: adoptar termina en recarga, y si por lo que sea la pestaña
+        // volviera a detectar discrepancia recargaría sin parar. Al tercer intento en
+        // la misma pestaña se cierra sesión y se manda al login, que siempre resuelve.
+        try {
+            const tries = Number(sessionStorage.getItem('pv_adopt_tries') || 0) + 1;
+            sessionStorage.setItem('pv_adopt_tries', String(tries));
+            if (tries > 2) {
+                console.warn('🚪 Demasiados intentos de adoptar la sesión — al login');
+                sessionStorage.removeItem('pv_adopt_tries');
+                get().logout();
+                if (typeof window !== 'undefined') window.location.replace('/login');
+                return { success: false };
+            }
+        } catch { /* sin sessionStorage: seguimos sin tope */ }
+
+        try {
+            const r = await fetch('/api/data/actions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ action: 'sessionUser' }),
+            });
+            const data = await r.json().catch(() => ({}));
+
+            if (!data?.success || !data.user) {
+                // Sin sesión válida: la cerraron en otra pestaña.
+                console.warn('🚪 La sesión del navegador ya no es válida — cerrando esta pestaña');
+                get().logout();
+                if (typeof window !== 'undefined') window.location.replace('/login');
+                return { success: false };
+            }
+
+            const { user, companies, activeCompanyId } = data;
+            const activeCompany = companies.find(c => c.id === activeCompanyId) || companies[0];
+            console.log('🔄 Esta pestaña adopta la sesión de:', user.name || user.username);
+
+            fetchInProgress = false; // permitir que fetchInitialData vuelva a correr
+            set({
+                currentUser: user,
+                availableCompanies: companies,
+                activeCompanyId: activeCompany.id,
+                currentCompanyTimezone: activeCompany.timezone || 'America/Santiago',
+                currentCurrency: activeCompany.currency || 'CLP',
+                currentUserCompanyRole: activeCompany.role,
+                inventoryAdjustmentMode: activeCompany.inventory_adjustment_mode === 1,
+                sessionTakeover: null,
+                // Datos de la cuenta anterior: se vacían para no mezclarlos. El carrito
+                // también, o el usuario nuevo heredaría el ticket a medio cobrar del
+                // anterior. Se repite en el guardado manual de abajo para que ambas
+                // escrituras coincidan, gane la que gane.
+                cashRegister: null,
+                registerStats: { balance: 0, sales: 0, movements_in: 0, movements_out: 0, initial: 0, transactions: [] },
+                carts: [{ id: 1, name: 'Ticket 1', items: [], client: null, createdAt: Date.now() }],
+                activeCartId: 1,
+                nextCartId: 2,
+                posSelectedClient: null,
+            });
+            setTabUserId(user.id);
+
+            // Guardado MANUAL antes de recargar, igual que en login(): el guardado
+            // automático del store no alcanza a escribir antes de que la recarga corte
+            // la página, y la pestaña volvía a arrancar con la cuenta anterior —
+            // detectaba la discrepancia otra vez y entraba en un ciclo de recargas.
+            try {
+                localStorage.setItem('pos-storage', JSON.stringify({
+                    state: {
+                        currentUser: user,
+                        activeCompanyId: activeCompany.id,
+                        availableCompanies: companies,
+                        currentCompanyTimezone: activeCompany.timezone || 'America/Santiago',
+                        currentCurrency: activeCompany.currency || 'CLP',
+                        currentUserCompanyRole: activeCompany.role,
+                        inventoryAdjustmentMode: activeCompany.inventory_adjustment_mode === 1,
+                        darkMode: get().darkMode,
+                        // Carrito vacío: los tickets eran de la cuenta anterior.
+                        carts: [{ id: 1, name: 'Ticket 1', items: [], client: null, createdAt: Date.now() }],
+                        activeCartId: 1,
+                        nextCartId: 2,
+                    },
+                    version: 0,
+                }));
+            } catch (e) {
+                console.warn('No se pudo guardar la sesión adoptada:', e);
+            }
+
+            // Recargar para arrancar limpio con la cuenta nueva (permisos, catálogo,
+            // caja y carritos de la otra cuenta no deben sobrevivir).
+            if (typeof window !== 'undefined') window.location.reload();
+            return { success: true };
+        } catch (e) {
+            console.error('❌ No se pudo adoptar la sesión del navegador:', e);
+            return { success: false };
+        }
     },
 
     currentUserCompanyRole: null,
@@ -1507,8 +1632,10 @@ export const useStore = create(persist((set, get) => ({
         // Reset fetch lock so login can trigger fetchInitialData again
         fetchInProgress = false;
 
-        // Esta pestaña deja de actuar a nombre de nadie.
+        // Esta pestaña deja de actuar a nombre de nadie, y se avisa a las demás:
+        // la cookie es del navegador entero, así que el cierre las afecta a todas.
         setTabUserId(null);
+        broadcastLogout();
 
         // Limpiar localStorage
         if (currentUser) {

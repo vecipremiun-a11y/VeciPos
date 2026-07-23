@@ -72,4 +72,44 @@ async function bootstrap(turso, companyId) {
     };
 }
 
-export const bootstrapActions = { bootstrap, userCompanies };
+// Reconstruye la sesión a partir de la cookie, sin pedir contraseña.
+//
+// La cookie de sesión es del NAVEGADOR, no de la pestaña. Si en una pestaña se
+// inicia sesión con otro usuario, las demás quedan mostrando al anterior. Con esto
+// esas pestañas pueden adoptar en silencio la cuenta que realmente tiene la sesión,
+// en vez de quedarse pegadas en una cuenta que ya se cerró.
+//
+// Devuelve la misma forma que /api/auth/login (usuario sin contraseña, empresas y
+// empresa activa) para que el cliente reutilice el mismo camino de arranque.
+async function sessionUser(turso, session) {
+    const uid = session?.uid ?? null;
+    if (!uid) return { success: false, error: 'Sin sesión' };
+
+    const [userRes, companiesRes] = await turso.batch([
+        { sql: 'SELECT * FROM users WHERE id = ?', args: [uid] },
+        {
+            sql: `SELECT c.id, c.name, c.timezone, c.inventory_adjustment_mode, c.currency,
+                         c.credit_block_mode, uc.role, c.status, c.trial_ends_at,
+                         c.subscription_id, c.access_until
+                  FROM user_companies uc
+                  JOIN companies c ON uc.company_id = c.id
+                  WHERE uc.user_id = ? AND c.status IN ('active', 'trial', 'past_due', 'blocked')
+                  ORDER BY c.id`,
+            args: [uid],
+        },
+    ], 'read');
+
+    if (userRes.rows.length === 0) return { success: false, error: 'Usuario no encontrado' };
+    const { password: _pw, ...user } = userRes.rows[0]; // nunca devolver el hash
+    const companies = companiesRes.rows;
+    if (companies.length === 0) return { success: false, error: 'Este usuario no tiene empresas asignadas.' };
+
+    // Misma resolución de empresa activa que el login: home → primera.
+    const activeCompanyId = (user.company_id && companies.some(c => c.id === user.company_id))
+        ? user.company_id
+        : companies[0].id;
+
+    return { success: true, user, companies, activeCompanyId };
+}
+
+export const bootstrapActions = { bootstrap, userCompanies, sessionUser };

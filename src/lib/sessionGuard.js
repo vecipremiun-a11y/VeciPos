@@ -26,14 +26,25 @@ function getChannel() {
         channel = new BroadcastChannel(CHANNEL_NAME);
         channel.onmessage = (ev) => {
             const msg = ev?.data;
-            if (!msg || msg.type !== 'login') return;
-            // Otra pestaña inició sesión. Si es con otro usuario, esta quedó zombi.
-            if (tabUserId != null && Number(msg.userId) !== Number(tabUserId)) {
-                listeners.forEach(cb => { try { cb(msg); } catch { /* noop */ } });
+            if (!msg) return;
+            // Cierre de sesión en otra pestaña: la cookie ya no vale para nadie,
+            // así que TODAS las pestañas deben cerrar.
+            if (msg.type === 'logout') {
+                if (tabUserId != null) emit(msg);
+                return;
+            }
+            // Inicio de sesión en otra pestaña con OTRO usuario: esta pestaña quedó
+            // mostrando una cuenta que ya no es la de la sesión.
+            if (msg.type === 'login' && tabUserId != null && Number(msg.userId) !== Number(tabUserId)) {
+                emit(msg);
             }
         };
     }
     return channel;
+}
+
+function emit(msg) {
+    listeners.forEach(cb => { try { cb(msg); } catch { /* noop */ } });
 }
 
 /** Registra a nombre de quién actúa esta pestaña. `null` al cerrar sesión. */
@@ -54,8 +65,16 @@ export function broadcastLogin(userId) {
     } catch { /* el canal no está disponible: queda el candado del servidor */ }
 }
 
+/** Avisa a las demás pestañas que aquí se cerró sesión: deben cerrar también. */
+export function broadcastLogout() {
+    try {
+        getChannel()?.postMessage({ type: 'logout', at: Date.now() });
+    } catch { /* noop */ }
+}
+
 /**
- * Se dispara cuando otra pestaña tomó la sesión con un usuario distinto.
+ * Se dispara cuando la sesión del navegador cambió en otra pestaña: alguien entró
+ * con otra cuenta (`{type:'login', userId}`) o cerró sesión (`{type:'logout'}`).
  * Devuelve la función para desuscribirse.
  */
 export function onSessionTakeover(cb) {
