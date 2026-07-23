@@ -4,7 +4,6 @@ import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFrom
 import { localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
 import { syncCatalogIncremental } from '../lib/db/sync';
 import { markActivity } from '../lib/smartPolling';
-import { setTabUserId, getTabUserId, broadcastLogin } from '../lib/sessionGuard';
 import { getModuleByKey } from '../constants/modules';
 import { getPlanLevel } from '../config/mercadopago';
 import bcrypt from 'bcryptjs';
@@ -33,16 +32,10 @@ async function userApiCall(action, payload = {}) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            // expectedUserId va al final: identifica a nombre de quién cree actuar ESTA
-            // pestaña. El servidor lo compara con la cookie y corta si no coinciden.
-            body: JSON.stringify({ action, ...payload, expectedUserId: getTabUserId() }),
+            body: JSON.stringify({ action, ...payload }),
         });
         const data = await r.json().catch(() => ({ success: false, error: 'Respuesta inválida del servidor' }));
         if (data && typeof data === 'object') data._status = r.status;
-        // La sesión del navegador ya es de otro usuario: esta pestaña quedó zombi.
-        if (data?.error === 'SESSION_MISMATCH') {
-            try { useStore.getState().flagSessionTakeover(data); } catch { /* noop */ }
-        }
         return data;
     } catch (e) {
         // _network: la petición ni llegó al servidor (offline / caída) — addSale usa
@@ -182,23 +175,6 @@ export const useStore = create(persist((set, get) => ({
     supportTickets: [],
     currentTicket: null,
     unreadSupportCount: 0,
-
-    // Pestaña zombi: se inició sesión con otro usuario en otra pestaña del mismo
-    // navegador, así que esta ya no puede operar (ver src/lib/sessionGuard.js).
-    // Lo levanta el aviso entre pestañas o el rechazo SESSION_MISMATCH del servidor.
-    sessionTakeover: null,
-
-    flagSessionTakeover: (info = {}) => {
-        if (get().sessionTakeover) return; // ya avisado, no repetir
-        console.warn('⚠️ Sesión tomada por otro usuario en otra pestaña:', info);
-        set({
-            sessionTakeover: {
-                previousUserName: get().currentUser?.name || get().currentUser?.username || null,
-                sessionUserId: info.sessionUserId ?? null,
-                at: new Date().toISOString(),
-            },
-        });
-    },
 
     currentUserCompanyRole: null,
 
@@ -1440,15 +1416,8 @@ export const useStore = create(persist((set, get) => ({
                 activeCompanyId: activeCompanyId,
                 currentCompanyTimezone: activeCompany.timezone || 'America/Santiago',
                 currentUserCompanyRole: activeCompany.role,
-                inventoryAdjustmentMode: activeCompany.inventory_adjustment_mode === 1,
-                sessionTakeover: null,
+                inventoryAdjustmentMode: activeCompany.inventory_adjustment_mode === 1
             });
-
-            // 4b. Esta pestaña pasa a actuar a nombre de `user`, y se avisa a las demás
-            // pestañas del navegador: la cookie de sesión que acabamos de recibir las
-            // afecta a todas. Las que tenían otro usuario quedan bloqueadas.
-            setTabUserId(user.id);
-            broadcastLogin(user.id);
 
             // 5. Guardar en localStorage
             localStorage.setItem(`activeCompanyId:${user.id}`, activeCompanyId);
@@ -1507,9 +1476,6 @@ export const useStore = create(persist((set, get) => ({
         // Reset fetch lock so login can trigger fetchInitialData again
         fetchInProgress = false;
 
-        // Esta pestaña deja de actuar a nombre de nadie.
-        setTabUserId(null);
-
         // Limpiar localStorage
         if (currentUser) {
             localStorage.removeItem(`activeCompanyId:${currentUser.id}`);
@@ -1545,8 +1511,7 @@ export const useStore = create(persist((set, get) => ({
             cashRegister: null,
             posSelectedClient: null,
             isLoading: false,
-            error: null,
-            sessionTakeover: null
+            error: null
         });
 
         console.log('✅ Logout complete - All state cleared');
@@ -3868,15 +3833,14 @@ export const useStore = create(persist((set, get) => ({
 
     openRegister: async (userId, amount) => {
         try {
-            const { activeCompanyId } = get();
+            const { activeCompanyId, currentCompanyTimezone } = get();
 
-            // Server-side: dup-check de caja abierta + INSERT (misma validación crítica).
-            // La hora de apertura la pone el servidor: si la mandaba el dispositivo y su
-            // zona horaria no era la del local, la caja podía no sumar ninguna venta.
+            // Server-side: dup-check de caja abierta + INSERT (misma validación crítica)
             const r = await userApiCall('registerOpen', {
                 companyId: activeCompanyId,
                 userId,
                 amount,
+                openingTime: getNowInCompanyTime(currentCompanyTimezone).toISOString(),
             });
 
             if (!r?.success) {
@@ -3902,6 +3866,7 @@ export const useStore = create(persist((set, get) => ({
             const r = await userApiCall('registerClose', {
                 companyId: get().activeCompanyId,
                 registerId, finalAmount, observations, difference,
+                closingTime: getNowInCompanyTime(get().currentCompanyTimezone).toISOString(),
             });
             if (!r?.success) return false;
             set({ cashRegister: null });
@@ -7205,10 +7170,6 @@ export const useStore = create(persist((set, get) => ({
         darkMode: state.darkMode
     }),
     onRehydrateStorage: () => (state) => {
-        // Al recargar, esta pestaña vuelve a actuar a nombre del usuario persistido.
-        // Si la cookie del navegador ya es de otro, el servidor la cortará con
-        // SESSION_MISMATCH en la primera llamada (ver src/lib/sessionGuard.js).
-        setTabUserId(state?.currentUser?.id ?? null);
         state?.setHasHydrated(true);
     }
 }));
