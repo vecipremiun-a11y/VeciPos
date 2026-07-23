@@ -11,7 +11,7 @@ async function registerCheck(turso, companyId, session, { userId }) {
     return { success: true, register: r.rows[0] || null };
 }
 
-async function registerOpen(turso, companyId, session, { userId, amount, openingTime }) {
+async function registerOpen(turso, companyId, session, { userId, amount }) {
     if (!userId) return { success: false, error: 'Falta userId' };
 
     // Validación crítica: no permitir 2 cajas abiertas del mismo usuario
@@ -27,18 +27,23 @@ async function registerOpen(turso, companyId, session, { userId, amount, opening
         };
     }
 
+    // La hora de apertura la pone el SERVIDOR, no el dispositivo. Antes llegaba del
+    // cliente convertida a la zona de la empresa: si la zona horaria del equipo no
+    // coincidía con la del local, la apertura quedaba corrida y, si quedaba en el
+    // futuro, NINGUNA venta entraba a la caja. `openingTime` se ignora a propósito.
     const result = await turso.execute({
         sql: "INSERT INTO cash_registers (user_id, opening_amount, opening_time, status, company_id) VALUES (?, ?, ?, 'open', ?) RETURNING *",
-        args: [userId, amount, openingTime || new Date().toISOString(), companyId],
+        args: [userId, amount, new Date().toISOString(), companyId],
     });
     return { success: true, register: result.rows[0] };
 }
 
-async function registerClose(turso, companyId, session, { registerId, finalAmount, observations, difference, closingTime }) {
+async function registerClose(turso, companyId, session, { registerId, finalAmount, observations, difference }) {
     if (!registerId) return { success: false, error: 'Falta registerId' };
+    // Igual que la apertura: la hora la pone el servidor, no el reloj del dispositivo.
     await turso.execute({
         sql: "UPDATE cash_registers SET status = 'closed', closing_time = ?, final_amount = ?, observations = ?, difference = ? WHERE id = ? AND company_id = ?",
-        args: [closingTime || new Date().toISOString(), finalAmount, observations ?? null, difference ?? null, registerId, companyId],
+        args: [new Date().toISOString(), finalAmount, observations ?? null, difference ?? null, registerId, companyId],
     });
     return { success: true };
 }
@@ -84,21 +89,35 @@ async function registerActiveList(turso, companyId) {
 
     const queries = [];
     registers.forEach(reg => {
+        // Mismo criterio de pertenencia que registerStats, para que el balance que ve
+        // el dueño en "otras cajas abiertas" coincida con el que ve cada cajero.
+        // Incluye status != 'cancelled', que antes faltaba aquí.
+        const owns = saleBelongsToRegister(reg.id, reg.user_id, reg.opening_time);
         queries.push({
-            sql: 'SELECT total, payment_method, payment_details FROM sales WHERE user_id = ? AND date >= ? AND company_id = ?',
-            args: [reg.user_id, reg.opening_time, companyId],
+            sql: `SELECT total, payment_method, payment_details FROM sales
+                  WHERE company_id = ? AND status != 'cancelled' AND ${owns.sql}`,
+            args: [companyId, ...owns.args],
         });
         queries.push({
             sql: 'SELECT type, amount FROM cash_movements WHERE register_id = ? AND company_id = ?',
             args: [reg.id, companyId],
+        });
+        queries.push({
+            // Efectivo de encargos: también está en el cajón (ver registerStats).
+            sql: `SELECT COALESCE(SUM(pp.amount), 0) AS total
+                  FROM preorder_payments pp
+                  JOIN preorders po ON pp.preorder_id = po.id
+                  WHERE pp.register_id = ? AND pp.method = 'Efectivo' AND po.status != 'canceled'`,
+            args: [reg.id],
         });
     });
     const results = await turso.batch(queries, 'read');
 
     const out = [];
     registers.forEach((reg, index) => {
-        const salesRes = results[index * 2];
-        const movRes = results[index * 2 + 1];
+        const salesRes = results[index * 3];
+        const movRes = results[index * 3 + 1];
+        const preorderCash = parseFloat(results[index * 3 + 2].rows[0]?.total) || 0;
 
         let cashSales = 0;
         salesRes.rows.forEach(sale => {
@@ -118,9 +137,25 @@ async function registerActiveList(turso, companyId) {
             else movesOut += amount;
         });
 
-        out.push({ ...reg, currentBalance: reg.opening_amount + cashSales + movesIn - movesOut });
+        out.push({ ...reg, currentBalance: reg.opening_amount + cashSales + preorderCash + movesIn - movesOut });
     });
     return { success: true, registers: out };
+}
+
+// Pertenencia de una venta a una caja.
+//
+// Desde la migración 0012 la venta guarda su `register_id`, así que la relación es
+// exacta. Las ventas anteriores tienen NULL y se resuelven con la heurística vieja
+// (mismo usuario + posterior a la apertura), que es frágil: depende de quién tenía la
+// sesión del navegador y de la hora que puso el dispositivo al abrir la caja.
+//
+// Devuelve el trozo de WHERE y sus argumentos, para que todas las lecturas de caja
+// usen exactamente el mismo criterio.
+function saleBelongsToRegister(registerId, userId, openingTime) {
+    return {
+        sql: '(register_id = ? OR (register_id IS NULL AND user_id = ? AND date >= ?))',
+        args: [registerId, userId, openingTime],
+    };
 }
 
 async function registerStats(turso, companyId, session, { registerId }) {
@@ -131,6 +166,7 @@ async function registerStats(turso, companyId, session, { registerId }) {
     if (regRes.rows.length === 0) return { success: true, stats: null };
     const register = regRes.rows[0];
     const openingTime = register.opening_time;
+    const owns = saleBelongsToRegister(registerId, register.user_id, openingTime);
 
     const [salesStatsRes, movementsRes, recentSalesRes, preorderPaymentsRes, mixedSalesRes] = await turso.batch([
         {
@@ -142,8 +178,8 @@ async function registerStats(turso, companyId, session, { registerId }) {
                     SUM(CASE WHEN payment_method = 'Crédito' THEN total ELSE 0 END) as credit_total,
                     SUM(total) as total_sales_amount
                   FROM sales
-                  WHERE user_id = ? AND date >= ? AND company_id = ? AND status != 'cancelled'`,
-            args: [register.user_id, openingTime, companyId],
+                  WHERE company_id = ? AND status != 'cancelled' AND ${owns.sql}`,
+            args: [companyId, ...owns.args],
         },
         {
             sql: 'SELECT * FROM cash_movements WHERE register_id = ? AND company_id = ?',
@@ -151,25 +187,29 @@ async function registerStats(turso, companyId, session, { registerId }) {
         },
         {
             sql: `SELECT id, date, total, payment_method FROM sales
-                  WHERE user_id = ? AND date >= ? AND company_id = ? AND status != 'cancelled'
+                  WHERE company_id = ? AND status != 'cancelled' AND ${owns.sql}
                     AND (payment_method = 'Efectivo' OR payment_method = 'Mixto')
                   ORDER BY date DESC LIMIT 20`,
-            args: [register.user_id, openingTime, companyId],
+            args: [companyId, ...owns.args],
         },
         {
-            sql: `SELECT pp.method, SUM(pp.amount) as total
+            // Incluye 'Efectivo': un abono o pago final de encargo cobrado en efectivo
+            // entra al cajón igual que una venta, pero antes solo se leían Tarjeta y
+            // Transferencia y esa plata no aparecía en ninguna parte de la caja.
+            // Filas individuales (no agregadas) para poder listarlas junto a las ventas.
+            sql: `SELECT pp.id, pp.method, pp.amount, pp.created_at, pp.preorder_id, po.client_name
                   FROM preorder_payments pp
                   JOIN preorders po ON pp.preorder_id = po.id
-                  WHERE pp.register_id = ? AND pp.method IN ('Tarjeta', 'Transferencia')
+                  WHERE pp.register_id = ? AND pp.method IN ('Efectivo', 'Tarjeta', 'Transferencia')
                     AND po.status != 'canceled'
-                  GROUP BY pp.method`,
+                  ORDER BY pp.created_at DESC LIMIT 200`,
             args: [registerId],
         },
         {
             sql: `SELECT total, payment_details FROM sales
-                  WHERE user_id = ? AND date >= ? AND company_id = ? AND status != 'cancelled'
-                    AND payment_method = 'Mixto'`,
-            args: [register.user_id, openingTime, companyId],
+                  WHERE company_id = ? AND status != 'cancelled'
+                    AND payment_method = 'Mixto' AND ${owns.sql}`,
+            args: [companyId, ...owns.args],
         },
     ], 'read');
 
@@ -192,11 +232,27 @@ async function registerStats(turso, companyId, session, { registerId }) {
         });
     });
 
+    const preorderCashTransactions = [];
     (preorderPaymentsRes.rows || []).forEach(r => {
-        const amt = parseFloat(r.total) || 0;
+        const amt = parseFloat(r.amount) || 0;
         if (r.method === 'Tarjeta') salesBreakdown.card += amt;
         else if (r.method === 'Transferencia') salesBreakdown.transfer += amt;
+        else if (r.method === 'Efectivo') {
+            // El efectivo de encargos sí está en el cajón: suma al saldo igual que una
+            // venta. Sin esto el cajero cuadraba siempre con un sobrante inexplicable.
+            cashSalesTotal += amt;
+            salesBreakdown.cash += amt;
+            preorderCashTransactions.push({
+                type: 'VENTA',
+                amount: amt,
+                total: amt,
+                date: r.created_at,
+                id: `preorder_${r.id}`,
+                reason: `Encargo #${r.preorder_id}${r.client_name ? ' · ' + r.client_name : ''}`,
+            });
+        }
     });
+    salesBreakdown.total += preorderCashTransactions.reduce((s, t) => s + t.amount, 0);
 
     const salesTransactions = recentSalesRes.rows.map(sale => ({
         type: 'VENTA', amount: parseFloat(sale.total), total: parseFloat(sale.total), date: sale.date, id: sale.id,
@@ -215,7 +271,7 @@ async function registerStats(turso, companyId, session, { registerId }) {
         }
     });
 
-    const allTransactions = [...salesTransactions, ...movementTransactions]
+    const allTransactions = [...salesTransactions, ...preorderCashTransactions, ...movementTransactions]
         .sort((a, b) => new Date(b.date) - new Date(a.date));
 
     return {
@@ -241,21 +297,22 @@ async function registerMethodTransactions(turso, companyId, session, { registerI
     });
     if (regRes.rows.length === 0) return { success: false, transactions: [] };
     const { user_id: userId, opening_time: openingTime } = regRes.rows[0];
+    const owns = saleBelongsToRegister(registerId, userId, openingTime);
 
     const [salesRes, mixedRes, preorderRes] = await turso.batch([
         {
             sql: `SELECT id, date, total, payment_method, payment_details FROM sales
-                  WHERE user_id = ? AND date >= ? AND company_id = ?
-                    AND status != 'cancelled' AND payment_method = ?
+                  WHERE company_id = ? AND status != 'cancelled' AND payment_method = ?
+                    AND ${owns.sql}
                   ORDER BY date DESC LIMIT 100`,
-            args: [userId, openingTime, companyId, method],
+            args: [companyId, method, ...owns.args],
         },
         {
             sql: `SELECT id, date, total, payment_details FROM sales
-                  WHERE user_id = ? AND date >= ? AND company_id = ?
-                    AND status != 'cancelled' AND payment_method = 'Mixto'
+                  WHERE company_id = ? AND status != 'cancelled' AND payment_method = 'Mixto'
+                    AND ${owns.sql}
                   ORDER BY date DESC LIMIT 100`,
-            args: [userId, openingTime, companyId],
+            args: [companyId, ...owns.args],
         },
         {
             sql: `SELECT pp.id, pp.amount, pp.created_at, pp.type, po.id as preorder_id,
@@ -361,9 +418,14 @@ async function cashMovementsList(turso, companyId, session, { limit = 20, offset
 
 async function registerReport(turso, companyId, session, { register }) {
     if (!register?.id) return { success: false, error: 'Falta register' };
+    // Caja ya cerrada: las ventas propias se identifican por register_id, y las
+    // anteriores a la migración 0012 por la ventana apertura→cierre del mismo usuario.
     const salesRes = await turso.execute({
-        sql: 'SELECT * FROM sales WHERE user_id = ? AND date >= ? AND date <= ? AND company_id = ?',
-        args: [register.user_id, register.opening_time, register.closing_time, companyId],
+        sql: `SELECT * FROM sales
+              WHERE company_id = ?
+                AND (register_id = ?
+                     OR (register_id IS NULL AND user_id = ? AND date >= ? AND date <= ?))`,
+        args: [companyId, register.id, register.user_id, register.opening_time, register.closing_time],
     });
 
     let cashSalesTotal = 0;

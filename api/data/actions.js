@@ -48,7 +48,25 @@ export default async function handler(req, res) {
 
     try {
         const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-        const { action, companyId } = body;
+        const { action, companyId, expectedUserId } = body;
+
+        // 1b) Anti-"pestaña zombi". La cookie de sesión es del NAVEGADOR, no de la
+        // pestaña: si en otra pestaña se inicia sesión con otro usuario, esta seguiría
+        // mostrando al anterior pero escribiendo a nombre del nuevo (así se perdieron
+        // ventas de una cajera dentro de la caja de otro). La pestaña manda a nombre de
+        // quién cree actuar; si no coincide con la sesión real, se corta ANTES de tocar
+        // la base.
+        //
+        // Se responde 200 a propósito: es un rechazo de negocio, no un fallo de red. Con
+        // 4xx/5xx el cliente encolaría la venta y la reintentaría para siempre.
+        if (expectedUserId != null && Number(expectedUserId) !== Number(session.uid)) {
+            return res.status(200).json({
+                success: false,
+                error: 'SESSION_MISMATCH',
+                message: 'Se inició sesión con otro usuario en esta misma ventana del navegador. Esta pestaña quedó desactualizada y no puede seguir operando.',
+                sessionUserId: session.uid,
+            });
+        }
 
         const turso = getTurso();
 

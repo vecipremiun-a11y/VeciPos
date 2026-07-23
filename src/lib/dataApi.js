@@ -1,13 +1,17 @@
 // Helper compartido para páginas que consultan el endpoint de datos autenticado
 // (/api/data/actions — sesión + membresía validadas server-side). Mismo contrato
 // que userApiCall del store. Fase 1 · Paso 19.
+import { getTabUserId } from './sessionGuard';
+
 export async function dataApiCall(action, payload = {}) {
     try {
         const r = await fetch('/api/data/actions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ action, ...payload }),
+            // Identifica a nombre de quién cree actuar esta pestaña; el servidor corta
+            // si la cookie ya es de otro usuario (ver src/lib/sessionGuard.js).
+            body: JSON.stringify({ action, ...payload, expectedUserId: getTabUserId() }),
         });
         const data = await r.json().catch(() => ({ success: false, error: 'Respuesta inválida del servidor' }));
         if (data && typeof data === 'object') data._status = r.status;

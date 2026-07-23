@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useNavigate } from 'react-router-dom';
-import { DollarSign, ArrowUpRight, ArrowDownLeft, Clock, ShoppingCart, LogOut, X, TrendingUp, TrendingDown, CreditCard, ArrowLeftRight, Banknote } from 'lucide-react';
-import { format } from 'date-fns';
+import { DollarSign, ArrowUpRight, ArrowDownLeft, Clock, ShoppingCart, LogOut, X, TrendingUp, TrendingDown, CreditCard, ArrowLeftRight, Banknote, AlertTriangle, Users, Landmark } from 'lucide-react';
+import { format, isToday, differenceInHours } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '../lib/utils';
 import CashClosingModal from './CashClosingModal';
@@ -14,9 +14,13 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
 import { createSmartInterval } from '../lib/smartPolling';
 
+// A partir de aquí se considera que la caja quedó abierta de un turno anterior.
+// 18 h cubre un turno largo sin molestar, y detecta la caja olvidada de días.
+const STALE_REGISTER_HOURS = 18;
+
 const CashStatusWidget = () => {
     // FASE 10 · useShallow para aislar re-renders.
-    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency, getRegisterMethodTransactions } = useStore(
+    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency, getRegisterMethodTransactions, activeRegisters, fetchActiveRegisters } = useStore(
         useShallow(s => ({
             cashRegister: s.cashRegister,
             registerStats: s.registerStats,
@@ -26,6 +30,8 @@ const CashStatusWidget = () => {
             currentUser: s.currentUser,
             currentCurrency: s.currentCurrency,
             getRegisterMethodTransactions: s.getRegisterMethodTransactions,
+            activeRegisters: s.activeRegisters,
+            fetchActiveRegisters: s.fetchActiveRegisters,
         }))
     );
     const { can } = usePermissions();
@@ -33,6 +39,7 @@ const CashStatusWidget = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [txModalType, setTxModalType] = useState(null); // 'IN' or 'OUT'
     const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
+    const [showStaleNotice, setShowStaleNotice] = useState(false);
     const [successModalData, setSuccessModalData] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
     // Pestaña activa del desglose de movimientos. Tarjeta/Transferencia se
@@ -84,8 +91,41 @@ const CashStatusWidget = () => {
         }
     }, [cashRegister, refreshRegisterStats]);
 
+    // Al abrir el desplegable, traer las demás cajas abiertas del local. Es la única
+    // forma de que el dueño entienda que su número no es "lo que vendió la tienda":
+    // cada cajero tiene su propia caja y solo ve la suya.
+    useEffect(() => {
+        if (isOpen) fetchActiveRegisters();
+    }, [isOpen, fetchActiveRegisters]);
+
+    // Caja olvidada abierta de días anteriores: avisar al entrar al POS. Una vez por
+    // caja y por sesión del navegador, para avisar sin volverse molesto.
+    useEffect(() => {
+        if (!cashRegister?.opening_time) return;
+        if (differenceInHours(new Date(), new Date(cashRegister.opening_time)) < STALE_REGISTER_HOURS) return;
+        const key = `pv_stale_notice_${cashRegister.id}`;
+        try {
+            if (sessionStorage.getItem(key)) return;
+            sessionStorage.setItem(key, '1');
+        } catch { /* sin sessionStorage: se avisa igual */ }
+        setShowStaleNotice(true);
+    }, [cashRegister?.id, cashRegister?.opening_time]);
+
     // If no register is open AND no success data to show, render nothing
     if (!cashRegister && !successModalData) return null;
+
+    // La caja puede llevar días abierta (pasó en producción: 4,6 días). Mostrar solo
+    // "9:08 AM" hace creer que es de hoy, así que se añade la fecha y un aviso.
+    const openedAt = cashRegister ? new Date(cashRegister.opening_time) : null;
+    const openedToday = openedAt ? isToday(openedAt) : true;
+    const hoursOpen = openedAt ? differenceInHours(new Date(), openedAt) : 0;
+    const isStale = hoursOpen >= STALE_REGISTER_HOURS;
+    const staleLabel = hoursOpen >= 48
+        ? `abierta hace ${Math.floor(hoursOpen / 24)} días`
+        : `abierta hace ${hoursOpen} h`;
+
+    const otherRegisters = (activeRegisters || []).filter(r => Number(r.id) !== Number(cashRegister?.id));
+    const ownerName = currentUser?.name || currentUser?.username || '';
 
     const handleInitialCloseClick = () => {
         setIsClosingModalOpen(true);
@@ -148,12 +188,20 @@ const CashStatusWidget = () => {
                         className="h-10 px-4 rounded-xl bg-[var(--glass-bg)] border-[var(--glass-border)] flex items-center gap-3 hover:border-[var(--color-primary)] transition-all group"
                     >
                         <div className="flex flex-col items-end">
+                            {/* Mismo formato que el desplegable: antes el botón truncaba
+                                con Math.floor y mostraba $195.049 donde el detalle decía
+                                $195.050, y el cajero desconfiaba del número. */}
                             <span className="text-[var(--color-primary)] font-bold text-lg leading-none">
-                                {formatCurrency(Math.floor(registerStats.balance), currentCurrency)}
+                                {formatCurrency(registerStats.balance, currentCurrency)}
                             </span>
-                            <span className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1">
-                                <Clock size={10} />
-                                Desde {format(new Date(cashRegister.opening_time), 'h:mm a', { locale: es })}
+                            <span className={cn(
+                                "text-[10px] flex items-center gap-1",
+                                isStale ? "text-amber-400 font-semibold" : "text-[var(--color-text-muted)]"
+                            )}>
+                                {isStale ? <AlertTriangle size={10} /> : <Clock size={10} />}
+                                {openedToday
+                                    ? `Desde ${format(openedAt, 'h:mm a', { locale: es })}`
+                                    : `Desde ${format(openedAt, "d MMM, h:mm a", { locale: es })}`}
                             </span>
                         </div>
                         <div className="w-8 h-8 rounded-lg bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)] group-hover:bg-[var(--color-primary)] group-hover:text-black transition-colors">
@@ -168,8 +216,12 @@ const CashStatusWidget = () => {
                             <div className="absolute inset-4 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 w-auto sm:w-[360px] glass-card p-0 !bg-[#0f0f2d]/98 border-[var(--glass-border)] shadow-2xl overflow-hidden animate-[float_0.2s_ease-out] max-h-[90vh] flex flex-col rounded-2xl">
                                 {/* Header */}
                                 <div className="p-3 border-b border-[var(--glass-border)] flex justify-between items-center shrink-0">
-                                    <h3 className="font-bold text-[var(--color-text)] text-sm lg:text-base">Estado de Caja</h3>
-                                    <div className="flex items-center gap-2">
+                                    {/* "Mi caja · <nombre>": el número es de ESTE usuario, no del
+                                        local. Con dos cajeros a la vez, cada uno ve solo lo suyo. */}
+                                    <h3 className="font-bold text-[var(--color-text)] text-sm lg:text-base truncate">
+                                        Mi caja{ownerName ? <span className="text-[var(--color-text-muted)] font-medium"> · {ownerName}</span> : null}
+                                    </h3>
+                                    <div className="flex items-center gap-2 shrink-0">
                                         <div className="px-2 py-0.5 rounded bg-green-500/20 text-green-400 text-[10px] lg:text-xs font-bold border border-green-500/30">
                                             Turno Activo
                                         </div>
@@ -186,10 +238,26 @@ const CashStatusWidget = () => {
                                         <span className="text-3xl lg:text-4xl font-extrabold text-[var(--color-primary)] mb-0.5 text-glow">
                                             {formatCurrency(registerStats.balance, currentCurrency)}
                                         </span>
-                                        <span className="text-xs lg:text-sm text-[var(--color-text-muted)] font-medium">Saldo Actual en Caja</span>
+                                        <span className="text-xs lg:text-sm text-[var(--color-text-muted)] font-medium">Efectivo en caja · solo mis ventas</span>
+                                        <span className="text-[10px] lg:text-xs text-[var(--color-text-muted)] mt-1">
+                                            Abierta el {format(openedAt, "EEE d 'de' MMMM, h:mm a", { locale: es })}
+                                        </span>
                                     </div>
 
-                                    {/* Quick Stats Grid - 4 medios visibles del turno */}
+                                    {/* Caja arrastrada de días anteriores: el saldo ya no representa
+                                        lo que hay en el cajón. Pasó en producción con 4,6 días. */}
+                                    {isStale && (
+                                        <div className="mx-3 mt-3 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-2">
+                                            <AlertTriangle size={14} className="text-amber-400 mt-0.5 shrink-0" />
+                                            <p className="text-[11px] lg:text-xs text-amber-200/90 leading-relaxed">
+                                                Esta caja lleva <strong>{staleLabel}</strong>. El saldo viene acumulando
+                                                desde entonces, no es lo vendido hoy. Conviene cerrarla y abrir una nueva por turno.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {/* Desglose del turno. Solo Efectivo entra al saldo de arriba:
+                                        tarjeta, transferencia y crédito no están en el cajón. */}
                                     <div className="grid grid-cols-2 gap-2 p-3">
                                         <div className="p-2 lg:p-3 bg-green-500/5 rounded-xl border border-green-500/20 flex flex-col items-center">
                                             <Banknote size={14} className="text-green-400 mb-0.5" />
@@ -211,7 +279,43 @@ const CashStatusWidget = () => {
                                             <span className="text-base lg:text-lg font-bold text-orange-400">{formatCurrency(registerStats.movements_out, currentCurrency)}</span>
                                             <span className="text-[10px] lg:text-xs text-orange-300/60">Retiros</span>
                                         </div>
+                                        {/* Crédito: el dato ya venía en salesBreakdown pero no se
+                                            mostraba, así que una venta fiada desaparecía de la vista. */}
+                                        {(registerStats.salesBreakdown?.credit || 0) > 0 && (
+                                            <div className="p-2 lg:p-3 bg-rose-500/5 rounded-xl border border-rose-500/20 flex flex-col items-center col-span-2">
+                                                <Landmark size={14} className="text-rose-400 mb-0.5" />
+                                                <span className="text-base lg:text-lg font-bold text-rose-400">{formatCurrency(registerStats.salesBreakdown.credit, currentCurrency)}</span>
+                                                <span className="text-[10px] lg:text-xs text-rose-300/60">Crédito (por cobrar)</span>
+                                            </div>
+                                        )}
                                     </div>
+
+                                    {/* Las demás cajas abiertas del local. Sin esto, un cajero ve su
+                                        número quieto mientras el local vende y cree que el sistema
+                                        no suma — que fue justamente el reclamo del 22-jul. */}
+                                    {otherRegisters.length > 0 && (
+                                        <div className="mx-3 mb-3 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+                                            <div className="flex items-center gap-1.5 mb-2 text-[var(--color-text-muted)]">
+                                                <Users size={12} />
+                                                <span className="text-[11px] lg:text-xs font-bold uppercase tracking-wide">
+                                                    Otras cajas abiertas ahora
+                                                </span>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                {otherRegisters.map(r => (
+                                                    <div key={r.id} className="flex justify-between items-center text-xs">
+                                                        <span className="text-[var(--color-text)] truncate mr-2">{r.user_name || 'Sin nombre'}</span>
+                                                        <span className="font-bold text-[var(--color-text-muted)] shrink-0">
+                                                            {formatCurrency(r.currentBalance, currentCurrency)}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <p className="text-[10px] text-[var(--color-text-muted)] mt-2 leading-relaxed">
+                                                Sus ventas no suman en tu caja: cada cajero rinde la suya.
+                                            </p>
+                                        </div>
+                                    )}
 
                                     {/* Action Buttons */}
                                     <div className="grid grid-cols-2 gap-2 px-3 pb-3">
@@ -288,7 +392,9 @@ const CashStatusWidget = () => {
                                                                 </div>
                                                                 <div className="flex flex-col">
                                                                     <span className="font-bold text-[var(--color-text)] text-xs lg:text-sm truncate max-w-[100px] lg:max-w-[140px]">
-                                                                        {tx.type === 'VENTA' ? 'Venta (Efectivo)' :
+                                                                        {/* Los cobros de encargo en efectivo llegan como VENTA con
+                                                                            `reason` (el nº de encargo y el cliente). */}
+                                                                        {tx.type === 'VENTA' ? (tx.reason || 'Venta (Efectivo)') :
                                                                             tx.type === 'INGRESO' ? (tx.reason || 'Ingreso') :
                                                                                 (tx.reason || 'Retiro')}
                                                                     </span>
@@ -365,6 +471,42 @@ const CashStatusWidget = () => {
                         document.body
                     )}
                 </div>
+            )}
+
+            {/* Aviso de caja arrastrada de un turno anterior. Sale al entrar al POS,
+                una vez por caja y sesión. Reutiliza el cierre de caja de siempre. */}
+            {showStaleNotice && cashRegister && createPortal(
+                <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+                    <div className="glass-card w-full max-w-sm p-6 !bg-[#0f0f2d]/98 border border-amber-500/40 rounded-2xl text-center">
+                        <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400 mb-4">
+                            <AlertTriangle size={24} />
+                        </div>
+                        <h3 className="text-lg font-bold text-[var(--color-text)] mb-2">Tienes una caja sin cerrar</h3>
+                        <p className="text-sm text-[var(--color-text-muted)] mb-4 leading-relaxed">
+                            Está abierta desde el{' '}
+                            <strong className="text-[var(--color-text)]">
+                                {format(new Date(cashRegister.opening_time), "d 'de' MMMM, h:mm a", { locale: es })}
+                            </strong>{' '}
+                            ({staleLabel}). Mientras no la cierres, el saldo sigue sumando turnos
+                            anteriores y no refleja lo que hay en el cajón.
+                        </p>
+                        <div className="flex flex-col gap-2">
+                            <button
+                                onClick={() => { setShowStaleNotice(false); setIsClosingModalOpen(true); }}
+                                className="w-full py-2.5 rounded-xl bg-amber-400 text-black font-bold text-sm hover:bg-amber-300 transition-all"
+                            >
+                                Cerrar caja ahora
+                            </button>
+                            <button
+                                onClick={() => setShowStaleNotice(false)}
+                                className="w-full py-2 rounded-xl border border-[var(--glass-border)] text-[var(--color-text-muted)] font-medium text-sm hover:text-white transition-all"
+                            >
+                                Seguir vendiendo por ahora
+                            </button>
+                        </div>
+                    </div>
+                </div>,
+                document.body
             )}
 
             {/* Sub Modals */}
