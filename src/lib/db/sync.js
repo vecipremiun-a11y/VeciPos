@@ -9,6 +9,7 @@
 // la UI online — Dexie es el respaldo para offline + arranque rápido.
 
 import { localDb, pendingOpsApi, siiFoliosApi } from './localdb';
+import { getTabUserId } from '../sessionGuard';
 
 // Llama al endpoint autenticado de datos (sesión + membresía validadas server-side).
 // Desde Fase 1 · Paso 6 el catálogo ya NO se lee con el token de Turso en el navegador.
@@ -17,7 +18,7 @@ async function dataApi(action, payload) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ action, ...payload }),
+    body: JSON.stringify({ action, ...payload, expectedUserId: getTabUserId() }),
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok || data?.success === false) {
@@ -236,10 +237,20 @@ export async function syncPendingOpsToServer(companyId, storeApi) {
 
   const pending = await pendingOpsApi.list(companyId);
   const now = Date.now();
+
+  // La venta se graba a nombre de quien tiene la sesión del navegador AHORA, no de
+  // quien la encoló. Si son distintos (el cajero cerró sesión y entró otro), la venta
+  // caería en la caja equivocada. Se dejan en espera —sin gastar reintentos— hasta que
+  // vuelva a entrar su dueño. Ver src/lib/sessionGuard.js
+  const sessionUserId = getTabUserId();
+  const isForeign = (o) =>
+    o.userId != null && sessionUserId != null && Number(o.userId) !== Number(sessionUserId);
+
   // Procesar:
   //  - 'queued' siempre
   //  - 'error' solo si pasó el backoff (nextAttemptAt) y no superó intentos
   const candidates = pending.filter((o) => {
+    if (isForeign(o)) return false;
     if (o.status === 'queued') return true;
     if (o.status === 'error' && (o.attempts || 0) < 10) {
       if (!o.nextAttemptAt) return true;
@@ -247,6 +258,11 @@ export async function syncPendingOpsToServer(companyId, storeApi) {
     }
     return false;
   });
+
+  const deferred = pending.filter(isForeign).length;
+  if (deferred > 0) {
+    console.warn(`[sync] ${deferred} venta(s) offline en espera: las encoló otro usuario. Se sincronizarán cuando vuelva a iniciar sesión.`);
+  }
 
   let processed = 0;
   let errors = 0;
@@ -314,7 +330,7 @@ export async function syncPendingOpsToServer(companyId, storeApi) {
   }
 
   const remaining = (await pendingOpsApi.list(companyId, 'queued')).length;
-  return { processed, remaining, errors };
+  return { processed, remaining, errors, deferred };
 }
 
 /**

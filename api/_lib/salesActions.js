@@ -77,17 +77,27 @@ export async function saleCommit(turso, companyId, session, body) {
     const itemIds = allProductIds.length > 0 ? allProductIds : [0];
     const placeholders = itemIds.map(() => '?').join(',');
 
-    const dbProductsRes = await turso.execute({
-        sql: `SELECT * FROM products WHERE id IN (${placeholders}) AND company_id = ?`,
-        args: [...itemIds, companyId],
-    });
+    // Un solo round-trip para productos, lotes y la caja abierta (antes eran dos).
+    const [dbProductsRes, dbLotsRes, openRegRes] = await turso.batch([
+        {
+            sql: `SELECT * FROM products WHERE id IN (${placeholders}) AND company_id = ?`,
+            args: [...itemIds, companyId],
+        },
+        {
+            sql: `SELECT * FROM product_lots WHERE product_id IN (${placeholders}) AND company_id = ? AND quantity > 0`,
+            args: [...itemIds, companyId],
+        },
+        {
+            // La caja la resuelve el SERVIDOR desde la sesión, no la manda el cliente:
+            // una pestaña desactualizada podría mandar la caja de otro turno. Si el
+            // usuario no tiene caja abierta queda NULL y la venta no entra a ninguna.
+            sql: "SELECT id FROM cash_registers WHERE user_id = ? AND company_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1",
+            args: [session?.uid ?? null, companyId],
+        },
+    ], 'read');
     const dbProducts = dbProductsRes.rows;
-
-    const dbLotsRes = await turso.execute({
-        sql: `SELECT * FROM product_lots WHERE product_id IN (${placeholders}) AND company_id = ? AND quantity > 0`,
-        args: [...itemIds, companyId],
-    });
     const freshLots = dbLotsRes.rows;
+    const registerId = openRegRes.rows[0]?.id ?? null;
 
     const itemsToProcess = [];
     const productsToUpdate = [];
@@ -220,12 +230,13 @@ export async function saleCommit(turso, companyId, session, body) {
 
         const saleResult = await tx.execute({
             sql: `INSERT INTO sales
-                  (company_id, user_id, date, items, total, summary, payment_method, payment_details, status, client_id, client_name, payment_due_date)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?)`,
+                  (company_id, user_id, date, items, total, summary, payment_method, payment_details, status, client_id, client_name, payment_due_date, register_id)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?)`,
             args: [
                 companyId, session?.uid ?? null, now, itemsJson, saleTotal,
                 sale.summary ?? null, sale.paymentMethod ?? null, detailsJson,
                 sale.client?.id || null, sale.client?.name || null, paymentDueDate,
+                registerId,
             ],
         });
         const rawSaleId = saleResult.lastInsertRowid || Date.now();

@@ -72,6 +72,7 @@ import { useStore } from './store/useStore';
 import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncCatalogIncremental, syncPendingOpsToServer } from './lib/db/sync';
 import { createSmartInterval } from './lib/smartPolling';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
+import SessionTakeoverModal from './components/SessionTakeoverModal';
 
 // Protected Route Component - ROBUST RESTORE
 const ProtectedRoute = ({ children }) => {
@@ -289,6 +290,7 @@ function App() {
     <Router>
       <PWAUpdatePrompt />
       <ToastHost />
+      <SessionTakeoverModal />
       <Suspense fallback={
         <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)]">
           <div className="flex flex-col items-center gap-3">
