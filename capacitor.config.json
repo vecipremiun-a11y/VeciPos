@@ -1,0 +1,13 @@
+{
+  "appId": "com.posveci.app",
+  "appName": "POSVECI",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

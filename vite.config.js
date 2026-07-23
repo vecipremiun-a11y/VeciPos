@@ -10,6 +10,11 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // En build nativo (Capacitor, detectado por VITE_API_BASE_URL) se desactiva
+      // el service worker: dentro del WebView causa contenido cacheado/pantalla en
+      // blanco y no aporta (los assets ya van empaquetados). La web (sin esa var)
+      // conserva la PWA intacta.
+      disable: !!process.env.VITE_API_BASE_URL,
       // Sirve el manifest, SW y favicon a todos los dispositivos
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
       manifest: {
