@@ -92,7 +92,7 @@ async function registerActiveList(turso, companyId) {
         // Mismo criterio de pertenencia que registerStats, para que el balance que ve
         // el dueño en "otras cajas abiertas" coincida con el que ve cada cajero.
         // Incluye status != 'cancelled', que antes faltaba aquí.
-        const owns = saleBelongsToRegister(reg.id, reg.user_id, reg.opening_time);
+        const owns = saleBelongsToRegister(reg.id);
         queries.push({
             sql: `SELECT total, payment_method, payment_details FROM sales
                   WHERE company_id = ? AND status != 'cancelled' AND ${owns.sql}`,
@@ -151,11 +151,19 @@ async function registerActiveList(turso, companyId) {
 //
 // Devuelve el trozo de WHERE y sus argumentos, para que todas las lecturas de caja
 // usen exactamente el mismo criterio.
-function saleBelongsToRegister(registerId, userId, openingTime) {
-    return {
-        sql: '(register_id = ? OR (register_id IS NULL AND user_id = ? AND date >= ?))',
-        args: [registerId, userId, openingTime],
-    };
+// OJO con el rendimiento: NO usar un OR entre `register_id` y la heurística vieja.
+// SQLite no puede indexar `(register_id = ? OR (register_id IS NULL AND ...))` y
+// termina escaneando todas las ventas de la empresa. Medido el 23-jul-2026 sobre
+// 68.193 ventas: registerStats pasó de 0,7 s a 8,7 s y registerActiveList a 32,9 s,
+// por encima del límite de 10 s de Vercel → 504 en TODO el endpoint, incluida la
+// carga de productos.
+//
+// Para una caja ABIERTA el fallback no hace falta: la migración 0012 rellenó el
+// `register_id` de todas sus ventas y las nuevas ya lo traen. Basta el índice
+// idx_sales_register. La heurística vieja solo se usa en registerReport, que mira
+// cajas ya cerradas de antes de la migración y se pide bajo demanda, no en bucle.
+function saleBelongsToRegister(registerId) {
+    return { sql: 'register_id = ?', args: [registerId] };
 }
 
 async function registerStats(turso, companyId, session, { registerId }) {
@@ -165,8 +173,7 @@ async function registerStats(turso, companyId, session, { registerId }) {
     });
     if (regRes.rows.length === 0) return { success: true, stats: null };
     const register = regRes.rows[0];
-    const openingTime = register.opening_time;
-    const owns = saleBelongsToRegister(registerId, register.user_id, openingTime);
+    const owns = saleBelongsToRegister(registerId);
 
     const [salesStatsRes, movementsRes, recentSalesRes, preorderPaymentsRes, mixedSalesRes] = await turso.batch([
         {
@@ -186,10 +193,14 @@ async function registerStats(turso, companyId, session, { registerId }) {
             args: [registerId, companyId],
         },
         {
+            // SIN "ORDER BY date DESC LIMIT 20": con él, SQLite prefiere el índice de
+            // fecha para evitar el ordenamiento y recorre las 68.193 ventas de la
+            // empresa para encontrar las 6 de esta caja (4,2 s medidos el 23-jul-2026).
+            // Filtrando solo por register_id usa idx_sales_register y devuelve las
+            // ventas del turno, que son pocas; se ordenan y recortan en memoria.
             sql: `SELECT id, date, total, payment_method FROM sales
                   WHERE company_id = ? AND status != 'cancelled' AND ${owns.sql}
-                    AND (payment_method = 'Efectivo' OR payment_method = 'Mixto')
-                  ORDER BY date DESC LIMIT 20`,
+                    AND (payment_method = 'Efectivo' OR payment_method = 'Mixto')`,
             args: [companyId, ...owns.args],
         },
         {
@@ -254,9 +265,14 @@ async function registerStats(turso, companyId, session, { registerId }) {
     });
     salesBreakdown.total += preorderCashTransactions.reduce((s, t) => s + t.amount, 0);
 
-    const salesTransactions = recentSalesRes.rows.map(sale => ({
-        type: 'VENTA', amount: parseFloat(sale.total), total: parseFloat(sale.total), date: sale.date, id: sale.id,
-    }));
+    // El orden y el recorte a 20 se hacen aquí (ver la consulta: hacerlo en SQL
+    // disparaba un recorrido completo de la tabla).
+    const salesTransactions = recentSalesRes.rows
+        .map(sale => ({
+            type: 'VENTA', amount: parseFloat(sale.total), total: parseFloat(sale.total), date: sale.date, id: sale.id,
+        }))
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .slice(0, 20);
 
     let movementsIn = 0, movementsOut = 0;
     const movementTransactions = [];
@@ -296,22 +312,21 @@ async function registerMethodTransactions(turso, companyId, session, { registerI
         args: [registerId, companyId],
     });
     if (regRes.rows.length === 0) return { success: false, transactions: [] };
-    const { user_id: userId, opening_time: openingTime } = regRes.rows[0];
-    const owns = saleBelongsToRegister(registerId, userId, openingTime);
+    const owns = saleBelongsToRegister(registerId);
 
+    // Sin ORDER BY/LIMIT en SQL, por el mismo motivo que en registerStats: forzaría
+    // el índice de fecha y el recorrido completo de la tabla. Se ordena más abajo.
     const [salesRes, mixedRes, preorderRes] = await turso.batch([
         {
             sql: `SELECT id, date, total, payment_method, payment_details FROM sales
                   WHERE company_id = ? AND status != 'cancelled' AND payment_method = ?
-                    AND ${owns.sql}
-                  ORDER BY date DESC LIMIT 100`,
+                    AND ${owns.sql}`,
             args: [companyId, method, ...owns.args],
         },
         {
             sql: `SELECT id, date, total, payment_details FROM sales
                   WHERE company_id = ? AND status != 'cancelled' AND payment_method = 'Mixto'
-                    AND ${owns.sql}
-                  ORDER BY date DESC LIMIT 100`,
+                    AND ${owns.sql}`,
             args: [companyId, ...owns.args],
         },
         {

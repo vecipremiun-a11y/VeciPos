@@ -862,12 +862,22 @@ async function clientRegisterPayment(turso, companyId, session, body) {
     }]);
     const paymentDetails = JSON.stringify({ amount, change: 0, type: 'debt_payment', distribution });
 
+    // El abono también entra al cajón, así que debe quedar amarrado a la caja abierta
+    // del cajero (migración 0012). Sin esto la lectura de caja, que ahora filtra por
+    // register_id, no lo vería y el arqueo saldría corto.
+    const openReg = await turso.execute({
+        sql: "SELECT id FROM cash_registers WHERE user_id = ? AND company_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1",
+        args: [session?.uid ?? null, companyId],
+    });
+    const paymentRegisterId = openReg.rows[0]?.id ?? null;
+
     const queries = [{
         sql: `INSERT INTO sales (date, total, summary, items, payment_method, payment_details, user_id, status,
-                has_negative_stock, client_id, client_name, company_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', 0, ?, ?, ?)`,
+                has_negative_stock, client_id, client_name, company_id, register_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', 0, ?, ?, ?, ?)`,
         args: [date || new Date().toISOString(), amount, `Abono de Cliente: ${client.name}`, items,
-            paymentMethod, paymentDetails, session?.uid ?? null, client.id, client.name, companyId],
+            paymentMethod, paymentDetails, session?.uid ?? null, client.id, client.name, companyId,
+            paymentRegisterId],
     }];
 
     for (const d of distribution) {
