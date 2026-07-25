@@ -102,22 +102,16 @@ async function registerActiveList(turso, companyId) {
             sql: 'SELECT type, amount FROM cash_movements WHERE register_id = ? AND company_id = ?',
             args: [reg.id, companyId],
         });
-        queries.push({
-            // Efectivo de encargos: también está en el cajón (ver registerStats).
-            sql: `SELECT COALESCE(SUM(pp.amount), 0) AS total
-                  FROM preorder_payments pp
-                  JOIN preorders po ON pp.preorder_id = po.id
-                  WHERE pp.register_id = ? AND pp.method = 'Efectivo' AND po.status != 'canceled'`,
-            args: [reg.id],
-        });
+        // Nota: el efectivo de encargos NO se lee aquí; ya está incluido en
+        // cash_movements (movimiento "Abono/Cobro/Pago encargo…"). Leerlo también de
+        // preorder_payments lo duplicaba en el saldo.
     });
     const results = await turso.batch(queries, 'read');
 
     const out = [];
     registers.forEach((reg, index) => {
-        const salesRes = results[index * 3];
-        const movRes = results[index * 3 + 1];
-        const preorderCash = parseFloat(results[index * 3 + 2].rows[0]?.total) || 0;
+        const salesRes = results[index * 2];
+        const movRes = results[index * 2 + 1];
 
         let cashSales = 0;
         salesRes.rows.forEach(sale => {
@@ -137,7 +131,7 @@ async function registerActiveList(turso, companyId) {
             else movesOut += amount;
         });
 
-        out.push({ ...reg, currentBalance: reg.opening_amount + cashSales + preorderCash + movesIn - movesOut });
+        out.push({ ...reg, currentBalance: reg.opening_amount + cashSales + movesIn - movesOut });
     });
     return { success: true, registers: out };
 }
@@ -204,14 +198,16 @@ async function registerStats(turso, companyId, session, { registerId }) {
             args: [companyId, ...owns.args],
         },
         {
-            // Incluye 'Efectivo': un abono o pago final de encargo cobrado en efectivo
-            // entra al cajón igual que una venta, pero antes solo se leían Tarjeta y
-            // Transferencia y esa plata no aparecía en ninguna parte de la caja.
-            // Filas individuales (no agregadas) para poder listarlas junto a las ventas.
+            // SOLO Tarjeta/Transferencia. Esos abonos/pagos de encargo NO generan un
+            // movimiento de caja, así que se leen aquí para sumarlos a sus totales.
+            // El EFECTIVO de encargo se EXCLUYE a propósito: ya se registra como
+            // movimiento de caja ("Abono/Cobro/Pago encargo…", tipo Ingreso) al momento
+            // de cobrarlo (ver _registerPreorderCash en el cliente). Contarlo también
+            // aquí lo DUPLICABA en el arqueo (aparecía como Venta y como Ingreso).
             sql: `SELECT pp.id, pp.method, pp.amount, pp.created_at, pp.preorder_id, po.client_name
                   FROM preorder_payments pp
                   JOIN preorders po ON pp.preorder_id = po.id
-                  WHERE pp.register_id = ? AND pp.method IN ('Efectivo', 'Tarjeta', 'Transferencia')
+                  WHERE pp.register_id = ? AND pp.method IN ('Tarjeta', 'Transferencia')
                     AND po.status != 'canceled'
                   ORDER BY pp.created_at DESC LIMIT 200`,
             args: [registerId],
@@ -243,27 +239,15 @@ async function registerStats(turso, companyId, session, { registerId }) {
         });
     });
 
+    // Encargos en Tarjeta/Transferencia → a sus totales. El EFECTIVO de encargo NO se
+    // suma aquí: ya está contado como movimiento de caja (Ingreso). Evita el doble
+    // conteo que inflaba el saldo esperado y generaba "falta de dinero" falsa.
     const preorderCashTransactions = [];
     (preorderPaymentsRes.rows || []).forEach(r => {
         const amt = parseFloat(r.amount) || 0;
         if (r.method === 'Tarjeta') salesBreakdown.card += amt;
         else if (r.method === 'Transferencia') salesBreakdown.transfer += amt;
-        else if (r.method === 'Efectivo') {
-            // El efectivo de encargos sí está en el cajón: suma al saldo igual que una
-            // venta. Sin esto el cajero cuadraba siempre con un sobrante inexplicable.
-            cashSalesTotal += amt;
-            salesBreakdown.cash += amt;
-            preorderCashTransactions.push({
-                type: 'VENTA',
-                amount: amt,
-                total: amt,
-                date: r.created_at,
-                id: `preorder_${r.id}`,
-                reason: `Encargo #${r.preorder_id}${r.client_name ? ' · ' + r.client_name : ''}`,
-            });
-        }
     });
-    salesBreakdown.total += preorderCashTransactions.reduce((s, t) => s + t.amount, 0);
 
     // El orden y el recorte a 20 se hacen aquí (ver la consulta: hacerlo en SQL
     // disparaba un recorrido completo de la tabla).
@@ -361,15 +345,19 @@ async function registerMethodTransactions(turso, companyId, session, { registerI
             }
         });
     }
-    for (const p of preorderRes.rows) {
-        let detail = null;
-        if (method === 'Tarjeta') detail = p.terminal_name || null;
-        else if (method === 'Transferencia') detail = p.bank_name ? `${p.bank_name}${p.bank_account_number ? ' · ' + p.bank_account_number : ''}` : null;
-        transactions.push({
-            id: `p_${p.id}`, source: 'Encargo',
-            reference: `Encargo #${p.preorder_id}${p.client_name ? ' · ' + p.client_name : ''}`,
-            amount: parseFloat(p.amount) || 0, date: p.created_at, detail,
-        });
+    // El EFECTIVO de encargo no se lista aquí: se muestra como movimiento de caja
+    // (Ingreso), no dentro del método Efectivo, para que el detalle cuadre con el total.
+    if (method !== 'Efectivo') {
+        for (const p of preorderRes.rows) {
+            let detail = null;
+            if (method === 'Tarjeta') detail = p.terminal_name || null;
+            else if (method === 'Transferencia') detail = p.bank_name ? `${p.bank_name}${p.bank_account_number ? ' · ' + p.bank_account_number : ''}` : null;
+            transactions.push({
+                id: `p_${p.id}`, source: 'Encargo',
+                reference: `Encargo #${p.preorder_id}${p.client_name ? ' · ' + p.client_name : ''}`,
+                amount: parseFloat(p.amount) || 0, date: p.created_at, detail,
+            });
+        }
     }
 
     transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
