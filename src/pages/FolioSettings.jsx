@@ -26,67 +26,44 @@ const FolioSettings = () => {
 
     const loadSettings = async () => {
         setLoading(true);
-        try {
-            // Load enabled DTEs from sii_config
-            const _fs = await dataApiCall('folioSettingsLoad', { companyId: activeCompanyId });
-            if (!_fs?.success) throw new Error(_fs?.error || 'Error');
-            const configResult = { rows: _fs.config ? [_fs.config] : [] };
-            if (configResult.rows.length > 0) {
-                if (configResult.rows[0].enabled_dtes) {
-                    try {
-                        setEnabledDtes(JSON.parse(configResult.rows[0].enabled_dtes));
-                    } catch {
-                        setEnabledDtes([0]);
-                    }
-                } else {
-                    setEnabledDtes([0]);
-                }
-                if (configResult.rows[0].default_dte != null) {
-                    setDefaultDte(Number(configResult.rows[0].default_dte));
-                } else {
-                    setDefaultDte(0);
-                }
-            } else {
-                // No sii_config row for this company — only Nota de Venta
-                setEnabledDtes([0]);
-                setDefaultDte(0);
-            }
 
-            // Disponibilidad de folios: se lee del MISMO endpoint que la pantalla
-            // de Facturación SII (/api/sii/folios), que agrega TODOS los CAF activos
-            // por tipo. Antes se usaba `_fs.cafs` y en algunos casos llegaba vacío,
-            // haciendo que un tipo con folios (p. ej. Boleta 39) apareciera como
-            // "Sin folios cargados". Este endpoint es la fuente confiable.
-            const info = {};
-            const addRow = (tipo, folioActual, folioHasta, disp) => {
-                const d = Number(disp);
-                if (!info[tipo]) info[tipo] = { folioActual, folioHasta, disponibles: 0 };
-                info[tipo].folioActual = folioActual;
-                info[tipo].folioHasta = folioHasta;
-                info[tipo].disponibles += d > 0 ? d : 0;
-            };
-            try {
-                const res = await fetch('/api/sii/folios', { headers: { 'x-company-id': activeCompanyId } });
-                const data = await res.json();
-                for (const f of (data.folios || [])) {
-                    const disp = f.disponibles != null ? f.disponibles : (Number(f.folio_hasta) - Number(f.folio_actual) + 1);
-                    addRow(f.tipo_dte, f.folio_actual, f.folio_hasta, disp);
-                }
-            } catch (e) {
-                console.warn('No se pudo leer /api/sii/folios, usando respaldo:', e?.message);
+        // 1) Config (tipos habilitados / predeterminado) — best-effort. Si esta llamada
+        //    falla, quedan los valores por defecto, pero NO impide leer los folios.
+        try {
+            const _fs = await dataApiCall('folioSettingsLoad', { companyId: activeCompanyId });
+            const cfg = _fs?.success ? _fs.config : null;
+            if (cfg && cfg.enabled_dtes) {
+                try { setEnabledDtes(JSON.parse(cfg.enabled_dtes)); } catch { setEnabledDtes([0]); }
+            } else {
+                setEnabledDtes([0]);
             }
-            // Respaldo: si el endpoint no devolvió nada, usar lo que trajo folioSettingsLoad.
-            if (Object.keys(info).length === 0) {
-                for (const row of (_fs.cafs || [])) {
-                    addRow(row.tipo_dte, row.folio_actual, row.folio_hasta, Number(row.folio_hasta) - Number(row.folio_actual) + 1);
-                }
+            setDefaultDte(cfg && cfg.default_dte != null ? Number(cfg.default_dte) : 0);
+        } catch (err) {
+            console.warn('folioSettingsLoad falló:', err?.message);
+            setEnabledDtes([0]);
+            setDefaultDte(0);
+        }
+
+        // 2) Disponibilidad de folios — SIEMPRE desde /api/sii/folios, INDEPENDIENTE de
+        //    lo anterior. Es la fuente confiable (agrega todos los CAF activos por tipo)
+        //    y evita el bug donde un tipo con folios aparecía como "Sin folios cargados".
+        try {
+            const info = {};
+            const res = await fetch('/api/sii/folios', { headers: { 'x-company-id': activeCompanyId } });
+            const data = await res.json();
+            for (const f of (data.folios || [])) {
+                const disp = f.disponibles != null ? f.disponibles : (Number(f.folio_hasta) - Number(f.folio_actual) + 1);
+                if (!info[f.tipo_dte]) info[f.tipo_dte] = { folioActual: f.folio_actual, folioHasta: f.folio_hasta, disponibles: 0 };
+                info[f.tipo_dte].folioActual = f.folio_actual;
+                info[f.tipo_dte].folioHasta = f.folio_hasta;
+                info[f.tipo_dte].disponibles += disp > 0 ? disp : 0;
             }
             setFolioInfo(info);
         } catch (err) {
-            console.error('Error loading folio settings:', err);
-        } finally {
-            setLoading(false);
+            console.warn('/api/sii/folios falló:', err?.message);
         }
+
+        setLoading(false);
     };
 
     const toggleDte = (tipo) => {
