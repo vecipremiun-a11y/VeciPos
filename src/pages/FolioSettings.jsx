@@ -52,16 +52,34 @@ const FolioSettings = () => {
                 setDefaultDte(0);
             }
 
-            // Load folio availability info
-            const cafsResult = { rows: _fs.cafs };
+            // Disponibilidad de folios: se lee del MISMO endpoint que la pantalla
+            // de Facturación SII (/api/sii/folios), que agrega TODOS los CAF activos
+            // por tipo. Antes se usaba `_fs.cafs` y en algunos casos llegaba vacío,
+            // haciendo que un tipo con folios (p. ej. Boleta 39) apareciera como
+            // "Sin folios cargados". Este endpoint es la fuente confiable.
             const info = {};
-            for (const row of cafsResult.rows) {
-                const disponibles = Number(row.folio_hasta) - Number(row.folio_actual) + 1;
-                info[row.tipo_dte] = {
-                    folioActual: row.folio_actual,
-                    folioHasta: row.folio_hasta,
-                    disponibles: disponibles > 0 ? disponibles : 0
-                };
+            const addRow = (tipo, folioActual, folioHasta, disp) => {
+                const d = Number(disp);
+                if (!info[tipo]) info[tipo] = { folioActual, folioHasta, disponibles: 0 };
+                info[tipo].folioActual = folioActual;
+                info[tipo].folioHasta = folioHasta;
+                info[tipo].disponibles += d > 0 ? d : 0;
+            };
+            try {
+                const res = await fetch('/api/sii/folios', { headers: { 'x-company-id': activeCompanyId } });
+                const data = await res.json();
+                for (const f of (data.folios || [])) {
+                    const disp = f.disponibles != null ? f.disponibles : (Number(f.folio_hasta) - Number(f.folio_actual) + 1);
+                    addRow(f.tipo_dte, f.folio_actual, f.folio_hasta, disp);
+                }
+            } catch (e) {
+                console.warn('No se pudo leer /api/sii/folios, usando respaldo:', e?.message);
+            }
+            // Respaldo: si el endpoint no devolvió nada, usar lo que trajo folioSettingsLoad.
+            if (Object.keys(info).length === 0) {
+                for (const row of (_fs.cafs || [])) {
+                    addRow(row.tipo_dte, row.folio_actual, row.folio_hasta, Number(row.folio_hasta) - Number(row.folio_actual) + 1);
+                }
             }
             setFolioInfo(info);
         } catch (err) {
@@ -136,7 +154,10 @@ const FolioSettings = () => {
                 {DTE_TYPES.map(({ tipo, label, icon: Icon, color, description }) => {
                     const enabled = enabledDtes.includes(tipo);
                     const folio = folioInfo[tipo];
-                    const canActivate = tipo === 0 || !!folio;
+                    // Un tipo ya habilitado (enabled_dtes) siempre es operable, aunque
+                    // la carga de disponibilidad falle. Así Boleta 39 (activa por
+                    // debajo) no aparece como "Sin folios cargados".
+                    const canActivate = tipo === 0 || !!folio || enabled;
                     const colorMap = {
                         green: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', shadow: 'shadow-green-500/10' },
                         blue: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400', shadow: 'shadow-blue-500/10' },
@@ -172,10 +193,13 @@ const FolioSettings = () => {
                                                 </span>
                                             </p>
                                         )}
-                                        {!folio && tipo !== 0 && (
+                                        {!folio && !enabled && tipo !== 0 && (
                                             <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
                                                 <Info size={12} /> Sin folios cargados (CAF) — no se puede activar
                                             </p>
+                                        )}
+                                        {!folio && enabled && tipo !== 0 && (
+                                            <p className="text-xs text-green-400 mt-1">Activado</p>
                                         )}
                                         {tipo === 0 && (
                                             <p className="text-xs text-green-400 mt-1">No requiere folios</p>
