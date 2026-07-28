@@ -57,7 +57,7 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="glass-card w-full max-w-lg p-6 relative"
+                className="glass-card w-full max-w-lg p-6 relative max-h-full overflow-y-auto"
             >
                 <button
                     onClick={onClose}
@@ -375,7 +375,7 @@ const Clients = () => {
     // If Account View is active, show it instead of the list
     if (selectedAccountClient) {
         return (
-            <div className="h-full p-6 overflow-hidden">
+            <div className="h-full p-3 lg:p-6 overflow-hidden">
                 <ClientAccountDetails
                     client={selectedAccountClient}
                     onBack={handleBackToClients}

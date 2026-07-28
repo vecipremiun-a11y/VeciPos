@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Tags, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -118,6 +118,7 @@ const MainLayout = () => {
             moduleKey: 'inventory',
             subItems: [
                 { icon: Box, label: 'Productos', path: '/inventory', permission: 'products.view' },
+                { icon: Tags, label: 'Etiquetas', path: '/inventory/labels', permission: 'products.view', moduleKey: 'labels' },
                 { icon: Tag, label: 'Categorías', path: '/categories', permission: 'categories.view' },
                 { icon: Truck, label: 'Proveedores', path: '/suppliers', permission: 'suppliers.view', moduleKey: 'purchases' },
                 { icon: FileText, label: 'Facturas', path: '/invoices', permission: 'invoices.view', moduleKey: 'purchases' },
@@ -241,7 +242,7 @@ const MainLayout = () => {
             <aside
                 className={cn(
                     "glass border-r border-[var(--glass-border)] transition-all duration-300 flex flex-col z-50",
-                    isMobile ? "fixed inset-y-0 left-0 h-full shadow-2xl" : "relative",
+                    isMobile ? "mobile-drawer fixed inset-y-0 left-0 h-full shadow-2xl" : "relative",
                     isSidebarOpen ? "w-[266px] translate-x-0" : (isMobile ? "-translate-x-full w-[266px]" : "w-20")
                 )}
             >
@@ -444,8 +445,8 @@ const MainLayout = () => {
 
             {/* Main Content Area */}
             <main className="flex-1 flex flex-col overflow-hidden bg-[var(--color-background)] relative">
-                <header className="h-16 glass border-b border-[var(--glass-border)] flex justify-between items-center px-4 md:px-6 z-30 shrink-0 relative">
-                    <div className="flex items-center gap-4">
+                <header className="h-16 glass border-b border-[var(--glass-border)] flex justify-between items-center gap-2 px-3 md:px-6 z-30 shrink-0 relative">
+                    <div className="flex items-center gap-2 md:gap-4 min-w-0">
                         {isMobile && (
                             <button
                                 onClick={() => setIsSidebarOpen(true)}
@@ -481,24 +482,28 @@ const MainLayout = () => {
                         })()}
                     </div>
 
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 md:gap-4 shrink-0">
                         {/* Company Switcher */}
                         <CompanySwitcher />
 
                         {/* Notification Bell */}
                         <NotificationBell />
 
-                        <div className="flex items-center gap-3 pl-4 border-l border-[var(--glass-border)]">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[var(--color-primary)] to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-[var(--color-primary)]/20">
-                                {currentUser?.name?.[0] || 'U'}
-                            </div>
-                            <div className="hidden md:block">
-                                <p className="text-sm font-medium text-[var(--color-text)]">{currentUser?.name}</p>
-                                <p className="text-xs text-[var(--color-text-muted)] capitalize">{currentUser?.role}</p>
+                        <div className="flex items-center gap-3 md:pl-4 md:border-l md:border-[var(--glass-border)]">
+                            {/* Avatar + nombre: solo en pantallas grandes; en móvil ocupan
+                                espacio y hacen que la barra desborde. */}
+                            <div className="hidden md:flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[var(--color-primary)] to-purple-600 flex items-center justify-center font-bold text-white shadow-lg shadow-[var(--color-primary)]/20">
+                                    {currentUser?.name?.[0] || 'U'}
+                                </div>
+                                <div>
+                                    <p className="text-sm font-medium text-[var(--color-text)]">{currentUser?.name}</p>
+                                    <p className="text-xs text-[var(--color-text-muted)] capitalize">{currentUser?.role}</p>
+                                </div>
                             </div>
                             <button
                                 onClick={handleLogout}
-                                className="p-2 hover:bg-[var(--color-surface-hover)] rounded-full text-[var(--color-text-muted)] hover:text-red-400 transition-colors ml-2"
+                                className="p-2 hover:bg-[var(--color-surface-hover)] rounded-full text-[var(--color-text-muted)] hover:text-red-400 transition-colors md:ml-2 shrink-0"
                                 title="Cerrar Sesión"
                             >
                                 <LogOut size={18} />

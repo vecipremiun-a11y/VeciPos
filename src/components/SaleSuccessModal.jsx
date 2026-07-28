@@ -8,6 +8,8 @@ import bwipjs from 'bwip-js';
 import { reportCall, dataApiCall } from '../lib/dataApi';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
+import { isThermalAvailable, getSavedPrinter, printThermalReceipt, buildTimbreRaster } from '../lib/thermalPrint';
+import { buildSaleReceiptModel } from '../lib/saleReceipt';
 
 // Extraer TED XML del DTE firmado
 function extractTED(xmlFirmado) {
@@ -368,7 +370,35 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         const encodedMessage = encodeURIComponent(receiptText);
         window.open(`https://wa.me/${fullNumber}?text=${encodedMessage}`, '_blank');
     };
-    const handlePrint = () => {
+    // Arma el recibo para la impresora térmica a partir de la venta y la config.
+    // Usa el mismo modelo compartido que la reimpresión del Historial, para que el
+    // ticket térmico sea idéntico en venta nueva y en reimpresión.
+    const buildThermalReceipt = () => buildSaleReceiptModel(saleDetails, {
+        sellerName: seller?.name,
+        receiptConfig,
+        currency: currentCurrency,
+        dteInfo,
+    });
+
+    const handlePrint = async () => {
+        // En la app nativa: imprimir directo a la térmica (ESC/POS). Abrir el
+        // navegador (window.open) no imprime y saca al usuario de la app.
+        if (isThermalAvailable()) {
+            const saved = getSavedPrinter();
+            if (!saved) {
+                alert('Configura tu impresora en Configuración → General → Impresora térmica.');
+                return;
+            }
+            const model = buildThermalReceipt();
+            // Timbre electrónico SII (PDF417) si la venta es un DTE (boleta/factura).
+            if (dteInfo?.xml_firmado) {
+                model.timbre = await buildTimbreRaster(dteInfo.xml_firmado, saved.paperWidth || 58);
+            }
+            const r = await printThermalReceipt(model, { money: (n) => formatCurrency(n, currentCurrency) });
+            if (!r.ok) alert('No se pudo imprimir: ' + (r.error || ''));
+            return;
+        }
+
         const printWindow = window.open('', '', 'width=400,height=700');
         const sellerName = seller?.name || 'Vendedor';
         const date = new Date().toLocaleString('es-CL');

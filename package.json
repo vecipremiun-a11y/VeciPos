@@ -13,6 +13,7 @@
     "verify-all": "node scripts/db/verify-all.mjs"
   },
   "dependencies": {
+    "@capacitor/core": "^8.4.2",
     "@devlas/dte-sii": "^2.5.14",
     "@libsql/client": "^0.17.0",
     "@tailwindcss/vite": "^4.1.18",

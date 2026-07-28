@@ -264,6 +264,85 @@ body {
   /* Base size for mobile */
 }
 
+/* ── Zonas seguras (app nativa Android/iOS) ─────────────────────────────────
+   En los móviles modernos la app se dibuja de borde a borde: sin esto el
+   contenido queda TAPADO por la barra de estado (cámara/hora) arriba y por
+   los botones de navegación abajo.
+
+   En el navegador env(safe-area-inset-*) vale 0px, así que la web y la PWA
+   quedan EXACTAMENTE igual que antes. */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+#root {
+  box-sizing: border-box;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+/* El layout usa h-screen (100vh) y los modales 100dvh. Dentro de #root ya
+   descontamos las zonas seguras, así que deben ocupar solo el alto disponible;
+   si no, se saldrían justo por debajo de los botones del teléfono. */
+#root .h-screen {
+  height: calc(100vh - var(--safe-top) - var(--safe-bottom));
+  height: calc(100dvh - var(--safe-top) - var(--safe-bottom));
+}
+
+/* Barras pegadas al borde inferior: extienden el fondo hasta el borde y suben su
+   contenido con padding. */
+#root .fixed.bottom-0 {
+  padding-bottom: var(--safe-bottom);
+}
+
+/* Botones/paneles FLOTANTES separados del borde (bottom-2/4/6): se elevan por
+   encima de los botones del sistema sumando la zona segura a su separación. */
+.fixed.bottom-2 { bottom: calc(0.5rem + var(--safe-bottom)); }
+.fixed.bottom-4 { bottom: calc(1rem + var(--safe-bottom)); }
+.fixed.bottom-6 { bottom: calc(1.5rem + var(--safe-bottom)); }
+.fixed.bottom-8 { bottom: calc(2rem + var(--safe-bottom)); }
+
+/* Menú lateral (drawer) en móvil: la clase `.glass` lo deja casi transparente
+   (fondo rgba blanco al 5%), así que en el teléfono se transparenta el contenido
+   de atrás y las letras se leen mal. Aquí lo hacemos OPACO y con texto más claro.
+   Va sin @layer para ganarle a `.glass` (que sí está en una capa). En escritorio
+   no se aplica (solo se agrega la clase cuando es móvil). */
+.mobile-drawer {
+  background-color: var(--color-surface);
+  /* Ítems inactivos: gris más claro que el muted por defecto, para que resalten
+     sobre el fondo oscuro sólido. */
+  --color-text-muted: #d1d5db;
+  box-shadow: 0 0 45px rgba(0, 0, 0, 0.7);
+}
+[data-theme="light"] .mobile-drawer {
+  --color-text-muted: #475569;
+}
+
+/* Paneles a pantalla completa anclados con position:fixed (menú lateral móvil,
+   modales que ocupan todo el alto). fixed ignora el padding de #root, así que
+   se desbordan bajo la barra de estado y los botones. Les damos las zonas
+   seguras directamente. En web (insets = 0) no cambia nada. */
+.fixed.inset-y-0,
+.fixed.top-0.bottom-0 {
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+
+/* Modales/overlays a pantalla completa (fixed inset-0): el CONTENIDO respeta las
+   zonas seguras. El fondo oscuro sigue cubriendo todo (el color llena también el
+   padding); solo el contenido se mete hacia adentro para no quedar bajo la cámara
+   ni bajo los botones del sistema. Cubre modales centrados, hojas inferiores
+   (items-end) y modales de alto completo. En web (insets = 0) no cambia nada. */
+.fixed.inset-0 {
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+
 /* Desktop typography - slightly larger for readability */
 @media (min-width: 1024px) {
   body {

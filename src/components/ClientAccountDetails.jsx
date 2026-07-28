@@ -165,91 +165,146 @@ const ClientAccountDetails = ({ client, onBack }) => {
         window.open(url, '_blank');
     };
 
+    // Helpers de render reutilizados por la tabla (escritorio) y las tarjetas (móvil).
+    const renderVence = (sale) => {
+        if (!sale.payment_due_date) return <span className="text-[var(--color-text-muted)] text-xs">-</span>;
+        const dueDate = new Date(sale.payment_due_date);
+        const daysLeft = Math.ceil((dueDate - new Date()) / (1000 * 60 * 60 * 24));
+        const isPaid = sale.status === 'paid';
+        const isCancelled = sale.status === 'cancelled';
+        if (isPaid || isCancelled) return <span className="text-[var(--color-text-muted)]">{dueDate.toLocaleDateString()}</span>;
+        if (daysLeft < 0) return <span className="text-red-400 font-bold flex items-center gap-1"><AlertTriangle size={14} />Vencido ({Math.abs(daysLeft)}d)</span>;
+        if (daysLeft <= 3) return <span className="text-yellow-400 font-medium flex items-center gap-1"><Clock size={14} />{daysLeft === 0 ? 'Hoy' : `${daysLeft}d`}</span>;
+        return <span className="text-green-400">{dueDate.toLocaleDateString()}</span>;
+    };
+
+    const renderMonto = (sale) => {
+        const isAbono = sale.status === 'completed' && sale.summary?.includes('Abono');
+        const isPaid = sale.status === 'paid';
+        const isCancelled = sale.status === 'cancelled';
+        const hasPartialPayment = parseFloat(sale.amount_paid || 0) > 0 && !isPaid && !isCancelled;
+        const saleTotal = Math.abs(parseFloat(sale.total));
+        const remaining = saleTotal - parseFloat(sale.amount_paid || 0);
+        let colorClass = 'text-red-400';
+        let sign = '-';
+        if (isCancelled) colorClass = 'line-through text-[var(--color-text-muted)]';
+        else if (isAbono) { colorClass = 'text-blue-400'; sign = '+'; }
+        else if (isPaid) colorClass = 'text-green-400';
+        return (
+            <div className="text-right">
+                <span className={`font-bold text-sm ${colorClass}`}>{sign}{formatCurrency(saleTotal, currentCurrency)}</span>
+                {hasPartialPayment && <p className="text-[10px] text-yellow-400/80 mt-0.5">Resta: {formatCurrency(remaining, currentCurrency)}</p>}
+            </div>
+        );
+    };
+
+    const renderBadges = (sale) => (
+        <>
+            {sale.payment_method === 'Crédito' && sale.status === 'paid' && (
+                <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-500/20 text-green-400 border border-green-500/30">DEUDA PAGADA</span>
+            )}
+            {sale.payment_method === 'Crédito' && sale.status !== 'paid' && sale.status !== 'cancelled' && parseFloat(sale.amount_paid || 0) > 0 && (
+                <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">ABONO PARCIAL: {formatCurrency(parseFloat(sale.amount_paid), currentCurrency)} / {formatCurrency(parseFloat(sale.total), currentCurrency)}</span>
+            )}
+            {sale.status === 'cancelled' && (
+                <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">ANULADO</span>
+            )}
+            {sale.status === 'completed' && sale.summary?.includes('Abono') && (
+                <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">COMPROBANTE DE PAGO</span>
+            )}
+        </>
+    );
+
     return (
-        <div className="flex flex-col h-full gap-6 animate-in fade-in duration-300 relative">
-            {/* Header / Nav */}
-            <div className="flex justify-between items-center shrink-0">
-                <div className="flex items-center gap-4">
+        <div className="flex flex-col h-full gap-4 lg:gap-6 overflow-y-auto overflow-x-hidden lg:overflow-hidden animate-in fade-in duration-300 relative">
+            {/* Header / Nav — en móvil se apila en vertical para no desbordar el ancho. */}
+            <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 lg:gap-4 shrink-0">
+                {/* Título: "Estado de Cuenta" arriba; nombre y RUT debajo. */}
+                <div className="flex items-center gap-3 min-w-0">
                     <button
                         onClick={onBack}
-                        className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-[var(--color-text)] transition-colors border border-white/10"
+                        className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-[var(--color-text)] transition-colors border border-white/10 shrink-0"
                     >
                         <ArrowLeft size={20} />
                     </button>
-                    <div>
-                        <h2 className="text-2xl font-bold text-[var(--color-text)] flex items-center gap-2">
-                            <FileText className="text-[var(--color-primary)]" />
-                            Estado de Cuenta: <span className="text-[var(--color-primary)]">{client.name}</span>
+                    <div className="min-w-0">
+                        <h2 className="text-base lg:text-2xl font-bold text-[var(--color-text)] flex items-center gap-2">
+                            <FileText className="text-[var(--color-primary)] shrink-0" size={20} />
+                            <span>Estado de Cuenta</span>
                         </h2>
-                        <p className="text-[var(--color-text-muted)] text-sm">{client.rut || 'Sin RUT'}</p>
+                        <p className="text-[var(--color-primary)] font-bold text-sm lg:text-base truncate">{client.name}</p>
+                        <p className="text-[var(--color-text-muted)] text-xs">{client.rut || 'Sin RUT'}</p>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-4">
+                {/* Controles: en móvil van full-width y apilados (no a un lado). */}
+                <div className="flex flex-col sm:flex-row lg:items-center gap-2 shrink-0">
                     <div className="bg-black/20 p-1 rounded-xl border border-white/10 flex">
                         <button
                             onClick={() => setViewMode('pending')}
-                            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${viewMode === 'pending' ? 'bg-[var(--color-primary)] text-black shadow-lg' : 'text-[var(--color-text-muted)] hover:text-white'}`}
+                            className={`flex-1 lg:flex-none px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${viewMode === 'pending' ? 'bg-[var(--color-primary)] text-black shadow-lg' : 'text-[var(--color-text-muted)] hover:text-white'}`}
                         >
                             Pendientes
                         </button>
                         <button
                             onClick={() => setViewMode('history')}
-                            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${viewMode === 'history' ? 'bg-[var(--color-primary)] text-black shadow-lg' : 'text-[var(--color-text-muted)] hover:text-white'}`}
+                            className={`flex-1 lg:flex-none px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${viewMode === 'history' ? 'bg-[var(--color-primary)] text-black shadow-lg' : 'text-[var(--color-text-muted)] hover:text-white'}`}
                         >
                             Historial
                         </button>
                     </div>
 
-                    <button
-                        onClick={async () => {
-                            setIsGeneratingPDF(true);
-                            try {
-                                await generateAccountStatementPDF({
-                                    client,
-                                    pendingSales,
-                                    allSales: rawClientSales,
-                                    totalDebt,
-                                    creditLimit,
-                                    creditEnabled,
-                                    clientStatus,
-                                    activeCompanyId,
-                                    currentCurrency,
-                                    users
-                                });
-                            } catch (e) {
-                                console.error('Error generating PDF:', e);
-                            } finally {
-                                setIsGeneratingPDF(false);
-                            }
-                        }}
-                        disabled={isGeneratingPDF}
-                        className="px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 border border-[var(--color-primary)]/50 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 transition-all disabled:opacity-50"
-                    >
-                        <Download size={18} className={isGeneratingPDF ? 'animate-bounce' : ''} />
-                        {isGeneratingPDF ? 'Generando...' : 'Descargar PDF'}
-                    </button>
-
-                    {can('clients.manage_payments') && (
+                    <div className="flex gap-2">
                         <button
-                            onClick={() => setIsPaymentModalOpen(true)}
-                            disabled={pendingSales.length === 0}
-                            className="btn-primary px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] disabled:opacity-50 disabled:shadow-none"
+                            onClick={async () => {
+                                setIsGeneratingPDF(true);
+                                try {
+                                    await generateAccountStatementPDF({
+                                        client,
+                                        pendingSales,
+                                        allSales: rawClientSales,
+                                        totalDebt,
+                                        creditLimit,
+                                        creditEnabled,
+                                        clientStatus,
+                                        activeCompanyId,
+                                        currentCurrency,
+                                        users
+                                    });
+                                } catch (e) {
+                                    console.error('Error generating PDF:', e);
+                                } finally {
+                                    setIsGeneratingPDF(false);
+                                }
+                            }}
+                            disabled={isGeneratingPDF}
+                            className="flex-1 lg:flex-none justify-center px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 border border-[var(--color-primary)]/50 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 transition-all disabled:opacity-50 text-sm"
                         >
-                            <Banknote size={20} />
-                            Abonar / Pagar
+                            <Download size={18} className={isGeneratingPDF ? 'animate-bounce' : ''} />
+                            {isGeneratingPDF ? 'Generando...' : 'Descargar PDF'}
                         </button>
-                    )}
+
+                        {can('clients.manage_payments') && (
+                            <button
+                                onClick={() => setIsPaymentModalOpen(true)}
+                                disabled={pendingSales.length === 0}
+                                className="flex-1 lg:flex-none justify-center btn-primary px-4 lg:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] disabled:opacity-50 disabled:shadow-none text-sm"
+                            >
+                                <Banknote size={20} />
+                                Abonar / Pagar
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
 
-            {/* Dashboard Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 shrink-0">
+            {/* Dashboard Cards — 2×2 en móvil, 4 en fila en escritorio. */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 lg:gap-4 shrink-0">
                 {/* Total Debt Card */}
-                <div className="glass-card p-6 bg-red-500/10 border-red-500/20 relative overflow-hidden group">
+                <div className="glass-card p-3 lg:p-6 bg-red-500/10 border-red-500/20 relative overflow-hidden group">
                     <div className="relative z-10">
-                        <p className="text-red-400 text-sm font-bold uppercase tracking-wider mb-2">Deuda Total</p>
-                        <p className="text-4xl font-black text-white tracking-tight">{formatCurrency(totalDebt, currentCurrency)}</p>
+                        <p className="text-red-400 text-xs lg:text-sm font-bold uppercase tracking-wider mb-2">Deuda Total</p>
+                        <p className="text-xl lg:text-4xl font-black text-white tracking-tight break-words">{formatCurrency(totalDebt, currentCurrency)}</p>
                     </div>
                     <div className="absolute right-[-20px] top-[-20px] opacity-10 group-hover:opacity-20 transition-opacity">
                         <DollarSignIcon size={120} />
@@ -257,11 +312,11 @@ const ClientAccountDetails = ({ client, onBack }) => {
                 </div>
 
                 {/* Credit Limit Card */}
-                <div className="glass-card p-6 bg-[var(--glass-bg)] border-[var(--glass-border)]">
-                    <p className="text-[var(--color-text-muted)] text-sm font-bold uppercase tracking-wider mb-2">Límite de Crédito</p>
+                <div className="glass-card p-3 lg:p-6 bg-[var(--glass-bg)] border-[var(--glass-border)]">
+                    <p className="text-[var(--color-text-muted)] text-xs lg:text-sm font-bold uppercase tracking-wider mb-2">Límite de Crédito</p>
                     {creditLimit > 0 ? (
                         <>
-                            <p className="text-xl font-bold text-[var(--color-text)]">{formatCurrency(creditLimit, currentCurrency)}</p>
+                            <p className="text-base lg:text-xl font-bold text-[var(--color-text)]">{formatCurrency(creditLimit, currentCurrency)}</p>
                             <div className="mt-2 w-full bg-white/10 rounded-full h-2">
                                 <div
                                     className={cn(
@@ -275,53 +330,53 @@ const ClientAccountDetails = ({ client, onBack }) => {
                             <p className="text-xs text-[var(--color-text-muted)] mt-1">{creditUsagePercent.toFixed(0)}% utilizado</p>
                         </>
                     ) : (
-                        <p className="text-xl font-bold text-[var(--color-text)]">Sin límite</p>
+                        <p className="text-base lg:text-xl font-bold text-[var(--color-text)]">Sin límite</p>
                     )}
                 </div>
 
                 {/* Available Credit / Status Card */}
                 <div className={cn(
-                    'glass-card p-6',
+                    'glass-card p-3 lg:p-6',
                     overdueCount > 0 ? 'bg-red-500/10 border-red-500/20' :
                     clientStatus !== 'active' ? 'bg-orange-500/10 border-orange-500/20' :
                     'bg-green-500/10 border-green-500/20'
                 )}>
-                    <p className="text-[var(--color-text-muted)] text-sm font-bold uppercase tracking-wider mb-2">Estado</p>
+                    <p className="text-[var(--color-text-muted)] text-xs lg:text-sm font-bold uppercase tracking-wider mb-2">Estado</p>
                     {overdueCount > 0 ? (
                         <div className="flex items-center gap-2">
                             <AlertTriangle className="text-red-400" size={24} />
                             <div>
-                                <p className="text-xl font-bold text-red-400">Moroso</p>
+                                <p className="text-base lg:text-xl font-bold text-red-400">Moroso</p>
                                 <p className="text-xs text-red-400/80">{oldestOverdueDays} días de atraso • {overdueCount} deuda{overdueCount > 1 ? 's' : ''}</p>
                             </div>
                         </div>
                     ) : clientStatus === 'blocked' ? (
                         <div className="flex items-center gap-2">
                             <ShieldAlert className="text-red-400" size={24} />
-                            <p className="text-xl font-bold text-red-400">Bloqueado</p>
+                            <p className="text-base lg:text-xl font-bold text-red-400">Bloqueado</p>
                         </div>
                     ) : clientStatus === 'credit_blocked' ? (
                         <div className="flex items-center gap-2">
                             <ShieldOff className="text-orange-400" size={24} />
-                            <p className="text-xl font-bold text-orange-400">Sin Crédito</p>
+                            <p className="text-base lg:text-xl font-bold text-orange-400">Sin Crédito</p>
                         </div>
                     ) : !creditEnabled ? (
                         <div className="flex items-center gap-2">
                             <ShieldOff className="text-orange-400" size={24} />
-                            <p className="text-xl font-bold text-orange-400">Crédito OFF</p>
+                            <p className="text-base lg:text-xl font-bold text-orange-400">Crédito OFF</p>
                         </div>
                     ) : (
                         <div className="flex items-center gap-2">
                             <Shield className="text-green-400" size={24} />
-                            <p className="text-xl font-bold text-green-400">Al Día</p>
+                            <p className="text-base lg:text-xl font-bold text-green-400">Al Día</p>
                         </div>
                     )}
                 </div>
 
                 {/* Last Movement Card */}
-                <div className="glass-card p-6 bg-[var(--glass-bg)] border-[var(--glass-border)]">
-                    <p className="text-[var(--color-text-muted)] text-sm font-bold uppercase tracking-wider mb-2">Último Movimiento</p>
-                    <p className="text-xl font-bold text-[var(--color-text)]">
+                <div className="glass-card p-3 lg:p-6 bg-[var(--glass-bg)] border-[var(--glass-border)]">
+                    <p className="text-[var(--color-text-muted)] text-xs lg:text-sm font-bold uppercase tracking-wider mb-2">Último Movimiento</p>
+                    <p className="text-base lg:text-xl font-bold text-[var(--color-text)]">
                         {rawClientSales.length > 0 ? new Date(rawClientSales[0].date).toLocaleDateString() : 'N/A'}
                     </p>
                     <p className="text-sm text-[var(--color-text-muted)] mt-1">
@@ -334,7 +389,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
             </div>
 
             {/* Detailed List */}
-            <div className="flex-1 glass-card p-0 overflow-hidden flex flex-col">
+            <div className="shrink-0 lg:flex-1 lg:min-h-0 glass-card p-0 overflow-hidden flex flex-col">
                 <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] space-y-4">
                     <div className="flex justify-between items-center">
                         <h3 className="font-bold text-[var(--color-text)]">
@@ -397,9 +452,53 @@ const ClientAccountDetails = ({ client, onBack }) => {
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto">
+                <div className="lg:flex-1 lg:overflow-y-auto">
                     {salesToShow.length > 0 ? (
-                        <table className="w-full text-left border-collapse">
+                        <>
+                        {/* MÓVIL: cada movimiento es una tarjeta con TODO el detalle
+                            (sin scroll horizontal). */}
+                        <div className="lg:hidden divide-y divide-[var(--glass-border)]">
+                            {salesToShow.map(sale => (
+                                <button
+                                    key={sale.id}
+                                    onClick={() => setSelectedSale(sale)}
+                                    className="w-full text-left p-3 flex flex-col gap-2 hover:bg-white/5 active:bg-white/10 transition-colors"
+                                >
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+                                            <Calendar size={12} className="shrink-0" />
+                                            {new Date(sale.date).toLocaleString()}
+                                        </div>
+                                        {renderMonto(sale)}
+                                    </div>
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <p className="text-[var(--color-text)] font-medium text-sm">{sale.summary}</p>
+                                            <p className="text-xs text-[var(--color-text-muted)] italic mt-0.5">{sale.observation || 'Sin observaciones'}</p>
+                                            <div className="flex flex-wrap gap-1">{renderBadges(sale)}</div>
+                                        </div>
+                                        <div className="text-sm text-right shrink-0">{renderVence(sale)}</div>
+                                    </div>
+                                    <div className="flex gap-2 pt-1">
+                                        <button
+                                            onClick={(e) => handleWhatsAppShare(e, sale)}
+                                            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-500/10 text-green-400 rounded-lg text-xs font-bold"
+                                        >
+                                            <MessageCircle size={14} /> WhatsApp
+                                        </button>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setSelectedSale(sale); }}
+                                            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-cyan-500/10 text-cyan-400 rounded-lg text-xs font-bold"
+                                        >
+                                            <Eye size={14} /> Ver detalle
+                                        </button>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* ESCRITORIO: tabla */}
+                        <table className="hidden lg:table w-full text-left border-collapse">
                             <thead className="bg-black/20 sticky top-0 backdrop-blur-md z-10">
                                 <tr>
                                     <th className="p-4 text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Fecha</th>
@@ -538,8 +637,9 @@ const ClientAccountDetails = ({ client, onBack }) => {
                                 ))}
                             </tbody>
                         </table>
+                        </>
                     ) : (
-                        <div className="h-full flex flex-col items-center justify-center text-[var(--color-text-muted)] gap-4 opacity-50">
+                        <div className="min-h-[200px] lg:h-full flex flex-col items-center justify-center text-[var(--color-text-muted)] gap-4 opacity-50">
                             <Check size={64} />
                             <p className="text-lg font-medium">No hay registros</p>
                         </div>

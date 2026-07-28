@@ -49,8 +49,8 @@ const CompanySwitcher = () => {
         // Just show the name if there's nothing to switch to (and not admin)
         return (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 rounded-full border border-white/10 text-sm text-gray-300">
-                <Building2 size={14} />
-                <span className="font-medium truncate max-w-[150px]">{currentCompany.name}</span>
+                <Building2 size={14} className="shrink-0" />
+                <span className="font-medium truncate max-w-[100px] sm:max-w-[150px]">{currentCompany.name}</span>
             </div>
         );
     }
@@ -59,15 +59,15 @@ const CompanySwitcher = () => {
         <div className="relative" ref={dropdownRef}>
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 transition-all text-sm group"
+                className="flex items-center gap-2 px-2 sm:px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 transition-all text-sm group"
             >
-                <div className="p-1 bg-indigo-500/20 rounded-full text-indigo-400">
+                <div className="p-1 bg-indigo-500/20 rounded-full text-indigo-400 shrink-0">
                     <Building2 size={14} />
                 </div>
-                <span className="font-medium text-white truncate max-w-[150px]">
+                <span className="font-medium text-white truncate max-w-[100px] sm:max-w-[150px]">
                     {currentCompany.name}
                 </span>
-                <ChevronDown size={14} className={`text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown size={14} className={`text-gray-400 transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {isOpen && (

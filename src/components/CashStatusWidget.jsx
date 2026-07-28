@@ -199,9 +199,11 @@ const CashStatusWidget = () => {
                                 isStale ? "text-amber-400 font-semibold" : "text-[var(--color-text-muted)]"
                             )}>
                                 {isStale ? <AlertTriangle size={10} /> : <Clock size={10} />}
+                                {/* Compacto: si se abrió hoy, solo la hora; si fue otro día,
+                                    solo la fecha abreviada (sin hora) para no ocupar espacio. */}
                                 {openedToday
                                     ? `Desde ${format(openedAt, 'h:mm a', { locale: es })}`
-                                    : `Desde ${format(openedAt, "d MMM, h:mm a", { locale: es })}`}
+                                    : `Desde ${format(openedAt, "d MMM", { locale: es })}`}
                             </span>
                         </div>
                         <div className="w-8 h-8 rounded-lg bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)] group-hover:bg-[var(--color-primary)] group-hover:text-black transition-colors">

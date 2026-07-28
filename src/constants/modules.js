@@ -251,6 +251,15 @@ export const ALL_MODULES = [
         minLevel: 2,
         appKey: 'tienda_web',
     },
+    {
+        key: 'labels',
+        label: 'Etiquetas (App)',
+        description: 'Impresión de etiquetas de producto (nombre, código de barra y precio).',
+        defaultEnabled: false,
+        plan: 'professional',
+        minLevel: 2,
+        appKey: 'etiquetas',
+    },
 ];
 
 // Helper: obtener módulo por key

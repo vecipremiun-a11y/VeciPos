@@ -8,6 +8,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import { usePermissions } from '../hooks/usePermissions';
 import ReturnModal from '../components/ReturnModal';
+import { printSaleReceipt } from '../lib/saleReceipt';
 
 const SalesHistory = () => {
     const { sales, users, cancelSale, fetchSaleReturns, currentUser, currentCompanyTimezone, fetchSales, fetchSaleDetails, activeCompanyId, currentCurrency } = useStore();
@@ -38,6 +39,7 @@ const SalesHistory = () => {
     const [showCancelModal, setShowCancelModal] = useState(false);
     const [cancellationReason, setCancellationReason] = useState('');
     const [showReturnModal, setShowReturnModal] = useState(false);
+    const [isPrinting, setIsPrinting] = useState(false);
     const [saleReturns, setSaleReturns] = useState([]);
     const [returnSuccess, setReturnSuccess] = useState(null);
     const [dteMap, setDteMap] = useState({});
@@ -248,6 +250,45 @@ const SalesHistory = () => {
     const getSellerName = (userId) => {
         const user = users.find(u => u.id === userId);
         return user ? user.name : 'Desconocido';
+    };
+
+    // Reimprimir la boleta: en la app va a la térmica Bluetooth; en el navegador
+    // abre la ventana de impresión de siempre. Mismo formato que la venta nueva.
+    const handlePrintReceipt = async () => {
+        if (!selectedSale || isPrinting) return;
+        setIsPrinting(true);
+        try {
+            const configResult = { rows: await reportCall(activeCompanyId, 'receiptConfig', {}) };
+            const receiptConfig = configResult.rows.length > 0 ? {
+                ...configResult.rows[0],
+                show_tax_id: configResult.rows[0].show_tax_id === 1,
+                show_phone: configResult.rows[0].show_phone === 1,
+                show_email: configResult.rows[0].show_email === 1,
+            } : {};
+            const dteInfo = dteMap[selectedSale.id] || selectedDteInfo || null;
+            // Timbre SII: traer el XML firmado del DTE (si la venta es boleta/factura).
+            let tedXml = null;
+            try {
+                const dteResult = { rows: await reportCall(activeCompanyId, 'dteForSale', { saleId: selectedSale.id }) };
+                if (dteResult.rows.length > 0 && dteResult.rows[0].xml_firmado) tedXml = dteResult.rows[0].xml_firmado;
+            } catch { /* venta sin DTE: sin timbre */ }
+            const r = await printSaleReceipt(selectedSale, {
+                sellerName: getSellerName(selectedSale.user_id),
+                receiptConfig,
+                currency: currentCurrency,
+                dteInfo,
+                tedXml,
+            });
+            if (!r.ok) {
+                if (r.error === 'NO_PRINTER') alert('Configura tu impresora en Configuración → General → Impresora térmica.');
+                else if (r.error === 'POPUP_BLOCKED') alert('El navegador bloqueó la ventana de impresión. Permite las ventanas emergentes.');
+                else alert('No se pudo imprimir: ' + (r.error || ''));
+            }
+        } catch (e) {
+            alert('No se pudo imprimir: ' + (e?.message || e));
+        } finally {
+            setIsPrinting(false);
+        }
     };
 
     return (
@@ -461,6 +502,10 @@ const SalesHistory = () => {
                                     <button onClick={handleWhatsAppClick} className="flex items-center gap-2 px-4 py-2 bg-[#25D366]/20 hover:bg-[#25D366]/30 text-[#25D366] rounded-lg text-sm transition-colors">
                                         <Send size={16} />
                                         Compartir WhatsApp
+                                    </button>
+                                    <button onClick={handlePrintReceipt} disabled={isPrinting} className="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)]/10 hover:bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded-lg text-sm transition-colors border border-[var(--color-primary)]/20 disabled:opacity-50">
+                                        <Printer size={16} />
+                                        {isPrinting ? 'Imprimiendo…' : 'Imprimir'}
                                     </button>
                                     <div className="flex-1"></div>
                                     {selectedSale.status !== 'cancelled' && can('sales.return') && (
@@ -848,6 +893,10 @@ const SalesHistory = () => {
                             <Send size={14} />
                             Compartir WhatsApp
                         </button>
+                        <button onClick={handlePrintReceipt} disabled={isPrinting} className="flex items-center gap-1.5 px-3 py-2 bg-[var(--color-primary)]/10 text-[var(--color-primary)] rounded-lg text-xs border border-[var(--color-primary)]/20 whitespace-nowrap disabled:opacity-50">
+                            <Printer size={14} />
+                            {isPrinting ? 'Imprimiendo…' : 'Imprimir'}
+                        </button>
                         {selectedSale.status !== 'cancelled' && can('sales.return') && (
                             <button onClick={() => setShowReturnModal(true)} className="flex items-center gap-1.5 px-3 py-2 bg-orange-500/10 text-orange-400 rounded-lg text-xs border border-orange-500/20 whitespace-nowrap">
                                 <RotateCcw size={14} />
@@ -1050,6 +1099,58 @@ const SalesHistory = () => {
                                 onClose={() => setShowReturnModal(false)}
                                 onSuccess={handleReturnSuccess}
                             />
+                        </div>
+                    )}
+
+                    {/* Mobile Cancellation Modal — antes solo existía en la vista de
+                        escritorio, por eso en el teléfono "Anular Venta" no hacía nada. */}
+                    {showCancelModal && (
+                        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+                            <div className="bg-[var(--color-surface)] dark:bg-[#0f0f2d] border border-red-500/20 p-6 rounded-2xl w-full max-w-md shadow-2xl">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="text-xl font-bold text-[var(--color-text)] flex items-center gap-2">
+                                        <AlertTriangle className="text-red-500" size={24} />
+                                        Anular Venta
+                                    </h3>
+                                    <button
+                                        onClick={() => { setShowCancelModal(false); setCancellationReason(''); }}
+                                        className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                                    >
+                                        <X size={20} />
+                                    </button>
+                                </div>
+                                <div className="mb-6">
+                                    <p className="text-[var(--color-text-muted)] text-sm mb-4">
+                                        ¿Está seguro de que desea anular esta venta? Esta acción restaurará el stock de los productos.
+                                    </p>
+                                    <label className="block text-xs font-bold text-[var(--color-text-muted)] uppercase mb-2">
+                                        Motivo de Anulación (Requerido)
+                                    </label>
+                                    <textarea
+                                        className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg p-3 text-[var(--color-text)] text-sm focus:border-red-500/50 focus:outline-none resize-none h-24"
+                                        placeholder="Especifique la razón de la anulación..."
+                                        value={cancellationReason}
+                                        onChange={(e) => setCancellationReason(e.target.value)}
+                                        autoFocus
+                                    />
+                                </div>
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => { setShowCancelModal(false); setCancellationReason(''); }}
+                                        className="flex-1 px-4 py-2 bg-[var(--glass-bg)] hover:bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] rounded-lg text-sm font-bold transition-colors"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        onClick={confirmCancellation}
+                                        disabled={!cancellationReason.trim()}
+                                        className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                    >
+                                        <Trash2 size={16} />
+                                        Confirmar Anulación
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     )}
 

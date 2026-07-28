@@ -51,6 +51,16 @@ export const ALL_APPS = [
         moduleKeys: ['web'],
         icon: 'Globe',
     },
+    {
+        key: 'etiquetas',
+        name: 'Etiquetas',
+        description: 'Imprime etiquetas con nombre, código de barra y precio para escanear en el POS.',
+        priceClp: 5000, priceUsd: 5,
+        scope: 'branch',
+        status: 'available',
+        moduleKeys: ['labels'],
+        icon: 'Tags',
+    },
 
     // ── Próximamente · por sucursal ───────────────────────────────────
     { key: 'delivery', name: 'Delivery', description: 'Reparto a domicilio con app de repartidores.', scope: 'branch', status: 'coming_soon', icon: 'Bike' },

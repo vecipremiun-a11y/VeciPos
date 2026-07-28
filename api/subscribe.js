@@ -2,7 +2,7 @@ import { createClient } from '@libsql/client';
 import { MercadoPagoConfig, Preference } from 'mercadopago';
 import { appChargeQuote, APP_PRICES } from './_lib/billing.js';
 
-const APP_NAMES = { cocina: 'Cocina', integracion: 'Integración tienda', bascula: 'Báscula', tienda_web: 'Tienda Web' };
+const APP_NAMES = { cocina: 'Cocina', integracion: 'Integración tienda', bascula: 'Báscula', tienda_web: 'Tienda Web', etiquetas: 'Etiquetas' };
 
 // Turso lazy (las env se leen en request porque server.js carga dotenv tras los imports)
 let _turso = null;

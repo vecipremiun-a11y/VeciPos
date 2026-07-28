@@ -13,6 +13,7 @@ const AVAILABLE_APPS = {
     integracion: { scope: 'branch', priceClp: 10000, priceUsd: 10 },
     bascula: { scope: 'branch', priceClp: 10000, priceUsd: 10 },
     tienda_web: { scope: 'branch', priceClp: 15000, priceUsd: 15 },
+    etiquetas: { scope: 'branch', priceClp: 5000, priceUsd: 5 },
 };
 
 async function isProfessional(turso, companyId) {

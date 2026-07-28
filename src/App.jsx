@@ -57,6 +57,7 @@ const PreorderHistory = lazy(() => import('./pages/PreorderHistory'));
 const InventoryReconciliation = lazy(() => import('./pages/InventoryReconciliation'));
 const InventoryControl = lazy(() => import('./pages/InventoryControl'));
 const ProductCombos = lazy(() => import('./pages/ProductCombos'));
+const LabelPrinting = lazy(() => import('./pages/LabelPrinting'));
 const DocumentosSII = lazy(() => import('./pages/DocumentosSII'));
 const FolioSettings = lazy(() => import('./pages/FolioSettings'));
 const OfflineSync = lazy(() => import('./pages/OfflineSync'));
@@ -359,6 +360,7 @@ function App() {
           <Route path="inventory/reconciliation" element={<ProtectedPage permission="products.adjust_stock"><FeatureGatePage moduleKey="inventory_control"><InventoryReconciliation /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/control" element={<ProtectedPage permission="inventory_control.view"><FeatureGatePage moduleKey="inventory_control"><InventoryControl /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/combos" element={<ProtectedPage permission="combos.view"><FeatureGatePage moduleKey="combos"><ProductCombos /></FeatureGatePage></ProtectedPage>} />
+          <Route path="inventory/labels" element={<ProtectedPage permission="products.view"><FeatureGatePage moduleKey="labels"><LabelPrinting /></FeatureGatePage></ProtectedPage>} />
           <Route path="documentos-sii" element={<ProtectedPage permission="sii.view"><FeatureGatePage moduleKey="sii"><DocumentosSII /></FeatureGatePage></ProtectedPage>} />
           <Route path="sii/folios" element={<ProtectedPage permission="sii.folios"><FeatureGatePage moduleKey="sii"><FolioSettings /></FeatureGatePage></ProtectedPage>} />
 

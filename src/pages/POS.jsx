@@ -1325,9 +1325,10 @@ const POS = () => {
                                         const discountAmount = totalPrice * (discountPercent / 100);
                                         const finalPrice = totalPrice - discountAmount;
 
+                                        const isKg = item.unit === 'Kg';
                                         return (
-                                            <div key={item.id} className="bg-[#1a1b26] rounded-xl p-3 border border-white/5">
-                                                <div className="flex justify-between items-start mb-2">
+                                            <div key={item.id} className="bg-[#1a1b26] rounded-xl p-3 border border-white/5 space-y-2">
+                                                <div className="flex justify-between items-start">
                                                     <span className="text-white text-sm font-medium line-clamp-2 flex-1 pr-2">
                                                         {item.name}
                                                     </span>
@@ -1338,29 +1339,87 @@ const POS = () => {
                                                         <Trash2 size={16} />
                                                     </button>
                                                 </div>
-                                                <div className="flex justify-between items-center">
-                                                    <div className="flex items-center gap-2 bg-black/30 rounded-lg p-1">
-                                                        <button
-                                                            className="w-8 h-8 flex items-center justify-center bg-gray-700 rounded-lg text-white"
-                                                            onClick={() => {
-                                                                if (item.quantity > 1) {
-                                                                    updateCartItem(item.id, { quantity: item.quantity - 1 });
-                                                                }
+
+                                                {/* Precio unitario editable (+ báscula si es por Kg) */}
+                                                <div className="flex justify-between items-center text-xs text-gray-400">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span>{isKg ? 'Kg:' : 'Und:'}</span>
+                                                        <span className="text-sm">{getCurrencySymbol(currentCurrency)}</span>
+                                                        <input
+                                                            type="number"
+                                                            inputMode="decimal"
+                                                            className="w-20 bg-transparent text-sm font-bold text-white outline-none border-b border-white/15 focus:border-cyan-400 transition-colors"
+                                                            value={item.price}
+                                                            onChange={(e) => {
+                                                                const val = parseFloat(e.target.value);
+                                                                if (!isNaN(val) && val >= 0) updateCartItem(item.id, { price: val });
                                                             }}
-                                                        >
-                                                            <Minus size={14} />
-                                                        </button>
-                                                        <span className="font-bold text-white w-8 text-center">{item.quantity}</span>
-                                                        <button
-                                                            className="w-8 h-8 flex items-center justify-center bg-emerald-500 rounded-lg text-black"
-                                                            onClick={() => updateCartItem(item.id, { quantity: item.quantity + 1 })}
-                                                        >
-                                                            <Plus size={14} />
-                                                        </button>
+                                                        />
+                                                        {isKg && (
+                                                            <ScaleReadButton
+                                                                onWeight={(kg) => updateCartItem(item.id, { quantity: kg })}
+                                                                className="ml-1"
+                                                            />
+                                                        )}
                                                     </div>
                                                     <span className="text-green-400 font-bold text-lg">
                                                         {formatCurrency(finalPrice, currentCurrency)}
                                                     </span>
+                                                </div>
+
+                                                {/* Descuento + cantidad (decimales cuando es por Kg) */}
+                                                <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10">
+                                                    {can('pos.discount') ? (
+                                                        <div className="flex items-center gap-1 bg-black/30 rounded-lg px-2 py-1.5 border border-white/10 w-20">
+                                                            <span className="text-xs text-gray-400 font-bold">%</span>
+                                                            <input
+                                                                type="number"
+                                                                inputMode="decimal"
+                                                                placeholder="0"
+                                                                min="0"
+                                                                max="100"
+                                                                className="w-full bg-transparent text-sm text-white outline-none text-right font-bold"
+                                                                value={item.discountPercent || ''}
+                                                                onChange={(e) => {
+                                                                    let val = parseFloat(e.target.value);
+                                                                    if (isNaN(val)) val = 0;
+                                                                    if (val < 0) val = 0;
+                                                                    if (val > 100) val = 100;
+                                                                    updateCartItem(item.id, { discountPercent: val });
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    ) : <span />}
+
+                                                    <div className="flex items-center gap-2 bg-black/30 rounded-lg p-1">
+                                                        <button
+                                                            className="w-9 h-9 flex items-center justify-center bg-gray-700 rounded-lg text-white"
+                                                            onClick={() => {
+                                                                const minVal = isKg ? 0.001 : 1;
+                                                                if (item.quantity > minVal) {
+                                                                    const newVal = item.quantity - 1;
+                                                                    updateCartItem(item.id, { quantity: newVal < minVal ? minVal : newVal });
+                                                                }
+                                                            }}
+                                                        >
+                                                            <Minus size={16} />
+                                                        </button>
+                                                        {isKg ? (
+                                                            <KgQuantityInput
+                                                                value={item.quantity}
+                                                                onChange={(val) => updateCartItem(item.id, { quantity: val, _skipRemoval: true })}
+                                                                onCommit={(val) => updateCartItem(item.id, { quantity: val <= 0 ? 0.001 : val })}
+                                                            />
+                                                        ) : (
+                                                            <span className="font-bold text-white w-9 text-center">{item.quantity}</span>
+                                                        )}
+                                                        <button
+                                                            className="w-9 h-9 flex items-center justify-center bg-emerald-500 rounded-lg text-black"
+                                                            onClick={() => updateCartItem(item.id, { quantity: item.quantity + 1 })}
+                                                        >
+                                                            <Plus size={16} />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         );
