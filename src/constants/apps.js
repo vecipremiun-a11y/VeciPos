@@ -62,8 +62,18 @@ export const ALL_APPS = [
         icon: 'Tags',
     },
 
+    {
+        key: 'delivery',
+        name: 'Delivery',
+        description: 'Reparto a domicilio: repartidores, envíos, rastreo en vivo y liquidación.',
+        priceClp: 10000, priceUsd: 10,
+        scope: 'branch',
+        status: 'available',
+        moduleKeys: ['delivery'],
+        icon: 'Bike',
+    },
+
     // ── Próximamente · por sucursal ───────────────────────────────────
-    { key: 'delivery', name: 'Delivery', description: 'Reparto a domicilio con app de repartidores.', scope: 'branch', status: 'coming_soon', icon: 'Bike' },
     { key: 'fidelizacion', name: 'Fidelización', description: 'Puntos y recompensas para tus clientes.', scope: 'branch', status: 'coming_soon', icon: 'Gift' },
     { key: 'whatsapp', name: 'WhatsApp', description: 'Notifica y vende por WhatsApp.', scope: 'branch', status: 'coming_soon', icon: 'MessageCircle' },
     { key: 'restaurante', name: 'Restaurante', description: 'Gestión de mesas y comandas para restaurantes.', scope: 'branch', status: 'coming_soon', icon: 'Utensils' },

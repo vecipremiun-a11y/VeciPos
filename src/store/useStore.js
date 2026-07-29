@@ -95,6 +95,11 @@ const normalizeSku = (value) => {
 export const useStore = create(persist((set, get) => ({
     // Initial State
     products: [],
+    // Delivery (App): repartidores y tablero de envíos
+    couriers: [],
+    deliveries: [],
+    deliveryCounts: {},
+    deliveryAssignMode: 'manual',
     productLots: [], // New state for lots
     categories: [],
     suppliers: [],
@@ -6047,6 +6052,81 @@ export const useStore = create(persist((set, get) => ({
             return { success: false, error: e.message };
         }
     },
+
+    // ==========================================
+    // DELIVERY (App) — repartidores, envíos, rastreo y liquidación
+    // ==========================================
+    // Todas pasan por /api/data/actions (sesión + membresía validadas allí).
+    deliveryCall: async (action, payload = {}) => {
+        const { activeCompanyId } = get();
+        try {
+            const r = await userApiCall(action, { companyId: activeCompanyId, ...payload });
+            return r || { success: false, error: 'Sin respuesta' };
+        } catch (e) {
+            console.error(`Error en ${action}:`, e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    fetchCouriers: async () => {
+        const r = await get().deliveryCall('courierList');
+        if (r?.success) set({ couriers: r.couriers || [] });
+        return r;
+    },
+    saveCourier: async (courier) => {
+        const r = await get().deliveryCall('courierSave', courier);
+        if (r?.success) await get().fetchCouriers();
+        return r;
+    },
+    deleteCourier: async (id) => {
+        const r = await get().deliveryCall('courierDelete', { id });
+        if (r?.success) await get().fetchCouriers();
+        return r;
+    },
+
+    fetchDeliveryBoard: async () => {
+        const r = await get().deliveryCall('deliveryBoard');
+        if (r?.success) {
+            set({
+                deliveries: r.deliveries || [],
+                deliveryCounts: r.counts || {},
+                deliveryAssignMode: r.assignMode || 'manual',
+            });
+        }
+        return r;
+    },
+    createDelivery: async (data) => {
+        const r = await get().deliveryCall('deliveryCreate', data);
+        if (r?.success) await get().fetchDeliveryBoard();
+        return r;
+    },
+    assignDelivery: async (id, courierId) => {
+        const r = await get().deliveryCall('deliveryAssign', { id, courierId });
+        if (r?.success) { await get().fetchDeliveryBoard(); get().fetchCouriers(); }
+        return r;
+    },
+    setDeliveryStatus: async (id, status, extra = {}) => {
+        const r = await get().deliveryCall('deliveryStatus', { id, status, ...extra });
+        if (r?.success) { await get().fetchDeliveryBoard(); get().fetchCouriers(); }
+        return r;
+    },
+    fetchImportableOrders: async () => get().deliveryCall('deliveryImportable'),
+    saveDeliverySettings: async (assignMode) => {
+        const r = await get().deliveryCall('deliverySettingsSave', { assignMode });
+        if (r?.success) set({ deliveryAssignMode: r.assignMode });
+        return r;
+    },
+
+    // Modo Repartidor
+    fetchMyDeliveries: async () => get().deliveryCall('courierMyDeliveries'),
+    takeDelivery: async (id) => get().deliveryCall('courierTake', { id }),
+    pingCourierLocation: async (lat, lng) => get().deliveryCall('courierPing', { lat, lng }),
+
+    // Rastreo y liquidación
+    fetchDeliveryTracking: async () => get().deliveryCall('deliveryTracking'),
+    createSettlement: async (courierId, registerId, notes) =>
+        get().deliveryCall('settlementCreate', { courierId, registerId, notes }),
+    fetchSettlements: async () => get().deliveryCall('settlementList'),
 
     // ==========================================
     // PAYMENT METHODS ACTIONS

@@ -5,6 +5,7 @@ import { saleCommit, saleAggregations, saleAggregationsReverse, saleCancel, sale
 import { registerActions } from '../_lib/registerActions.js';
 import { purchaseActions } from '../_lib/purchaseActions.js';
 import { preorderActions } from '../_lib/preorderActions.js';
+import { deliveryActions } from '../_lib/deliveryActions.js';
 import { reportRun } from '../_lib/reportActions.js';
 import { sorteoActions } from '../_lib/sorteoActions.js';
 import { companyActions } from '../_lib/companyActions.js';
@@ -211,6 +212,23 @@ export default async function handler(req, res) {
             case 'preorderAnalyticsRaw':
             case 'preorderableProducts':
                 return res.status(200).json(await preorderActions[action](turso, companyId, session, body));
+            // App Delivery (migración 0013)
+            case 'courierList':
+            case 'courierSave':
+            case 'courierDelete':
+            case 'deliveryBoard':
+            case 'deliveryCreate':
+            case 'deliveryAssign':
+            case 'deliveryStatus':
+            case 'deliveryImportable':
+            case 'courierMyDeliveries':
+            case 'courierTake':
+            case 'courierPing':
+            case 'deliveryTracking':
+            case 'settlementCreate':
+            case 'settlementList':
+            case 'deliverySettingsSave':
+                return res.status(200).json(await deliveryActions[action](turso, companyId, session, body));
             // Reportes generales (catálogo whitelisteado — Fase 1 · Paso 18)
             case 'report':
                 return res.status(200).json(await reportRun(turso, companyId, session, body));

@@ -260,6 +260,15 @@ export const ALL_MODULES = [
         minLevel: 2,
         appKey: 'etiquetas',
     },
+    {
+        key: 'delivery',
+        label: 'Delivery (App)',
+        description: 'Repartidores, envíos, rastreo en vivo y liquidación de lo recaudado.',
+        defaultEnabled: false,
+        plan: 'professional',
+        minLevel: 2,
+        appKey: 'delivery',
+    },
 ];
 
 // Helper: obtener módulo por key

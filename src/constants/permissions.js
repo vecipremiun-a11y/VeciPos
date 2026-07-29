@@ -245,6 +245,17 @@ export const ALL_PERMISSIONS = [
         ]
     },
     {
+        id: 'delivery',
+        label: 'Delivery',
+        permissions: [
+            { id: 'delivery.view', label: 'Ver Envíos', desc: 'Permite ver el tablero de envíos y el rastreo de repartidores' },
+            { id: 'delivery.assign', label: 'Asignar Envíos', desc: 'Permite asignar o reasignar envíos a los repartidores' },
+            { id: 'delivery.couriers', label: 'Gestionar Repartidores', desc: 'Permite agregar, editar y desactivar repartidores' },
+            { id: 'delivery.settle', label: 'Liquidar Recaudación', desc: 'Permite rendir a caja el efectivo cobrado por los repartidores' },
+            { id: 'delivery.courier', label: 'Modo Repartidor', desc: 'Da acceso a la pantalla del repartidor: sus pedidos y entregas' },
+        ]
+    },
+    {
         id: 'settings',
         label: 'Configuración',
         permissions: [

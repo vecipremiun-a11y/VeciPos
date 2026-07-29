@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Tags, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Tags, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store, Bike, MapPin, Navigation } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -162,6 +162,17 @@ const MainLayout = () => {
             subItems: [
                 { icon: FileText, label: 'Documentos', path: '/documentos-sii', permission: 'sii.view' },
                 { icon: Settings, label: 'Activar Folios', path: '/sii/folios', permission: 'sii.folios' },
+            ]
+        },
+        {
+            icon: Bike,
+            label: 'Delivery',
+            moduleKey: 'delivery',
+            subItems: [
+                { icon: Truck, label: 'Envíos', path: '/delivery/shipments', permission: 'delivery.view' },
+                { icon: Bike, label: 'Repartidores', path: '/delivery/couriers', permission: 'delivery.view' },
+                { icon: MapPin, label: 'Rastreo', path: '/delivery/tracking', permission: 'delivery.view' },
+                { icon: Navigation, label: 'Modo Repartidor', path: '/delivery/me', permission: 'delivery.courier' },
             ]
         },
         { icon: Briefcase, label: 'Personal', path: '/personal', permission: 'personal.view', moduleKey: 'personal' },

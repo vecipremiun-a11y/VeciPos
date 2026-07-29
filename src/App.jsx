@@ -58,6 +58,10 @@ const InventoryReconciliation = lazy(() => import('./pages/InventoryReconciliati
 const InventoryControl = lazy(() => import('./pages/InventoryControl'));
 const ProductCombos = lazy(() => import('./pages/ProductCombos'));
 const LabelPrinting = lazy(() => import('./pages/LabelPrinting'));
+const DeliveryCouriers = lazy(() => import('./pages/delivery/Couriers'));
+const DeliveryShipments = lazy(() => import('./pages/delivery/Shipments'));
+const DeliveryTracking = lazy(() => import('./pages/delivery/Tracking'));
+const CourierMode = lazy(() => import('./pages/delivery/CourierMode'));
 const DocumentosSII = lazy(() => import('./pages/DocumentosSII'));
 const FolioSettings = lazy(() => import('./pages/FolioSettings'));
 const OfflineSync = lazy(() => import('./pages/OfflineSync'));
@@ -361,6 +365,11 @@ function App() {
           <Route path="inventory/control" element={<ProtectedPage permission="inventory_control.view"><FeatureGatePage moduleKey="inventory_control"><InventoryControl /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/combos" element={<ProtectedPage permission="combos.view"><FeatureGatePage moduleKey="combos"><ProductCombos /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/labels" element={<ProtectedPage permission="products.view"><FeatureGatePage moduleKey="labels"><LabelPrinting /></FeatureGatePage></ProtectedPage>} />
+          {/* App Delivery */}
+          <Route path="delivery/shipments" element={<ProtectedPage permission="delivery.view"><FeatureGatePage moduleKey="delivery"><DeliveryShipments /></FeatureGatePage></ProtectedPage>} />
+          <Route path="delivery/couriers" element={<ProtectedPage permission="delivery.view"><FeatureGatePage moduleKey="delivery"><DeliveryCouriers /></FeatureGatePage></ProtectedPage>} />
+          <Route path="delivery/tracking" element={<ProtectedPage permission="delivery.view"><FeatureGatePage moduleKey="delivery"><DeliveryTracking /></FeatureGatePage></ProtectedPage>} />
+          <Route path="delivery/me" element={<ProtectedPage permission="delivery.courier"><FeatureGatePage moduleKey="delivery"><CourierMode /></FeatureGatePage></ProtectedPage>} />
           <Route path="documentos-sii" element={<ProtectedPage permission="sii.view"><FeatureGatePage moduleKey="sii"><DocumentosSII /></FeatureGatePage></ProtectedPage>} />
           <Route path="sii/folios" element={<ProtectedPage permission="sii.folios"><FeatureGatePage moduleKey="sii"><FolioSettings /></FeatureGatePage></ProtectedPage>} />
 

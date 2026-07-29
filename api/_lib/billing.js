@@ -17,6 +17,7 @@ export const APP_PRICES = {
     bascula: { CLP: 10000, USD: 10 },
     tienda_web: { CLP: 15000, USD: 15 },
     etiquetas: { CLP: 5000, USD: 5 },
+    delivery: { CLP: 10000, USD: 10 },
 };
 
 export function normalizePlan(p) {
