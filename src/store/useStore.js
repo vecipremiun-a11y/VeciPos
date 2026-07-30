@@ -6111,6 +6111,7 @@ export const useStore = create(persist((set, get) => ({
         return r;
     },
     fetchImportableOrders: async () => get().deliveryCall('deliveryImportable'),
+    fetchDeliveryDetail: async (id) => get().deliveryCall('deliveryDetail', { id }),
     saveDeliverySettings: async (assignMode) => {
         const r = await get().deliveryCall('deliverySettingsSave', { assignMode });
         if (r?.success) set({ deliveryAssignMode: r.assignMode });

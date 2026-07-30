@@ -221,6 +221,7 @@ export default async function handler(req, res) {
             case 'deliveryAssign':
             case 'deliveryStatus':
             case 'deliveryImportable':
+            case 'deliveryDetail':
             case 'courierMyDeliveries':
             case 'courierTake':
             case 'courierPing':
@@ -238,16 +239,20 @@ export default async function handler(req, res) {
             case 'sorteoSave':
             case 'sorteoClearParticipants':
                 return res.status(200).json(await sorteoActions[action](turso, companyId, session, body));
-            // Configuración de empresa / folios / DTEs (Fase 1 · Paso 23)
-            case 'companyFieldsUpdate':
-            case 'folioSettingsLoad':
-            case 'folioSettingsSave':
-            case 'dteRetryDelete':
+            // Complementos del Marketplace
             case 'appList':
             case 'appActivate':
             case 'appCancel':
             case 'appChargeQuote':
                 return res.status(200).json(await appActions[action](turso, companyId, session, body));
+            // Configuración de empresa / folios / DTEs (Fase 1 · Paso 23).
+            // OJO: estas viven en companyActions. Estaban agrupadas con las de Apps,
+            // así que se llamaba appActions['companyFieldsUpdate'] (inexistente) y la
+            // pantalla de Empresa decía "guardado" sin escribir nada.
+            case 'companyFieldsUpdate':
+            case 'folioSettingsLoad':
+            case 'folioSettingsSave':
+            case 'dteRetryDelete':
             case 'companyModuleUpdate':
             case 'companyLinkedCreate':
             case 'companyBranches':

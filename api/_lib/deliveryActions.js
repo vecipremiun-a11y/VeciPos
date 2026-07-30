@@ -87,6 +87,37 @@ async function recalcClientDebt(turso, companyId, clientId) {
     });
 }
 
+/**
+ * Dirección del LOCAL (a dónde va el repartidor a retirar). `full_address` suele
+ * estar vacío porque no es obligatorio, así que se cae a la dirección de la
+ * boleta y, si tampoco, a la del SII — que casi siempre está completa.
+ */
+async function pickupAddressOf(turso, companyId) {
+    const r = await turso.execute({
+        sql: 'SELECT name, full_address, receipt_address, city FROM companies WHERE id = ? LIMIT 1',
+        args: [companyId],
+    });
+    const co = r.rows[0] || {};
+    const limpio = (s) => String(s || '').trim();
+    let dir = limpio(co.full_address);
+    if (!dir) {
+        const partes = [limpio(co.receipt_address), limpio(co.city)].filter(Boolean);
+        dir = partes.join(', ');
+    }
+    if (!dir) {
+        try {
+            const s = await turso.execute({
+                sql: 'SELECT direccion, comuna, ciudad FROM sii_config WHERE company_id = ? LIMIT 1',
+                args: [companyId],
+            });
+            const x = s.rows[0] || {};
+            const partes = [limpio(x.direccion), limpio(x.comuna) || limpio(x.ciudad)].filter(Boolean);
+            dir = [...new Set(partes)].join(', ');
+        } catch { /* la empresa puede no tener SII */ }
+    }
+    return { name: co.name || '', address: dir };
+}
+
 // Guard: el envío debe ser de la empresa. Devuelve la fila o null.
 async function ownDelivery(turso, companyId, id, cols = '*') {
     if (!id) return null;
@@ -419,10 +450,11 @@ async function courierMyDeliveries(turso, companyId, session) {
     if (!me) return { success: true, isCourier: false, me: null, nuevos: [], enCurso: [], entregados: [], fallidos: [], available: [] };
 
     const cfg = await turso.execute({
-        sql: 'SELECT delivery_assign_mode, full_address, name FROM companies WHERE id = ? LIMIT 1',
+        sql: 'SELECT delivery_assign_mode FROM companies WHERE id = ? LIMIT 1',
         args: [companyId],
     });
     const mode = cfg.rows[0]?.delivery_assign_mode || 'manual';
+    const local = await pickupAddressOf(turso, companyId);
     // Historial reciente: últimas 24 h. Cubre un turno completo sin depender de la
     // zona horaria (un reparto a las 21:00 en Chile ya es "mañana" en UTC).
     const desde = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
@@ -473,8 +505,8 @@ async function courierMyDeliveries(turso, companyId, session) {
         isCourier: true,
         me,
         assignMode: mode,
-        pickupAddress: cfg.rows[0]?.full_address || '',
-        pickupName: cfg.rows[0]?.name || 'el local',
+        pickupAddress: local.address,
+        pickupName: local.name || 'el local',
         nuevos: nuevos.rows || [],
         enCurso: enCurso.rows || [],
         entregados: entregados.rows || [],
@@ -482,6 +514,101 @@ async function courierMyDeliveries(turso, companyId, session) {
         available: avail.rows || [],
         pendingCash: Number(cash.rows[0]?.cash) || 0,
         pendingCount: Number(cash.rows[0]?.n) || 0,
+    };
+}
+
+// ── Detalle del envío (lo que el repartidor ve ANTES de aceptar) ─────────────
+// Geocodificación con Nominatim (OpenStreetMap): gratis y sin API key. Se cachea
+// en memoria y, para el envío, en su fila, para no repetir consultas — el servicio
+// pide un uso moderado.
+const _geoCache = new Map();
+async function geocode(address) {
+    const key = String(address || '').trim().toLowerCase();
+    if (!key) return null;
+    if (_geoCache.has(key)) return _geoCache.get(key);
+    try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`;
+        const res = await fetch(url, { headers: { 'User-Agent': 'POSVECI/1.0 (delivery)' } });
+        if (!res.ok) return null;
+        const j = await res.json();
+        const hit = j?.[0] ? { lat: Number(j[0].lat), lng: Number(j[0].lon) } : null;
+        _geoCache.set(key, hit);
+        return hit;
+    } catch {
+        return null;   // sin internet o servicio caído: el detalle igual se muestra
+    }
+}
+
+/** Distancia en km entre dos puntos (fórmula de Haversine, línea recta). */
+function distanceKm(a, b) {
+    if (!a || !b) return null;
+    const R = 6371, rad = (x) => (x * Math.PI) / 180;
+    const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+    return Math.round(R * 2 * Math.asin(Math.sqrt(h)) * 10) / 10;
+}
+
+/**
+ * Todo lo del envío para decidir si aceptarlo: productos, direcciones (local →
+ * cliente), distancia aproximada y tiempo estimado.
+ * OJO: la distancia es EN LÍNEA RECTA (no la ruta real). El tiempo se estima a
+ * 22 km/h de promedio urbano. Sirve para dimensionar; la ruta real la da el mapa.
+ */
+async function deliveryDetail(turso, companyId, session, { id } = {}) {
+    const d = await ownDelivery(turso, companyId, id);
+    if (!d) return { success: false, error: 'Envío no encontrado' };
+
+    // Productos según el origen.
+    let items = [];
+    if (d.source_type === 'preorder' && d.source_id) {
+        const r = await turso.execute({
+            sql: `SELECT product_name AS name, COALESCE(real_qty, qty) AS qty, unit,
+                         unit_price, COALESCE(real_total, line_total) AS total, note
+                  FROM preorder_items WHERE preorder_id = ?`,
+            args: [d.source_id],
+        });
+        items = r.rows || [];
+    } else if (d.source_type === 'sale' && d.source_id) {
+        const r = await turso.execute({
+            sql: 'SELECT items FROM sales WHERE id = ? AND company_id = ? LIMIT 1',
+            args: [d.source_id, companyId],
+        });
+        try {
+            items = JSON.parse(r.rows[0]?.items || '[]').map(i => ({
+                name: i.name, qty: i.quantity, unit: i.unit || 'Und',
+                unit_price: i.price, total: (Number(i.price) || 0) * (Number(i.quantity) || 0),
+            }));
+        } catch { items = []; }
+    }
+
+    const local = await pickupAddressOf(turso, companyId);
+    const pickupAddress = local.address;
+
+    // Coordenadas: las del envío si ya las tiene; si no, se geocodifica y se guardan.
+    let destino = (d.lat != null && d.lng != null) ? { lat: d.lat, lng: d.lng } : null;
+    if (!destino && d.address) {
+        destino = await geocode(d.address);
+        if (destino) {
+            await turso.execute({
+                sql: 'UPDATE deliveries SET lat = ?, lng = ? WHERE id = ? AND company_id = ?',
+                args: [destino.lat, destino.lng, id, companyId],
+            });
+        }
+    }
+    const origen = pickupAddress ? await geocode(pickupAddress) : null;
+    const km = distanceKm(origen, destino);
+    const minutos = km != null ? Math.max(1, Math.round((km / 22) * 60)) : null;
+
+    return {
+        success: true,
+        delivery: d,
+        items,
+        pickupName: local.name || '',
+        pickupAddress,
+        pickupCoords: origen,
+        destCoords: destino,
+        distanceKm: km,
+        etaMin: minutos,
     };
 }
 
@@ -629,6 +756,7 @@ export const deliveryActions = {
     deliveryAssign,
     deliveryStatus,
     deliveryImportable,
+    deliveryDetail,
     courierMyDeliveries,
     courierTake,
     courierPing,

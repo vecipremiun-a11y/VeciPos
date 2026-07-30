@@ -17,6 +17,7 @@ import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
 import { PRODUCTION_SOUNDS, getProductionSound, setProductionSound, playProductionSound } from '../utils/productionSounds';
 import { cn } from '../lib/utils';
+import ThermalPrinterSettings from '../components/settings/ThermalPrinterSettings';
 
 const Settings = () => {
     const { darkMode, toggleDarkMode, inventoryAdjustmentMode, toggleInventoryAdjustmentMode, activeCompanyId, currentCompanyTimezone, fetchInitialData, updateCurrency, checkSubscriptionStatus, currentUser, currentUserCompanyRole, hasModule } = useStore();
@@ -198,7 +199,10 @@ const Settings = () => {
     const handleSaveCompanyInfo = async () => {
         setIsSavingCompanyInfo(true);
         try {
-            await dataApiCall('companyFieldsUpdate', {
+            // Se revisa la respuesta: antes se avisaba "guardado" sin mirarla, así que
+            // un fallo del servidor pasaba desapercibido y los datos se perdían al
+            // recargar.
+            const r = await dataApiCall('companyFieldsUpdate', {
                 companyId: activeCompanyId,
                 fields: {
                     legal_name: companyInfo.legal_name,
@@ -214,6 +218,10 @@ const Settings = () => {
                     currency: companyInfo.currency,
                 },
             });
+            if (!r?.success) {
+                alert('❌ No se pudo guardar: ' + (r?.error || 'el servidor rechazó el cambio'));
+                return;
+            }
             alert('✅ Información de la empresa guardada correctamente');
         } catch (e) {
             console.error('Error saving company info:', e);
@@ -458,6 +466,9 @@ const Settings = () => {
                                 )}
                             </div>
                             </>)}
+
+                            {/* Impresora térmica Bluetooth — solo se muestra en la app nativa */}
+                            <ThermalPrinterSettings />
                         </>
                     )}
 

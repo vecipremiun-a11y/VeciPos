@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import {
     Bike, MapPin, Phone, Check, X, Navigation, Package, Loader2, Camera,
     Banknote, AlertTriangle, Hand, ChevronLeft, Inbox, CheckCircle2, XCircle, Truck,
+    Info, Store, Route, Clock, ShoppingBag,
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -29,7 +30,9 @@ const RECEIVERS = [
 ];
 
 export default function CourierMode() {
-    const { fetchMyDeliveries, takeDelivery, setDeliveryStatus, pingCourierLocation, currentCurrency } = useStore();
+    const { fetchMyDeliveries, takeDelivery, setDeliveryStatus, pingCourierLocation, fetchDeliveryDetail, currentCurrency } = useStore();
+    const [detail, setDetail] = useState(null);   // envío cuyo detalle se está viendo
+    const [navTarget, setNavTarget] = useState(null); // destino elegido para navegar
 
     const [data, setData] = useState({ isCourier: true, nuevos: [], enCurso: [], entregados: [], fallidos: [], available: [], pendingCash: 0 });
     const [loading, setLoading] = useState(true);
@@ -84,14 +87,18 @@ export default function CourierMode() {
     /**
      * Navegar. ANTES de retirar el destino es el LOCAL (hay que ir a buscar el
      * pedido); después de salir a repartir, la dirección del cliente.
+     * Abre un selector para elegir Google Maps o Waze.
      */
     const navigateTo = (d) => {
         const alLocal = d.status === 'accepted';
-        const destino = alLocal
-            ? (data.pickupAddress || data.pickupName)
-            : (d.lat != null && d.lng != null ? `${d.lat},${d.lng}` : d.address);
-        if (!destino) { toast('No hay dirección para navegar', 'error'); return; }
-        window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destino)}&travelmode=driving`, '_blank');
+        if (alLocal && !data.pickupAddress) {
+            toast('El local no tiene dirección cargada. Pídele al administrador que la ponga en Configuración → Empresa.', 'error');
+            return;
+        }
+        const coords = !alLocal && d.lat != null && d.lng != null ? { lat: d.lat, lng: d.lng } : null;
+        const address = alLocal ? data.pickupAddress : d.address;
+        if (!coords && !address) { toast('Este pedido no tiene dirección para navegar', 'error'); return; }
+        setNavTarget({ coords, address, alLocal, name: alLocal ? (data.pickupName || 'el local') : (d.client_name || 'el cliente') });
     };
 
     if (loading) {
@@ -215,6 +222,7 @@ export default function CourierMode() {
                     onNavigate={() => navigateTo(d)}
                     onDeliver={() => setDelivering(d)}
                     onFail={() => setFailing(d)}
+                    onDetail={() => setDetail(d)}
                 />
             ))}
 
@@ -226,12 +234,19 @@ export default function CourierMode() {
                 <DeliverModal d={delivering} currency={currentCurrency} onClose={() => setDelivering(null)}
                     onConfirm={async (extra) => { await act(delivering, 'delivered', extra); setDelivering(null); }} />
             )}
+            {detail && (
+                <DetailModal d={detail} currency={currentCurrency} fetchDetail={fetchDeliveryDetail}
+                    onClose={() => setDetail(null)}
+                    onNavigate={() => { setDetail(null); navigateTo(detail); }}
+                    onAccept={async () => { await act(detail, 'accepted'); setDetail(null); }} />
+            )}
+            {navTarget && <NavModal target={navTarget} onClose={() => setNavTarget(null)} />}
         </div>
     );
 }
 
 // ── Tarjeta de un envío ─────────────────────────────────────────────────────
-function OrderCard({ d, view, busy, currency, pickupName, onAccept, onPickedUp, onRoute, onNavigate, onDeliver, onFail }) {
+function OrderCard({ d, view, busy, currency, pickupName, onAccept, onPickedUp, onRoute, onNavigate, onDeliver, onFail, onDetail }) {
     const cobra = Number(d.amount_to_collect) > 0;
     const cerrado = ['delivered', 'failed'].includes(d.status);
     const alLocal = d.status === 'accepted';
@@ -252,7 +267,14 @@ function OrderCard({ d, view, busy, currency, pickupName, onAccept, onPickedUp, 
                     <p className="font-bold text-[var(--color-text)]">#{d.id}</p>
                     <p className="text-sm text-[var(--color-text)]">{d.client_name || 'Sin cliente'}</p>
                 </div>
-                <span className={cn('text-[10px] font-bold px-2 py-1 rounded-full border shrink-0', badge.c)}>{badge.t}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                    {/* Ver TODO antes de decidir: productos, ruta, distancia y tiempo. */}
+                    <button onClick={onDetail} title="Ver detalle del pedido"
+                        className="p-1.5 rounded-lg border border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-primary)]">
+                        <Info size={16} />
+                    </button>
+                    <span className={cn('text-[10px] font-bold px-2 py-1 rounded-full border', badge.c)}>{badge.t}</span>
+                </div>
             </div>
 
             <p className="text-sm text-[var(--color-text-muted)] flex items-start gap-1.5">
@@ -331,6 +353,212 @@ function OrderCard({ d, view, busy, currency, pickupName, onAccept, onPickedUp, 
                     )}
                 </div>
             )}
+        </div>
+    );
+}
+
+// ── Selector de app de navegación ───────────────────────────────────────────
+// Se abre con enlaces https (no esquemas waze:// ni geo:) porque Android muestra
+// el selector de app con ellos y, si la app no está instalada, cae al navegador
+// en vez de fallar en silencio.
+function NavModal({ target, onClose }) {
+    const { coords, address, name, alLocal } = target;
+    const punto = coords ? `${coords.lat},${coords.lng}` : address;
+
+    const abrir = (url) => {
+        // '_blank' hace que Android lo tome como enlace externo y ofrezca la app.
+        window.open(url, '_blank', 'noopener');
+        onClose();
+    };
+
+    const googleMaps = coords
+        ? `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}&travelmode=driving`
+        : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}&travelmode=driving`;
+    const waze = coords
+        ? `https://waze.com/ul?ll=${coords.lat},${coords.lng}&navigate=yes`
+        : `https://waze.com/ul?q=${encodeURIComponent(address)}&navigate=yes`;
+
+    return (
+        <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
+            <div className="glass-card w-full max-w-sm p-5">
+                <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2">
+                        <Navigation className="text-[var(--color-primary)]" size={20} /> Navegar
+                    </h3>
+                    <button onClick={onClose} className="text-[var(--color-text-muted)]"><X size={20} /></button>
+                </div>
+                <p className="text-sm text-[var(--color-text-muted)] mb-1">
+                    {alLocal ? 'Vas a retirar el pedido a:' : 'Vas a entregar a:'}
+                </p>
+                <p className="text-sm font-bold text-[var(--color-text)]">{name}</p>
+                <p className="text-xs text-[var(--color-text-muted)] mb-4 flex items-start gap-1">
+                    <MapPin size={12} className="shrink-0 mt-0.5" /> {address || punto}
+                </p>
+
+                <div className="space-y-2">
+                    <button onClick={() => abrir(googleMaps)}
+                        className="w-full py-3.5 rounded-xl font-bold bg-[#4285F4]/15 text-[#8AB4F8] border border-[#4285F4]/40 flex items-center justify-center gap-2">
+                        <Navigation size={18} /> Google Maps
+                    </button>
+                    <button onClick={() => abrir(waze)}
+                        className="w-full py-3.5 rounded-xl font-bold bg-[#33CCFF]/15 text-[#33CCFF] border border-[#33CCFF]/40 flex items-center justify-center gap-2">
+                        <Navigation size={18} /> Waze
+                    </button>
+                    <button
+                        onClick={() => { navigator.clipboard?.writeText(address || punto); toast('Dirección copiada', 'success'); onClose(); }}
+                        className="w-full py-2.5 rounded-xl text-sm font-bold text-[var(--color-text-muted)] border border-[var(--glass-border)]">
+                        Copiar dirección
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ── Detalle del pedido: qué llevo, a dónde y cuánto me toma ─────────────────
+function DetailModal({ d, currency, fetchDetail, onClose, onAccept, onNavigate }) {
+    const [info, setInfo] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        let vivo = true;
+        (async () => {
+            const r = await fetchDetail(d.id);
+            if (vivo) { setInfo(r?.success ? r : null); setLoading(false); }
+        })();
+        return () => { vivo = false; };
+    }, [d.id, fetchDetail]);
+
+    const items = info?.items || [];
+    const totalItems = items.reduce((s, i) => s + (Number(i.qty) || 0), 0);
+    return (
+        <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
+            <div className="glass-card w-full max-w-md p-5 max-h-full overflow-y-auto">
+                <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2">
+                        <Info className="text-[var(--color-primary)]" size={20} /> Pedido #{d.id}
+                    </h3>
+                    <button onClick={onClose} className="text-[var(--color-text-muted)]"><X size={20} /></button>
+                </div>
+
+                {loading ? (
+                    <div className="py-10 flex items-center justify-center text-[var(--color-text-muted)] gap-2">
+                        <Loader2 className="animate-spin" size={18} /> Cargando detalle…
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        {/* Ruta: local → cliente */}
+                        <div className="rounded-xl border border-[var(--glass-border)] p-3 space-y-2">
+                            <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Recorrido</p>
+                            <div className="flex items-start gap-2">
+                                <Store size={15} className="text-indigo-400 shrink-0 mt-0.5" />
+                                <div className="min-w-0">
+                                    <p className="text-sm text-[var(--color-text)]">{info?.pickupName || 'El local'}</p>
+                                    <p className="text-[11px] text-[var(--color-text-muted)]">
+                                        {info?.pickupAddress || 'Sin dirección configurada'}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="border-l-2 border-dashed border-[var(--glass-border)] h-3 ml-[7px]" />
+                            <div className="flex items-start gap-2">
+                                <MapPin size={15} className="text-emerald-400 shrink-0 mt-0.5" />
+                                <div className="min-w-0">
+                                    <p className="text-sm text-[var(--color-text)]">{d.client_name || 'Cliente'}</p>
+                                    <p className="text-[11px] text-[var(--color-text-muted)]">
+                                        {d.address}{d.address_notes ? ` · ${d.address_notes}` : ''}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Distancia y tiempo — aproximados, en línea recta */}
+                            {info?.distanceKm != null ? (
+                                <div className="flex gap-2 pt-2">
+                                    <div className="flex-1 rounded-lg bg-[var(--glass-bg)] p-2 text-center">
+                                        <Route size={14} className="mx-auto text-[var(--color-primary)]" />
+                                        <p className="text-sm font-bold text-[var(--color-text)] mt-0.5">{info.distanceKm} km</p>
+                                        <p className="text-[9px] text-[var(--color-text-muted)]">en línea recta</p>
+                                    </div>
+                                    <div className="flex-1 rounded-lg bg-[var(--glass-bg)] p-2 text-center">
+                                        <Clock size={14} className="mx-auto text-[var(--color-primary)]" />
+                                        <p className="text-sm font-bold text-[var(--color-text)] mt-0.5">~{info.etaMin} min</p>
+                                        <p className="text-[9px] text-[var(--color-text-muted)]">estimado</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="text-[11px] text-amber-400 pt-1">
+                                    No se pudo calcular la distancia (falta la dirección del local o no se ubicó en el mapa).
+                                </p>
+                            )}
+
+                            <button onClick={onNavigate}
+                                className="w-full py-2.5 rounded-lg text-sm font-bold bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30">
+                                <Navigation size={14} className="inline mr-1" /> Ver ruta completa en el mapa
+                            </button>
+                        </div>
+
+                        {/* Productos */}
+                        <div className="rounded-xl border border-[var(--glass-border)] p-3">
+                            <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-2 flex items-center gap-1">
+                                <ShoppingBag size={12} /> Productos {totalItems > 0 && `(${totalItems})`}
+                            </p>
+                            {items.length === 0 ? (
+                                <p className="text-sm text-[var(--color-text-muted)]">Sin detalle de productos.</p>
+                            ) : (
+                                <div className="divide-y divide-[var(--glass-border)]">
+                                    {items.map((i, k) => (
+                                        <div key={k} className="py-2 flex justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <p className="text-sm text-[var(--color-text)]">{i.name}</p>
+                                                <p className="text-[11px] text-[var(--color-text-muted)]">
+                                                    {i.qty} {i.unit || 'Und'} × {formatCurrency(i.unit_price, currency)}
+                                                </p>
+                                                {i.note && <p className="text-[11px] text-amber-400 italic">{i.note}</p>}
+                                            </div>
+                                            <span className="text-sm font-bold text-[var(--color-text)] shrink-0">
+                                                {formatCurrency(i.total, currency)}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Cobro y contacto */}
+                        <div className="rounded-xl border border-[var(--glass-border)] p-3 space-y-2">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-[var(--color-text-muted)]">A cobrar</span>
+                                <span className={cn('font-bold', Number(d.amount_to_collect) > 0 ? 'text-amber-400' : 'text-emerald-400')}>
+                                    {Number(d.amount_to_collect) > 0 ? formatCurrency(d.amount_to_collect, currency) : 'Ya pagado'}
+                                </span>
+                            </div>
+                            {Number(d.delivery_fee) > 0 && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-[var(--color-text-muted)]">Costo de envío</span>
+                                    <span className="text-[var(--color-text)]">{formatCurrency(d.delivery_fee, currency)}</span>
+                                </div>
+                            )}
+                            {d.client_phone && (
+                                <a href={`tel:${d.client_phone}`} className="text-sm text-[var(--color-primary)] flex items-center gap-1.5">
+                                    <Phone size={14} /> {d.client_phone}
+                                </a>
+                            )}
+                            {d.notes && <p className="text-[11px] text-[var(--color-text-muted)] italic">{d.notes}</p>}
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex gap-3 mt-5">
+                    <button onClick={onClose}
+                        className="flex-1 py-3 rounded-xl border border-[var(--glass-border)] text-[var(--color-text-muted)] font-bold">
+                        Cerrar
+                    </button>
+                    {d.status === 'assigned' && (
+                        <button onClick={onAccept} className="flex-1 py-3 rounded-xl bg-sky-500 text-black font-bold">
+                            <Check size={16} className="inline mr-1" /> Aceptar
+                        </button>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
