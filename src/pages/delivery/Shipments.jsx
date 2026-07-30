@@ -13,6 +13,7 @@ import { cn } from '../../lib/utils';
 const COLS = [
     { id: 'pending', label: 'Pendientes', cls: 'text-amber-400 border-amber-500/30 bg-amber-500/5' },
     { id: 'assigned', label: 'Asignados', cls: 'text-sky-400 border-sky-500/30 bg-sky-500/5' },
+    { id: 'accepted', label: 'Aceptados', cls: 'text-indigo-400 border-indigo-500/30 bg-indigo-500/5' },
     { id: 'picked_up', label: 'Retirados', cls: 'text-violet-400 border-violet-500/30 bg-violet-500/5' },
     { id: 'on_route', label: 'En ruta', cls: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/5' },
     { id: 'delivered', label: 'Entregados', cls: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/5' },
@@ -144,7 +145,7 @@ export default function Shipments() {
             )}
 
             {/* Contadores por estado */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 shrink-0">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 shrink-0">
                 <button onClick={() => setFilter('all')}
                     className={cn('p-3 rounded-xl border text-left transition-all',
                         filter === 'all' ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10' : 'border-[var(--glass-border)] bg-[var(--glass-bg)]')}>
@@ -239,7 +240,7 @@ export default function Shipments() {
                                         )}
                                         {/* Solo la acción SIGUIENTE: las etapas no se saltan
                                             (el servidor también lo valida). */}
-                                        {d.status === 'assigned' && (
+                                        {d.status === 'accepted' && (
                                             <button onClick={() => advance(d, 'picked_up')}
                                                 className="px-3 py-1.5 rounded-lg text-xs font-bold bg-violet-500/10 text-violet-400 border border-violet-500/30">
                                                 Retirado
@@ -257,7 +258,7 @@ export default function Shipments() {
                                                 <Check size={12} className="inline mr-1" /> Entregado
                                             </button>
                                         )}
-                                        {['assigned', 'picked_up', 'on_route'].includes(d.status) && (
+                                        {['assigned', 'accepted', 'picked_up', 'on_route'].includes(d.status) && (
                                             <button onClick={() => setFailing(d)}
                                                 className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-500/10 text-red-400 border border-red-500/30">
                                                 <X size={12} className="inline mr-1" /> No entregado

@@ -11,20 +11,23 @@
 const nowIso = () => new Date().toISOString();
 
 // Estados válidos y su orden natural.
-const FLOW = ['pending', 'assigned', 'picked_up', 'on_route', 'delivered'];
+const FLOW = ['pending', 'assigned', 'accepted', 'picked_up', 'on_route', 'delivered'];
 const TERMINAL = ['delivered', 'failed', 'canceled'];
+// Envíos que el repartidor ya tomó y están en curso.
+const EN_CURSO = ['accepted', 'picked_up', 'on_route'];
 
 // Máquina de estados: a qué se puede pasar DESDE cada estado. Se valida en el
 // servidor porque es lo único que no se puede saltar desde el cliente: sin esto
 // un repartidor marcaba "entregado" sin haber retirado ni salir a reparto.
 const NEXT = {
     pending: ['canceled'],                            // se asigna con deliveryAssign
-    assigned: ['picked_up', 'failed', 'canceled'],
+    assigned: ['accepted', 'failed', 'canceled'],     // el repartidor lo acepta
+    accepted: ['picked_up', 'failed', 'canceled'],
     picked_up: ['on_route', 'failed', 'canceled'],
     on_route: ['delivered', 'failed', 'canceled'],
 };
 const STATUS_LABEL = {
-    pending: 'Pendiente', assigned: 'Asignado', picked_up: 'Retirado',
+    pending: 'Pendiente', assigned: 'Asignado', accepted: 'Aceptado', picked_up: 'Retirado',
     on_route: 'En ruta', delivered: 'Entregado', failed: 'No entregado', canceled: 'Cancelado',
 };
 
@@ -113,7 +116,7 @@ async function courierList(turso, companyId) {
         {
             // Pedidos activos y recaudación pendiente de rendir por repartidor.
             sql: `SELECT courier_id,
-                    SUM(CASE WHEN status IN ('assigned','picked_up','on_route') THEN 1 ELSE 0 END) AS active_count,
+                    SUM(CASE WHEN status IN ('assigned','accepted','picked_up','on_route') THEN 1 ELSE 0 END) AS active_count,
                     SUM(CASE WHEN status = 'delivered' AND settlement_id IS NULL THEN collected_amount ELSE 0 END) AS pending_cash,
                     SUM(CASE WHEN status = 'delivered' AND settlement_id IS NULL THEN 1 ELSE 0 END) AS pending_count
                   FROM deliveries WHERE company_id = ? AND courier_id IS NOT NULL
@@ -307,7 +310,7 @@ async function deliveryAssign(turso, companyId, session, { id, courierId } = {})
  * Avanza el estado del envío. Al entregar registra lo cobrado, que queda
  * PENDIENTE DE RENDIR (settlement_id NULL) — no toca la caja todavía.
  */
-async function deliveryStatus(turso, companyId, session, { id, status, collectedAmount, collectedMethod, reason } = {}) {
+async function deliveryStatus(turso, companyId, session, { id, status, collectedAmount, collectedMethod, reason, receivedBy, receivedByKind, proofPhoto } = {}) {
     if (!FLOW.includes(status) && !['failed', 'canceled'].includes(status)) {
         return { success: false, error: 'Estado no válido' };
     }
@@ -330,6 +333,7 @@ async function deliveryStatus(turso, companyId, session, { id, status, collected
     const iso = nowIso();
     const sets = ['status = ?', 'updated_at = ?'];
     const args = [status, iso];
+    if (status === 'accepted') { sets.push('accepted_at = ?'); args.push(iso); }
     if (status === 'picked_up') { sets.push('picked_up_at = ?'); args.push(iso); }
     if (status === 'delivered') {
         sets.push('delivered_at = ?'); args.push(iso);
@@ -344,6 +348,10 @@ async function deliveryStatus(turso, companyId, session, { id, status, collected
 
         sets.push('collected_amount = ?'); args.push(collected > 0 ? collected : 0);
         if (collectedMethod) { sets.push('collected_method = ?'); args.push(collectedMethod); }
+        // Constancia de entrega: a quién se le dejó y la foto de respaldo.
+        if (receivedByKind) { sets.push('received_by_kind = ?'); args.push(receivedByKind); }
+        if (receivedBy) { sets.push('received_by = ?'); args.push(String(receivedBy).slice(0, 120)); }
+        if (proofPhoto) { sets.push('proof_photo = ?'); args.push(proofPhoto); }
     }
     if (status === 'failed') { sets.push('failed_reason = ?'); args.push(reason || null); }
     args.push(id, companyId);
@@ -354,7 +362,7 @@ async function deliveryStatus(turso, companyId, session, { id, status, collected
     // Si el repartidor se queda sin envíos activos, vuelve a "disponible".
     if (d.courier_id && TERMINAL.includes(status)) {
         const left = await turso.execute({
-            sql: `SELECT COUNT(*) AS n FROM deliveries WHERE courier_id = ? AND company_id = ? AND status IN ('assigned','picked_up','on_route')`,
+            sql: `SELECT COUNT(*) AS n FROM deliveries WHERE courier_id = ? AND company_id = ? AND status IN ('assigned','accepted','picked_up','on_route')`,
             args: [d.courier_id, companyId],
         });
         if (Number(left.rows[0]?.n) === 0) {
@@ -396,21 +404,55 @@ async function courierMe(turso, companyId, session) {
     return r.rows[0] || null;
 }
 
-/** Envíos del repartilor conectado + los disponibles si el modo lo permite. */
+/**
+ * Todo lo que necesita la app del repartidor en una sola llamada:
+ *   · nuevos     → asignados que aún no acepta
+ *   · enCurso    → aceptados / retirados / en ruta (los que está repartiendo)
+ *   · entregados → entregados HOY
+ *   · fallidos   → no entregados HOY
+ * Los históricos se limitan al día para que la pantalla no crezca sin control.
+ * `pickupAddress` es la dirección del local: es a donde navega antes de retirar.
+ */
 async function courierMyDeliveries(turso, companyId, session) {
     await ensureColumns(turso);
     const me = await courierMe(turso, companyId, session);
-    if (!me) return { success: true, isCourier: false, deliveries: [], available: [], me: null };
+    if (!me) return { success: true, isCourier: false, me: null, nuevos: [], enCurso: [], entregados: [], fallidos: [], available: [] };
 
-    const modeRow = await turso.execute({ sql: 'SELECT delivery_assign_mode FROM companies WHERE id = ? LIMIT 1', args: [companyId] });
-    const mode = modeRow.rows[0]?.delivery_assign_mode || 'manual';
+    const cfg = await turso.execute({
+        sql: 'SELECT delivery_assign_mode, full_address, name FROM companies WHERE id = ? LIMIT 1',
+        args: [companyId],
+    });
+    const mode = cfg.rows[0]?.delivery_assign_mode || 'manual';
+    // Historial reciente: últimas 24 h. Cubre un turno completo sin depender de la
+    // zona horaria (un reparto a las 21:00 en Chile ya es "mañana" en UTC).
+    const desde = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
 
-    const [mine, avail, today] = await turso.batch([
+    const [nuevos, enCurso, entregados, fallidos, avail, cash] = await turso.batch([
         {
-            sql: `SELECT * FROM deliveries WHERE company_id = ? AND courier_id = ?
-                    AND status IN ('assigned','picked_up','on_route')
+            sql: `SELECT * FROM deliveries WHERE company_id = ? AND courier_id = ? AND status = 'assigned'
                   ORDER BY assigned_at`,
             args: [companyId, me.id],
+        },
+        {
+            sql: `SELECT * FROM deliveries WHERE company_id = ? AND courier_id = ?
+                    AND status IN ('accepted','picked_up','on_route')
+                  ORDER BY accepted_at, assigned_at`,
+            args: [companyId, me.id],
+        },
+        // El corte se calcula en JS y se compara ISO contra ISO. Las funciones de
+        // fecha de SQLite no interpretan el formato que guarda la app
+        // (2026-07-29T14:00:00.000Z), así que date()/datetime() daban vacío.
+        {
+            sql: `SELECT * FROM deliveries WHERE company_id = ? AND courier_id = ? AND status = 'delivered'
+                    AND delivered_at >= ?
+                  ORDER BY delivered_at DESC`,
+            args: [companyId, me.id, desde],
+        },
+        {
+            sql: `SELECT * FROM deliveries WHERE company_id = ? AND courier_id = ? AND status = 'failed'
+                    AND updated_at >= ?
+                  ORDER BY updated_at DESC`,
+            args: [companyId, me.id, desde],
         },
         {
             sql: mode === 'manual'
@@ -431,10 +473,15 @@ async function courierMyDeliveries(turso, companyId, session) {
         isCourier: true,
         me,
         assignMode: mode,
-        deliveries: mine.rows || [],
+        pickupAddress: cfg.rows[0]?.full_address || '',
+        pickupName: cfg.rows[0]?.name || 'el local',
+        nuevos: nuevos.rows || [],
+        enCurso: enCurso.rows || [],
+        entregados: entregados.rows || [],
+        fallidos: fallidos.rows || [],
         available: avail.rows || [],
-        pendingCash: Number(today.rows[0]?.cash) || 0,
-        pendingCount: Number(today.rows[0]?.n) || 0,
+        pendingCash: Number(cash.rows[0]?.cash) || 0,
+        pendingCount: Number(cash.rows[0]?.n) || 0,
     };
 }
 
@@ -474,7 +521,7 @@ async function deliveryTracking(turso, companyId) {
         },
         {
             sql: `SELECT id, courier_id, status, client_name, address, lat, lng, assigned_at, picked_up_at
-                  FROM deliveries WHERE company_id = ? AND status IN ('assigned','picked_up','on_route')`,
+                  FROM deliveries WHERE company_id = ? AND status IN ('assigned','accepted','picked_up','on_route')`,
             args: [companyId],
         },
     ], 'read');
