@@ -14,11 +14,74 @@ const nowIso = () => new Date().toISOString();
 const FLOW = ['pending', 'assigned', 'picked_up', 'on_route', 'delivered'];
 const TERMINAL = ['delivered', 'failed', 'canceled'];
 
+// Máquina de estados: a qué se puede pasar DESDE cada estado. Se valida en el
+// servidor porque es lo único que no se puede saltar desde el cliente: sin esto
+// un repartidor marcaba "entregado" sin haber retirado ni salir a reparto.
+const NEXT = {
+    pending: ['canceled'],                            // se asigna con deliveryAssign
+    assigned: ['picked_up', 'failed', 'canceled'],
+    picked_up: ['on_route', 'failed', 'canceled'],
+    on_route: ['delivered', 'failed', 'canceled'],
+};
+const STATUS_LABEL = {
+    pending: 'Pendiente', assigned: 'Asignado', picked_up: 'Retirado',
+    on_route: 'En ruta', delivered: 'Entregado', failed: 'No entregado', canceled: 'Cancelado',
+};
+
 let _colsEnsured = false;
 async function ensureColumns(turso) {
     if (_colsEnsured) return;
     try { await turso.execute("ALTER TABLE companies ADD COLUMN delivery_assign_mode TEXT DEFAULT 'manual'"); } catch { /* ya existe */ }
     _colsEnsured = true;
+}
+
+/**
+ * Cuánto DEBE todavía el pedido/venta de origen. Devuelve null si el origen es
+ * manual (ahí manda el monto que se puso al crear el envío).
+ *   · preorder → remaining_amount
+ *   · sale     → solo las de Crédito deben algo (total - amount_paid)
+ */
+async function pendingOfSource(turso, companyId, sourceType, sourceId) {
+    if (!sourceId) return null;
+    if (sourceType === 'preorder') {
+        const r = await turso.execute({
+            sql: 'SELECT COALESCE(remaining_amount, 0) AS pendiente FROM preorders WHERE id = ? AND company_id = ? LIMIT 1',
+            args: [sourceId, companyId],
+        });
+        return r.rows.length ? (Number(r.rows[0].pendiente) || 0) : null;
+    }
+    if (sourceType === 'sale') {
+        const r = await turso.execute({
+            sql: `SELECT payment_method, status, total, COALESCE(amount_paid, 0) AS pagado
+                  FROM sales WHERE id = ? AND company_id = ? LIMIT 1`,
+            args: [sourceId, companyId],
+        });
+        if (!r.rows.length) return null;
+        const s = r.rows[0];
+        // Una venta ya cobrada (efectivo/tarjeta) no deja nada por cobrar.
+        if (s.payment_method !== 'Crédito' || s.status === 'paid') return 0;
+        return Math.max(0, (Number(s.total) || 0) - (Number(s.pagado) || 0));
+    }
+    return null;
+}
+
+/** Recalcula la deuda del cliente (espejo de clientSyncDebt, sin efectos en caja). */
+async function recalcClientDebt(turso, companyId, clientId) {
+    if (!clientId) return;
+    const r = await turso.execute({
+        sql: `SELECT COALESCE(SUM(total - COALESCE(amount_paid, 0)), 0) AS deuda,
+                     COUNT(*) AS pendientes,
+                     COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') THEN 1 END) AS vencidas
+              FROM sales
+              WHERE client_id = ? AND company_id = ? AND payment_method = 'Crédito'
+                AND status NOT IN ('paid', 'cancelled')`,
+        args: [clientId, companyId],
+    });
+    const x = r.rows[0] || {};
+    await turso.execute({
+        sql: 'UPDATE clients SET total_debt = ?, pending_sales_count = ?, overdue_count = ? WHERE id = ? AND company_id = ?',
+        args: [Number(x.deuda) || 0, Number(x.pendientes) || 0, Number(x.vencidas) || 0, clientId, companyId],
+    });
 }
 
 // Guard: el envío debe ser de la empresa. Devuelve la fila o null.
@@ -113,7 +176,18 @@ async function deliveryBoard(turso, companyId, session, { includeDelivered = tru
     await ensureColumns(turso);
     const [rows, counts, mode] = await turso.batch([
         {
-            sql: `SELECT d.*, c.name AS courier_name, c.phone AS courier_phone, c.vehicle
+            // `pendiente_real` = lo que el pedido/venta debe AHORA. Si ya se cobró
+            // en el local llega en 0 y la pantalla avisa que el repartidor no cobra.
+            sql: `SELECT d.*, c.name AS courier_name, c.phone AS courier_phone, c.vehicle,
+                         CASE
+                           WHEN d.source_type = 'preorder'
+                             THEN (SELECT COALESCE(p.remaining_amount, 0) FROM preorders p
+                                   WHERE p.id = d.source_id AND p.company_id = d.company_id)
+                           WHEN d.source_type = 'sale'
+                             THEN (SELECT CASE WHEN s.payment_method != 'Crédito' OR s.status = 'paid' THEN 0
+                                               ELSE MAX(0, s.total - COALESCE(s.amount_paid, 0)) END
+                                   FROM sales s WHERE s.id = d.source_id AND s.company_id = d.company_id)
+                           ELSE NULL END AS pendiente_real
                   FROM deliveries d LEFT JOIN couriers c ON c.id = d.courier_id
                   WHERE d.company_id = ?
                     AND (d.status NOT IN ('delivered','failed','canceled')
@@ -166,6 +240,19 @@ async function deliveryCreate(turso, companyId, session, data = {}) {
         if (dup.rows.length) return { success: false, error: 'Ese pedido ya tiene un envío', id: dup.rows[0].id };
     }
 
+    // Un pedido pasa a reparto SOLO cuando está LISTO. Antes de eso todavía se
+    // está aceptando o preparando, y mandarlo a la calle no tiene sentido.
+    if (sourceType === 'preorder' && sourceId) {
+        const po = await turso.execute({
+            sql: 'SELECT status FROM preorders WHERE id = ? AND company_id = ? LIMIT 1',
+            args: [sourceId, companyId],
+        });
+        if (!po.rows.length) return { success: false, error: 'Pedido no encontrado' };
+        if (po.rows[0].status !== 'ready') {
+            return { success: false, error: 'El pedido todavía no está LISTO. Confírmalo y prepáralo antes de mandarlo a reparto.' };
+        }
+    }
+
     const iso = nowIso();
     const status = courierId ? 'assigned' : 'pending';
     const r = await turso.execute({
@@ -188,6 +275,10 @@ async function deliveryAssign(turso, companyId, session, { id, courierId } = {})
     const d = await ownDelivery(turso, companyId, id, 'id, status');
     if (!d) return { success: false, error: 'Envío no encontrado' };
     if (TERMINAL.includes(d.status)) return { success: false, error: 'El envío ya está cerrado' };
+    // Reasignar solo antes de que el repartidor lo retire.
+    if (!['pending', 'assigned'].includes(d.status)) {
+        return { success: false, error: `El envío ya está en "${STATUS_LABEL[d.status]}": no se puede reasignar.` };
+    }
     if (!courierId) {
         await turso.execute({
             sql: "UPDATE deliveries SET courier_id = NULL, status = 'pending', assigned_at = NULL, updated_at = ? WHERE id = ? AND company_id = ?",
@@ -220,9 +311,21 @@ async function deliveryStatus(turso, companyId, session, { id, status, collected
     if (!FLOW.includes(status) && !['failed', 'canceled'].includes(status)) {
         return { success: false, error: 'Estado no válido' };
     }
-    const d = await ownDelivery(turso, companyId, id, 'id, status, courier_id, amount_to_collect');
+    const d = await ownDelivery(turso, companyId, id, 'id, status, courier_id, amount_to_collect, source_type, source_id');
     if (!d) return { success: false, error: 'Envío no encontrado' };
     if (TERMINAL.includes(d.status)) return { success: false, error: 'El envío ya está cerrado' };
+
+    // No se pueden saltar etapas: asignado → retirado → en ruta → entregado.
+    const allowed = NEXT[d.status] || [];
+    if (!allowed.includes(status)) {
+        const falta = (NEXT[d.status] || []).filter(s => !['failed', 'canceled'].includes(s))[0];
+        return {
+            success: false,
+            error: falta
+                ? `No se puede pasar de "${STATUS_LABEL[d.status]}" a "${STATUS_LABEL[status]}". Primero hay que marcar "${STATUS_LABEL[falta]}".`
+                : `El envío está en "${STATUS_LABEL[d.status]}" y no admite ese cambio.`,
+        };
+    }
 
     const iso = nowIso();
     const sets = ['status = ?', 'updated_at = ?'];
@@ -230,7 +333,15 @@ async function deliveryStatus(turso, companyId, session, { id, status, collected
     if (status === 'picked_up') { sets.push('picked_up_at = ?'); args.push(iso); }
     if (status === 'delivered') {
         sets.push('delivered_at = ?'); args.push(iso);
-        const collected = collectedAmount != null ? Number(collectedAmount) : Number(d.amount_to_collect) || 0;
+        let collected = collectedAmount != null ? Number(collectedAmount) : Number(d.amount_to_collect) || 0;
+
+        // El repartidor solo tiene por rendir lo que el pedido DEBÍA al momento de
+        // entregar. Si mientras tanto se cobró en el local (p. ej. "Cobrar y
+        // entregar" en Tienda, o un abono del cliente), el saldo ya bajó: esa plata
+        // ya entró a la caja y contarla otra vez la duplicaría.
+        const pendiente = await pendingOfSource(turso, companyId, d.source_type, d.source_id);
+        if (pendiente != null) collected = Math.min(collected, pendiente);
+
         sets.push('collected_amount = ?'); args.push(collected > 0 ? collected : 0);
         if (collectedMethod) { sets.push('collected_method = ?'); args.push(collectedMethod); }
     }
@@ -253,7 +364,10 @@ async function deliveryStatus(turso, companyId, session, { id, status, collected
     return { success: true };
 }
 
-/** Pedidos con entrega a domicilio que todavía no tienen envío creado. */
+/**
+ * Pedidos a domicilio LISTOS que todavía no tienen envío. Solo 'ready': mientras
+ * el pedido está pendiente, confirmado o preparándose no debe salir a reparto.
+ */
 async function deliveryImportable(turso, companyId) {
     const r = await turso.execute({
         sql: `SELECT p.id, p.client_name, p.client_phone, p.delivery_address, p.delivery_fee,
@@ -262,7 +376,7 @@ async function deliveryImportable(turso, companyId) {
               FROM preorders p
               WHERE p.company_id = ?
                 AND p.delivery_type = 'delivery'
-                AND p.status NOT IN ('delivered', 'canceled')
+                AND p.status = 'ready'
                 AND NOT EXISTS (
                     SELECT 1 FROM deliveries d
                     WHERE d.company_id = p.company_id AND d.source_type = 'preorder'
@@ -398,6 +512,32 @@ async function settlementCreate(turso, companyId, session, { courierId, register
         args: [companyId, courierId, registerId || null, total, cash, n, notes || null, session?.uid ?? null, iso],
     });
     const settlementId = ins.rows[0]?.id;
+
+    // Ventas a Crédito que el repartidor ya cobró: se dan por pagadas y se
+    // recalcula la deuda del cliente. NO se usa clientRegisterPayment aquí a
+    // propósito: esa función genera una venta que entra a la caja, y el efectivo
+    // ya va a entrar por el movimiento de la liquidación (una sola vía).
+    const aSaldar = await turso.execute({
+        sql: `SELECT d.source_id, d.collected_amount, s.client_id, s.total
+              FROM deliveries d JOIN sales s ON s.id = d.source_id AND s.company_id = d.company_id
+              WHERE d.company_id = ? AND d.courier_id = ? AND d.status = 'delivered'
+                AND d.settlement_id IS NULL AND d.source_type = 'sale'
+                AND s.payment_method = 'Crédito' AND s.status != 'paid'`,
+        args: [companyId, courierId],
+    });
+    const clientesTocados = new Set();
+    for (const v of (aSaldar.rows || [])) {
+        const pagado = Number(v.collected_amount) || 0;
+        if (pagado <= 0) continue;
+        await turso.execute({
+            sql: `UPDATE sales SET amount_paid = COALESCE(amount_paid, 0) + ?,
+                    status = CASE WHEN COALESCE(amount_paid, 0) + ? >= total THEN 'paid' ELSE status END
+                  WHERE id = ? AND company_id = ?`,
+            args: [pagado, pagado, v.source_id, companyId],
+        });
+        if (v.client_id) clientesTocados.add(v.client_id);
+    }
+    for (const cl of clientesTocados) await recalcClientDebt(turso, companyId, cl);
 
     await turso.execute({
         sql: `UPDATE deliveries SET settlement_id = ?, updated_at = ?

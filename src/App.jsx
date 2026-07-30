@@ -169,6 +169,13 @@ const ProtectedRoute = ({ children }) => {
   return <Navigate to="/login" replace />;
 };
 
+// Destino de "/" según el rol. El Repartidor no tiene acceso al Dashboard, así
+// que se le manda a sus entregas (si no, vería un "sin permiso").
+const HomeRedirect = () => {
+  const role = useStore(state => state.currentUser?.role);
+  return <Navigate to={role === 'Repartidor' ? '/delivery/me' : '/dashboard'} replace />;
+};
+
 function App() {
   // FASE 10 · selectores atómicos: re-render solo cuando ESTOS valores cambian,
   // no en cualquier mutación del store (que es 13k líneas).
@@ -340,7 +347,7 @@ function App() {
             <MainLayout />
           </ProtectedRoute>
         }>
-          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route index element={<HomeRedirect />} />
           <Route path="dashboard" element={<ProtectedPage permission="dashboard.view"><Dashboard /></ProtectedPage>} />
           <Route path="pos" element={<ProtectedPage permission="pos.access"><POS /></ProtectedPage>} />
           <Route path="sales-history" element={<ProtectedPage permission="sales.view"><SalesHistory /></ProtectedPage>} />

@@ -9,7 +9,28 @@ const SYSTEM_ROLES = [
     { role_name: 'Vendedor', is_system: 1, color: '#8b5cf6', description: 'Vendedor - crea preventas' },
     { role_name: 'Bodeguero', is_system: 1, color: '#f59e0b', description: 'Gestión de inventario' },
     { role_name: 'Supervisor', is_system: 1, color: '#3b82f6', description: 'Acceso a reportes y supervisión' },
+    { role_name: 'Repartidor', is_system: 1, color: '#06b6d4', description: 'Solo entregas: ve sus pedidos, sin acceso al POS ni a caja' },
 ];
+
+/**
+ * Siembra los permisos por defecto de UN rol si todavía no los tiene. Necesario
+ * para roles agregados después: permissionsSeedDefaults() sale temprano cuando la
+ * empresa ya tiene permisos, así que un rol nuevo se quedaría sin ninguno.
+ * Idempotente.
+ */
+async function ensureRoleSeeded(turso, companyId, role) {
+    const has = await turso.execute({
+        sql: 'SELECT COUNT(*) AS c FROM role_permissions WHERE company_id = ? AND role = ?',
+        args: [companyId, role],
+    });
+    if (Number(has.rows[0]?.c) > 0) return;
+    const allowed = DEFAULT_PERMS[role] || [];
+    const queries = ALL_PERMS.map(p => ({
+        sql: 'INSERT INTO role_permissions (company_id, role, permission, granted) VALUES (?, ?, ?, ?)',
+        args: [companyId, role, p, allowed.includes(p) ? 1 : 0],
+    }));
+    for (let i = 0; i < queries.length; i += 50) await turso.batch(queries.slice(i, i + 50));
+}
 
 async function rolePermissionsList(turso, companyId) {
     const res = await turso.execute({
@@ -28,6 +49,10 @@ async function companyRolesList(turso, companyId) {
         sql: 'SELECT * FROM custom_roles WHERE company_id = ?',
         args: [companyId],
     });
+    // Roles agregados después del alta de la empresa (p. ej. Repartidor) pueden
+    // no tener permisos sembrados: se aseguran aquí.
+    await ensureRoleSeeded(turso, companyId, 'Repartidor').catch(() => { /* no bloquea el listado */ });
+
     const merged = [...res.rows];
     for (const sys of SYSTEM_ROLES) {
         if (!merged.find(r => r.role_name === sys.role_name)) merged.push(sys);
@@ -121,7 +146,7 @@ async function permissionsSeedDefaults(turso, companyId) {
     if (Number(check.rows[0].count) > 0) return { success: true, skipped: true };
 
     const queries = [];
-    for (const role of ['Caja', 'Vendedor', 'Bodeguero', 'Supervisor']) {
+    for (const role of ['Caja', 'Vendedor', 'Bodeguero', 'Supervisor', 'Repartidor']) {
         const allowed = DEFAULT_PERMS[role] || [];
         for (const p of ALL_PERMS) {
             queries.push({

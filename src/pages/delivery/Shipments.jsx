@@ -177,7 +177,10 @@ export default function Shipments() {
                 <div className="space-y-3">
                     {shown.map(d => {
                         const col = COLS.find(c => c.id === d.status);
-                        const cobra = Number(d.amount_to_collect) > 0;
+                        // Si el pedido ya se cobró en el local, el repartidor no cobra
+                        // (y no habrá nada que rendir): se avisa para evitar confusión.
+                        const yaCobrado = d.pendiente_real != null && Number(d.pendiente_real) <= 0;
+                        const cobra = Number(d.amount_to_collect) > 0 && !yaCobrado;
                         return (
                             <div key={d.id} className="glass-card p-4 space-y-3">
                                 <div className="flex items-start justify-between gap-3">
@@ -212,7 +215,9 @@ export default function Shipments() {
                                     </span>
                                     <span className={cn('flex items-center gap-1 font-bold', cobra ? 'text-amber-400' : 'text-emerald-400')}>
                                         <Banknote size={12} />
-                                        {cobra ? `Cobrar ${formatCurrency(d.amount_to_collect, currentCurrency)}` : 'Pagado'}
+                                        {cobra
+                                            ? `Cobrar ${formatCurrency(d.amount_to_collect, currentCurrency)}`
+                                            : (yaCobrado && Number(d.amount_to_collect) > 0 ? 'Ya cobrado en caja' : 'Pagado')}
                                     </span>
                                     {d.courier_name && (
                                         <span className="text-cyan-400 font-medium">🛵 {d.courier_name}</span>
@@ -222,13 +227,18 @@ export default function Shipments() {
                                 {/* Acciones */}
                                 {can('delivery.assign') && !['delivered', 'failed', 'canceled'].includes(d.status) && (
                                     <div className="flex flex-wrap gap-2 pt-2 border-t border-[var(--glass-border)]">
-                                        <select value={d.courier_id || ''} onChange={e => assign(d, e.target.value)}
-                                            className="glass-input !py-1.5 text-xs flex-1 min-w-[140px]">
-                                            <option value="">— Sin asignar —</option>
-                                            {activeCouriers.map(c => (
-                                                <option key={c.id} value={c.id}>{c.name} ({c.active_count})</option>
-                                            ))}
-                                        </select>
+                                        {/* Reasignar solo antes del retiro. */}
+                                        {['pending', 'assigned'].includes(d.status) && (
+                                            <select value={d.courier_id || ''} onChange={e => assign(d, e.target.value)}
+                                                className="glass-input !py-1.5 text-xs flex-1 min-w-[140px]">
+                                                <option value="">— Sin asignar —</option>
+                                                {activeCouriers.map(c => (
+                                                    <option key={c.id} value={c.id}>{c.name} ({c.active_count})</option>
+                                                ))}
+                                            </select>
+                                        )}
+                                        {/* Solo la acción SIGUIENTE: las etapas no se saltan
+                                            (el servidor también lo valida). */}
                                         {d.status === 'assigned' && (
                                             <button onClick={() => advance(d, 'picked_up')}
                                                 className="px-3 py-1.5 rounded-lg text-xs font-bold bg-violet-500/10 text-violet-400 border border-violet-500/30">
@@ -241,17 +251,17 @@ export default function Shipments() {
                                                 <Navigation size={12} className="inline mr-1" /> En ruta
                                             </button>
                                         )}
+                                        {d.status === 'on_route' && (
+                                            <button onClick={() => advance(d, 'delivered')}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                                                <Check size={12} className="inline mr-1" /> Entregado
+                                            </button>
+                                        )}
                                         {['assigned', 'picked_up', 'on_route'].includes(d.status) && (
-                                            <>
-                                                <button onClick={() => advance(d, 'delivered')}
-                                                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                                                    <Check size={12} className="inline mr-1" /> Entregado
-                                                </button>
-                                                <button onClick={() => setFailing(d)}
-                                                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-500/10 text-red-400 border border-red-500/30">
-                                                    <X size={12} className="inline mr-1" /> No entregado
-                                                </button>
-                                            </>
+                                            <button onClick={() => setFailing(d)}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-500/10 text-red-400 border border-red-500/30">
+                                                <X size={12} className="inline mr-1" /> No entregado
+                                            </button>
                                         )}
                                     </div>
                                 )}

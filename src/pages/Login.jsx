@@ -26,7 +26,10 @@ const Login = () => {
         try {
             const result = await login(username, password);
             if (result.success) {
-                navigate('/dashboard');
+                // El repartidor no tiene acceso al Dashboard: entra directo a sus
+                // entregas, que es lo único que puede ver.
+                const role = result.user?.role || useStore.getState().currentUser?.role;
+                navigate(role === 'Repartidor' ? '/delivery/me' : '/dashboard');
             } else {
                 if (result.needsRenewal) {
                     navigate('/renew-subscription');

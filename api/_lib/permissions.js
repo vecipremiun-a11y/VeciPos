@@ -46,6 +46,12 @@ export const DEFAULT_PERMS = {
         'sii.view', 'sii.folios',
         'finance.view',
     ],
+    // Repartidor: acceso EXCLUSIVO a su pantalla de entregas. Sin POS, sin caja,
+    // sin inventario. Existe para no tener que darle un rol de cajero/vendedor a
+    // alguien que solo reparte (le abriría medio sistema).
+    'Repartidor': [
+        'delivery.courier',
+    ],
 };
 
 export const ALL_PERMS = [
@@ -72,12 +78,13 @@ export const ALL_PERMS = [
     'alerts.view', 'alerts.manage',
     'sii.view', 'sii.folios',
     'finance.view', 'finance.manage',
+    'delivery.view', 'delivery.assign', 'delivery.couriers', 'delivery.settle', 'delivery.courier',
 ];
 
 // Siembra las plantillas de permisos por rol para una empresa nueva (INSERT OR IGNORE, por lotes).
 export async function seedRolePermissions(turso, companyId) {
     const queries = [];
-    for (const role of ['Caja', 'Vendedor', 'Bodeguero', 'Supervisor']) {
+    for (const role of ['Caja', 'Vendedor', 'Bodeguero', 'Supervisor', 'Repartidor']) {
         const allowed = DEFAULT_PERMS[role] || [];
         for (const p of ALL_PERMS) {
             queries.push({

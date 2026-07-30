@@ -606,7 +606,8 @@ const Users = () => {
                                         <option value="Vendedor">Vendedor</option>
                                         <option value="Bodeguero">Bodeguero</option>
                                         <option value="Supervisor">Supervisor</option>
-                                        {companyRoles.filter(r => !['Administrador','Caja','Vendedor','Bodeguero','Supervisor'].includes(r.role_name)).map(r => (
+                                        <option value="Repartidor">Repartidor (solo entregas)</option>
+                                        {companyRoles.filter(r => !['Administrador','Caja','Vendedor','Bodeguero','Supervisor','Repartidor'].includes(r.role_name)).map(r => (
                                             <option key={r.role_name} value={r.role_name}>{r.role_name}</option>
                                         ))}
                                     </select>

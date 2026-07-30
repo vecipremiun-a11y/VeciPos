@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect as useEffectReact } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift, FileText, Receipt, ScanBarcode, Package, Store } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift, FileText, Receipt, ScanBarcode, Package, Store, Truck } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -13,6 +13,7 @@ import SaleSuccessModal from '../components/SaleSuccessModal';
 import ClientSearchWidget from '../components/ClientSearchWidget';
 import OptimizedImage from '../components/OptimizedImage';
 import SuspendedSalesModal from '../components/SuspendedSalesModal';
+import DispatchModal from '../components/DispatchModal';
 import InvoiceDataModal from '../components/InvoiceDataModal';
 import PreventaSuccessModal from '../components/PreventaSuccessModal';
 import PreventasListModal from '../components/PreventasListModal';
@@ -154,6 +155,8 @@ const POS = () => {
     // pestaña se muestra según su propia App contratada (son complementos aparte).
     const canPreorders = useStore((s) => s.hasModule('preorders'));
     const canStore = useStore((s) => s.hasModule('web'));
+    const canDelivery = useStore((s) => s.hasModule('delivery'));
+    const createDelivery = useStore((s) => s.createDelivery);
     const orderBadges = useStore((s) => s.orderBadges);
     const fetchOrderBadges = useStore((s) => s.fetchOrderBadges);
 
@@ -243,6 +246,10 @@ const POS = () => {
     const { online } = useOnlineStatus();
     const [activePreventaCode, setActivePreventaCode] = useState(null);
     const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
+    // Despacho a domicilio: datos capturados antes de cobrar. Si queda seteado,
+    // al confirmarse la venta se crea el envío con ese origen.
+    const [isDispatchOpen, setIsDispatchOpen] = useState(false);
+    const [pendingDispatch, setPendingDispatch] = useState(null);
     const [showTotalsDetail, setShowTotalsDetail] = useState(false);
     const { can } = usePermissions();
 
@@ -405,7 +412,36 @@ const POS = () => {
         setIsPaymentModalOpen(true);
     };
 
-    const handlePaymentConfirm = async (paymentData) => {
+    // ── Despacho a domicilio ────────────────────────────────────────────────
+    // Requiere cliente (hay que saber a quién y dónde entregar), igual que el crédito.
+    const handleDispatchClick = () => {
+        if (cart.length === 0) return;
+        if (!posSelectedClient) {
+            alert('Selecciona un cliente para despachar a domicilio: se necesita su dirección y teléfono.');
+            return;
+        }
+        setIsDispatchOpen(true);
+    };
+
+    // El modal ya recogió dirección/costo/forma de pago.
+    const handleDispatchConfirm = (data) => {
+        setPendingDispatch(data);
+        setIsDispatchOpen(false);
+        if (data.payMode === 'now') {
+            // Cobra aquí: sigue el flujo normal de cobro y el envío sale sin monto.
+            setIsPaymentModalOpen(true);
+        } else {
+            // Paga al recibir: la venta queda a Crédito del cliente y el repartidor cobra.
+            handlePaymentConfirm({
+                method: 'Crédito',
+                amountPaid: finalTotal + (data.deliveryFee || 0),
+                change: 0,
+            }, data);
+        }
+    };
+
+    const handlePaymentConfirm = async (paymentData, dispatchOverride) => {
+        const dispatch = dispatchOverride || pendingDispatch;
         const saleData = {
             items: cart,
             total: finalTotal,
@@ -439,6 +475,24 @@ const POS = () => {
             // ✅ Venta confirmada (commit en BD) o encolada (offline failsafe)
             // Incluir el id real de la venta → el ticket imprime T-<id> y ese
             // número es verificable (ej: sorteos). Offline encolado: aún sin id.
+            // Despacho: la venta ya existe, ahora se crea el envío que la lleva.
+            // Lo que el repartidor debe cobrar es el saldo real: 0 si se pagó aquí.
+            if (dispatch && result.saleId && !result.queued) {
+                const aCobrar = dispatch.payMode === 'on_delivery'
+                    ? finalTotal + (dispatch.deliveryFee || 0)
+                    : 0;
+                const dr = await createDelivery({
+                    sourceType: 'sale', sourceId: result.saleId,
+                    clientName: posSelectedClient?.name, clientPhone: dispatch.clientPhone,
+                    address: dispatch.address, addressNotes: dispatch.addressNotes,
+                    amountToCollect: aCobrar, deliveryFee: dispatch.deliveryFee || 0,
+                });
+                if (!dr?.success) alert('La venta se guardó, pero no se pudo crear el envío: ' + (dr?.error || ''));
+            } else if (dispatch && result.queued) {
+                alert('Venta encolada sin conexión: crea el envío manualmente desde Delivery → Envíos.');
+            }
+            setPendingDispatch(null);
+
             setLastSaleDetails({ ...saleData, id: result.saleId || null, _queued: !!result.queued });
             setIsSuccessModalOpen(true);
             setPosSelectedClient(null);
@@ -701,6 +755,17 @@ const POS = () => {
                             <Store size={14} />
                             Tienda
                             <OrderTabBadge count={orderBadges?.store} />
+                        </button>
+                        )}
+                        {/* Misma pantalla de Envíos (no una copia): una sola fuente
+                            de datos, dos accesos. */}
+                        {canDelivery && (
+                        <button
+                            onClick={() => navigate('/delivery/shipments')}
+                            className="px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                        >
+                            <Truck size={14} />
+                            Delivery
                         </button>
                         )}
                     </div>
@@ -1197,6 +1262,15 @@ const POS = () => {
                             </button>
                         )}
 
+                        {can('pos.sell') && canDelivery && (
+                            <button disabled={cart.length === 0} onClick={handleDispatchClick}
+                                title="Enviar a domicilio"
+                                className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold disabled:opacity-40">
+                                <Truck size={18} />
+                                Despacho
+                            </button>
+                        )}
+
                         {can('pos.sell') && (
                             <button disabled={cart.length === 0} onClick={handleCheckoutClick} className="btn-primary flex-1 flex items-center justify-center gap-2 py-3 rounded-xl">
 
@@ -1524,9 +1598,17 @@ const POS = () => {
 
             <PaymentModal
                 isOpen={isPaymentModalOpen}
-                onClose={() => setIsPaymentModalOpen(false)}
-                total={finalTotal}
+                onClose={() => { setIsPaymentModalOpen(false); setPendingDispatch(null); }}
+                total={finalTotal + (pendingDispatch?.deliveryFee || 0)}
                 onConfirm={handlePaymentConfirm}
+            />
+
+            <DispatchModal
+                isOpen={isDispatchOpen}
+                onClose={() => setIsDispatchOpen(false)}
+                onConfirm={handleDispatchConfirm}
+                client={posSelectedClient}
+                total={finalTotal}
             />
 
             <SaleSuccessModal
