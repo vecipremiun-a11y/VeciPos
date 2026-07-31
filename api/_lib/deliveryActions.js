@@ -522,12 +522,26 @@ async function courierMyDeliveries(turso, companyId, session) {
 // en memoria y, para el envío, en su fila, para no repetir consultas — el servicio
 // pide un uso moderado.
 const _geoCache = new Map();
-async function geocode(address) {
-    const key = String(address || '').trim().toLowerCase();
-    if (!key) return null;
+
+/**
+ * Convierte una dirección en coordenadas. SIEMPRE se le agrega la ciudad y el
+ * país de la empresa: sin eso "Thompson 742" se encontraba en cualquier parte del
+ * mundo y la distancia salía en miles de kilómetros.
+ * `ctx` = { city, countryCode }.
+ */
+async function geocode(address, ctx = {}) {
+    const base = String(address || '').trim();
+    if (!base) return null;
+    const ciudad = String(ctx.city || '').trim();
+    // No repetir la ciudad si la dirección ya la trae.
+    const consulta = ciudad && !base.toLowerCase().includes(ciudad.toLowerCase())
+        ? `${base}, ${ciudad}` : base;
+    const cc = String(ctx.countryCode || '').trim().toLowerCase();
+    const key = `${consulta}|${cc}`.toLowerCase();
     if (_geoCache.has(key)) return _geoCache.get(key);
     try {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(address)}`;
+        let url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(consulta)}`;
+        if (cc) url += `&countrycodes=${cc}`;
         const res = await fetch(url, { headers: { 'User-Agent': 'POSVECI/1.0 (delivery)' } });
         if (!res.ok) return null;
         const j = await res.json();
@@ -537,6 +551,28 @@ async function geocode(address) {
     } catch {
         return null;   // sin internet o servicio caído: el detalle igual se muestra
     }
+}
+
+/** Ciudad y país de la empresa, para acotar la búsqueda de direcciones. */
+async function geoContextOf(turso, companyId) {
+    const r = await turso.execute({
+        sql: 'SELECT city, country FROM companies WHERE id = ? LIMIT 1',
+        args: [companyId],
+    });
+    let city = String(r.rows[0]?.city || '').trim();
+    const pais = String(r.rows[0]?.country || '').trim().toLowerCase();
+    if (!city) {
+        try {
+            const s = await turso.execute({
+                sql: 'SELECT comuna, ciudad FROM sii_config WHERE company_id = ? LIMIT 1',
+                args: [companyId],
+            });
+            city = String(s.rows[0]?.comuna || s.rows[0]?.ciudad || '').trim();
+        } catch { /* puede no tener SII */ }
+    }
+    // Chile por defecto (es el mercado del sistema); si el país es otro, se respeta.
+    const MAP = { chile: 'cl', peru: 'pe', 'perú': 'pe', argentina: 'ar', colombia: 'co', mexico: 'mx', 'méxico': 'mx' };
+    return { city, countryCode: MAP[pais] || (pais.length === 2 ? pais : 'cl') };
 }
 
 /** Distancia en km entre dos puntos (fórmula de Haversine, línea recta). */
@@ -584,19 +620,27 @@ async function deliveryDetail(turso, companyId, session, { id } = {}) {
     const local = await pickupAddressOf(turso, companyId);
     const pickupAddress = local.address;
 
-    // Coordenadas: las del envío si ya las tiene; si no, se geocodifica y se guardan.
+    const ctx = await geoContextOf(turso, companyId);
+    const origen = pickupAddress ? await geocode(pickupAddress, ctx) : null;
+
+    // Coordenadas del destino: las guardadas si existen; si no, se geocodifica.
     let destino = (d.lat != null && d.lng != null) ? { lat: d.lat, lng: d.lng } : null;
-    if (!destino && d.address) {
-        destino = await geocode(d.address);
-        if (destino) {
-            await turso.execute({
-                sql: 'UPDATE deliveries SET lat = ?, lng = ? WHERE id = ? AND company_id = ?',
-                args: [destino.lat, destino.lng, id, companyId],
-            });
-        }
+    if (!destino && d.address) destino = await geocode(d.address, ctx);
+
+    // Control de cordura: un reparto a más de 150 km del local no es un reparto,
+    // es que la dirección se ubicó mal (otra ciudad u otro país). Se descarta para
+    // no mostrar "4.482 km" ni mandar al repartidor a la otra punta del mapa.
+    let km = distanceKm(origen, destino);
+    let dudoso = false;
+    if (km != null && km > 150) { dudoso = true; destino = null; km = null; }
+
+    // Solo se guardan coordenadas confiables.
+    if (destino && (d.lat == null || d.lng == null)) {
+        await turso.execute({
+            sql: 'UPDATE deliveries SET lat = ?, lng = ? WHERE id = ? AND company_id = ?',
+            args: [destino.lat, destino.lng, id, companyId],
+        });
     }
-    const origen = pickupAddress ? await geocode(pickupAddress) : null;
-    const km = distanceKm(origen, destino);
     const minutos = km != null ? Math.max(1, Math.round((km / 22) * 60)) : null;
 
     return {
@@ -609,6 +653,10 @@ async function deliveryDetail(turso, companyId, session, { id } = {}) {
         destCoords: destino,
         distanceKm: km,
         etaMin: minutos,
+        // La dirección no se pudo ubicar con certeza: el repartidor debe guiarse
+        // por el texto de la dirección, no por el mapa.
+        addressUnsure: dudoso || (!destino && !!d.address),
+        geoCity: ctx.city,
     };
 }
 

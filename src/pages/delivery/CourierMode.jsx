@@ -54,18 +54,46 @@ export default function CourierMode() {
         return () => clearInterval(t);
     }, [load]);
 
-    // Ubicación solo mientras hay envíos en curso.
+    // Ubicación solo mientras hay envíos en curso. Se usa el plugin de Capacitor
+    // porque es el que PIDE el permiso al sistema; con navigator.geolocation a secas
+    // la app nunca preguntaba y el rastreo quedaba mudo.
     const enRuta = (data.enCurso || []).length > 0;
+    const [gps, setGps] = useState('idle');   // idle | ok | denied | error
+
     useEffect(() => {
-        if (!enRuta || typeof navigator === 'undefined' || !navigator.geolocation) return;
-        const send = () => navigator.geolocation.getCurrentPosition(
-            (p) => pingCourierLocation(p.coords.latitude, p.coords.longitude),
-            () => { /* sin permiso: se ignora */ },
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 20000 }
-        );
-        send();
-        timerRef.current = setInterval(send, PING_MS);
-        return () => { clearInterval(timerRef.current); timerRef.current = null; };
+        if (!enRuta) { setGps('idle'); return; }
+        let vivo = true;
+
+        const leer = async () => {
+            try {
+                const { Geolocation } = await import('@capacitor/geolocation');
+                const p = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
+                if (!vivo) return;
+                setGps('ok');
+                pingCourierLocation(p.coords.latitude, p.coords.longitude);
+            } catch (e) {
+                if (!vivo) return;
+                setGps(/denied|permission/i.test(e?.message || '') ? 'denied' : 'error');
+            }
+        };
+
+        (async () => {
+            try {
+                const { Geolocation } = await import('@capacitor/geolocation');
+                // Pide el permiso explícitamente (Android no lo pregunta solo).
+                const perm = await Geolocation.checkPermissions();
+                if (perm.location !== 'granted') {
+                    const pedido = await Geolocation.requestPermissions();
+                    if (pedido.location !== 'granted') { if (vivo) setGps('denied'); return; }
+                }
+                await leer();
+                timerRef.current = setInterval(leer, PING_MS);
+            } catch {
+                if (vivo) setGps('error');
+            }
+        })();
+
+        return () => { vivo = false; clearInterval(timerRef.current); timerRef.current = null; };
     }, [enRuta, pingCourierLocation]);
 
     const act = async (d, status, extra) => {
@@ -134,10 +162,20 @@ export default function CourierMode() {
                     <h1 className="text-xl font-bold text-[var(--color-text)] flex items-center gap-2">
                         <Bike className="text-[var(--color-primary)]" /> {data.me?.name || 'Repartidor'}
                     </h1>
-                    {enRuta && (
+                    {enRuta && gps === 'ok' && (
                         <p className="text-[11px] text-emerald-400 flex items-center gap-1 mt-0.5">
                             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block" />
                             Compartiendo ubicación
+                        </p>
+                    )}
+                    {enRuta && gps === 'denied' && (
+                        <p className="text-[11px] text-red-400 flex items-center gap-1 mt-0.5">
+                            <AlertTriangle size={11} /> Ubicación bloqueada — actívala para que te vean en el mapa
+                        </p>
+                    )}
+                    {enRuta && gps === 'error' && (
+                        <p className="text-[11px] text-amber-400 flex items-center gap-1 mt-0.5">
+                            <AlertTriangle size={11} /> No se pudo obtener el GPS. Revisa que esté encendido.
                         </p>
                     )}
                 </div>
@@ -262,34 +300,43 @@ function OrderCard({ d, view, busy, currency, pickupName, onAccept, onPickedUp, 
 
     return (
         <div className="glass-card p-4 space-y-3">
-            <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                    <p className="font-bold text-[var(--color-text)]">#{d.id}</p>
-                    <p className="text-sm text-[var(--color-text)]">{d.client_name || 'Sin cliente'}</p>
+            {/* Toda la zona de datos abre el detalle: es el gesto natural en el
+                celular y evita un botón extra. Los botones de acción de abajo
+                quedan fuera de esta zona para que no se disparen sin querer. */}
+            <div onClick={!cerrado ? onDetail : undefined}
+                className={cn('space-y-3', !cerrado && 'cursor-pointer active:opacity-70 transition-opacity')}>
+                <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                        <p className="font-bold text-[var(--color-text)]">#{d.id}</p>
+                        <p className="text-sm text-[var(--color-text)]">{d.client_name || 'Sin cliente'}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                        {!cerrado && <Info size={16} className="text-[var(--color-primary)]" />}
+                        <span className={cn('text-[10px] font-bold px-2 py-1 rounded-full border', badge.c)}>{badge.t}</span>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                    {/* Ver TODO antes de decidir: productos, ruta, distancia y tiempo. */}
-                    <button onClick={onDetail} title="Ver detalle del pedido"
-                        className="p-1.5 rounded-lg border border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-primary)]">
-                        <Info size={16} />
-                    </button>
-                    <span className={cn('text-[10px] font-bold px-2 py-1 rounded-full border', badge.c)}>{badge.t}</span>
-                </div>
+
+                <p className="text-sm text-[var(--color-text-muted)] flex items-start gap-1.5">
+                    <MapPin size={14} className="shrink-0 mt-0.5" />
+                    <span>{d.address}{d.address_notes ? ` · ${d.address_notes}` : ''}</span>
+                </p>
+                <p className={cn('text-sm font-bold flex items-center gap-1.5', cobra ? 'text-amber-400' : 'text-emerald-400')}>
+                    <Banknote size={14} />
+                    {cobra ? `Cobrar ${formatCurrency(d.amount_to_collect, currency)}` : 'Ya pagado'}
+                </p>
+                {!cerrado && (
+                    <p className="text-[11px] text-[var(--color-text-muted)]">Toca para ver el detalle</p>
+                )}
             </div>
 
-            <p className="text-sm text-[var(--color-text-muted)] flex items-start gap-1.5">
-                <MapPin size={14} className="shrink-0 mt-0.5" />
-                <span>{d.address}{d.address_notes ? ` · ${d.address_notes}` : ''}</span>
-            </p>
+            {/* Llamar queda como enlace propio, fuera de la zona del detalle. */}
             {d.client_phone && !cerrado && (
-                <a href={`tel:${d.client_phone}`} className="text-sm text-[var(--color-primary)] flex items-center gap-1.5">
+                <a href={`tel:${d.client_phone}`} onClick={(e) => e.stopPropagation()}
+                    className="text-sm text-[var(--color-primary)] flex items-center gap-1.5">
                     <Phone size={14} /> {d.client_phone}
                 </a>
             )}
-            <p className={cn('text-sm font-bold flex items-center gap-1.5', cobra ? 'text-amber-400' : 'text-emerald-400')}>
-                <Banknote size={14} />
-                {cobra ? `Cobrar ${formatCurrency(d.amount_to_collect, currency)}` : 'Ya pagado'}
-            </p>
+
 
             {/* Cerrados: solo se muestra el resultado */}
             {cerrado ? (
@@ -320,31 +367,43 @@ function OrderCard({ d, view, busy, currency, pickupName, onAccept, onPickedUp, 
                         </button>
                     ) : (
                         <>
-                            <div className="grid grid-cols-2 gap-2">
-                                {/* El botón de navegar se apaga cuando ya se entregó */}
-                                <button onClick={onNavigate}
-                                    className="py-3 rounded-xl font-bold bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30">
-                                    <Navigation size={16} className="inline mr-1" /> Navegar
-                                </button>
-                                {d.status === 'accepted' && (
+                            {/* "Navegar" solo cuando hay a dónde ir: camino al local
+                                (aceptado) o camino al cliente (en ruta). Al RETIRAR ya
+                                estás en el local, así que primero marcas que saliste y
+                                recién ahí aparece la navegación al cliente. */}
+                            {d.status === 'accepted' && (
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onClick={onNavigate}
+                                        className="py-3 rounded-xl font-bold bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30">
+                                        <Navigation size={16} className="inline mr-1" /> Navegar
+                                    </button>
                                     <button onClick={onPickedUp} disabled={busy}
                                         className="py-3 rounded-xl font-bold bg-violet-500/15 text-violet-300 border border-violet-500/30 disabled:opacity-50">
                                         Retiré
                                     </button>
-                                )}
-                                {d.status === 'picked_up' && (
-                                    <button onClick={onRoute} disabled={busy}
-                                        className="py-3 rounded-xl font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 disabled:opacity-50">
-                                        Salí a repartir
+                                </div>
+                            )}
+
+                            {d.status === 'picked_up' && (
+                                <button onClick={onRoute} disabled={busy}
+                                    className="w-full py-3.5 rounded-xl font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 disabled:opacity-50">
+                                    <Truck size={16} className="inline mr-1" /> Salí a repartir
+                                </button>
+                            )}
+
+                            {d.status === 'on_route' && (
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onClick={onNavigate}
+                                        className="py-3 rounded-xl font-bold bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30">
+                                        <Navigation size={16} className="inline mr-1" /> Navegar
                                     </button>
-                                )}
-                                {d.status === 'on_route' && (
                                     <button onClick={onDeliver} disabled={busy}
                                         className="py-3 rounded-xl font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 disabled:opacity-50">
                                         <Check size={16} className="inline mr-1" /> Entregar
                                     </button>
-                                )}
-                            </div>
+                                </div>
+                            )}
+
                             <button onClick={onFail}
                                 className="w-full py-2.5 rounded-xl text-sm font-bold text-red-400 border border-red-500/30">
                                 <X size={14} className="inline mr-1" /> No pude entregar
@@ -380,7 +439,7 @@ function NavModal({ target, onClose }) {
 
     return (
         <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
-            <div className="glass-card w-full max-w-sm p-5">
+            <div className="w-full max-w-sm p-5 rounded-2xl bg-[var(--color-surface)] border border-[var(--glass-border)] shadow-2xl">
                 <div className="flex items-center justify-between mb-1">
                     <h3 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2">
                         <Navigation className="text-[var(--color-primary)]" size={20} /> Navegar
@@ -433,7 +492,7 @@ function DetailModal({ d, currency, fetchDetail, onClose, onAccept, onNavigate }
     const totalItems = items.reduce((s, i) => s + (Number(i.qty) || 0), 0);
     return (
         <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
-            <div className="glass-card w-full max-w-md p-5 max-h-full overflow-y-auto">
+            <div className="w-full max-w-md p-5 max-h-full overflow-y-auto rounded-2xl bg-[var(--color-surface)] border border-[var(--glass-border)] shadow-2xl">
                 <div className="flex items-center justify-between mb-3">
                     <h3 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2">
                         <Info className="text-[var(--color-primary)]" size={20} /> Pedido #{d.id}
@@ -485,8 +544,11 @@ function DetailModal({ d, currency, fetchDetail, onClose, onAccept, onNavigate }
                                     </div>
                                 </div>
                             ) : (
-                                <p className="text-[11px] text-amber-400 pt-1">
-                                    No se pudo calcular la distancia (falta la dirección del local o no se ubicó en el mapa).
+                                <p className="text-[11px] text-amber-400 pt-1 flex items-start gap-1">
+                                    <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                                    {info?.addressUnsure
+                                        ? 'La dirección no se pudo ubicar con certeza en el mapa. Guíate por la dirección escrita y confirma con el cliente por teléfono.'
+                                        : 'No se pudo calcular la distancia (falta la dirección del local).'}
                                 </p>
                             )}
 
@@ -608,7 +670,7 @@ function DeliverModal({ d, currency, onClose, onConfirm }) {
 
     return (
         <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
-            <div className="glass-card w-full max-w-md p-5 max-h-full overflow-y-auto">
+            <div className="w-full max-w-md p-5 max-h-full overflow-y-auto rounded-2xl bg-[var(--color-surface)] border border-[var(--glass-border)] shadow-2xl">
                 <div className="flex items-center justify-between mb-1">
                     <h3 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2">
                         <Check className="text-emerald-400" size={20} /> Confirmar entrega
@@ -680,7 +742,7 @@ function FailModal({ onClose, onPick }) {
     const [otro, setOtro] = useState('');
     return (
         <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="glass-card w-full max-w-sm p-5">
+            <div className="w-full max-w-sm p-5 rounded-2xl bg-[var(--color-surface)] border border-[var(--glass-border)] shadow-2xl">
                 <h3 className="text-lg font-bold text-[var(--color-text)] mb-3 flex items-center gap-2">
                     <AlertTriangle className="text-red-400" size={20} /> No pude entregar
                 </h3>
