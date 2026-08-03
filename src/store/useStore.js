@@ -160,6 +160,7 @@ export const useStore = create(persist((set, get) => ({
         return carts.find(c => c.id === activeCartId)?.client || null;
     },
     activeRegisters: [],
+    activeRegistersCount: 0,
     cashRegister: null,
     currentUser: null,
     isLoading: false,
@@ -473,6 +474,7 @@ export const useStore = create(persist((set, get) => ({
             // Clear Dashboard/POS specific state
             cashRegister: null, // Critical: Reset cash register
             activeRegisters: [],
+            activeRegistersCount: 0,
             posSelectedClient: null,
             // Reset Multi-Cart System
             carts: [
@@ -3985,6 +3987,21 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error("❌ Fetch active registers error", e);
             console.timeEnd('⏱️ fetchActiveRegisters');
+        }
+    },
+
+    // Solo el número de cajas abiertas. Lo usa el panel "Mi Caja": ahí un cajero no
+    // debe recibir el nombre ni el saldo de sus compañeros, así que no se pide la
+    // lista. El detalle completo (fetchActiveRegisters) queda para el Dashboard.
+    fetchActiveRegistersCount: async () => {
+        try {
+            const r = await userApiCall('registerActiveList', { companyId: get().activeCompanyId, summary: true });
+            // `count` lo agrega el modo resumen; el `.length` cubre un servidor que
+            // todavía no lo conozca (despliegue a medias) sin dejar la vista en cero.
+            const n = r?.success ? (r.count ?? (r.registers || []).length) : 0;
+            set({ activeRegistersCount: n });
+        } catch (e) {
+            console.error("❌ Fetch active registers count error", e);
         }
     },
 

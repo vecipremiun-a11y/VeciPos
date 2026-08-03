@@ -123,10 +123,16 @@ export default function CourierMode() {
             toast('El local no tiene dirección cargada. Pídele al administrador que la ponga en Configuración → Empresa.', 'error');
             return;
         }
-        const coords = !alLocal && d.lat != null && d.lng != null ? { lat: d.lat, lng: d.lng } : null;
         const address = alLocal ? data.pickupAddress : d.address;
+        // Coordenadas SOLO como último recurso (ver NavModal): las nuestras son a
+        // nivel de calle y pueden apuntar a una calle homónima equivocada.
+        const coords = !address && !alLocal && d.lat != null && d.lng != null ? { lat: d.lat, lng: d.lng } : null;
         if (!coords && !address) { toast('Este pedido no tiene dirección para navegar', 'error'); return; }
-        setNavTarget({ coords, address, alLocal, name: alLocal ? (data.pickupName || 'el local') : (d.client_name || 'el cliente') });
+        setNavTarget({
+            coords, address, alLocal,
+            city: data.geoCity, country: data.geoCountry,
+            name: alLocal ? (data.pickupName || 'el local') : (d.client_name || 'el cliente'),
+        });
     };
 
     if (loading) {
@@ -420,9 +426,32 @@ function OrderCard({ d, view, busy, currency, pickupName, onAccept, onPickedUp, 
 // Se abre con enlaces https (no esquemas waze:// ni geo:) porque Android muestra
 // el selector de app con ellos y, si la app no está instalada, cae al navegador
 // en vez de fallar en silencio.
+//
+// SE NAVEGA POR TEXTO, NO POR COORDENADAS. OpenStreetMap (de donde salen las
+// nuestras) no tiene numeración domiciliaria en buena parte de Chile: ante
+// "Thompson 742" ignora el número y devuelve el centro de alguna calle Thompson,
+// que puede ser otra homónima al otro lado de la ciudad — así el repartidor
+// terminaba en un condominio equivocado. Google Maps y Waze sí resuelven la
+// numeración chilena, así que se les entrega la dirección escrita con su ciudad
+// y país. Las coordenadas quedan solo para el pedido que no tiene texto.
 function NavModal({ target, onClose }) {
-    const { coords, address, name, alLocal } = target;
-    const punto = coords ? `${coords.lat},${coords.lng}` : address;
+    const { coords, address, name, alLocal, city, country } = target;
+
+    // "Thompson 742" → "Thompson 742, Iquique, Chile". La comparación es por
+    // partes separadas por coma, no por subcadena: si no, una calle "Av. Chile"
+    // haría creer que la dirección ya trae el país y se quedaría sin él.
+    const completa = (txt) => {
+        const t = String(txt || '').trim();
+        const partes = t.split(',').map(p => p.trim().toLowerCase()).filter(Boolean);
+        const salida = [t];
+        for (const extra of [city, country]) {
+            const e = String(extra || '').trim();
+            if (e && !partes.includes(e.toLowerCase())) { salida.push(e); partes.push(e.toLowerCase()); }
+        }
+        return salida.join(', ');
+    };
+    const destinoTexto = address ? completa(address) : '';
+    const punto = destinoTexto || (coords ? `${coords.lat},${coords.lng}` : '');
 
     const abrir = (url) => {
         // '_blank' hace que Android lo tome como enlace externo y ofrezca la app.
@@ -430,12 +459,12 @@ function NavModal({ target, onClose }) {
         onClose();
     };
 
-    const googleMaps = coords
-        ? `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}&travelmode=driving`
-        : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}&travelmode=driving`;
-    const waze = coords
-        ? `https://waze.com/ul?ll=${coords.lat},${coords.lng}&navigate=yes`
-        : `https://waze.com/ul?q=${encodeURIComponent(address)}&navigate=yes`;
+    const googleMaps = destinoTexto
+        ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destinoTexto)}&travelmode=driving`
+        : `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}&travelmode=driving`;
+    const waze = destinoTexto
+        ? `https://waze.com/ul?q=${encodeURIComponent(destinoTexto)}&navigate=yes`
+        : `https://waze.com/ul?ll=${coords.lat},${coords.lng}&navigate=yes`;
 
     return (
         <div className="fixed inset-0 z-[9999] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-3">
@@ -529,20 +558,32 @@ function DetailModal({ d, currency, fetchDetail, onClose, onAccept, onNavigate }
                                 </div>
                             </div>
 
-                            {/* Distancia y tiempo — aproximados, en línea recta */}
+                            {/* Distancia y tiempo — en línea recta y, cuando el mapa
+                                solo ubica la calle (sin número), referenciales. */}
                             {info?.distanceKm != null ? (
-                                <div className="flex gap-2 pt-2">
-                                    <div className="flex-1 rounded-lg bg-[var(--glass-bg)] p-2 text-center">
-                                        <Route size={14} className="mx-auto text-[var(--color-primary)]" />
-                                        <p className="text-sm font-bold text-[var(--color-text)] mt-0.5">{info.distanceKm} km</p>
-                                        <p className="text-[9px] text-[var(--color-text-muted)]">en línea recta</p>
+                                <>
+                                    <div className="flex gap-2 pt-2">
+                                        <div className="flex-1 rounded-lg bg-[var(--glass-bg)] p-2 text-center">
+                                            <Route size={14} className="mx-auto text-[var(--color-primary)]" />
+                                            <p className="text-sm font-bold text-[var(--color-text)] mt-0.5">
+                                                {info.distanceApprox ? '≈ ' : ''}{info.distanceKm} km
+                                            </p>
+                                            <p className="text-[9px] text-[var(--color-text-muted)]">en línea recta</p>
+                                        </div>
+                                        <div className="flex-1 rounded-lg bg-[var(--glass-bg)] p-2 text-center">
+                                            <Clock size={14} className="mx-auto text-[var(--color-primary)]" />
+                                            <p className="text-sm font-bold text-[var(--color-text)] mt-0.5">~{info.etaMin} min</p>
+                                            <p className="text-[9px] text-[var(--color-text-muted)]">estimado</p>
+                                        </div>
                                     </div>
-                                    <div className="flex-1 rounded-lg bg-[var(--glass-bg)] p-2 text-center">
-                                        <Clock size={14} className="mx-auto text-[var(--color-primary)]" />
-                                        <p className="text-sm font-bold text-[var(--color-text)] mt-0.5">~{info.etaMin} min</p>
-                                        <p className="text-[9px] text-[var(--color-text-muted)]">estimado</p>
-                                    </div>
-                                </div>
+                                    {info.distanceApprox && (
+                                        <p className="text-[10px] text-[var(--color-text-muted)] flex items-start gap-1">
+                                            <AlertTriangle size={11} className="shrink-0 mt-0.5 text-amber-400" />
+                                            Referencial: el mapa ubica la calle pero no el número. La distancia
+                                            real te la da la app de navegación.
+                                        </p>
+                                    )}
+                                </>
                             ) : (
                                 <p className="text-[11px] text-amber-400 pt-1 flex items-start gap-1">
                                     <AlertTriangle size={12} className="shrink-0 mt-0.5" />

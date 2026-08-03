@@ -455,6 +455,9 @@ async function courierMyDeliveries(turso, companyId, session) {
     });
     const mode = cfg.rows[0]?.delivery_assign_mode || 'manual';
     const local = await pickupAddressOf(turso, companyId);
+    // Ciudad y país: se le agregan al texto que se manda a Google Maps / Waze para
+    // que no busquen la calle en otra región.
+    const geo = await geoContextOf(turso, companyId);
     // Historial reciente: últimas 24 h. Cubre un turno completo sin depender de la
     // zona horaria (un reparto a las 21:00 en Chile ya es "mañana" en UTC).
     const desde = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
@@ -507,6 +510,8 @@ async function courierMyDeliveries(turso, companyId, session) {
         assignMode: mode,
         pickupAddress: local.address,
         pickupName: local.name || 'el local',
+        geoCity: geo.city,
+        geoCountry: geo.country,
         nuevos: nuevos.rows || [],
         enCurso: enCurso.rows || [],
         entregados: entregados.rows || [],
@@ -524,12 +529,21 @@ async function courierMyDeliveries(turso, companyId, session) {
 const _geoCache = new Map();
 
 /**
- * Convierte una dirección en coordenadas. SIEMPRE se le agrega la ciudad y el
- * país de la empresa: sin eso "Thompson 742" se encontraba en cualquier parte del
- * mundo y la distancia salía en miles de kilómetros.
- * `ctx` = { city, countryCode }.
+ * Convierte una dirección en coordenadas aproximadas, para dimensionar el reparto.
+ *
+ * OJO — LIMITACIÓN IMPORTANTE: OpenStreetMap casi no tiene numeración domiciliaria
+ * en Chile. Ante "Thompson 742" ignora el 742 y devuelve el centro de alguna calle
+ * llamada Thompson, que puede ser otra calle homónima en la otra punta de la
+ * ciudad. Por eso el resultado se marca con `precise` y NUNCA se usa para navegar:
+ * a Google Maps y Waze se les pasa el texto de la dirección, que ellos sí saben
+ * resolver con número.
+ *
+ * `ctx` = { city, countryCode }. `ref` = punto de referencia (el local): entre
+ * varias calles del mismo nombre se elige la más cercana a él, que es la que tiene
+ * sentido para un reparto.
+ * Devuelve { lat, lng, precise } o null.
  */
-async function geocode(address, ctx = {}) {
+async function geocode(address, ctx = {}, ref = null) {
     const base = String(address || '').trim();
     if (!base) return null;
     const ciudad = String(ctx.city || '').trim();
@@ -538,19 +552,36 @@ async function geocode(address, ctx = {}) {
         ? `${base}, ${ciudad}` : base;
     const cc = String(ctx.countryCode || '').trim().toLowerCase();
     const key = `${consulta}|${cc}`.toLowerCase();
-    if (_geoCache.has(key)) return _geoCache.get(key);
-    try {
-        let url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(consulta)}`;
-        if (cc) url += `&countrycodes=${cc}`;
-        const res = await fetch(url, { headers: { 'User-Agent': 'POSVECI/1.0 (delivery)' } });
-        if (!res.ok) return null;
-        const j = await res.json();
-        const hit = j?.[0] ? { lat: Number(j[0].lat), lng: Number(j[0].lon) } : null;
-        _geoCache.set(key, hit);
-        return hit;
-    } catch {
-        return null;   // sin internet o servicio caído: el detalle igual se muestra
+
+    let candidatos = _geoCache.get(key);
+    if (candidatos === undefined) {
+        try {
+            let url = 'https://nominatim.openstreetmap.org/search'
+                + `?format=json&addressdetails=1&limit=5&q=${encodeURIComponent(consulta)}`;
+            if (cc) url += `&countrycodes=${cc}`;
+            const res = await fetch(url, { headers: { 'User-Agent': 'POSVECI/1.0 (delivery)' } });
+            if (!res.ok) return null;
+            candidatos = (await res.json() || []).map(h => ({
+                lat: Number(h.lat),
+                lng: Number(h.lon),
+                numero: String(h.address?.house_number || '').trim(),
+            })).filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lng));
+            _geoCache.set(key, candidatos);
+        } catch {
+            return null;   // sin internet o servicio caído: el detalle igual se muestra
+        }
     }
+    if (!candidatos.length) return null;
+
+    const numero = (base.match(/\d+/) || [''])[0];
+    // 1) El candidato con la numeración exacta: ese sí es la puerta del cliente.
+    const exacto = numero ? candidatos.find(c => c.numero === numero) : null;
+    if (exacto) return { lat: exacto.lat, lng: exacto.lng, precise: true };
+    // 2) Si no, la calle homónima más cercana al local.
+    const elegido = ref
+        ? candidatos.slice().sort((a, b) => (distanceKm(ref, a) ?? 1e9) - (distanceKm(ref, b) ?? 1e9))[0]
+        : candidatos[0];
+    return { lat: elegido.lat, lng: elegido.lng, precise: false };
 }
 
 /** Ciudad y país de la empresa, para acotar la búsqueda de direcciones. */
@@ -560,7 +591,7 @@ async function geoContextOf(turso, companyId) {
         args: [companyId],
     });
     let city = String(r.rows[0]?.city || '').trim();
-    const pais = String(r.rows[0]?.country || '').trim().toLowerCase();
+    const pais = String(r.rows[0]?.country || '').trim();
     if (!city) {
         try {
             const s = await turso.execute({
@@ -572,7 +603,12 @@ async function geoContextOf(turso, companyId) {
     }
     // Chile por defecto (es el mercado del sistema); si el país es otro, se respeta.
     const MAP = { chile: 'cl', peru: 'pe', 'perú': 'pe', argentina: 'ar', colombia: 'co', mexico: 'mx', 'méxico': 'mx' };
-    return { city, countryCode: MAP[pais] || (pais.length === 2 ? pais : 'cl') };
+    const clave = pais.toLowerCase();
+    return {
+        city,
+        country: pais || 'Chile',   // nombre, para completar el texto que se le pasa al navegador
+        countryCode: MAP[clave] || (clave.length === 2 ? clave : 'cl'),
+    };
 }
 
 /** Distancia en km entre dos puntos (fórmula de Haversine, línea recta). */
@@ -623,9 +659,11 @@ async function deliveryDetail(turso, companyId, session, { id } = {}) {
     const ctx = await geoContextOf(turso, companyId);
     const origen = pickupAddress ? await geocode(pickupAddress, ctx) : null;
 
-    // Coordenadas del destino: las guardadas si existen; si no, se geocodifica.
-    let destino = (d.lat != null && d.lng != null) ? { lat: d.lat, lng: d.lng } : null;
-    if (!destino && d.address) destino = await geocode(d.address, ctx);
+    // Destino: se resuelve desde el texto usando el local como referencia (así se
+    // descartan las calles homónimas lejanas). Las coordenadas guardadas quedan
+    // como respaldo, no como verdad: se grabaron con una búsqueda peor.
+    let destino = d.address ? await geocode(d.address, ctx, origen) : null;
+    if (!destino && d.lat != null && d.lng != null) destino = { lat: d.lat, lng: d.lng, precise: false };
 
     // Control de cordura: un reparto a más de 150 km del local no es un reparto,
     // es que la dirección se ubicó mal (otra ciudad u otro país). Se descarta para
@@ -634,14 +672,20 @@ async function deliveryDetail(turso, companyId, session, { id } = {}) {
     let dudoso = false;
     if (km != null && km > 150) { dudoso = true; destino = null; km = null; }
 
-    // Solo se guardan coordenadas confiables.
-    if (destino && (d.lat == null || d.lng == null)) {
+    // Solo se graban coordenadas con numeración exacta. Las de nivel de calle
+    // apuntaban a la calle equivocada y ensuciaban el mapa de rastreo.
+    if (destino?.precise && (d.lat !== destino.lat || d.lng !== destino.lng)) {
         await turso.execute({
             sql: 'UPDATE deliveries SET lat = ?, lng = ? WHERE id = ? AND company_id = ?',
             args: [destino.lat, destino.lng, id, companyId],
         });
     }
     const minutos = km != null ? Math.max(1, Math.round((km / 22) * 60)) : null;
+
+    // ¿Se puede confiar en los números? Solo si AMBOS extremos tienen numeración
+    // exacta. Con uno solo a nivel de calle, la distancia puede errar por
+    // kilómetros y el repartidor la toma por buena.
+    const exacto = !!(origen?.precise && destino?.precise);
 
     return {
         success: true,
@@ -653,10 +697,13 @@ async function deliveryDetail(turso, companyId, session, { id } = {}) {
         destCoords: destino,
         distanceKm: km,
         etaMin: minutos,
-        // La dirección no se pudo ubicar con certeza: el repartidor debe guiarse
-        // por el texto de la dirección, no por el mapa.
+        // Los kilómetros son referenciales: OpenStreetMap no tiene numeración en
+        // buena parte de Chile y ubica la dirección a nivel de calle.
+        distanceApprox: km != null && !exacto,
+        // La dirección no se pudo ubicar: el repartidor debe guiarse por el texto.
         addressUnsure: dudoso || (!destino && !!d.address),
         geoCity: ctx.city,
+        geoCountry: ctx.country,
     };
 }
 

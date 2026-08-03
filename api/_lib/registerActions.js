@@ -73,7 +73,7 @@ function mixedPortions(paymentDetails) {
     } catch { return []; }
 }
 
-async function registerActiveList(turso, companyId) {
+async function registerActiveList(turso, companyId, session, body = {}) {
     const result = await turso.execute({
         sql: `SELECT cr.*, u.name as user_name
               FROM cash_registers cr
@@ -85,6 +85,14 @@ async function registerActiveList(turso, companyId) {
         args: [companyId],
     });
     const registers = result.rows;
+
+    // Modo resumen: solo CUÁNTAS cajas hay abiertas, sin nombres ni saldos. Lo pide
+    // el panel "Mi Caja", donde un cajero no tiene por qué recibir lo que lleva
+    // recaudado el resto (el detalle vive en el Dashboard y en los reportes de
+    // cierres/movimientos). De paso se salta el cálculo de balances, que es la
+    // parte cara: con 68.193 ventas esta consulta llegó a tardar 32,9 s.
+    if (body?.summary) return { success: true, count: registers.length, registers: [] };
+
     if (registers.length === 0) return { success: true, registers: [] };
 
     const queries = [];

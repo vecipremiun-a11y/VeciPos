@@ -20,7 +20,7 @@ const STALE_REGISTER_HOURS = 18;
 
 const CashStatusWidget = () => {
     // FASE 10 · useShallow para aislar re-renders.
-    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency, getRegisterMethodTransactions, activeRegisters, fetchActiveRegisters } = useStore(
+    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency, getRegisterMethodTransactions, activeRegistersCount, fetchActiveRegistersCount } = useStore(
         useShallow(s => ({
             cashRegister: s.cashRegister,
             registerStats: s.registerStats,
@@ -30,8 +30,8 @@ const CashStatusWidget = () => {
             currentUser: s.currentUser,
             currentCurrency: s.currentCurrency,
             getRegisterMethodTransactions: s.getRegisterMethodTransactions,
-            activeRegisters: s.activeRegisters,
-            fetchActiveRegisters: s.fetchActiveRegisters,
+            activeRegistersCount: s.activeRegistersCount,
+            fetchActiveRegistersCount: s.fetchActiveRegistersCount,
         }))
     );
     const { can } = usePermissions();
@@ -91,12 +91,12 @@ const CashStatusWidget = () => {
         }
     }, [cashRegister, refreshRegisterStats]);
 
-    // Al abrir el desplegable, traer las demás cajas abiertas del local. Es la única
-    // forma de que el dueño entienda que su número no es "lo que vendió la tienda":
-    // cada cajero tiene su propia caja y solo ve la suya.
+    // Al abrir el desplegable se pide SOLO cuántas cajas hay abiertas, no la lista.
+    // Sirve para explicarle al cajero que su número no es "lo que vendió la tienda"
+    // sin que su navegador reciba el nombre ni el saldo de sus compañeros.
     useEffect(() => {
-        if (isOpen) fetchActiveRegisters();
-    }, [isOpen, fetchActiveRegisters]);
+        if (isOpen) fetchActiveRegistersCount();
+    }, [isOpen, fetchActiveRegistersCount]);
 
     // Caja olvidada abierta de días anteriores: avisar al entrar al POS. Una vez por
     // caja y por sesión del navegador, para avisar sin volverse molesto.
@@ -124,7 +124,8 @@ const CashStatusWidget = () => {
         ? `abierta hace ${Math.floor(hoursOpen / 24)} días`
         : `abierta hace ${hoursOpen} h`;
 
-    const otherRegisters = (activeRegisters || []).filter(r => Number(r.id) !== Number(cashRegister?.id));
+    // El conteo incluye la propia: las "otras" son una menos.
+    const otherRegisters = Math.max(0, (Number(activeRegistersCount) || 0) - 1);
     const ownerName = currentUser?.name || currentUser?.username || '';
 
     const handleInitialCloseClick = () => {
@@ -215,7 +216,9 @@ const CashStatusWidget = () => {
                     {isOpen && createPortal(
                         <div className="fixed inset-0 z-[9999]">
                             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)}></div>
-                            <div className="absolute inset-4 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 w-auto sm:w-[360px] glass-card p-0 !bg-[#0f0f2d]/98 border-[var(--glass-border)] shadow-2xl overflow-hidden animate-[float_0.2s_ease-out] max-h-[90vh] flex flex-col rounded-2xl">
+                            {/* En celular ocupa la pantalla (inset-4). En escritorio crece:
+                                con 360 px fijos quedaba con ancho de teléfono en un monitor. */}
+                            <div className="absolute inset-4 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 w-auto sm:w-[420px] lg:w-[640px] glass-card p-0 !bg-[#0f0f2d]/98 border-[var(--glass-border)] shadow-2xl overflow-hidden animate-[float_0.2s_ease-out] max-h-[90vh] flex flex-col rounded-2xl">
                                 {/* Header */}
                                 <div className="p-3 border-b border-[var(--glass-border)] flex justify-between items-center shrink-0">
                                     {/* "Mi caja · <nombre>": el número es de ESTE usuario, no del
@@ -260,7 +263,7 @@ const CashStatusWidget = () => {
 
                                     {/* Desglose del turno. Solo Efectivo entra al saldo de arriba:
                                         tarjeta, transferencia y crédito no están en el cajón. */}
-                                    <div className="grid grid-cols-2 gap-2 p-3">
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 p-3">
                                         <div className="p-2 lg:p-3 bg-green-500/5 rounded-xl border border-green-500/20 flex flex-col items-center">
                                             <Banknote size={14} className="text-green-400 mb-0.5" />
                                             <span className="text-base lg:text-lg font-bold text-green-400">{formatCurrency(registerStats.sales, currentCurrency)}</span>
@@ -284,7 +287,7 @@ const CashStatusWidget = () => {
                                         {/* Crédito: el dato ya venía en salesBreakdown pero no se
                                             mostraba, así que una venta fiada desaparecía de la vista. */}
                                         {(registerStats.salesBreakdown?.credit || 0) > 0 && (
-                                            <div className="p-2 lg:p-3 bg-rose-500/5 rounded-xl border border-rose-500/20 flex flex-col items-center col-span-2">
+                                            <div className="p-2 lg:p-3 bg-rose-500/5 rounded-xl border border-rose-500/20 flex flex-col items-center col-span-2 lg:col-span-4">
                                                 <Landmark size={14} className="text-rose-400 mb-0.5" />
                                                 <span className="text-base lg:text-lg font-bold text-rose-400">{formatCurrency(registerStats.salesBreakdown.credit, currentCurrency)}</span>
                                                 <span className="text-[10px] lg:text-xs text-rose-300/60">Crédito (por cobrar)</span>
@@ -292,29 +295,19 @@ const CashStatusWidget = () => {
                                         )}
                                     </div>
 
-                                    {/* Las demás cajas abiertas del local. Sin esto, un cajero ve su
-                                        número quieto mientras el local vende y cree que el sistema
-                                        no suma — que fue justamente el reclamo del 22-jul. */}
-                                    {otherRegisters.length > 0 && (
-                                        <div className="mx-3 mb-3 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
-                                            <div className="flex items-center gap-1.5 mb-2 text-[var(--color-text-muted)]">
-                                                <Users size={12} />
-                                                <span className="text-[11px] lg:text-xs font-bold uppercase tracking-wide">
-                                                    Otras cajas abiertas ahora
-                                                </span>
-                                            </div>
-                                            <div className="space-y-1.5">
-                                                {otherRegisters.map(r => (
-                                                    <div key={r.id} className="flex justify-between items-center text-xs">
-                                                        <span className="text-[var(--color-text)] truncate mr-2">{r.user_name || 'Sin nombre'}</span>
-                                                        <span className="font-bold text-[var(--color-text-muted)] shrink-0">
-                                                            {formatCurrency(r.currentBalance, currentCurrency)}
-                                                        </span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <p className="text-[10px] text-[var(--color-text-muted)] mt-2 leading-relaxed">
-                                                Sus ventas no suman en tu caja: cada cajero rinde la suya.
+                                    {/* Aviso de que hay otras cajas abiertas, SIN nombres ni montos:
+                                        "Mi Caja" es la caja de uno y nada más, y un vendedor no tiene
+                                        por qué ver lo que lleva recaudado el resto (el detalle de todas
+                                        vive en los reportes de cierres y movimientos, con permiso).
+                                        La nota se mantiene porque resuelve el reclamo del 22-jul: el
+                                        cajero veía su número quieto mientras el local vendía y creía
+                                        que el sistema no estaba sumando. */}
+                                    {otherRegisters > 0 && (
+                                        <div className="mx-3 mb-3 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)] flex items-start gap-2">
+                                            <Users size={13} className="text-[var(--color-text-muted)] shrink-0 mt-0.5" />
+                                            <p className="text-[11px] lg:text-xs text-[var(--color-text-muted)] leading-relaxed">
+                                                Hay otras cajas abiertas en el local. Sus ventas no suman en la tuya:
+                                                cada cajero rinde la suya.
                                             </p>
                                         </div>
                                     )}
