@@ -33,3 +33,16 @@ dist-ssr
 *.bak
 
 .vercel
+
+# Capacitor / Android — solo se versiona el proyecto nativo, no sus artefactos.
+# (La salida real de Gradle va a C:/AndroidBuilds, fuera de OneDrive.)
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+android/local.properties
+android/.idea/
+android/app/release/
+*.keystore
+*.jks
+android/keystore.properties

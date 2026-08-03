@@ -13,7 +13,9 @@
     "verify-all": "node scripts/db/verify-all.mjs"
   },
   "dependencies": {
-    "@capacitor/core": "^8.4.2",
+    "@capacitor/android": "8.4.2",
+    "@capacitor/cli": "8.4.2",
+    "@capacitor/core": "8.4.2",
     "@capacitor/geolocation": "^8.2.0",
     "@devlas/dte-sii": "^2.5.14",
     "@libsql/client": "^0.17.0",
@@ -50,6 +52,7 @@
     "zustand": "^5.0.10"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@eslint/js": "^9.39.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
