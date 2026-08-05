@@ -2,8 +2,14 @@
 // (/api/data/actions — sesión + membresía validadas server-side). Mismo contrato
 // que userApiCall del store. Fase 1 · Paso 19.
 import { getTabUserId } from './sessionGuard';
+import { sinDobleEnvio } from './inFlight';
 
-export async function dataApiCall(action, payload = {}) {
+// Mismo blindaje que userApiCall: un doble clic no manda la operación dos veces.
+export function dataApiCall(action, payload = {}) {
+    return sinDobleEnvio(action, payload, () => _dataApiCall(action, payload));
+}
+
+async function _dataApiCall(action, payload = {}) {
     try {
         const r = await fetch('/api/data/actions', {
             method: 'POST',

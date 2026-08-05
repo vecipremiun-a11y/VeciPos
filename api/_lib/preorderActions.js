@@ -191,6 +191,12 @@ async function preorderItemsEdit(turso, companyId, session, { preorderId, items 
             line_total: lineTotal,
             note: it.note || '',
             billing_unit: it.billing_unit || 'unit',
+            // El precio por kilo y los gramos por unidad se perdían al editar: el
+            // INSERT no los incluía, así que un producto por kilo quedaba con
+            // price_per_kg = 0 y al entregarlo el peso real multiplicaba por cero.
+            // Se cobraba $0 sin que nada avisara.
+            price_per_kg: Number(it.price_per_kg) || 0,
+            gram_per_unit: Number(it.gram_per_unit) || 0,
             external_product_id: it.external_product_id || null,
         };
     });
@@ -207,10 +213,11 @@ async function preorderItemsEdit(turso, companyId, session, { preorderId, items 
         ...norm.map(it => ({
             sql: `INSERT INTO preorder_items
                   (preorder_id, product_id, product_name, qty, unit, unit_price, line_total, note,
-                   billing_unit, estimated_total, external_product_id)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                   billing_unit, price_per_kg, gram_per_unit, estimated_total, external_product_id)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             args: [preorderId, it.product_id, it.product_name, it.qty, it.unit, it.unit_price,
-                it.line_total, it.note, it.billing_unit, it.line_total, it.external_product_id],
+                it.line_total, it.note, it.billing_unit, it.price_per_kg, it.gram_per_unit,
+                it.line_total, it.external_product_id],
         })),
         {
             sql: `UPDATE preorders SET total_amount = ?, estimated_total = ?, remaining_amount = ?, updated_at = datetime('now')

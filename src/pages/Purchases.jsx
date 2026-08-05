@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore';
 import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus, Edit, X, ArrowLeft, Paperclip, ScanBarcode } from 'lucide-react';
 import ProductModal from '../components/ProductModal';
 import { usePermissions } from '../hooks/usePermissions';
+import AsyncButton from '../components/AsyncButton';
 
 const Purchases = () => {
     const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown } = useStore();
@@ -566,9 +567,14 @@ const Purchases = () => {
                             <div className="text-2xl font-bold text-[var(--color-primary)]">${totalAmount.toLocaleString()}</div>
                         </div>
                         {can('purchases.create') && (
-                            <button onClick={handleSavePurchase} className="w-full py-4 btn-primary flex items-center justify-center gap-2 text-base font-bold">
-                                <Save size={20} /> Guardar Compra
-                            </button>
+                            <AsyncButton
+                                onClick={handleSavePurchase}
+                                icon={<Save size={20} />}
+                                loadingText="Guardando…"
+                                className="w-full py-4 btn-primary flex items-center justify-center gap-2 text-base font-bold"
+                            >
+                                Guardar Compra
+                            </AsyncButton>
                         )}
                     </div>
                 </div>
@@ -1000,12 +1006,14 @@ const Purchases = () => {
                                         </div>
                                     </div>
                                     {can('purchases.create') && (
-                                        <button
+                                        <AsyncButton
                                             onClick={handleSavePurchase}
+                                            icon={<Save size={20} />}
+                                            loadingText="Guardando…"
                                             className="btn-primary py-3 px-8 flex items-center gap-2 shadow-lg hover:shadow-[0_0_20px_rgba(0,240,255,0.4)] transition-all"
                                         >
-                                            <Save size={20} /> Guardar Compra
-                                        </button>
+                                            Guardar Compra
+                                        </AsyncButton>
                                     )}
                                 </div>
                             </div>

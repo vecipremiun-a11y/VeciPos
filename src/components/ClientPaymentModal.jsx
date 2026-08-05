@@ -3,6 +3,7 @@ import { X, Check, CreditCard, ChevronDown, ChevronUp, Zap, CheckCircle2, AlertC
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
+import AsyncButton from './AsyncButton';
 
 const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
     const { currentCurrency } = useStore();
@@ -81,7 +82,10 @@ const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
 
     if (!isOpen || !client) return null;
 
-    const handleSubmit = () => {
+    // async + return: AsyncButton necesita la promesa para saber cuándo terminó y
+    // mantenerse bloqueado mientras tanto. Sin esto, el botón se liberaba al
+    // instante y un segundo clic alcanzaba a mandar el abono de nuevo.
+    const handleSubmit = async () => {
         if (effectiveAmount <= 0) return;
         // Build distribution data for the store
         const paymentDistribution = distribution
@@ -92,7 +96,7 @@ const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
                 fullyPaid: d.fullyPaid,
                 newTotalPaid: d.alreadyPaid + d.applied
             }));
-        onConfirm(paymentDistribution, effectiveAmount, paymentMethod);
+        return await onConfirm(paymentDistribution, effectiveAmount, paymentMethod);
     };
 
     const handleAmountChange = (e) => {
@@ -377,9 +381,11 @@ const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
                                 </div>
 
                                 <div className="mt-auto">
-                                    <button
+                                    <AsyncButton
                                         onClick={handleSubmit}
                                         disabled={effectiveAmount <= 0}
+                                        icon={<Check size={24} />}
+                                        loadingText="Registrando abono…"
                                         className={`
                                             w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all
                                             ${effectiveAmount > 0
@@ -388,9 +394,8 @@ const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
                                             }
                                         `}
                                     >
-                                        <Check size={24} />
                                         Confirmar Abono
-                                    </button>
+                                    </AsyncButton>
                                 </div>
                             </div>
                         </div>

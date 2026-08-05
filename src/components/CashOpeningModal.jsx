@@ -18,7 +18,7 @@ const CashOpeningModal = ({ isOpen, canOpen = true }) => {
     if (!canOpen) {
         return (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md">
-                <div className="glass-card w-full max-w-md p-8 text-center">
+                <div className="glass-card modal-solido w-full max-w-md p-8 text-center">
                     <div className="w-16 h-16 mx-auto mb-4 bg-amber-500/15 rounded-full flex items-center justify-center text-amber-400">
                         <Lock size={32} />
                     </div>
@@ -72,7 +72,7 @@ const CashOpeningModal = ({ isOpen, canOpen = true }) => {
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md">
-            <div className="glass-card w-full max-w-md p-8 relative animate-[float_0.3s_ease-out]">
+            <div className="glass-card modal-solido w-full max-w-md p-8 relative animate-[float_0.3s_ease-out]">
                 {/* Back Button */}
                 <button
                     onClick={() => navigate('/dashboard')}

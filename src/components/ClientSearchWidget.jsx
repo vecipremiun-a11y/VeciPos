@@ -246,7 +246,7 @@ const ClientSearchWidget = () => {
             {/* Add Client Modal */}
             {isAddModalOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-                    <div className="glass-card w-full max-w-md p-6 relative animate-in fade-in zoom-in duration-200">
+                    <div className="glass-card modal-solido w-full max-w-md p-6 relative animate-in fade-in zoom-in duration-200">
                         <button
                             onClick={() => setIsAddModalOpen(false)}
                             className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"

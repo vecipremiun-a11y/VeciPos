@@ -155,7 +155,7 @@ const RejectReasonModal = ({ order, onClose, onConfirm }) => {
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
-            <div className="glass-card w-full max-w-md animate-[float_0.3s_ease-out]" onClick={e => e.stopPropagation()}>
+            <div className="glass-card modal-solido w-full max-w-md animate-[float_0.3s_ease-out]" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shrink-0">
                         <Ban size={20} className="text-white" />
@@ -217,7 +217,7 @@ const ProductionDetailModal = ({ preorder, onClose, onStatusChange, onReject, ca
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
-            <div className="glass-card w-full max-w-lg animate-[float_0.3s_ease-out] max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="glass-card modal-solido w-full max-w-lg animate-[float_0.3s_ease-out] max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 {/* Header */}
                 <div className="flex items-center justify-between mb-5">
                     <div className="flex items-center gap-3">

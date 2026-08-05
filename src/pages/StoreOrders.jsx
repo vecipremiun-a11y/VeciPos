@@ -524,6 +524,9 @@ export default function StoreOrders() {
         if (newStatus === 'delivered' && remaining > 0) { setRefundOrder(null); setCodOrder(order); return; }
         if (newStatus === 'delivered' && remaining < 0) { setCodOrder(null); setRefundOrder(order); return; }
         const result = await updatePreorderStatus(orderId, newStatus, reason, getListFilters());
+        // Efectivo que no llegó a ninguna caja: aviso que hay que cerrar, para que
+        // no se descubra recién al cuadrar el turno.
+        if (result.cashWarning) alert('⚠️ ' + result.cashWarning);
         if (!result.success) { alert('Error al actualizar: ' + (result.error || '')); return; }
     };
 
@@ -533,6 +536,7 @@ export default function StoreOrders() {
 
     const handleCodCharge = async (order, amount, method, { terminalId, bankAccountId }) => {
         const pay = await addPreorderPayment(order.id, amount, method, 'final', { terminalId, bankAccountId });
+        if (pay.cashWarning) alert('⚠️ ' + pay.cashWarning);
         if (!pay.success) { alert('Error al registrar el cobro: ' + (pay.error || '')); return false; }
         await updatePreorderStatus(order.id, 'delivered', null, getListFilters());
         return true;

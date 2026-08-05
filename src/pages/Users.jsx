@@ -493,7 +493,7 @@ const Users = () => {
             {/* Modal */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-                    <div className="glass-card w-full max-w-2xl p-6 relative animate-in fade-in zoom-in-95 duration-200 my-8">
+                    <div className="glass-card modal-solido w-full max-w-2xl p-6 relative animate-in fade-in zoom-in-95 duration-200 my-8">
                         <button
                             onClick={() => setIsModalOpen(false)}
                             className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"

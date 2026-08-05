@@ -249,7 +249,7 @@ const CategoryModal = ({ isOpen, onClose, onSave, categoryToEdit }) => {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in duration-200">
-            <div className="glass-card w-full max-w-lg relative animate-[float_0.3s_ease-out] border border-white/10 shadow-2xl shadow-black/50">
+            <div className="glass-card modal-solido w-full max-w-lg relative animate-[float_0.3s_ease-out] border border-white/10 shadow-2xl shadow-black/50">
                 <button
                     onClick={onClose}
                     className="absolute top-4 right-4 p-2 rounded-full hover:bg-white/10 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"

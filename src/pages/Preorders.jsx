@@ -108,8 +108,8 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
     }
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-            <div className="glass-card w-full max-w-lg my-auto animate-[float_0.3s_ease-out] max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+            <div className="glass-card modal-solido w-full max-w-lg my-auto animate-[float_0.3s_ease-out] max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center justify-between mb-6">
                     <h2 className="text-xl font-bold text-[var(--color-text)] flex items-center gap-2">
                         <ClipboardList className="text-[var(--color-primary)]" size={24} />
@@ -382,6 +382,7 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
             terminalId: payMethod === 'Tarjeta' ? payTerminalId : null,
             bankAccountId: payMethod === 'Transferencia' ? payBankAccountId : null,
         });
+        if (result.cashWarning) alert('⚠️ ' + result.cashWarning);
         if (result.success) {
             // Reload details
             const updated = await getPreorderDetails(preorder.id);
@@ -781,6 +782,10 @@ const Preorders = () => {
 
     const handleConfirmPreorder = async (data) => {
         const result = await createPreorder(data);
+        // Efectivo recibido que no llegó a ninguna caja: se avisa con un diálogo
+        // que hay que cerrar, no con un aviso que se desvanece. Si pasa
+        // desapercibido, la falta recién aparece al cuadrar el turno.
+        if (result.cashWarning) alert('⚠️ ' + result.cashWarning);
         if (result.success) {
             setShowConfirmModal(false);
             setActiveTab('list');
@@ -821,11 +826,22 @@ const Preorders = () => {
             setIsLoading(true);
             const details = await getPreorderDetails(preorderId);
             setIsLoading(false);
-            if (details.success) {
-                setSelectedPreorder(null); // cerrar detalle para no superponer modales
-                setDeliveryPreorder(details);
-                setShowDeliveryModal(true);
+            // Antes solo se abría "si salió bien" y, si no, no pasaba NADA: ni el
+            // modal ni un aviso. El cajero volvía a apretar hasta que cargara, que
+            // es justo el "hay que abrir varias veces". Ahora cada forma de fallar
+            // lo dice. Se exige el encargo Y sus productos: sin productos el modal
+            // salía sin la casilla del peso y dejaba entregar con total $0.
+            if (!details?.success || !details.preorder) {
+                alert('No se pudieron cargar los datos del encargo. Revisa la conexión e inténtalo de nuevo.');
+                return;
             }
+            if (!Array.isArray(details.items) || details.items.length === 0) {
+                alert('Este encargo no tiene productos cargados, así que no se puede pesar ni entregar. Revísalo antes de continuar.');
+                return;
+            }
+            setSelectedPreorder(null); // cerrar detalle para no superponer modales
+            setDeliveryPreorder(details);
+            setShowDeliveryModal(true);
             return;
         }
         await updatePreorderStatus(preorderId, newStatus);
@@ -837,6 +853,7 @@ const Preorders = () => {
 
     const handleDeliverSuccess = async (preorderId, weights, method, opts = {}) => {
         const result = await deliverPreorder(preorderId, weights, method, opts);
+        if (result.cashWarning) alert('⚠️ ' + result.cashWarning);
         if (result.success) {
             setShowDeliveryModal(false);
             setDeliveryPreorder(null);

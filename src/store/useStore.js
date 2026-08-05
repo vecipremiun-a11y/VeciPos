@@ -5,6 +5,7 @@ import { localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
 import { syncCatalogIncremental } from '../lib/db/sync';
 import { markActivity } from '../lib/smartPolling';
 import { setTabUserId, getTabUserId, broadcastLogin, broadcastLogout } from '../lib/sessionGuard';
+import { sinDobleEnvio } from '../lib/inFlight';
 import { getModuleByKey } from '../constants/modules';
 import { getPlanLevel } from '../config/mercadopago';
 import bcrypt from 'bcryptjs';
@@ -27,7 +28,14 @@ async function adminApiCall(action, payload = {}) {
 
 // Llama al endpoint de datos del app (sesión de usuario + membresía a la empresa,
 // validadas en el servidor). Ver api/data/actions.js
-async function userApiCall(action, payload = {}) {
+//
+// Va envuelto en `sinDobleEnvio`: si un doble clic manda la misma operación de
+// escritura dos veces, la segunda se suma a la primera en vez de duplicarla.
+function userApiCall(action, payload = {}) {
+    return sinDobleEnvio(action, payload, () => _userApiCall(action, payload));
+}
+
+async function _userApiCall(action, payload = {}) {
     try {
         const r = await fetch('/api/data/actions', {
             method: 'POST',
@@ -160,7 +168,6 @@ export const useStore = create(persist((set, get) => ({
         return carts.find(c => c.id === activeCartId)?.client || null;
     },
     activeRegisters: [],
-    activeRegistersCount: 0,
     cashRegister: null,
     currentUser: null,
     isLoading: false,
@@ -474,7 +481,6 @@ export const useStore = create(persist((set, get) => ({
             // Clear Dashboard/POS specific state
             cashRegister: null, // Critical: Reset cash register
             activeRegisters: [],
-            activeRegistersCount: 0,
             posSelectedClient: null,
             // Reset Multi-Cart System
             carts: [
@@ -3990,21 +3996,6 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    // Solo el número de cajas abiertas. Lo usa el panel "Mi Caja": ahí un cajero no
-    // debe recibir el nombre ni el saldo de sus compañeros, así que no se pide la
-    // lista. El detalle completo (fetchActiveRegisters) queda para el Dashboard.
-    fetchActiveRegistersCount: async () => {
-        try {
-            const r = await userApiCall('registerActiveList', { companyId: get().activeCompanyId, summary: true });
-            // `count` lo agrega el modo resumen; el `.length` cubre un servidor que
-            // todavía no lo conozca (despliegue a medias) sin dejar la vista en cero.
-            const n = r?.success ? (r.count ?? (r.registers || []).length) : 0;
-            set({ activeRegistersCount: n });
-        } catch (e) {
-            console.error("❌ Fetch active registers count error", e);
-        }
-    },
-
     checkRegisterStatus: async (userId) => {
         try {
             const { activeCompanyId } = get();
@@ -5474,11 +5465,35 @@ export const useStore = create(persist((set, get) => ({
     // Solo aplica a efectivo; tarjeta/transferencia no tocan la caja física.
     // Si no hay caja abierta o el monto es 0, no hace nada (no se puede sumar
     // a una caja cerrada).
+    /**
+     * La caja abierta del usuario, volviendo a preguntarle al SERVIDOR si el estado
+     * local viene vacío. El estado se queda atrás cuando la caja se abre en otra
+     * pestaña o después de que se cargó la pantalla actual, y darlo por bueno sin
+     * confirmar hacía que un abono en efectivo no entrara a ninguna caja.
+     */
+    _ensureCashRegister: async () => {
+        const actual = get().cashRegister;
+        if (actual?.id) return actual;
+        const uid = get().currentUser?.id;
+        if (!uid) return null;
+        await get().checkRegisterStatus(uid);
+        return get().cashRegister || null;
+    },
+
     _registerPreorderCash: async ({ amount, reason, direction = 'IN' }) => {
         try {
-            const { cashRegister, activeCompanyId } = get();
+            const { activeCompanyId } = get();
             const amt = Number(amount) || 0;
-            if (!cashRegister?.id || amt <= 0) return { skipped: true };
+            if (amt <= 0) return { skipped: true };
+
+            // Es plata que ya cambió de manos: si no hay caja donde anotarla, se
+            // avisa. Antes se devolvía `skipped` en silencio y el efectivo
+            // desaparecía sin que nadie se enterara hasta el arqueo.
+            const cashRegister = await get()._ensureCashRegister();
+            if (!cashRegister?.id) {
+                console.error('Efectivo de encargo sin caja donde registrarlo:', reason, amt);
+                return { success: false, noRegister: true, error: 'No tienes una caja abierta' };
+            }
 
             const r = await userApiCall('cashMovementAdd', {
                 companyId: activeCompanyId,
@@ -5501,19 +5516,29 @@ export const useStore = create(persist((set, get) => ({
         const { activeCompanyId } = get();
         try {
             // Server-side (Fase 1 · Paso 15): INSERT encargo + items + abono inicial
-            const regId = get().cashRegister?.id || null;
+            // La caja se resuelve ANTES de crear (consultando al servidor si el
+            // estado local viene vacío): así el abono queda enlazado a ella en
+            // preorder_payments.register_id y no huérfano.
+            const reg = await get()._ensureCashRegister();
+            const regId = reg?.id || null;
             const r = await userApiCall('preorderCreate', { companyId: activeCompanyId, preorderData, registerId: regId });
             if (!r?.success) return r || { success: false, error: 'Error creando encargo' };
             const preorderId = r.preorderId;
 
             // Efectivo del abono → movimiento de caja (vía API); tarjeta/transf → refresh stats
+            let cashWarning = null;
             if (preorderData.deposit_amount > 0) {
                 const depositMethod = preorderData.deposit_method || 'Efectivo';
                 if (depositMethod === 'Efectivo') {
-                    await get()._registerPreorderCash({
+                    const cash = await get()._registerPreorderCash({
                         amount: preorderData.deposit_amount,
                         reason: `Abono encargo #${preorderId} - ${preorderData.client_name || 'Cliente'}`.trim()
                     });
+                    // El abono es plata recibida: si no llegó a ninguna caja hay que
+                    // decirlo, o la falta recién aparece al cuadrar el turno.
+                    if (cash?.noRegister) {
+                        cashWarning = 'El abono en efectivo NO entró a ninguna caja porque no tienes una caja abierta. Ábrela y regístralo como ingreso.';
+                    }
                 } else if (regId && (depositMethod === 'Tarjeta' || depositMethod === 'Transferencia')) {
                     get().refreshRegisterStats(regId);
                 }
@@ -5536,7 +5561,7 @@ export const useStore = create(persist((set, get) => ({
                 }).catch(() => { /* fire-and-forget */ });
             }
 
-            return { success: true, preorderId };
+            return { success: true, preorderId, cashWarning };
         } catch (e) {
             console.error('Error creating preorder:', e);
             return { success: false, error: e.message };
@@ -5676,12 +5701,16 @@ export const useStore = create(persist((set, get) => ({
             if (!r?.success) return r || { success: false, error: 'Error' };
 
             // Si se canceló: devolver el efectivo desde la caja abierta del cajero
+            let cashWarning = null;
             if (r.cashPaid > 0) {
-                await get()._registerPreorderCash({
+                const cash = await get()._registerPreorderCash({
                     amount: r.cashPaid,
                     reason: `Devolución abono encargo #${preorderId} - ${r.clientName || ''}`.trim(),
                     direction: 'OUT'
                 });
+                if (cash?.noRegister) {
+                    cashWarning = 'La devolución en efectivo NO quedó registrada en ninguna caja porque no tienes una caja abierta.';
+                }
             }
 
             // refetchFilters: la pestaña Tienda pasa { kind: 'store', ... } para
@@ -5703,7 +5732,7 @@ export const useStore = create(persist((set, get) => ({
                 }).catch(err => console.warn('notify-miniveci failed', err));
             }
 
-            return { success: true };
+            return { success: true, cashWarning };
         } catch (e) {
             console.error('Error updating preorder status:', e);
             return { success: false, error: e.message };
@@ -5712,7 +5741,9 @@ export const useStore = create(persist((set, get) => ({
 
     addPreorderPayment: async (preorderId, amount, method, type = 'final', { terminalId = null, bankAccountId = null, authCode = null } = {}) => {
         try {
-            const regId = get().cashRegister?.id || null;
+            // Igual que al crear: se confirma la caja con el servidor antes de
+            // enlazar el pago, para que no quede sin caja por estado desactualizado.
+            const regId = (await get()._ensureCashRegister())?.id || null;
 
             // Server-side (con guard de empresa): pago + totales + delivered si corresponde
             const r = await userApiCall('preorderPaymentAdd', {
@@ -5723,17 +5754,21 @@ export const useStore = create(persist((set, get) => ({
             if (!r?.success) return r || { success: false, error: 'Error' };
 
             // Si el pago fue en efectivo, sumarlo a la caja abierta.
+            let cashWarning = null;
             if (method === 'Efectivo') {
-                await get()._registerPreorderCash({
+                const cash = await get()._registerPreorderCash({
                     amount,
                     reason: `Pago encargo #${preorderId}`
                 });
+                if (cash?.noRegister) {
+                    cashWarning = 'El pago en efectivo NO entró a ninguna caja porque no tienes una caja abierta. Ábrela y regístralo como ingreso.';
+                }
             } else if (regId && (method === 'Tarjeta' || method === 'Transferencia')) {
                 get().refreshRegisterStats(regId);
             }
 
             await get().fetchPreorders();
-            return { success: true };
+            return { success: true, cashWarning };
         } catch (e) {
             console.error('Error adding preorder payment:', e);
             return { success: false, error: e.message };
@@ -6018,7 +6053,7 @@ export const useStore = create(persist((set, get) => ({
             // Server-side (Fase 1 · Paso 16): snapshot costo/tax, items reales,
             // pago final y marca delivered. El efectivo/caja, agregaciones y
             // notificación web se mantienen aquí (ya van por API).
-            const regId = get().cashRegister?.id || null;
+            const regId = (await get()._ensureCashRegister())?.id || null;
             const r = await userApiCall('preorderDeliver', {
                 companyId: get().activeCompanyId,
                 preorderId, itemWeights, paymentMethod,
@@ -6028,12 +6063,16 @@ export const useStore = create(persist((set, get) => ({
 
             const { realTotal, balanceDue, aggregationItems } = r;
 
+            let cashWarning = null;
             if (balanceDue > 0) {
                 if (paymentMethod === 'Efectivo') {
-                    await get()._registerPreorderCash({
+                    const cash = await get()._registerPreorderCash({
                         amount: balanceDue,
                         reason: `Cobro encargo #${preorderId}`
                     });
+                    if (cash?.noRegister) {
+                        cashWarning = 'El cobro en efectivo NO entró a ninguna caja porque no tienes una caja abierta. Ábrela y regístralo como ingreso.';
+                    }
                 } else if (regId && (paymentMethod === 'Tarjeta' || paymentMethod === 'Transferencia')) {
                     get().refreshRegisterStats(regId);
                 }
@@ -6063,7 +6102,7 @@ export const useStore = create(persist((set, get) => ({
             }
 
             await get().fetchPreorders();
-            return { success: true, realTotal, balanceDue };
+            return { success: true, realTotal, balanceDue, cashWarning };
         } catch (e) {
             console.error('Error delivering preorder:', e);
             return { success: false, error: e.message };

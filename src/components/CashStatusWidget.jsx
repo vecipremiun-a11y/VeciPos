@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useNavigate } from 'react-router-dom';
-import { DollarSign, ArrowUpRight, ArrowDownLeft, Clock, ShoppingCart, LogOut, X, TrendingUp, TrendingDown, CreditCard, ArrowLeftRight, Banknote, AlertTriangle, Users, Landmark } from 'lucide-react';
+import { DollarSign, ArrowUpRight, ArrowDownLeft, Clock, ShoppingCart, LogOut, X, TrendingUp, TrendingDown, CreditCard, ArrowLeftRight, Banknote, AlertTriangle, Landmark, History } from 'lucide-react';
 import { format, isToday, differenceInHours } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '../lib/utils';
@@ -18,9 +18,56 @@ import { createSmartInterval } from '../lib/smartPolling';
 // 18 h cubre un turno largo sin molestar, y detecta la caja olvidada de días.
 const STALE_REGISTER_HOURS = 18;
 
+/**
+ * Sello de tiempo de un movimiento. Si no es de hoy se antepone el día: una caja
+ * que lleva días abierta mezcla fechas, y viendo solo "8:02 PM" sobre "12:33 PM"
+ * la lista parece desordenada cuando en realidad son días distintos.
+ */
+function stampOf(fecha) {
+    const d = new Date(fecha);
+    if (isNaN(d)) return '';
+    return isToday(d) ? format(d, 'h:mm a') : format(d, "d MMM · h:mm a", { locale: es });
+}
+
+/** Aspecto de cada tipo de movimiento: icono, color y nombre por defecto. */
+const TX_LOOK = {
+    APERTURA: { icon: <Clock size={12} />, box: 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30', amount: 'text-green-400', sign: '+', fallback: 'Apertura' },
+    VENTA: { icon: <ShoppingCart size={12} />, box: 'bg-blue-500/20 text-blue-400 border-blue-500/30', amount: 'text-green-400', sign: '+', fallback: 'Venta (Efectivo)' },
+    INGRESO: { icon: <ArrowUpRight size={12} />, box: 'bg-green-500/20 text-green-400 border-green-500/30', amount: 'text-green-400', sign: '+', fallback: 'Ingreso' },
+    RETIRO: { icon: <ArrowDownLeft size={12} />, box: 'bg-orange-500/20 text-orange-400 border-orange-500/30', amount: 'text-orange-400', sign: '-', fallback: 'Retiro' },
+};
+
+/** Una línea del listado. La comparten las pestañas Efectivo y Movimientos. */
+function TxRow({ tx, currency }) {
+    const look = TX_LOOK[tx.type] || TX_LOOK.INGRESO;
+    return (
+        <div className="flex justify-between items-center text-xs lg:text-sm p-1.5 lg:p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
+            <div className="flex items-center gap-2 min-w-0">
+                <div className={cn("w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center border shrink-0", look.box)}>
+                    {look.icon}
+                </div>
+                <div className="flex flex-col min-w-0">
+                    <span className="font-bold text-[var(--color-text)] text-xs lg:text-sm truncate max-w-[110px] lg:max-w-[220px]">
+                        {/* Los cobros de encargo en efectivo llegan como VENTA con
+                            `reason` (el nº de encargo y el cliente). */}
+                        {tx.reason || look.fallback}
+                    </span>
+                    <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{tx.type}</span>
+                </div>
+            </div>
+            <div className="text-right shrink-0 pl-2">
+                <span className={cn("block font-bold text-xs lg:text-sm", look.amount)}>
+                    {look.sign}{formatCurrency(tx.amount, currency)}
+                </span>
+                <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{stampOf(tx.date)}</span>
+            </div>
+        </div>
+    );
+}
+
 const CashStatusWidget = () => {
     // FASE 10 · useShallow para aislar re-renders.
-    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency, getRegisterMethodTransactions, activeRegistersCount, fetchActiveRegistersCount } = useStore(
+    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency, getRegisterMethodTransactions } = useStore(
         useShallow(s => ({
             cashRegister: s.cashRegister,
             registerStats: s.registerStats,
@@ -30,8 +77,6 @@ const CashStatusWidget = () => {
             currentUser: s.currentUser,
             currentCurrency: s.currentCurrency,
             getRegisterMethodTransactions: s.getRegisterMethodTransactions,
-            activeRegistersCount: s.activeRegistersCount,
-            fetchActiveRegistersCount: s.fetchActiveRegistersCount,
         }))
     );
     const { can } = usePermissions();
@@ -48,11 +93,11 @@ const CashStatusWidget = () => {
     const [methodTx, setMethodTx] = useState({ Tarjeta: null, Transferencia: null });
     const [methodTxLoading, setMethodTxLoading] = useState(false);
 
-    // Lazy fetch del detalle de Tarjeta o Transferencia. Solo dispara al
-    // cambiar de pestaña a una no-Efectivo y si todavía no se cargó.
+    // Lazy fetch del detalle de Tarjeta o Transferencia. Efectivo y Movimientos
+    // salen de registerStats, que ya está cargado: no piden nada al servidor.
     useEffect(() => {
         if (!isOpen || !cashRegister?.id) return;
-        if (activeTab === 'Efectivo') return;
+        if (activeTab !== 'Tarjeta' && activeTab !== 'Transferencia') return;
         if (methodTx[activeTab] != null) return; // ya cargado
         let alive = true;
         setMethodTxLoading(true);
@@ -91,13 +136,6 @@ const CashStatusWidget = () => {
         }
     }, [cashRegister, refreshRegisterStats]);
 
-    // Al abrir el desplegable se pide SOLO cuántas cajas hay abiertas, no la lista.
-    // Sirve para explicarle al cajero que su número no es "lo que vendió la tienda"
-    // sin que su navegador reciba el nombre ni el saldo de sus compañeros.
-    useEffect(() => {
-        if (isOpen) fetchActiveRegistersCount();
-    }, [isOpen, fetchActiveRegistersCount]);
-
     // Caja olvidada abierta de días anteriores: avisar al entrar al POS. Una vez por
     // caja y por sesión del navegador, para avisar sin volverse molesto.
     useEffect(() => {
@@ -110,6 +148,29 @@ const CashStatusWidget = () => {
         } catch { /* sin sessionStorage: se avisa igual */ }
         setShowStaleNotice(true);
     }, [cashRegister?.id, cashRegister?.opening_time]);
+
+    // Listados de las pestañas. Cada movimiento aparece en UNA sola, o parece que
+    // se estuviera contando dos veces:
+    //   · Efectivo → las ventas cobradas en efectivo, igual que Tarjeta y
+    //     Transferencia muestran las suyas. Cuadra con el recuadro "Efectivo".
+    //   · Movimientos → la plata que entra y sale sin ser venta: con cuánto se
+    //     abrió, los ingresos y los retiros. Cuadra con sus tres recuadros.
+    // La apertura va dentro de la lista, no clavada arriba: antes quedaba
+    // encabezando por código y es lo más viejo del turno.
+    const { efectivoList, movimientosList } = useMemo(() => {
+        const txs = registerStats?.transactions || [];
+        const apertura = cashRegister ? [{
+            id: '__apertura__', type: 'APERTURA',
+            amount: registerStats?.initial || 0,
+            reason: 'Apertura de caja',
+            date: cashRegister.opening_time,
+        }] : [];
+        const recientesPrimero = (a, b) => new Date(b.date) - new Date(a.date);
+        return {
+            efectivoList: txs.filter(t => t.type === 'VENTA').sort(recientesPrimero),
+            movimientosList: [...txs.filter(t => t.type !== 'VENTA'), ...apertura].sort(recientesPrimero),
+        };
+    }, [registerStats?.transactions, registerStats?.initial, cashRegister]);
 
     // If no register is open AND no success data to show, render nothing
     if (!cashRegister && !successModalData) return null;
@@ -124,8 +185,6 @@ const CashStatusWidget = () => {
         ? `abierta hace ${Math.floor(hoursOpen / 24)} días`
         : `abierta hace ${hoursOpen} h`;
 
-    // El conteo incluye la propia: las "otras" son una menos.
-    const otherRegisters = Math.max(0, (Number(activeRegistersCount) || 0) - 1);
     const ownerName = currentUser?.name || currentUser?.username || '';
 
     const handleInitialCloseClick = () => {
@@ -295,23 +354,6 @@ const CashStatusWidget = () => {
                                         )}
                                     </div>
 
-                                    {/* Aviso de que hay otras cajas abiertas, SIN nombres ni montos:
-                                        "Mi Caja" es la caja de uno y nada más, y un vendedor no tiene
-                                        por qué ver lo que lleva recaudado el resto (el detalle de todas
-                                        vive en los reportes de cierres y movimientos, con permiso).
-                                        La nota se mantiene porque resuelve el reclamo del 22-jul: el
-                                        cajero veía su número quieto mientras el local vendía y creía
-                                        que el sistema no estaba sumando. */}
-                                    {otherRegisters > 0 && (
-                                        <div className="mx-3 mb-3 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)] flex items-start gap-2">
-                                            <Users size={13} className="text-[var(--color-text-muted)] shrink-0 mt-0.5" />
-                                            <p className="text-[11px] lg:text-xs text-[var(--color-text-muted)] leading-relaxed">
-                                                Hay otras cajas abiertas en el local. Sus ventas no suman en la tuya:
-                                                cada cajero rinde la suya.
-                                            </p>
-                                        </div>
-                                    )}
-
                                     {/* Action Buttons */}
                                     <div className="grid grid-cols-2 gap-2 px-3 pb-3">
                                         {can('pos.cash_in') && (
@@ -338,7 +380,8 @@ const CashStatusWidget = () => {
                                             {[
                                                 { key: 'Efectivo', label: 'Efectivo', icon: <Banknote size={12} />, color: 'text-green-400' },
                                                 { key: 'Tarjeta', label: 'Tarjeta', icon: <CreditCard size={12} />, color: 'text-blue-400' },
-                                                { key: 'Transferencia', label: 'Transfer.', icon: <ArrowLeftRight size={12} />, color: 'text-purple-400' }
+                                                { key: 'Transferencia', label: 'Transfer.', icon: <ArrowLeftRight size={12} />, color: 'text-purple-400' },
+                                                { key: 'Movimientos', label: 'Movim.', icon: <History size={12} />, color: 'text-amber-400' }
                                             ].map(t => (
                                                 <button key={t.key}
                                                     onClick={() => setActiveTab(t.key)}
@@ -355,56 +398,38 @@ const CashStatusWidget = () => {
 
                                         <div className="space-y-1.5 max-h-[180px] lg:max-h-[220px] overflow-y-auto pr-1 scrollbar-thin">
                                             {activeTab === 'Efectivo' && (
+                                                efectivoList.length === 0 ? (
+                                                    <div className="text-center text-[var(--color-text-muted)] text-xs py-6">
+                                                        Sin ventas en efectivo este turno
+                                                    </div>
+                                                ) : efectivoList.map(tx => (
+                                                    <TxRow key={`${tx.type}-${tx.id}`} tx={tx} currency={currentCurrency} />
+                                                ))
+                                            )}
+
+                                            {/* Movimientos: la plata que entra y sale sin contar ventas.
+                                                Responde "con cuánto abrí, cuánto metí y cuánto saqué",
+                                                que es lo que se revisa al cuadrar la caja. */}
+                                            {activeTab === 'Movimientos' && (
                                                 <>
-                                                    <div className="flex justify-between items-center text-xs lg:text-sm p-1.5 lg:p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
-                                                        <div className="flex items-center gap-2">
-                                                            <div className="w-6 h-6 lg:w-8 lg:h-8 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500 border border-yellow-500/30">
-                                                                <Clock size={12} />
-                                                            </div>
-                                                            <div className="flex flex-col">
-                                                                <span className="font-bold text-[var(--color-text)] text-xs lg:text-sm">Apertura</span>
-                                                                <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">Apertura de caja</span>
-                                                            </div>
+                                                    <div className="grid grid-cols-3 gap-1.5 mb-2">
+                                                        <div className="rounded-lg bg-yellow-500/5 border border-yellow-500/20 p-1.5 text-center">
+                                                            <p className="text-[9px] text-yellow-300/70 uppercase tracking-wide">Apertura</p>
+                                                            <p className="text-[11px] lg:text-sm font-bold text-yellow-400">{formatCurrency(registerStats.initial, currentCurrency)}</p>
                                                         </div>
-                                                        <div className="text-right">
-                                                            <span className="block font-bold text-green-400 text-xs lg:text-sm">+{formatCurrency(registerStats.initial, currentCurrency)}</span>
-                                                            <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{format(new Date(cashRegister.opening_time), 'h:mm a')}</span>
+                                                        <div className="rounded-lg bg-green-500/5 border border-green-500/20 p-1.5 text-center">
+                                                            <p className="text-[9px] text-green-300/70 uppercase tracking-wide">Ingresos</p>
+                                                            <p className="text-[11px] lg:text-sm font-bold text-green-400">{formatCurrency(registerStats.movements_in || 0, currentCurrency)}</p>
+                                                        </div>
+                                                        <div className="rounded-lg bg-orange-500/5 border border-orange-500/20 p-1.5 text-center">
+                                                            <p className="text-[9px] text-orange-300/70 uppercase tracking-wide">Retiros</p>
+                                                            <p className="text-[11px] lg:text-sm font-bold text-orange-400">{formatCurrency(registerStats.movements_out || 0, currentCurrency)}</p>
                                                         </div>
                                                     </div>
-                                                    {registerStats.transactions.length === 0 ? (
-                                                        <div className="text-center text-[var(--color-text-muted)] text-xs py-4">Sin movimientos aún</div>
-                                                    ) : registerStats.transactions.map((tx) => (
-                                                        <div key={tx.id} className="flex justify-between items-center text-xs lg:text-sm p-1.5 lg:p-2 rounded-lg hover:bg-[var(--glass-bg)] transition-colors">
-                                                            <div className="flex items-center gap-2">
-                                                                <div className={cn(
-                                                                    "w-6 h-6 lg:w-8 lg:h-8 rounded-full flex items-center justify-center border",
-                                                                    tx.type === 'VENTA' ? "bg-blue-500/20 text-blue-400 border-blue-500/30" :
-                                                                        tx.type === 'INGRESO' ? "bg-green-500/20 text-green-400 border-green-500/30" :
-                                                                            "bg-orange-500/20 text-orange-400 border-orange-500/30"
-                                                                )}>
-                                                                    {tx.type === 'VENTA' ? <ShoppingCart size={12} /> :
-                                                                        tx.type === 'INGRESO' ? <ArrowUpRight size={12} /> : <ArrowDownLeft size={12} />}
-                                                                </div>
-                                                                <div className="flex flex-col">
-                                                                    <span className="font-bold text-[var(--color-text)] text-xs lg:text-sm truncate max-w-[100px] lg:max-w-[140px]">
-                                                                        {/* Los cobros de encargo en efectivo llegan como VENTA con
-                                                                            `reason` (el nº de encargo y el cliente). */}
-                                                                        {tx.type === 'VENTA' ? (tx.reason || 'Venta (Efectivo)') :
-                                                                            tx.type === 'INGRESO' ? (tx.reason || 'Ingreso') :
-                                                                                (tx.reason || 'Retiro')}
-                                                                    </span>
-                                                                    <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{tx.type}</span>
-                                                                </div>
-                                                            </div>
-                                                            <div className="text-right">
-                                                                <span className={cn("block font-bold text-xs lg:text-sm",
-                                                                    (tx.type === 'VENTA' || tx.type === 'INGRESO') ? "text-green-400" : "text-orange-400"
-                                                                )}>
-                                                                    {(tx.type === 'VENTA' || tx.type === 'INGRESO') ? '+' : '-'}{formatCurrency(tx.amount, currentCurrency)}
-                                                                </span>
-                                                                <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)]">{format(new Date(tx.date), 'h:mm a')}</span>
-                                                            </div>
-                                                        </div>
+                                                    {movimientosList.length === 0 ? (
+                                                        <div className="text-center text-[var(--color-text-muted)] text-xs py-4">Sin ingresos ni retiros este turno</div>
+                                                    ) : movimientosList.map(tx => (
+                                                        <TxRow key={`${tx.type}-${tx.id}`} tx={tx} currency={currentCurrency} />
                                                     ))}
                                                 </>
                                             )}
@@ -590,8 +615,10 @@ const TransactionModal = ({ isOpen, onClose, type, onConfirm, isProcessing }) =>
                         className={cn(
                             "w-full py-3 rounded-xl font-bold text-black shadow-lg transition-all flex items-center justify-center gap-2",
                             type === 'IN'
-                                ? (isProcessing ? "bg-green-400/50 cursor-wait" : "bg-green-400 hover:bg-green-300 shadow-green-400/20")
-                                : (isProcessing ? "bg-orange-400/50 cursor-wait" : "bg-orange-400 hover:bg-orange-300 shadow-orange-400/20")
+                                // El aviso de "trabajando" va en el botón (la rueda y el
+                                // texto de abajo), no en el cursor del mouse.
+                                ? (isProcessing ? "bg-green-400/50 btn-trabajando" : "bg-green-400 hover:bg-green-300 shadow-green-400/20")
+                                : (isProcessing ? "bg-orange-400/50 btn-trabajando" : "bg-orange-400 hover:bg-orange-300 shadow-orange-400/20")
                         )}
                     >
                         {isProcessing ? (

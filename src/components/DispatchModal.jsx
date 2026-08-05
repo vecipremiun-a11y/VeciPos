@@ -58,7 +58,7 @@ export default function DispatchModal({ isOpen, onClose, onConfirm, client, tota
 
     return (
         <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <form onSubmit={submit} className="glass-card w-full max-w-md p-6 max-h-full overflow-y-auto relative">
+            <form onSubmit={submit} className="glass-card modal-solido w-full max-w-md p-6 max-h-full overflow-y-auto relative">
                 <button type="button" onClick={onClose} className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
                     <X size={20} />
                 </button>

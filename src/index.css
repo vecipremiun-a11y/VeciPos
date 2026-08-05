@@ -158,6 +158,63 @@
     transform: scale(0.95);
   }
 
+  /* Modal opaco.
+     glass-card es vidrio: deja pasar el fondo (5% de blanco sobre lo que haya
+     detrás). En una pantalla llena de fotos de productos, el contenido del modal
+     se mezcla con las imágenes y cuesta leerlo. Los modales donde se ingresan
+     datos o se confirma una operación usan esto en vez del vidrio.
+     Toma el color del tema, así que sirve igual en claro y en oscuro. */
+  .modal-solido {
+    background-color: var(--color-surface) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  }
+
+  /* Botón trabajando (ver AsyncButton).
+     Al hacer clic el botón tiene que DECIR que ya recibió el clic, o uno vuelve a
+     apretar y la operación se manda dos veces. Se apaga el relieve (nada de hover
+     ni de escala: ya no responde) y una franja de luz recorre el botón de lado a
+     lado, en el cian del sistema, mientras dura el trabajo. */
+  .btn-trabajando {
+    position: relative;
+    overflow: hidden;
+    filter: saturate(0.75) brightness(0.9);
+    pointer-events: none;
+    transform: none !important;
+    box-shadow: none !important;
+  }
+
+  .btn-trabajando::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.28) 50%,
+        transparent 100%);
+    animation: barrido-trabajando 1.1s linear infinite;
+  }
+
+  @keyframes barrido-trabajando {
+    from {
+      transform: translateX(-100%);
+    }
+
+    to {
+      transform: translateX(100%);
+    }
+  }
+
+  /* Quien prefiere menos movimiento igual necesita saber que está trabajando:
+     se deja la franja quieta y semitransparente en vez de animarla. */
+  @media (prefers-reduced-motion: reduce) {
+    .btn-trabajando::after {
+      animation: none;
+      background: rgba(255, 255, 255, 0.12);
+    }
+  }
+
   .btn-ghost {
     backdrop-filter: blur(24px);
     background-color: rgba(255, 255, 255, 0.05);

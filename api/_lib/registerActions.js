@@ -73,7 +73,7 @@ function mixedPortions(paymentDetails) {
     } catch { return []; }
 }
 
-async function registerActiveList(turso, companyId, session, body = {}) {
+async function registerActiveList(turso, companyId) {
     const result = await turso.execute({
         sql: `SELECT cr.*, u.name as user_name
               FROM cash_registers cr
@@ -85,14 +85,6 @@ async function registerActiveList(turso, companyId, session, body = {}) {
         args: [companyId],
     });
     const registers = result.rows;
-
-    // Modo resumen: solo CUÁNTAS cajas hay abiertas, sin nombres ni saldos. Lo pide
-    // el panel "Mi Caja", donde un cajero no tiene por qué recibir lo que lleva
-    // recaudado el resto (el detalle vive en el Dashboard y en los reportes de
-    // cierres/movimientos). De paso se salta el cálculo de balances, que es la
-    // parte cara: con 68.193 ventas esta consulta llegó a tardar 32,9 s.
-    if (body?.summary) return { success: true, count: registers.length, registers: [] };
-
     if (registers.length === 0) return { success: true, registers: [] };
 
     const queries = [];
@@ -266,18 +258,42 @@ async function registerStats(turso, companyId, session, { registerId }) {
         .sort((a, b) => new Date(b.date) - new Date(a.date))
         .slice(0, 20);
 
-    let movementsIn = 0, movementsOut = 0;
+    // Un abono o pago de encargo es una VENTA, no una inyección de efectivo al
+    // cajón: el encargo es un producto con su costo y su utilidad, igual que
+    // cualquier otro. Los que se pagan con tarjeta o transferencia ya se suman a
+    // su método (más arriba); el efectivo se anota como movimiento de caja
+    // —porque así es como entra al cajón— y por eso quedaba disfrazado de Ingreso.
+    // Aquí se reclasifica: la MISMA fila pasa de "Ingresos" a "Ventas en efectivo".
+    // El saldo no cambia, porque los dos términos suman igual en el balance.
+    const ES_ENCARGO = /encargo/i;
+
+    let movementsIn = 0, movementsOut = 0, preorderCash = 0;
     const movementTransactions = [];
     movementsRes.rows.forEach(mov => {
         const amount = parseFloat(mov.amount);
+        const reason = mov.reason || '';
+        const date = mov.date || mov.created_at;
+        // El id lleva prefijo: un movimiento reclasificado a VENTA compartiría
+        // tipo con las ventas reales y sus id chocarían en el listado.
         if (mov.type === 'IN') {
-            movementsIn += amount;
-            movementTransactions.push({ type: 'INGRESO', amount, reason: mov.reason, date: mov.date || mov.created_at, id: mov.id });
+            if (ES_ENCARGO.test(reason)) {
+                preorderCash += amount;
+                movementTransactions.push({ type: 'VENTA', amount, reason, date, id: `mov${mov.id}` });
+            } else {
+                movementsIn += amount;
+                movementTransactions.push({ type: 'INGRESO', amount, reason, date, id: `mov${mov.id}` });
+            }
         } else {
+            // Las salidas se dejan como retiro, incluida la "Devolución abono
+            // encargo": es plata saliendo del cajón, y así el arqueo la ve donde
+            // el cajero la espera.
             movementsOut += amount;
-            movementTransactions.push({ type: 'RETIRO', amount, reason: mov.reason, date: mov.date || mov.created_at, id: mov.id });
+            movementTransactions.push({ type: 'RETIRO', amount, reason, date, id: `mov${mov.id}` });
         }
     });
+
+    cashSalesTotal += preorderCash;
+    salesBreakdown.cash += preorderCash;
 
     const allTransactions = [...salesTransactions, ...preorderCashTransactions, ...movementTransactions]
         .sort((a, b) => new Date(b.date) - new Date(a.date));

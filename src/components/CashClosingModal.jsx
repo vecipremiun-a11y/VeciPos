@@ -4,6 +4,7 @@ import { X, Calculator, CheckCircle, AlertTriangle, Save, ArrowRight } from 'luc
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
+import AsyncButton from './AsyncButton';
 
 const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => {
     const { currentCurrency } = useStore();
@@ -29,10 +30,13 @@ const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => 
 
     if (!isOpen) return null;
 
-    const handleConfirm = () => {
+    // async + await: el botón queda bloqueado con la rueda hasta que el cierre
+    // termina. Antes cerraba el modal de inmediato y un doble clic alcanzaba a
+    // mandar el cierre dos veces.
+    const handleConfirm = async () => {
         const finalAmount = parseFloat(actualAmount) || 0;
         // Call parent handler (which calls store action)
-        onConfirm(registerId, finalAmount, observations, difference);
+        await onConfirm(registerId, finalAmount, observations, difference);
         onClose();
     };
 
@@ -149,8 +153,10 @@ const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => 
                     >
                         Cancelar
                     </button>
-                    <button
+                    <AsyncButton
                         onClick={handleConfirm}
+                        icon={<Save size={20} />}
+                        loadingText="Cerrando caja…"
                         className={cn(
                             "flex-1 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg",
                             isMatch
@@ -158,9 +164,8 @@ const CashClosingModal = ({ isOpen, onClose, stats, registerId, onConfirm }) => 
                                 : "bg-red-500 text-white hover:bg-red-600 shadow-[0_0_20px_rgba(239,68,68,0.2)]"
                         )}
                     >
-                        <Save size={20} />
                         Cerrar Caja
-                    </button>
+                    </AsyncButton>
                 </div>
 
             </div>

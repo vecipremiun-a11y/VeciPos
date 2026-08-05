@@ -13,8 +13,14 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
     const [authCode, setAuthCode] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
 
+    // El modal no se desmonta al cerrarse (solo devuelve null), así que su estado
+    // sobrevive de una apertura a la otra. Si los productos del siguiente encargo
+    // no llegaran, se quedaba mostrando los del anterior. Se vacía siempre y se
+    // vuelve a llenar solo con lo que llegó.
     useEffect(() => {
-        if (preorderDetails?.items) {
+        if (!preorderDetails?.items?.length) {
+            setItemWeights([]);
+        } else {
             setItemWeights(preorderDetails.items.map(item => ({
                 id: item.id,
                 product_name: item.product_name,
@@ -54,7 +60,10 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
     }, [itemWeights]);
 
     const balanceDue = Math.max(0, realTotal - depositPaid);
-    const allWeightsFilled = itemWeights.every(iw =>
+    // OJO con el `every` a secas: sobre una lista VACÍA devuelve true, así que un
+    // encargo que llegara sin productos habilitaba "Confirmar Entrega" y lo cerraba
+    // con total $0. Se exige que haya productos.
+    const allWeightsFilled = itemWeights.length > 0 && itemWeights.every(iw =>
         iw.billing_unit !== 'kg' || (parseFloat(iw.real_weight_kg) > 0)
     );
 
@@ -95,13 +104,15 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
         setIsProcessing(false);
     };
 
-    if (!isOpen || !preorderDetails) return null;
+    // Sin `preorder` el encabezado reventaba (leía client_name de null) y la
+    // pantalla quedaba en blanco: mejor no abrir que abrir roto.
+    if (!isOpen || !preorderDetails?.preorder) return null;
 
     const preorder = preorderDetails.preorder;
 
     return createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="glass-card w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-slide-up">
+            <div className="glass-card modal-solido w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-slide-up">
                 {/* Header */}
                 <div className="p-4 border-b border-[var(--glass-border)] flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -161,8 +172,8 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
                                             step={isKg ? '1' : 'any'}
                                             value={iw.real_qty}
                                             onChange={e => handleQtyChange(iw.id, e.target.value)}
-                                            onClick={e => e.target.select()}
-                                            className="w-16 h-7 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-center font-bold text-[var(--color-text)] text-sm"
+                                            onFocus={e => e.target.select()}
+                                            className="w-16 h-7 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-center font-bold text-[var(--color-text)] text-sm cursor-text"
                                         />
                                         <button type="button" onClick={() => adjustQty(iw.id, 1)}
                                             className="w-7 h-7 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)] hover:bg-green-500/20 hover:border-green-500/30 hover:text-green-400 transition-all flex items-center justify-center">
@@ -190,10 +201,14 @@ const DeliveryCheckoutModal = ({ isOpen, onClose, preorderDetails, onDeliver, cu
                                                     step="0.01"
                                                     min="0"
                                                     placeholder="Peso real"
-                                                    className="glass-input w-full !pl-9 !pr-10 text-lg font-bold"
+                                                    className="glass-input w-full !pl-9 !pr-10 text-lg font-bold cursor-text"
                                                     value={iw.real_weight_kg}
                                                     onChange={e => handleWeightChange(iw.id, e.target.value)}
-                                                    onClick={e => e.target.select()}
+                                                    // Al ENTRAR selecciona lo escrito (para reemplazarlo de una),
+                                                    // pero los clics siguientes ya no: con onClick volvía a
+                                                    // seleccionar todo cada vez y era imposible poner el cursor
+                                                    // en un dígito para corregirlo.
+                                                    onFocus={e => e.target.select()}
                                                 />
                                                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-bold pointer-events-none">kg</span>
                                             </div>

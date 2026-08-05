@@ -221,7 +221,7 @@ const SupplierModal = ({ isOpen, onClose, onSave, supplierToEdit }) => {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--glass-bg)] backdrop-blur-sm p-4">
-            <div className="glass-card w-full max-w-md relative animate-[float_0.3s_ease-out]">
+            <div className="glass-card modal-solido w-full max-w-md relative animate-[float_0.3s_ease-out]">
                 <button
                     onClick={onClose}
                     className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
