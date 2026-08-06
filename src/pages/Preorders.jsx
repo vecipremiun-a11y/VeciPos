@@ -4,7 +4,7 @@ import {
     Search, ShoppingCart, Trash2, Plus, Minus, X, Clock, Phone, User,
     MapPin, FileText, Calendar, ChevronDown, Check, DollarSign, Package,
     ClipboardList, Truck, AlertCircle, CreditCard, Banknote, ArrowRight, CakeSlice, Printer,
-    Store as StoreIcon
+    Store as StoreIcon, UserPlus
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
@@ -14,6 +14,8 @@ import ClientSearchWidget from '../components/ClientSearchWidget';
 import DeliveryCheckoutModal from '../components/DeliveryCheckoutModal';
 import QuickPreorderProductModal from '../components/QuickPreorderProductModal';
 import PaymentDetailPicker from '../components/PaymentDetailPicker';
+import AsyncButton from '../components/AsyncButton';
+import NuevoClienteModal from '../components/NuevoClienteModal';
 import { printPreorder } from '../utils/printPreorder';
 import OrderTabBadge from '../components/OrderTabBadge';
 
@@ -33,7 +35,11 @@ const STATUS_NEXT_LABEL = {
 
 // ===== Confirm Preorder Modal =====
 const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, currentCurrency }) => {
-    const { clients } = useStore();
+    const { clients, updateClient } = useStore();
+    // Alta rápida de cliente desde el propio encargo, para no tener que salirse a
+    // la pantalla de Clientes y volver a empezar. Va en su propia ventana: dentro
+    // de este formulario quedaba demasiada información junta.
+    const [showNuevoCliente, setShowNuevoCliente] = useState(false);
     const [dueDate, setDueDate] = useState('today');
     const [customDate, setCustomDate] = useState('');
     const [dueTime, setDueTime] = useState('10:00');
@@ -74,14 +80,31 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
 
     const isPendingTotal = total === null;
 
+    // Guarda en la ficha del cliente el celular que se escribió acá. Si el cliente
+    // no lo tenía, la próxima vez sale solo al buscarlo — que es de lo que se trata
+    // tenerlos registrados. Si ya tenía otro, se respeta el suyo: cambiarlo desde un
+    // encargo, sin querer, sería peor que no guardarlo.
+    const guardarCelularEnFicha = async () => {
+        const tel = clientPhone.trim();
+        if (!selectedClient?.id || !tel || selectedClient.phone) return;
+        try {
+            await updateClient(selectedClient.id, { ...selectedClient, phone: tel });
+        } catch (e) {
+            console.warn('No se pudo guardar el celular en la ficha del cliente:', e);
+        }
+    };
+
     const handleSubmit = async () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
 
+        await guardarCelularEnFicha();
         await onConfirm({
             client_id: selectedClient?.id || null,
             client_name: selectedClient?.name || clientName,
-            client_phone: selectedClient?.phone || clientPhone,
+            // El celular escrito manda sobre el de la ficha: si el cliente no tenía
+            // y se acaba de anotar, el encargo tiene que salir con ese número.
+            client_phone: clientPhone.trim() || selectedClient?.phone || '',
             due_date: getActualDate(),
             due_time: dueTime,
             total_amount: total || 0, // 0 if pending
@@ -140,19 +163,37 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
                                 </button>
                             </div>
                         ) : (
-                            <div className="relative">
+                            <div className="relative flex gap-2">
                                 <input
                                     type="text"
                                     placeholder="Buscar o escribir nombre..."
-                                    className="glass-input w-full text-sm"
+                                    className="glass-input flex-1 text-sm"
                                     value={clientSearch}
                                     onChange={e => { setClientSearch(e.target.value); setClientName(e.target.value); setShowClientDropdown(true); }}
                                     onFocus={() => setShowClientDropdown(true)}
                                 />
+                                {/* Registrar al cliente sin salir del encargo: la próxima
+                                    vez basta con buscarlo por el nombre. Arranca con lo que
+                                    ya se escribió en el buscador. */}
+                                <button
+                                    type="button"
+                                    title="Registrar cliente nuevo"
+                                    onClick={() => { setShowClientDropdown(false); setShowNuevoCliente(true); }}
+                                    className="shrink-0 px-3 rounded-lg bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/40 hover:bg-[var(--color-primary)]/25 transition-all flex items-center gap-1.5 text-sm font-bold"
+                                >
+                                    <UserPlus size={16} /> Nuevo
+                                </button>
                                 {showClientDropdown && filteredClients.length > 0 && (
                                     <div className="absolute top-full left-0 right-0 mt-1 bg-[#18181b] border border-[var(--glass-border)] shadow-xl z-50 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
                                         {filteredClients.map(c => (
-                                            <button key={c.id} onClick={() => { setSelectedClient(c); setClientSearch(c.name); setClientName(c.name); setClientPhone(c.phone || ''); setShowClientDropdown(false); }}
+                                            <button key={c.id} onClick={() => {
+                                                setSelectedClient(c); setClientSearch(c.name); setClientName(c.name);
+                                                setClientPhone(c.phone || '');
+                                                // Si el cliente tiene dirección guardada, se carga sola: para eso
+                                                // se registra. No pisa una que ya se haya escrito a mano.
+                                                if (c.address) setDeliveryAddress(prev => prev.trim() ? prev : c.address);
+                                                setShowClientDropdown(false);
+                                            }}
                                                 className="w-full text-left px-3 py-2 hover:bg-[var(--color-primary)] hover:text-black transition-colors text-sm border-b border-white/5 last:border-0">
                                                 <p className="font-bold text-white">{c.name}</p>
                                                 {c.phone && <p className="text-xs text-gray-400">{c.phone}</p>}
@@ -164,6 +205,17 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
                         )}
                         <input type="text" placeholder="Celular" className="glass-input w-full text-sm"
                             value={clientPhone} onChange={e => setClientPhone(e.target.value)} />
+
+                        {/* Cliente ya elegido pero sin celular en su ficha: se avisa que
+                            el que se anote acá le queda guardado, así la próxima vez sale
+                            solo al buscarlo. */}
+                        {selectedClient && !selectedClient.phone && clientPhone.trim() && (
+                            <p className="text-[11px] text-green-400 flex items-center gap-1">
+                                <Check size={12} className="shrink-0" />
+                                Este celular quedará guardado en la ficha de {selectedClient.name}
+                            </p>
+                        )}
+
                     </div>
 
                     {/* Due Date & Time */}
@@ -336,20 +388,37 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
                             value={notes} onChange={e => setNotes(e.target.value)} />
                     </div>
 
-                    {/* Submit */}
-                    <button onClick={handleSubmit} disabled={isSubmitting || !getActualDate()}
-                        className="w-full btn-primary py-4 rounded-xl text-lg font-bold flex items-center justify-center gap-2 disabled:opacity-50">
-                        {isSubmitting ? (
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black" />
-                        ) : (
-                            <>
-                                <Check size={20} />
-                                Guardar Encargo
-                            </>
-                        )}
-                    </button>
+                    {/* Submit — crea el encargo y cobra el abono, así que va con el
+                        botón que se bloquea solo y avisa que está trabajando. */}
+                    <AsyncButton
+                        onClick={handleSubmit}
+                        busy={isSubmitting}
+                        disabled={!getActualDate()}
+                        icon={<Check size={20} />}
+                        loadingText="Guardando encargo…"
+                        className="w-full btn-primary py-4 rounded-xl text-lg font-bold flex items-center justify-center gap-2"
+                    >
+                        Guardar Encargo
+                    </AsyncButton>
                 </div>
             </div>
+
+            {/* Alta de cliente en su propia ventana, por encima de esta */}
+            <NuevoClienteModal
+                isOpen={showNuevoCliente}
+                onClose={() => setShowNuevoCliente(false)}
+                nombreInicial={clientSearch.trim()}
+                celularInicial={clientPhone.trim()}
+                onCreated={(cliente) => {
+                    // Queda elegido de una: no hay que volver a buscarlo.
+                    setSelectedClient(cliente);
+                    setClientSearch(cliente.name);
+                    setClientName(cliente.name);
+                    setClientPhone(cliente.phone || '');
+                    if (cliente.address) setDeliveryAddress(cliente.address);
+                    setShowNuevoCliente(false);
+                }}
+            />
         </div>
     );
 };
