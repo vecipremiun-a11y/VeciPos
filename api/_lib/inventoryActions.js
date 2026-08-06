@@ -430,13 +430,17 @@ async function reconcileProduct(turso, companyId, session, { productId, mode, no
     return { success: false, error: 'Acción no válida' };
 }
 
+// Ordena por CANTIDAD vendida (lo más vendido arriba), no por plata facturada.
+// OJO: `total_quantity` mezcla unidades — 34,8 kg de pan y 71 huevos van en la
+// misma columna, así que los productos por unidad tienden a quedar arriba.
+// El desempate por facturación mantiene el orden estable entre recargas.
 async function productProfitReport(turso, companyId, session, { startDate, endDate }) {
     const result = await turso.execute({
         sql: `SELECT pdp.day, pdp.product_id, pdp.total_quantity, pdp.total_revenue, pdp.total_cost, pdp.total_profit,
                 p.name as product_name, p.sku as product_sku
               FROM product_daily_profit pdp JOIN products p ON pdp.product_id = p.id
               WHERE pdp.company_id = ? AND pdp.day >= ? AND pdp.day <= ?
-              ORDER BY pdp.day DESC, pdp.total_revenue DESC`,
+              ORDER BY pdp.day DESC, pdp.total_quantity DESC, pdp.total_revenue DESC`,
         args: [companyId, startDate, endDate],
     });
     return { success: true, rows: result.rows };

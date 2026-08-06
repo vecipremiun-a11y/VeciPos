@@ -5308,6 +5308,9 @@ export const useStore = create(persist((set, get) => ({
     // Admin: cambiar el PLAN de una empresa (standard/professional). Define el gating por plan.
     adminSetCompanyPlan: async (companyId, plan) => adminApiCall('setCompanyPlan', { companyId, plan }),
 
+    // Admin: monitoreo de uso por cliente (quién trabaja en el sistema y quién se enfrió).
+    adminFetchClientActivity: async () => adminApiCall('clientActivity', {}),
+
     // Server-side (exige sesión super_admin): borra la empresa y sus datos. Ver api/admin/actions.js
     deleteCompany: async (companyId) => adminApiCall('deleteCompany', { companyId }),
 
@@ -6061,7 +6064,7 @@ export const useStore = create(persist((set, get) => ({
             });
             if (!r?.success) return r || { success: false, error: 'Error entregando encargo' };
 
-            const { realTotal, balanceDue, aggregationItems } = r;
+            const { realTotal, balanceDue } = r;
 
             let cashWarning = null;
             if (balanceDue > 0) {
@@ -6078,18 +6081,13 @@ export const useStore = create(persist((set, get) => ({
                 }
             }
 
-            // Alimentar las mismas tablas agregadas que usa addSale (ya server-side)
-            try {
-                const { activeCompanyId, currentUser, currentCompanyTimezone } = get();
-                await get().updateAllAggregations(
-                    { date: new Date().toISOString(), total: realTotal, items: aggregationItems },
-                    currentUser?.id,
-                    currentUser?.name,
-                    activeCompanyId,
-                    currentCompanyTimezone
-                );
-            } catch (aggErr) {
-                console.warn('Error alimentando agregaciones desde deliverPreorder:', aggErr);
+            // Las agregaciones (reporte de productos) las hace ahora `preorderDeliver`
+            // en la misma petición que la entrega. Hacerlo acá dependía de que la
+            // pestaña siguiera viva y no estaba llegando: los productos vendidos solo
+            // por encargo quedaban en 0 en el reporte. Si se reactiva desde el
+            // navegador, cada encargo se contaría dos veces.
+            if (r.aggregationError) {
+                console.error('El encargo se entregó pero no entró a los reportes:', r.aggregationError);
             }
 
             // Aviso a miniveci si el encargo está sincronizado con la web

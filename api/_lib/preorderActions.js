@@ -4,8 +4,23 @@
 // (antes UPDATE/SELECT iban solo por id).
 
 import { broadcastPreorderEvent } from '../events/preorders-stream.js';
+import { saleAggregations } from './salesActions.js';
 
 const nowIso = () => new Date().toISOString();
+
+// Día y hora en la zona horaria de la empresa, que es como se agrupan los
+// reportes (product_daily_profit.day, hourly_sales_stats.hour). El cliente hace
+// lo mismo con formatInCompanyTime; acá se resuelve sin depender del navegador.
+function companyDayAndHour(iso, tz) {
+    const d = new Date(iso);
+    const day = new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(d);
+    const hour = parseInt(new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz, hour: '2-digit', hourCycle: 'h23',
+    }).format(d), 10) || 0;
+    return { day, hour };
+}
 
 // order_kind separa encargos ('encargo') de pedidos de la tienda web ('store').
 // La columna se agrega perezosamente (una vez por proceso) para que reportes y
@@ -309,11 +324,14 @@ async function preorderPaymentAdd(turso, companyId, session, { preorderId, amoun
 // (snapshot, patrón sale_items). Devuelve aggregationItems para que el cliente
 // alimente updateAllAggregations (ya server-side) y el efectivo va por caja.
 async function preorderDeliver(turso, companyId, session, { preorderId, itemWeights, paymentMethod = 'Efectivo', registerId = null, terminalId = null, bankAccountId = null, authCode = null }) {
-    const own = await ownPreorder(turso, companyId, preorderId, 'id, external_public_code');
+    const own = await ownPreorder(turso, companyId, preorderId, 'id, external_public_code, status');
     if (!own) return { success: false, error: 'Encargo no encontrado' };
+    // Entregar dos veces sumaría la misma mercadería dos veces en los reportes.
+    const yaEntregado = own.status === 'delivered';
 
     const productMetaRes = await turso.execute({
         sql: `SELECT pi.id AS preorder_item_id, pi.product_id,
+                     COALESCE(p.name, pi.product_name) AS name,
                      COALESCE(p.cost, 0) AS cost,
                      COALESCE(p.tax_rate, 0) AS tax_rate
               FROM preorder_items pi
@@ -322,8 +340,9 @@ async function preorderDeliver(turso, companyId, session, { preorderId, itemWeig
         args: [preorderId],
     });
     const productMetaById = new Map(
-        (productMetaRes.rows || []).map(r => [r.preorder_item_id, {
+        (productMetaRes.rows || []).map(r => [Number(r.preorder_item_id), {
             product_id: r.product_id,
+            name: r.name || '',
             cost: Number(r.cost) || 0,
             tax_rate: Number(r.tax_rate) || 0,
         }])
@@ -343,7 +362,9 @@ async function preorderDeliver(turso, companyId, session, { preorderId, itemWeig
         const realItemTotal = isKg ? realWeightKg * pricePerKg : realQty * unitPrice;
         realTotal += realItemTotal;
 
-        const meta = productMetaById.get(iw.id) || { product_id: null, cost: 0, tax_rate: 0 };
+        // El id puede llegar como texto desde el navegador; la clave del Map es
+        // numérica y `get('12')` no encuentra a `12`.
+        const meta = productMetaById.get(Number(iw.id)) || { product_id: null, name: '', cost: 0, tax_rate: 0 };
         itemQueries.push({
             sql: 'UPDATE preorder_items SET real_qty = ?, real_weight_kg = ?, real_total = ?, unit_cost = ? WHERE id = ?',
             args: [realQty, iw.real_weight_kg || null, realItemTotal, meta.cost, iw.id],
@@ -351,6 +372,8 @@ async function preorderDeliver(turso, companyId, session, { preorderId, itemWeig
         if (meta.product_id) {
             aggregationItems.push({
                 id: meta.product_id,
+                // product_movement_stats guarda el nombre al crear la fila.
+                name: meta.name || iw.product_name || '',
                 quantity: isKg ? realWeightKg : realQty,
                 price: isKg ? pricePerKg : unitPrice,
                 cost: meta.cost,
@@ -382,11 +405,50 @@ async function preorderDeliver(turso, companyId, session, { preorderId, itemWeig
         args: [realTotal, realTotal, totalPaid, preorderId, companyId],
     });
 
+    // Un encargo entregado es una venta: alimenta las mismas tablas agregadas que
+    // una venta de mostrador, para que el reporte de productos muestre UN solo
+    // número (1 kg vendido en caja + 10 kg por encargo = 11 kg) y no haya que
+    // sumar dos pantallas a mano.
+    //
+    // Esto vivía en el navegador (deliverPreorder → updateAllAggregations) y no
+    // estaba llegando: productos vendidos SOLO por encargo quedaban en 0 en el
+    // reporte. Acá corre en la misma petición que la entrega, así que no depende
+    // de que la pestaña siga abierta ni de que haya internet un segundo después.
+    let aggregated = false;
+    let aggregationError = null;
+    if (!yaEntregado && aggregationItems.length) {
+        try {
+            const [tzRes, userRes] = await turso.batch([
+                { sql: 'SELECT timezone FROM companies WHERE id = ?', args: [companyId] },
+                { sql: 'SELECT name FROM users WHERE id = ?', args: [session?.uid ?? null] },
+            ], 'read');
+            const tz = tzRes.rows[0]?.timezone || 'America/Santiago';
+            const iso = nowIso();
+            const { day, hour } = companyDayAndHour(iso, tz);
+            await saleAggregations(turso, companyId, session, {
+                saleData: { total: realTotal, date: iso, items: aggregationItems },
+                userId: session?.uid ?? null,
+                userName: userRes.rows[0]?.name || session?.username || '',
+                dateStr: day,
+                hour,
+            });
+            aggregated = true;
+        } catch (e) {
+            // La entrega ya se guardó y la plata ya cambió de manos: no se revierte
+            // por esto. Se registra fuerte y se avisa al cliente, en vez del
+            // console.warn silencioso de antes.
+            aggregationError = e.message;
+            console.error(`❌ preorderDeliver #${preorderId}: el encargo NO entró a los reportes:`, e);
+        }
+    }
+
     return {
         success: true,
         realTotal,
         balanceDue,
         aggregationItems,
+        aggregated,
+        aggregationError,
         externalPublicCode: own.external_public_code || null,
     };
 }
