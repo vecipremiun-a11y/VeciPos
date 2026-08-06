@@ -85,6 +85,8 @@ export default async function handler(req, res) {
                 return res.status(200).json({ success: true, data: await listOwners(turso) });
             case 'adminStats':
                 return res.status(200).json({ success: true, data: await adminStats(turso) });
+            case 'clientActivity':
+                return res.status(200).json(await clientActivity(turso));
             case 'listAllCompanies':
                 return res.status(200).json({ success: true, data: await listAllCompanies(turso) });
             // Soporte (admin, super_admin — Fase 1 · Paso 28)
@@ -458,6 +460,161 @@ async function getPaymentReceipt(turso, paymentId) {
     if (!paymentId) return null;
     const r = await turso.execute({ sql: 'SELECT receipt_url FROM payments WHERE id = ?', args: [paymentId] });
     return r.rows[0]?.receipt_url || null;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Monitoreo de clientes: ¿está usando el sistema, se está enfriando o ya lo dejó?
+//
+// La señal de actividad es `audit_logs` (ventas, productos, compras, inventario…).
+// OJO: es "última actividad", NO "último login" — el sistema no guarda logins, así
+// que un usuario que entra y solo mira no deja rastro. Para avisar de abandono es
+// mejor señal igual: lo que importa es si TRABAJAN en el sistema, no si abren la
+// pantalla.
+// ─────────────────────────────────────────────────────────────────
+
+const DIAS = (n) => new Date(Date.now() - n * 86400000).toISOString();
+
+// Salud del cliente según hace cuánto que no hace nada. Los cortes están pensados
+// para un POS de uso diario: 2 días sin mover nada ya merece una mirada, y a los
+// 10 el cliente prácticamente lo dejó. Ajustar acá si resultan muy sensibles.
+function saludDe(lastAt) {
+    if (!lastAt) return 'nunca';
+    const dias = (Date.now() - new Date(lastAt).getTime()) / 86400000;
+    if (dias <= 2) return 'activo';
+    if (dias <= 10) return 'enfriando';
+    return 'inactivo';
+}
+
+async function clientActivity(turso) {
+    const d7 = DIAS(7);
+    const d30 = DIAS(30);
+
+    const [empresas, dueños, usuarios, actividad, ventasHist, ventasRec, cajas] = await turso.batch([
+        {
+            sql: `SELECT id, name, plan, status, access_until, trial_ends_at, created_at,
+                         email_main, country_code, parent_company_id
+                  FROM companies ORDER BY name`,
+            args: [],
+        },
+        {
+            sql: `SELECT uc.company_id, u.id AS user_id, u.name, u.username
+                  FROM user_companies uc JOIN users u ON u.id = uc.user_id
+                  WHERE uc.role = 'owner'`,
+            args: [],
+        },
+        {
+            sql: `SELECT uc.company_id, uc.role, u.id AS user_id, u.name, u.username
+                  FROM user_companies uc JOIN users u ON u.id = uc.user_id`,
+            args: [],
+        },
+        // Un solo recorrido de audit_logs alimenta el resumen por empresa Y el
+        // detalle por usuario: agrupar dos veces costaba el doble (la tabla no
+        // tiene índices y ya son ~85k filas).
+        {
+            sql: `SELECT company_id, user_id,
+                         MAX(created_at) AS last_at,
+                         COUNT(*) AS total,
+                         SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS e7,
+                         SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS e30
+                  FROM audit_logs GROUP BY company_id, user_id`,
+            args: [d7, d30],
+        },
+        // MAX(date) por empresa aprovecha idx_sales_company_date.
+        { sql: `SELECT company_id, MAX(date) AS last_sale FROM sales GROUP BY company_id`, args: [] },
+        {
+            sql: `SELECT company_id,
+                         SUM(CASE WHEN date >= ? THEN 1 ELSE 0 END) AS n7,
+                         COUNT(*) AS n30,
+                         SUM(total) AS monto30
+                  FROM sales WHERE date >= ? AND status != 'cancelled' GROUP BY company_id`,
+            args: [d7, d30],
+        },
+        { sql: `SELECT company_id, MAX(opening_time) AS last_open FROM cash_registers GROUP BY company_id`, args: [] },
+    ], 'read');
+
+    const porEmpresa = (rows, key = 'company_id') => {
+        const m = new Map();
+        rows.forEach(r => m.set(String(r[key]), r));
+        return m;
+    };
+    const mDueño = porEmpresa(dueños.rows);
+    const mVentaHist = porEmpresa(ventasHist.rows);
+    const mVentaRec = porEmpresa(ventasRec.rows);
+    const mCaja = porEmpresa(cajas.rows);
+
+    // Actividad agrupada por empresa → { total, e7, e30, last, porUsuario: Map }
+    const mAct = new Map();
+    for (const r of actividad.rows) {
+        const cid = String(r.company_id);
+        if (!mAct.has(cid)) mAct.set(cid, { total: 0, e7: 0, e30: 0, last: null, users: new Map() });
+        const acc = mAct.get(cid);
+        acc.total += Number(r.total) || 0;
+        acc.e7 += Number(r.e7) || 0;
+        acc.e30 += Number(r.e30) || 0;
+        if (!acc.last || String(r.last_at) > acc.last) acc.last = String(r.last_at);
+        acc.users.set(String(r.user_id), {
+            lastAt: r.last_at || null,
+            total: Number(r.total) || 0,
+            e7: Number(r.e7) || 0,
+            e30: Number(r.e30) || 0,
+        });
+    }
+
+    // Usuarios por empresa
+    const mUsers = new Map();
+    for (const u of usuarios.rows) {
+        const cid = String(u.company_id);
+        if (!mUsers.has(cid)) mUsers.set(cid, []);
+        mUsers.get(cid).push(u);
+    }
+
+    const companies = empresas.rows.map(c => {
+        const cid = String(c.id);
+        const act = mAct.get(cid) || { total: 0, e7: 0, e30: 0, last: null, users: new Map() };
+        const recientes = mVentaRec.get(cid) || {};
+        const users = (mUsers.get(cid) || []).map(u => {
+            const ua = act.users.get(String(u.user_id)) || { lastAt: null, total: 0, e7: 0, e30: 0 };
+            return {
+                userId: u.user_id,
+                name: u.name || u.username,
+                username: u.username,
+                role: u.role,
+                lastActivity: ua.lastAt,
+                events7d: ua.e7,
+                events30d: ua.e30,
+                eventsTotal: ua.total,
+                salud: saludDe(ua.lastAt),
+            };
+        }).sort((a, b) => String(b.lastActivity || '').localeCompare(String(a.lastActivity || '')));
+
+        return {
+            id: c.id,
+            name: c.name,
+            plan: normalizePlan(c.plan) || c.plan,
+            status: c.status,
+            accessUntil: c.access_until,
+            trialEndsAt: c.trial_ends_at,
+            createdAt: c.created_at,
+            email: c.email_main,
+            countryCode: c.country_code,
+            isBranch: !!c.parent_company_id,
+            owner: mDueño.get(cid)?.name || mDueño.get(cid)?.username || null,
+            users,
+            userCount: users.length,
+            activeUsers7d: users.filter(u => u.events7d > 0).length,
+            lastActivity: act.last,
+            events7d: act.e7,
+            events30d: act.e30,
+            lastSale: mVentaHist.get(cid)?.last_sale || null,
+            sales7d: Number(recientes.n7) || 0,
+            sales30d: Number(recientes.n30) || 0,
+            revenue30d: Number(recientes.monto30) || 0,
+            lastRegisterOpen: mCaja.get(cid)?.last_open || null,
+            salud: saludDe(act.last),
+        };
+    });
+
+    return { success: true, generatedAt: new Date().toISOString(), companies };
 }
 
 async function listClients(turso) {

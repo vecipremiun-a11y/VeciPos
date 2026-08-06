@@ -43,7 +43,7 @@ const AdminCompanies = () => {
     const [filter, setFilter] = useState('all'); // all, active, trial, suspended, pending
     const [selectedCompany, setSelectedCompany] = useState(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
-    const [activateCompany, setActivateCompany] = useState(null); // empresa en el modal de activar/extender
+    const [accessModal, setAccessModal] = useState(null); // { company, status } — modal de acceso: activar o dar prueba
 
     useEffect(() => {
         loadCompanies();
@@ -74,9 +74,9 @@ const AdminCompanies = () => {
     const handleStatusChange = async (company, newStatus) => {
         if (newStatus === effStatus(company)) return;
 
-        // Activar/Extender → abre el modal para elegir hasta cuándo.
-        if (newStatus === 'active') {
-            setActivateCompany(company);
+        // Activar/Extender y Prueba → abren el modal para elegir hasta cuándo.
+        if (newStatus === 'active' || newStatus === 'trial') {
+            setAccessModal({ company, status: newStatus });
             return;
         }
         // Overrides manuales (bloqueo)
@@ -84,13 +84,6 @@ const AdminCompanies = () => {
             const label = newStatus === 'suspended' ? 'Suspendida' : 'Cancelada';
             if (!window.confirm(`¿Cambiar "${company.company_name}" a ${label}? El usuario no podrá iniciar sesión.`)) return;
             const res = await adminSetCompanyAccess(company.company_id, { status: newStatus });
-            if (res.success) loadCompanies(); else alert("Error: " + res.error);
-            return;
-        }
-        // Dar/renovar prueba: 30 días desde hoy
-        if (newStatus === 'trial') {
-            const d = new Date(); d.setDate(d.getDate() + 30);
-            const res = await adminSetCompanyAccess(company.company_id, { status: 'trial', accessUntil: d.toISOString() });
             if (res.success) loadCompanies(); else alert("Error: " + res.error);
             return;
         }
@@ -113,11 +106,15 @@ const AdminCompanies = () => {
         if (res.success) loadCompanies(); else alert("Error: " + res.error);
     };
 
-    // Confirmación del modal: activa la empresa hasta la fecha elegida (sigue en el ciclo automático).
-    const handleConfirmActivate = async (accessUntilISO) => {
-        if (!activateCompany) return;
-        const res = await adminSetCompanyAccess(activateCompany.company_id, { status: 'active', accessUntil: accessUntilISO });
-        setActivateCompany(null);
+    // Confirmación del modal: deja la empresa activa (o en prueba) hasta la fecha
+    // elegida. Sigue en el ciclo automático: al llegar esa fecha se reevalúa.
+    const handleConfirmAccess = async (accessUntilISO) => {
+        if (!accessModal) return;
+        const res = await adminSetCompanyAccess(accessModal.company.company_id, {
+            status: accessModal.status,
+            accessUntil: accessUntilISO,
+        });
+        setAccessModal(null);
         if (res.success) loadCompanies(); else alert("Error: " + res.error);
     };
 
@@ -407,25 +404,30 @@ const AdminCompanies = () => {
                 />
             )}
 
-            {/* Activate / Extend Modal */}
-            {activateCompany && (
-                <ActivateModal
-                    company={activateCompany}
-                    onClose={() => setActivateCompany(null)}
-                    onConfirm={handleConfirmActivate}
+            {/* Modal de acceso: activar/extender o dar prueba */}
+            {accessModal && (
+                <AccessModal
+                    company={accessModal.company}
+                    status={accessModal.status}
+                    onClose={() => setAccessModal(null)}
+                    onConfirm={handleConfirmAccess}
                 />
             )}
         </div>
     );
 };
 
-// Modal para activar/extender una empresa eligiendo hasta cuándo (duraciones rápidas o fecha exacta).
-const ActivateModal = ({ company, onClose, onConfirm }) => {
+// Modal para elegir hasta cuándo tiene acceso una empresa: sirve para activarla
+// (duraciones en meses) y para darle prueba (duraciones en días). Antes la prueba
+// eran 30 días fijos sin preguntar.
+const AccessModal = ({ company, status, onClose, onConfirm }) => {
     const [custom, setCustom] = useState('');
     const [busy, setBusy] = useState(false);
+    const esPrueba = status === 'trial';
 
     const endOfDay = (d) => { d.setHours(23, 59, 59, 0); return d; };
     const addMonths = (n) => { const d = new Date(); d.setMonth(d.getMonth() + n); return endOfDay(d); };
+    const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return endOfDay(d); };
 
     const apply = async (date) => {
         setBusy(true);
@@ -433,29 +435,35 @@ const ActivateModal = ({ company, onClose, onConfirm }) => {
         setBusy(false);
     };
 
-    const quick = [
-        { label: '1 mes', months: 1 },
-        { label: '3 meses', months: 3 },
-        { label: '6 meses', months: 6 },
-        { label: '1 año', months: 12 },
-    ];
+    const quick = esPrueba
+        ? [7, 15, 30, 60].map(d => ({ label: `${d} días`, get: () => addDays(d) }))
+        : [
+            { label: '1 mes', get: () => addMonths(1) },
+            { label: '3 meses', get: () => addMonths(3) },
+            { label: '6 meses', get: () => addMonths(6) },
+            { label: '1 año', get: () => addMonths(12) },
+        ];
 
     return createPortal(
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
             <div className="bg-[#18181b] border border-white/10 rounded-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-start justify-between mb-1">
-                    <h3 className="text-lg font-bold text-white">Activar / Extender</h3>
+                    <h3 className="text-lg font-bold text-white">{esPrueba ? 'Dar prueba' : 'Activar / Extender'}</h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-white p-1"><X size={18} /></button>
                 </div>
-                <p className="text-sm text-gray-400 mb-5">{company.company_name} — elige hasta cuándo tendrá acceso. Al llegar esa fecha, vuelve a evaluarse automáticamente.</p>
+                <p className="text-sm text-gray-400 mb-5">
+                    {company.company_name} — {esPrueba
+                        ? 'elige cuánto dura la prueba. Al terminar, la empresa queda sin acceso hasta que pague.'
+                        : 'elige hasta cuándo tendrá acceso. Al llegar esa fecha, vuelve a evaluarse automáticamente.'}
+                </p>
 
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Duración rápida</p>
                 <div className="grid grid-cols-2 gap-2 mb-5">
                     {quick.map(q => (
                         <button
-                            key={q.months}
+                            key={q.label}
                             disabled={busy}
-                            onClick={() => apply(addMonths(q.months))}
+                            onClick={() => apply(q.get())}
                             className="py-2.5 rounded-lg border border-white/10 text-white text-sm font-bold hover:border-[var(--color-primary)]/60 hover:bg-[var(--color-primary)]/10 disabled:opacity-60"
                         >
                             {q.label}

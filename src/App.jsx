@@ -68,6 +68,7 @@ const OfflineSync = lazy(() => import('./pages/OfflineSync'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const AdminCompanies = lazy(() => import('./pages/admin/AdminCompanies'));
 const AdminClients = lazy(() => import('./pages/admin/AdminClients'));
+const AdminActivity = lazy(() => import('./pages/admin/AdminActivity'));
 const AdminPayments = lazy(() => import('./pages/admin/AdminPayments'));
 const SupportInbox = lazy(() => import('./pages/admin/SupportInbox'));
 const ProfitReport = lazy(() => import('./pages/admin/ProfitReport'));
@@ -408,6 +409,7 @@ function App() {
           <Route index element={<AdminDashboard />} />
           <Route path="companies" element={<AdminCompanies />} />
           <Route path="clients" element={<AdminClients />} />
+          <Route path="actividad" element={<AdminActivity />} />
           <Route path="payments" element={<AdminPayments />} />
           <Route path="soporte" element={<SupportInbox />} />
         </Route>
