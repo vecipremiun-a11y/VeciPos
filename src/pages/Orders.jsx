@@ -4,6 +4,21 @@ import { Search, Package, Truck, Box, AlertTriangle, TrendingDown, DollarSign, B
 import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
 import { dataApiCall, reportCall } from '../lib/dataApi';
+import { toast } from '../lib/toast';
+
+// Productos que se compran por peso o volumen. En estos la "cantidad" admite
+// decimales (10,417 kg es una compra normal) y el total se puede escribir para
+// deducirla: al proveedor se le compra "a $2.000 el kilo" y se paga un total.
+// La unidad sale de la ficha del producto (products.unit).
+const esFraccionable = (unit) => /^(kg|kgs|kilo|kilos|gr|grs|gramo|gramos|g|lt|lts|litro|litros|l|ml)$/i
+    .test(String(unit || '').trim());
+
+// "Costo por kg" / "Costo por unidad" — mostrar la unidad evita el malentendido
+// de leer "Costo Unitario" en un producto que se vende por kilo.
+const etiquetaUnidad = (unit) => {
+    const u = String(unit || 'Und').trim();
+    return /^und$/i.test(u) ? 'unidad' : u.toLowerCase();
+};
 
 const Orders = () => {
     const {
@@ -34,14 +49,124 @@ const Orders = () => {
     const [orderCostGross, setOrderCostGross] = useState('');
     const [orderQuantity, setOrderQuantity] = useState('');
 
+    // Total de la LÍNEA que se está agregando (ojo: `orderTotal`, más abajo, es el
+    // total de toda la factura). Dejó de ser un valor calculado y pasó a ser un
+    // campo más: en productos por peso se escribe lo que se pagó y sale la cantidad.
+    const [lineaTotal, setLineaTotal] = useState('');
+
     // Order cart states
     const [orderItems, setOrderItems] = useState([]);
     const [showOrderModal, setShowOrderModal] = useState(false);
     const [orderItemQuantityDrafts, setOrderItemQuantityDrafts] = useState({});
 
+    // ── Formulario de pedido: costo × cantidad = total ──────────────────────
+    //
+    // Los tres valores están ligados, así que con dos cualesquiera sale el
+    // tercero. La regla es: SE RECALCULA EL QUE HACE MÁS RATO QUE NO TOCÁS.
+    // Los dos campos que editaste último mandan.
+    //
+    // Con eso funcionan las dos formas reales de comprar en la feria:
+    //   · "va a $2.000 el kilo" + "pagué $25.000"  → salen los kilos
+    //   · "me pesaron 12 kg"   + "pagué $25.000"   → sale el costo por kilo
+    //
+    // La versión anterior dejaba el costo siempre fijo, así que el segundo caso
+    // era imposible: se peleaban cantidad y total sin que el costo se moviera.
+    const unidadProducto = selectedProduct?.unit || 'Und';
+    const productoPorPeso = esFraccionable(unidadProducto);
+    const unidadTexto = etiquetaUnidad(unidadProducto);
+
+    const CAMPOS = ['costo', 'cantidad', 'total'];
+    // Los dos últimos campos editados, el más reciente primero. El que falta es
+    // el calculado. Arranca en costo+cantidad: el comportamiento de toda la vida.
+    const [camposFijados, setCamposFijados] = useState(['costo', 'cantidad']);
+    const campoCalculado = CAMPOS.find(c => !camposFijados.includes(c));
+
+    const dosDecimales = (n) => Math.round(n * 100) / 100;
+    // El peso admite gramos; las unidades no se parten en pedazos.
+    const redondearCantidad = (n) => productoPorPeso ? Math.round(n * 1000) / 1000 : Math.round(n);
+
+    // Recalcula el campo que quedó libre a partir de los otros dos.
+    const recalcular = (campoEditado, { bruto, cantidad, total }) => {
+        const fijados = [campoEditado, ...camposFijados.filter(c => c !== campoEditado)].slice(0, 2);
+        setCamposFijados(fijados);
+        const aCalcular = CAMPOS.find(c => !fijados.includes(c));
+        const iva = 1 + (selectedProduct?.tax_rate || 0) / 100;
+        const b = parseFloat(bruto), q = parseFloat(cantidad), t = parseFloat(total);
+
+        if (aCalcular === 'total') {
+            setLineaTotal(!isNaN(b) && !isNaN(q) ? String(dosDecimales(b * q)) : '');
+            return;
+        }
+        if (aCalcular === 'cantidad') {
+            if (isNaN(t) || isNaN(b) || b <= 0) { setOrderQuantity(''); return; }
+            const cant = redondearCantidad(t / b);
+            setOrderQuantity(String(cant));
+            // En productos por unidad el redondeo cambia la cuenta (no se compran
+            // 20,8 botellas): se reajusta el total para que los tres números sigan
+            // cuadrando en vez de quedar mintiendo.
+            if (!productoPorPeso) setLineaTotal(String(dosDecimales(b * cant)));
+            return;
+        }
+        // aCalcular === 'costo'
+        if (isNaN(t) || isNaN(q) || q <= 0) { setOrderCostGross(''); setOrderCost(''); return; }
+        const brutoCalc = dosDecimales(t / q);
+        setOrderCostGross(String(brutoCalc));
+        setOrderCost(String(dosDecimales(brutoCalc / iva)));
+    };
+
+    const cambiarCostoNeto = (val) => {
+        setOrderCost(val);
+        const neto = parseFloat(val);
+        const iva = 1 + (selectedProduct?.tax_rate || 0) / 100;
+        const bruto = isNaN(neto) ? '' : String(dosDecimales(neto * iva));
+        setOrderCostGross(bruto);
+        recalcular('costo', { bruto, cantidad: orderQuantity, total: lineaTotal });
+    };
+
+    const cambiarCostoBruto = (val) => {
+        setOrderCostGross(val);
+        const b = parseFloat(val);
+        const iva = 1 + (selectedProduct?.tax_rate || 0) / 100;
+        setOrderCost(isNaN(b) ? '' : String(dosDecimales(b / iva)));
+        recalcular('costo', { bruto: val, cantidad: orderQuantity, total: lineaTotal });
+    };
+
+    const cambiarCantidad = (val) => {
+        setOrderQuantity(val);
+        recalcular('cantidad', { bruto: orderCostGross, cantidad: val, total: lineaTotal });
+    };
+
+    const cambiarTotal = (val) => {
+        setLineaTotal(val);
+        recalcular('total', { bruto: orderCostGross, cantidad: orderQuantity, total: val });
+    };
+
+    // Cartelito "se calcula" sobre el campo que maneja el sistema, para que se vea
+    // de un vistazo cuál se va a mover solo.
+    const ChipCalculado = ({ campo }) => campoCalculado === campo ? (
+        <span className="ml-1 px-1 py-px rounded bg-[var(--color-primary)]/20 text-[var(--color-primary)] text-[9px] font-bold align-middle">
+            se calcula
+        </span>
+    ) : null;
+
     // Add product to order cart
+    //
+    // Antes esto no avisaba NADA: ni al agregar (el cajero no sabía si había
+    // quedado en la factura y volvía a apretar) ni al fallar (si faltaba la
+    // cantidad o el costo, el botón simplemente no hacía nada y parecía roto).
     const addToOrder = () => {
-        if (!selectedProduct || !orderCost || !orderQuantity || Number(orderQuantity) <= 0) return false;
+        if (!selectedProduct) {
+            toast('Elige un producto de la lista antes de agregarlo.', 'error');
+            return false;
+        }
+        if (!orderCost || Number(orderCost) <= 0) {
+            toast('Falta el costo unitario del producto.', 'error');
+            return false;
+        }
+        if (!orderQuantity || Number(orderQuantity) <= 0) {
+            toast('Indica cuántas unidades vas a pedir.', 'error');
+            return false;
+        }
 
         const costWithTax = orderCostGross ? Number(orderCostGross) : Number(orderCost) * (1 + (selectedProduct.tax_rate || 0) / 100);
         const newItem = {
@@ -60,20 +185,29 @@ const Orders = () => {
         if (existingIndex >= 0) {
             // Update existing
             const updated = [...orderItems];
+            const totalQty = updated[existingIndex].quantity + newItem.quantity;
             updated[existingIndex] = {
                 ...updated[existingIndex],
                 cost: newItem.cost,
                 costWithTax: newItem.costWithTax,
-                quantity: updated[existingIndex].quantity + newItem.quantity,
-                total: newItem.costWithTax * (updated[existingIndex].quantity + newItem.quantity)
+                quantity: totalQty,
+                total: newItem.costWithTax * totalQty
             };
             setOrderItems(updated);
+            // Se dice el total acumulado, no lo que se sumó: el producto ya estaba
+            // en la factura y lo importante es con cuánto quedó.
+            toast(`${newItem.name}: ahora ${totalQty} ${unidadTexto} en el pedido`, 'success');
         } else {
             setOrderItems([...orderItems, newItem]);
+            toast(`${newItem.name} agregado al pedido (${newItem.quantity} ${unidadTexto})`, 'success');
         }
 
-        // Reset form
+        // Reset form: se vuelve al modo de siempre (costo y cantidad mandan,
+        // el total se calcula) para que el próximo producto arranque limpio.
         setOrderQuantity('1');
+        setCamposFijados(['costo', 'cantidad']);
+        const b = parseFloat(orderCostGross);
+        setLineaTotal(isNaN(b) ? '' : String(dosDecimales(b)));
         return true;
     };
 
@@ -268,6 +402,11 @@ const Orders = () => {
         }
 
         setOrderQuantity('1');
+        // El total arranca coherente con costo × 1, para que el campo no salga
+        // vacío cuando todavía no se tocó nada.
+        const taxRate = product.tax_rate || 0;
+        setLineaTotal(cost ? String(Math.round(Number(cost) * (1 + taxRate / 100) * 100) / 100) : '');
+        setCamposFijados(['costo', 'cantidad']);
         loadProductStats(product);
     };
 
@@ -576,7 +715,7 @@ const Orders = () => {
                                         )}>
                                             {selectedProduct.stock || 0}
                                         </div>
-                                        <div className="text-xs text-[var(--color-text-muted)]">unidades en stock</div>
+                                        <div className="text-xs text-[var(--color-text-muted)]">{unidadTexto === 'unidad' ? 'unidades' : unidadTexto} en stock</div>
                                     </div>
                                 </div>
                             </div>
@@ -838,29 +977,15 @@ const Orders = () => {
                                     <div className="grid grid-cols-4 gap-4 mb-4">
                                         {/* Costo */}
                                         <div>
-                                            <label className="block text-xs text-[var(--color-text-muted)] mb-1">Costo Unitario</label>
+                                            <label className="block text-xs text-[var(--color-text-muted)] mb-1">
+                                                Costo por {unidadTexto}<ChipCalculado campo="costo" />
+                                            </label>
                                             <div className="relative">
                                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">$</span>
                                                 <input
                                                     type="number"
                                                     value={orderCost}
-                                                    onChange={(e) => {
-                                                        const val = e.target.value;
-                                                        setOrderCost(val);
-
-                                                        // Update Gross based on Net
-                                                        if (val === '') {
-                                                            setOrderCostGross('');
-                                                            return;
-                                                        }
-                                                        const numVal = parseFloat(val);
-                                                        if (!isNaN(numVal)) {
-                                                            const taxRate = selectedProduct.tax_rate || 0;
-                                                            const newGross = numVal * (1 + taxRate / 100);
-                                                            // Keep full precision or 1 decimal for better UX
-                                                            setOrderCostGross(Number.isInteger(newGross) ? newGross.toString() : newGross.toFixed(1));
-                                                        }
-                                                    }}
+                                                    onChange={(e) => cambiarCostoNeto(e.target.value)}
                                                     className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-3 py-2 pl-7 text-[var(--color-text)] text-sm focus:outline-none focus:border-[var(--color-primary)] transition-colors"
                                                     placeholder="0"
                                                 />
@@ -877,22 +1002,7 @@ const Orders = () => {
                                                 className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-3 py-2 text-[var(--color-text)] text-sm focus:outline-none focus:border-[var(--color-primary)] transition-colors"
                                                 placeholder="0"
                                                 value={orderCostGross}
-                                                onChange={(e) => {
-                                                    const val = e.target.value;
-                                                    setOrderCostGross(val);
-
-                                                    // Update Net based on Gross
-                                                    if (val === '') {
-                                                        setOrderCost('');
-                                                        return;
-                                                    }
-                                                    const numVal = parseFloat(val);
-                                                    if (!isNaN(numVal)) {
-                                                        const taxRate = selectedProduct.tax_rate || 0;
-                                                        const newNet = numVal / (1 + taxRate / 100);
-                                                        setOrderCost(newNet.toFixed(1));
-                                                    }
-                                                }}
+                                                onChange={(e) => cambiarCostoBruto(e.target.value)}
                                             />
                                         </div>
 
@@ -916,29 +1026,45 @@ const Orders = () => {
                                             </div>
                                         </div>
 
-                                        {/* Cantidad */}
+                                        {/* Cantidad — con decimales si el producto va por peso.
+                                            El min="1" de antes impedía pedir medio kilo. */}
                                         <div>
-                                            <label className="block text-xs text-[var(--color-text-muted)] mb-1">Cantidad</label>
+                                            <label className="block text-xs text-[var(--color-text-muted)] mb-1">
+                                                Cantidad ({unidadTexto})<ChipCalculado campo="cantidad" />
+                                            </label>
                                             <input
                                                 type="number"
                                                 value={orderQuantity}
-                                                onChange={(e) => setOrderQuantity(e.target.value)}
-                                                min="1"
+                                                onChange={(e) => cambiarCantidad(e.target.value)}
+                                                min={productoPorPeso ? '0' : '1'}
+                                                step={productoPorPeso ? '0.001' : '1'}
                                                 className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-3 py-2 text-[var(--color-text)] text-sm focus:outline-none focus:border-[var(--color-primary)] transition-colors"
                                                 placeholder="1"
                                             />
                                         </div>
                                     </div>
 
-                                    {/* Total */}
-                                    <div className="flex justify-between items-center p-3 bg-[var(--glass-bg)] rounded-lg mb-4">
-                                        <span className="text-sm text-[var(--color-text-muted)]">Total del Pedido:</span>
-                                        <span className="text-xl font-bold text-[var(--color-primary)]">
-                                            {formatCurrency(
-                                                Number(orderCostGross || 0) * Number(orderQuantity || 0),
-                                                currentCurrency
-                                            )}
+                                    {/* Total editable: se escribe lo que se pagó. Junto con el
+                                        campo que hayas tocado antes, el tercero se calcula solo. */}
+                                    <div className="flex justify-between items-center gap-3 p-3 bg-[var(--glass-bg)] rounded-lg mb-4">
+                                        <span className="text-sm text-[var(--color-text-muted)]">
+                                            Total del Pedido:<ChipCalculado campo="total" />
+                                            <span className="block text-[10px] text-[var(--color-text-muted)]">
+                                                editá dos de los tres · el otro se calcula
+                                            </span>
                                         </span>
+                                        <div className="relative w-44">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-primary)] font-bold">$</span>
+                                            <input
+                                                type="number"
+                                                value={lineaTotal}
+                                                onChange={(e) => cambiarTotal(e.target.value)}
+                                                min="0"
+                                                step="1"
+                                                className="w-full bg-[var(--color-primary)]/10 border border-[var(--color-primary)] rounded-lg px-3 py-2 pl-7 text-right text-xl font-bold text-[var(--color-primary)] focus:outline-none"
+                                                placeholder="0"
+                                            />
+                                        </div>
                                     </div>
 
                                     {/* Order Button */}
@@ -987,7 +1113,7 @@ const Orders = () => {
                             )}>
                                 {selectedProduct.stock || 0}
                             </div>
-                            <span className="text-[10px] text-[var(--color-text-muted)]">unidades en stock</span>
+                            <span className="text-[10px] text-[var(--color-text-muted)]">{unidadTexto === 'unidad' ? 'unidades' : unidadTexto} en stock</span>
                         </div>
                     </div>
 
@@ -1114,25 +1240,18 @@ const Orders = () => {
                             </div>
 
                             <div className="grid grid-cols-3 gap-2 mb-3">
-                                {/* Costo Unitario */}
+                                {/* Costo por unidad/kg */}
                                 <div>
-                                    <label className="text-[10px] text-[var(--color-text-muted)] block mb-1">Costo Unit</label>
+                                    <label className="text-[10px] text-[var(--color-text-muted)] block mb-1 truncate">
+                                        Costo x {unidadTexto}<ChipCalculado campo="costo" />
+                                    </label>
                                     <div className="relative">
                                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] text-xs">$</span>
                                         <input
                                             type="number"
+                                            inputMode="decimal"
                                             value={orderCost}
-                                            onChange={(e) => {
-                                                const val = e.target.value;
-                                                setOrderCost(val);
-                                                if (val === '') { setOrderCostGross(''); return; }
-                                                const numVal = parseFloat(val);
-                                                if (!isNaN(numVal)) {
-                                                    const taxRate = selectedProduct.tax_rate || 0;
-                                                    const newGross = numVal * (1 + taxRate / 100);
-                                                    setOrderCostGross(Number.isInteger(newGross) ? newGross.toString() : newGross.toFixed(1));
-                                                }
-                                            }}
+                                            onChange={(e) => cambiarCostoNeto(e.target.value)}
                                             className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-1.5 pl-5 pr-1 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
                                             placeholder="0"
                                         />
@@ -1144,18 +1263,9 @@ const Orders = () => {
                                     <label className="text-[10px] text-[var(--color-text-muted)] block mb-1">Costo+IVA</label>
                                     <input
                                         type="number"
+                                        inputMode="decimal"
                                         value={orderCostGross}
-                                        onChange={(e) => {
-                                            const val = e.target.value;
-                                            setOrderCostGross(val);
-                                            if (val === '') { setOrderCost(''); return; }
-                                            const numVal = parseFloat(val);
-                                            if (!isNaN(numVal)) {
-                                                const taxRate = selectedProduct.tax_rate || 0;
-                                                const newNet = numVal / (1 + taxRate / 100);
-                                                setOrderCost(newNet.toFixed(1));
-                                            }
-                                        }}
+                                        onChange={(e) => cambiarCostoBruto(e.target.value)}
                                         className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-1.5 px-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
                                         placeholder="0"
                                     />
@@ -1176,24 +1286,43 @@ const Orders = () => {
                                 </div>
                             </div>
 
-                            {/* Quantity Row */}
+                            {/* Cantidad y Total: los dos editables. Se completan dos de los
+                                tres campos y el que falta lo pone el sistema. */}
                             <div className="mb-3">
-                                <label className="text-[10px] text-[var(--color-text-muted)] block mb-1">Cantidad</label>
+                                <label className="text-[10px] text-[var(--color-text-muted)] block mb-1">
+                                    Cantidad ({unidadTexto})<ChipCalculado campo="cantidad" />
+                                </label>
                                 <input
                                     type="number"
+                                    inputMode="decimal"
                                     value={orderQuantity}
-                                    onChange={(e) => setOrderQuantity(e.target.value)}
-                                    min="1"
+                                    onChange={(e) => cambiarCantidad(e.target.value)}
+                                    min={productoPorPeso ? '0' : '1'}
+                                    step={productoPorPeso ? '0.001' : '1'}
                                     className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-2 px-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
                                     placeholder="1"
                                 />
                             </div>
 
-                            <div className="flex items-center justify-between gap-3 bg-[var(--glass-bg)] p-2 rounded-lg mb-3">
-                                <div className="text-[var(--color-text-muted)] text-xs">Total del Pedido:</div>
-                                <div className="text-lg font-bold text-[var(--color-primary)]">
-                                    {formatCurrency(Number(orderCostGross || 0) * (Number(orderQuantity) || 1), currentCurrency)}
+                            <div className="mb-3">
+                                <label className="text-[10px] text-[var(--color-primary)] block mb-1 font-bold">
+                                    Total pagado<ChipCalculado campo="total" />
+                                </label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-primary)] font-bold">$</span>
+                                    <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={lineaTotal}
+                                        onChange={(e) => cambiarTotal(e.target.value)}
+                                        min="0"
+                                        className="w-full bg-[var(--color-primary)]/10 border border-[var(--color-primary)] rounded-lg py-2.5 pl-7 pr-3 text-right text-lg font-bold text-[var(--color-primary)] focus:outline-none"
+                                        placeholder="0"
+                                    />
                                 </div>
+                                <p className="text-[9px] text-[var(--color-text-muted)] mt-1">
+                                    Completá dos de los tres y el otro se calcula solo.
+                                </p>
                             </div>
 
                             <button
