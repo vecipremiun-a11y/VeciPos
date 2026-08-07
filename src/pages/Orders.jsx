@@ -30,7 +30,8 @@ const Orders = () => {
         updateProduct,
         deleteProduct,
         createSupplierOrder,
-        currentCurrency
+        currentCurrency,
+        taxRates
     } = useStore();
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -54,6 +55,15 @@ const Orders = () => {
     // campo más: en productos por peso se escribe lo que se pagó y sale la cantidad.
     const [lineaTotal, setLineaTotal] = useState('');
 
+    // Impuesto de ESTA compra. Arranca en el que tiene la ficha del producto, pero
+    // se puede cambiar: el proveedor puede facturar con otro (o el producto quedó
+    // cargado como exento y en realidad lleva IVA). Antes se tomaba fijo de la
+    // ficha, así que si el producto tenía 0% "Costo + IVA" repetía el costo y no
+    // había manera de corregirlo desde acá.
+    const [orderTaxRate, setOrderTaxRate] = useState(0);
+    // Margen para el precio sugerido. Estaba clavado en 30%.
+    const [orderMargen, setOrderMargen] = useState('30');
+
     // Order cart states
     const [orderItems, setOrderItems] = useState([]);
     const [showOrderModal, setShowOrderModal] = useState(false);
@@ -61,93 +71,135 @@ const Orders = () => {
 
     // ── Formulario de pedido: costo × cantidad = total ──────────────────────
     //
-    // Los tres valores están ligados, así que con dos cualesquiera sale el
-    // tercero. La regla es: SE RECALCULA EL QUE HACE MÁS RATO QUE NO TOCÁS.
-    // Los dos campos que editaste último mandan.
+    // Dos modos explícitos, uno por cada forma real de comprar. Antes esto se
+    // resolvía con una regla implícita ("se recalcula el que hace más rato que no
+    // tocás") que obligaba a adivinar cuál campo se iba a mover.
     //
-    // Con eso funcionan las dos formas reales de comprar en la feria:
-    //   · "va a $2.000 el kilo" + "pagué $25.000"  → salen los kilos
-    //   · "me pesaron 12 kg"   + "pagué $25.000"   → sale el costo por kilo
+    //   POR UNIDAD → escribís costo y cantidad; sale el TOTAL (no editable).
+    //                "el limón va a $2.000 el kilo y llevo 12" → $24.000
+    //   POR TOTAL  → escribís total y cantidad; sale el COSTO (no editable).
+    //                "pagué $25.000 y me pesaron 12 kg" → $2.083 el kilo
     //
-    // La versión anterior dejaba el costo siempre fijo, así que el segundo caso
-    // era imposible: se peleaban cantidad y total sin que el costo se moviera.
+    // El impuesto y el margen se aplican igual en los dos: siempre se muestran
+    // costo+IVA y el precio de venta sugerido.
+    const MODO_UNIDAD = 'unidad';
+    const MODO_TOTAL = 'total';
+    const [modoPedido, setModoPedido] = useState(MODO_UNIDAD);
+    const porTotal = modoPedido === MODO_TOTAL;
+
     const unidadProducto = selectedProduct?.unit || 'Und';
     const productoPorPeso = esFraccionable(unidadProducto);
     const unidadTexto = etiquetaUnidad(unidadProducto);
 
-    const CAMPOS = ['costo', 'cantidad', 'total'];
-    // Los dos últimos campos editados, el más reciente primero. El que falta es
-    // el calculado. Arranca en costo+cantidad: el comportamiento de toda la vida.
-    const [camposFijados, setCamposFijados] = useState(['costo', 'cantidad']);
-    const campoCalculado = CAMPOS.find(c => !camposFijados.includes(c));
-
     const dosDecimales = (n) => Math.round(n * 100) / 100;
-    // El peso admite gramos; las unidades no se parten en pedazos.
-    const redondearCantidad = (n) => productoPorPeso ? Math.round(n * 1000) / 1000 : Math.round(n);
 
-    // Recalcula el campo que quedó libre a partir de los otros dos.
-    const recalcular = (campoEditado, { bruto, cantidad, total }) => {
-        const fijados = [campoEditado, ...camposFijados.filter(c => c !== campoEditado)].slice(0, 2);
-        setCamposFijados(fijados);
-        const aCalcular = CAMPOS.find(c => !fijados.includes(c));
-        const iva = 1 + (selectedProduct?.tax_rate || 0) / 100;
+    // Recalcula el campo que el modo deja en manos del sistema.
+    const recalcular = ({ bruto, cantidad, total, tasa = orderTaxRate, modo = modoPedido }) => {
+        const iva = 1 + (Number(tasa) || 0) / 100;
         const b = parseFloat(bruto), q = parseFloat(cantidad), t = parseFloat(total);
 
-        if (aCalcular === 'total') {
-            setLineaTotal(!isNaN(b) && !isNaN(q) ? String(dosDecimales(b * q)) : '');
+        if (modo === MODO_TOTAL) {
+            // El total y la cantidad son datos; el costo se deduce.
+            if (isNaN(t) || isNaN(q) || q <= 0) { setOrderCostGross(''); setOrderCost(''); return; }
+            const brutoCalc = dosDecimales(t / q);
+            setOrderCostGross(String(brutoCalc));
+            setOrderCost(String(dosDecimales(brutoCalc / iva)));
             return;
         }
-        if (aCalcular === 'cantidad') {
-            if (isNaN(t) || isNaN(b) || b <= 0) { setOrderQuantity(''); return; }
-            const cant = redondearCantidad(t / b);
-            setOrderQuantity(String(cant));
-            // En productos por unidad el redondeo cambia la cuenta (no se compran
-            // 20,8 botellas): se reajusta el total para que los tres números sigan
-            // cuadrando en vez de quedar mintiendo.
-            if (!productoPorPeso) setLineaTotal(String(dosDecimales(b * cant)));
-            return;
-        }
-        // aCalcular === 'costo'
-        if (isNaN(t) || isNaN(q) || q <= 0) { setOrderCostGross(''); setOrderCost(''); return; }
-        const brutoCalc = dosDecimales(t / q);
-        setOrderCostGross(String(brutoCalc));
-        setOrderCost(String(dosDecimales(brutoCalc / iva)));
+        // MODO_UNIDAD: el costo y la cantidad son datos; el total se deduce.
+        setLineaTotal(!isNaN(b) && !isNaN(q) ? String(dosDecimales(b * q)) : '');
+    };
+
+    const cambiarModo = (modo) => {
+        setModoPedido(modo);
+        // Al cambiar de pestaña se recalcula el campo que pasa a ser automático,
+        // partiendo de lo que ya hay en pantalla: los números no saltan.
+        recalcular({ bruto: orderCostGross, cantidad: orderQuantity, total: lineaTotal, modo });
     };
 
     const cambiarCostoNeto = (val) => {
         setOrderCost(val);
         const neto = parseFloat(val);
-        const iva = 1 + (selectedProduct?.tax_rate || 0) / 100;
+        const iva = 1 + (Number(orderTaxRate) || 0) / 100;
         const bruto = isNaN(neto) ? '' : String(dosDecimales(neto * iva));
         setOrderCostGross(bruto);
-        recalcular('costo', { bruto, cantidad: orderQuantity, total: lineaTotal });
+        recalcular({ bruto, cantidad: orderQuantity, total: lineaTotal });
     };
 
     const cambiarCostoBruto = (val) => {
         setOrderCostGross(val);
         const b = parseFloat(val);
-        const iva = 1 + (selectedProduct?.tax_rate || 0) / 100;
+        const iva = 1 + (Number(orderTaxRate) || 0) / 100;
         setOrderCost(isNaN(b) ? '' : String(dosDecimales(b / iva)));
-        recalcular('costo', { bruto: val, cantidad: orderQuantity, total: lineaTotal });
+        recalcular({ bruto: val, cantidad: orderQuantity, total: lineaTotal });
     };
 
     const cambiarCantidad = (val) => {
         setOrderQuantity(val);
-        recalcular('cantidad', { bruto: orderCostGross, cantidad: val, total: lineaTotal });
+        recalcular({ bruto: orderCostGross, cantidad: val, total: lineaTotal });
     };
 
     const cambiarTotal = (val) => {
         setLineaTotal(val);
-        recalcular('total', { bruto: orderCostGross, cantidad: orderQuantity, total: val });
+        recalcular({ bruto: orderCostGross, cantidad: orderQuantity, total: val });
     };
 
-    // Cartelito "se calcula" sobre el campo que maneja el sistema, para que se vea
-    // de un vistazo cuál se va a mover solo.
-    const ChipCalculado = ({ campo }) => campoCalculado === campo ? (
-        <span className="ml-1 px-1 py-px rounded bg-[var(--color-primary)]/20 text-[var(--color-primary)] text-[9px] font-bold align-middle">
-            se calcula
-        </span>
-    ) : null;
+    // Cambiar el impuesto rearma el costo con IVA. En modo POR TOTAL el bruto ya
+    // está fijado por total ÷ cantidad, así que lo único que cambia es cómo se
+    // reparte entre neto e impuesto: lo pagado no se toca. En modo POR UNIDAD el
+    // neto es el dato del proveedor, el bruto se recalcula y arrastra al total.
+    const cambiarImpuesto = (val) => {
+        const r = Number(val) || 0;
+        setOrderTaxRate(r);
+        const iva = 1 + r / 100;
+        if (porTotal) {
+            const b = parseFloat(orderCostGross);
+            setOrderCost(isNaN(b) ? '' : String(dosDecimales(b / iva)));
+            return;
+        }
+        const neto = parseFloat(orderCost);
+        const bruto = isNaN(neto) ? '' : String(dosDecimales(neto * iva));
+        setOrderCostGross(bruto);
+        recalcular({ bruto, cantidad: orderQuantity, total: lineaTotal, tasa: r });
+    };
+
+    // Impuestos disponibles: los configurados en la empresa (Configuración →
+    // Impuestos). Se agrega el de la ficha del producto si no estuviera en la
+    // lista, para que el valor actual siempre se pueda seleccionar y no se pierda
+    // al abrir el desplegable.
+    const listaImpuestos = useMemo(() => {
+        const base = (taxRates || [])
+            .filter(t => t && t.status !== 'inactive')
+            .map(t => ({ key: String(t.id), name: t.name || 'Impuesto', rate: Number(t.rate) || 0 }));
+        const actual = Number(orderTaxRate) || 0;
+        if (!base.some(t => t.rate === actual)) {
+            base.push({ key: `actual-${actual}`, name: actual === 0 ? 'Sin impuesto' : 'Del producto', rate: actual });
+        }
+        return base.sort((a, b) => a.rate - b.rate);
+    }, [taxRates, orderTaxRate]);
+
+    // Precio de venta sugerido: el margen se aplica sobre el costo NETO y recién
+    // después se suma el impuesto. Al revés el IVA se comería parte del margen.
+    const precioSugerido = () => {
+        const netCost = parseFloat(orderCost);
+        if (isNaN(netCost)) return formatCurrency(0, currentCurrency);
+        const m = parseFloat(orderMargen);
+        const neto = netCost * (1 + (isNaN(m) ? 0 : m) / 100);
+        return formatCurrency(neto * (1 + (Number(orderTaxRate) || 0) / 100), currentCurrency);
+    };
+
+    // Cartelito sobre el campo que calcula el sistema en el modo actual.
+    const ChipCalculado = ({ campo }) => {
+        const calculado = porTotal ? 'costo' : 'total';
+        return calculado === campo ? (
+            <span className="ml-1 px-1 py-px rounded bg-[var(--color-primary)]/20 text-[var(--color-primary)] text-[9px] font-bold align-middle">
+                se calcula
+            </span>
+        ) : null;
+    };
+
+    // Estilo de los campos que el sistema completa: se ven distintos y no se editan.
+    const CLASE_CALCULADO = 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/40 text-[var(--color-primary)] font-bold cursor-not-allowed';
 
     // Add product to order cart
     //
@@ -168,7 +220,10 @@ const Orders = () => {
             return false;
         }
 
-        const costWithTax = orderCostGross ? Number(orderCostGross) : Number(orderCost) * (1 + (selectedProduct.tax_rate || 0) / 100);
+        // El impuesto que viaja a la factura es el ELEGIDO acá, no el de la ficha:
+        // esta compra puede venir con otro y es lo que hay que registrar.
+        const tasa = Number(orderTaxRate) || 0;
+        const costWithTax = orderCostGross ? Number(orderCostGross) : Number(orderCost) * (1 + tasa / 100);
         const newItem = {
             id: selectedProduct.id,
             name: selectedProduct.name,
@@ -176,7 +231,7 @@ const Orders = () => {
             cost: Number(orderCost),
             costWithTax,
             quantity: Number(orderQuantity),
-            taxRate: selectedProduct.tax_rate || 0,
+            taxRate: tasa,
             total: costWithTax * Number(orderQuantity)
         };
 
@@ -205,7 +260,7 @@ const Orders = () => {
         // Reset form: se vuelve al modo de siempre (costo y cantidad mandan,
         // el total se calcula) para que el próximo producto arranque limpio.
         setOrderQuantity('1');
-        setCamposFijados(['costo', 'cantidad']);
+        setModoPedido(MODO_UNIDAD);
         const b = parseFloat(orderCostGross);
         setLineaTotal(isNaN(b) ? '' : String(dosDecimales(b)));
         return true;
@@ -406,7 +461,11 @@ const Orders = () => {
         // vacío cuando todavía no se tocó nada.
         const taxRate = product.tax_rate || 0;
         setLineaTotal(cost ? String(Math.round(Number(cost) * (1 + taxRate / 100) * 100) / 100) : '');
-        setCamposFijados(['costo', 'cantidad']);
+        setModoPedido(MODO_UNIDAD);
+        // El impuesto y el margen arrancan en el del producto / 30%, pero quedan
+        // editables para esta compra.
+        setOrderTaxRate(taxRate);
+        setOrderMargen('30');
         loadProductStats(product);
     };
 
@@ -969,10 +1028,37 @@ const Orders = () => {
 
                                 {/* Order Form Section */}
                                 <div className="mt-6 glass-card p-5 border-2 border-[var(--color-primary)]/30">
-                                    <p className="text-xs text-[var(--color-text-muted)] uppercase font-bold mb-4 flex items-center gap-2">
+                                    <p className="text-xs text-[var(--color-text-muted)] uppercase font-bold mb-3 flex items-center gap-2">
                                         <Box size={14} className="text-[var(--color-primary)]" />
                                         Realizar Pedido
                                     </p>
+
+                                    {/* Cómo se carga la compra. Define qué se escribe y qué calcula
+                                        el sistema, en vez de que haya que adivinarlo. */}
+                                    <div className="flex gap-1 p-1 mb-4 bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
+                                        {[
+                                            { key: MODO_UNIDAD, label: `Por ${unidadTexto}`, hint: 'escribís costo y cantidad' },
+                                            { key: MODO_TOTAL, label: 'Por caja / total', hint: 'escribís total y cantidad' },
+                                        ].map(m => (
+                                            <button
+                                                key={m.key}
+                                                type="button"
+                                                onClick={() => cambiarModo(m.key)}
+                                                className={cn(
+                                                    'flex-1 py-2 px-3 rounded-lg text-left transition-all',
+                                                    modoPedido === m.key
+                                                        ? 'bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/50'
+                                                        : 'border border-transparent hover:bg-white/5'
+                                                )}
+                                            >
+                                                <span className={cn('block text-sm font-bold',
+                                                    modoPedido === m.key ? 'text-[var(--color-primary)]' : 'text-[var(--color-text-muted)]')}>
+                                                    {m.label}
+                                                </span>
+                                                <span className="block text-[10px] text-[var(--color-text-muted)]">{m.hint}</span>
+                                            </button>
+                                        ))}
+                                    </div>
 
                                     <div className="grid grid-cols-4 gap-4 mb-4">
                                         {/* Costo */}
@@ -986,43 +1072,71 @@ const Orders = () => {
                                                     type="number"
                                                     value={orderCost}
                                                     onChange={(e) => cambiarCostoNeto(e.target.value)}
-                                                    className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-3 py-2 pl-7 text-[var(--color-text)] text-sm focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+                                                    readOnly={porTotal}
+                                                    tabIndex={porTotal ? -1 : undefined}
+                                                    className={cn(
+                                                        'w-full border rounded-lg px-3 py-2 pl-7 text-sm focus:outline-none transition-colors',
+                                                        porTotal
+                                                            ? CLASE_CALCULADO
+                                                            : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text)] focus:border-[var(--color-primary)]'
+                                                    )}
                                                     placeholder="0"
                                                 />
                                             </div>
                                         </div>
 
-                                        {/* Costo con IVA */}
+                                        {/* Costo con IVA — el impuesto se elige acá.
+                                            Antes salía fijo de la ficha: si el producto estaba
+                                            cargado como exento, este campo repetía el costo y no
+                                            había forma de corregirlo al comprar. */}
                                         <div>
-                                            <label className="block text-xs text-[var(--color-text-muted)] mb-1">
-                                                Costo + IVA ({selectedProduct.tax_rate || 0}%)
+                                            <label className="block text-xs text-[var(--color-text-muted)] mb-1 flex items-center justify-between gap-1">
+                                                <span>Costo + IVA<ChipCalculado campo="costo" /></span>
+                                                <select
+                                                    value={orderTaxRate}
+                                                    onChange={(e) => cambiarImpuesto(e.target.value)}
+                                                    className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded px-1 py-0.5 text-[10px] text-[var(--color-primary)] font-bold focus:outline-none focus:border-[var(--color-primary)] cursor-pointer"
+                                                >
+                                                    {listaImpuestos.map(t => (
+                                                        <option key={t.key} value={t.rate} className="bg-gray-900">
+                                                            {t.name} ({t.rate}%)
+                                                        </option>
+                                                    ))}
+                                                </select>
                                             </label>
                                             <input
                                                 type="number"
-                                                className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-3 py-2 text-[var(--color-text)] text-sm focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+                                                className={cn(
+                                                    'w-full border rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors',
+                                                    porTotal
+                                                        ? CLASE_CALCULADO
+                                                        : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text)] focus:border-[var(--color-primary)]'
+                                                )}
                                                 placeholder="0"
                                                 value={orderCostGross}
                                                 onChange={(e) => cambiarCostoBruto(e.target.value)}
+                                                readOnly={porTotal}
+                                                tabIndex={porTotal ? -1 : undefined}
                                             />
                                         </div>
 
-                                        {/* Precio Sugerido +30% */}
+                                        {/* Precio sugerido — el margen ya no está clavado en 30% */}
                                         <div>
-                                            <label className="block text-xs text-[var(--color-text-muted)] mb-1">
-                                                Sugerido (30%)
+                                            <label className="block text-xs text-[var(--color-text-muted)] mb-1 flex items-center justify-between gap-1">
+                                                <span>Sugerido</span>
+                                                <span className="flex items-center gap-0.5">
+                                                    <input
+                                                        type="number"
+                                                        value={orderMargen}
+                                                        onChange={(e) => setOrderMargen(e.target.value)}
+                                                        min="0"
+                                                        className="w-12 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded px-1 py-0.5 text-[10px] text-right text-[var(--color-primary)] font-bold focus:outline-none focus:border-[var(--color-primary)]"
+                                                    />
+                                                    <span className="text-[10px] text-[var(--color-primary)] font-bold">%</span>
+                                                </span>
                                             </label>
                                             <div className="w-full bg-[var(--color-primary)]/20 border border-[var(--color-primary)] rounded-lg px-3 py-2 text-[var(--color-primary)] font-bold text-sm shadow-[0_0_10px_rgba(var(--color-primary-rgb),0.2)]">
-                                                {(() => {
-                                                    if (!orderCost) return '$0';
-                                                    const netCost = parseFloat(orderCost);
-                                                    if (isNaN(netCost)) return '$0';
-                                                    const taxRate = selectedProduct.tax_rate || 0;
-                                                    // Net Price for 30% margin = Net Cost * 1.30
-                                                    const targetNetPrice = netCost * 1.30;
-                                                    // Gross Price = Target Net Price * (1 + Tax Rate)
-                                                    const targetGrossPrice = targetNetPrice * (1 + taxRate / 100);
-                                                    return formatCurrency(targetGrossPrice, currentCurrency);
-                                                })()}
+                                                {precioSugerido()}
                                             </div>
                                         </div>
 
@@ -1044,13 +1158,13 @@ const Orders = () => {
                                         </div>
                                     </div>
 
-                                    {/* Total editable: se escribe lo que se pagó. Junto con el
-                                        campo que hayas tocado antes, el tercero se calcula solo. */}
+                                    {/* Total: se escribe en modo "por caja / total", se calcula en
+                                        modo "por unidad". */}
                                     <div className="flex justify-between items-center gap-3 p-3 bg-[var(--glass-bg)] rounded-lg mb-4">
                                         <span className="text-sm text-[var(--color-text-muted)]">
                                             Total del Pedido:<ChipCalculado campo="total" />
                                             <span className="block text-[10px] text-[var(--color-text-muted)]">
-                                                editá dos de los tres · el otro se calcula
+                                                {porTotal ? 'escribí lo que pagaste' : `costo × cantidad, con ${orderTaxRate}% de impuesto`}
                                             </span>
                                         </span>
                                         <div className="relative w-44">
@@ -1061,7 +1175,14 @@ const Orders = () => {
                                                 onChange={(e) => cambiarTotal(e.target.value)}
                                                 min="0"
                                                 step="1"
-                                                className="w-full bg-[var(--color-primary)]/10 border border-[var(--color-primary)] rounded-lg px-3 py-2 pl-7 text-right text-xl font-bold text-[var(--color-primary)] focus:outline-none"
+                                                readOnly={!porTotal}
+                                                tabIndex={!porTotal ? -1 : undefined}
+                                                className={cn(
+                                                    'w-full border rounded-lg px-3 py-2 pl-7 text-right text-xl font-bold text-[var(--color-primary)] focus:outline-none',
+                                                    porTotal
+                                                        ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]'
+                                                        : 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/40 cursor-not-allowed'
+                                                )}
                                                 placeholder="0"
                                             />
                                         </div>
@@ -1239,6 +1360,28 @@ const Orders = () => {
                                 Realizar Pedido
                             </div>
 
+                            {/* Pestañas: definen qué se escribe y qué calcula el sistema */}
+                            <div className="flex gap-1 p-1 mb-3 bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
+                                {[
+                                    { key: MODO_UNIDAD, label: `Por ${unidadTexto}` },
+                                    { key: MODO_TOTAL, label: 'Por caja / total' },
+                                ].map(m => (
+                                    <button
+                                        key={m.key}
+                                        type="button"
+                                        onClick={() => cambiarModo(m.key)}
+                                        className={cn(
+                                            'flex-1 py-2 rounded-lg text-xs font-bold transition-all',
+                                            modoPedido === m.key
+                                                ? 'bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/50 text-[var(--color-primary)]'
+                                                : 'border border-transparent text-[var(--color-text-muted)]'
+                                        )}
+                                    >
+                                        {m.label}
+                                    </button>
+                                ))}
+                            </div>
+
                             <div className="grid grid-cols-3 gap-2 mb-3">
                                 {/* Costo por unidad/kg */}
                                 <div>
@@ -1252,7 +1395,12 @@ const Orders = () => {
                                             inputMode="decimal"
                                             value={orderCost}
                                             onChange={(e) => cambiarCostoNeto(e.target.value)}
-                                            className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-1.5 pl-5 pr-1 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                            readOnly={porTotal}
+                                            className={cn(
+                                                'w-full border rounded-lg py-1.5 pl-5 pr-1 text-sm focus:outline-none',
+                                                porTotal ? CLASE_CALCULADO
+                                                    : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text)] focus:border-[var(--color-primary)]'
+                                            )}
                                             placeholder="0"
                                         />
                                     </div>
@@ -1266,23 +1414,52 @@ const Orders = () => {
                                         inputMode="decimal"
                                         value={orderCostGross}
                                         onChange={(e) => cambiarCostoBruto(e.target.value)}
-                                        className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-1.5 px-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                        readOnly={porTotal}
+                                        className={cn(
+                                            'w-full border rounded-lg py-1.5 px-2 text-sm focus:outline-none',
+                                            porTotal ? CLASE_CALCULADO
+                                                : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text)] focus:border-[var(--color-primary)]'
+                                        )}
                                         placeholder="0"
                                     />
                                 </div>
 
                                 {/* Sugerido */}
                                 <div>
-                                    <label className="text-[10px] text-[var(--color-text-muted)] block mb-1">Sugerido (30%)</label>
+                                    <label className="text-[10px] text-[var(--color-text-muted)] block mb-1">Sugerido</label>
                                     <div className="w-full bg-[var(--color-primary)]/20 border border-[var(--color-primary)] rounded-lg py-1.5 px-1 text-[var(--color-primary)] font-bold text-xs text-center truncate">
-                                        {(() => {
-                                            if (!orderCost) return '$0';
-                                            const netCost = parseFloat(orderCost);
-                                            if (isNaN(netCost)) return '$0';
-                                            const taxRate = selectedProduct.tax_rate || 0;
-                                            return formatCurrency((netCost * 1.30) * (1 + taxRate / 100), currentCurrency);
-                                        })()}
+                                        {precioSugerido()}
                                     </div>
+                                </div>
+                            </div>
+
+                            {/* Impuesto y margen, editables también en el celular */}
+                            <div className="grid grid-cols-2 gap-2 mb-3">
+                                <div>
+                                    <label className="text-[10px] text-[var(--color-text-muted)] block mb-1">Impuesto</label>
+                                    <select
+                                        value={orderTaxRate}
+                                        onChange={(e) => cambiarImpuesto(e.target.value)}
+                                        className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-2 px-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                    >
+                                        {listaImpuestos.map(t => (
+                                            <option key={t.key} value={t.rate} className="bg-gray-900">
+                                                {t.name} ({t.rate}%)
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] text-[var(--color-text-muted)] block mb-1">Margen sugerido (%)</label>
+                                    <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={orderMargen}
+                                        onChange={(e) => setOrderMargen(e.target.value)}
+                                        min="0"
+                                        className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-2 px-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                        placeholder="30"
+                                    />
                                 </div>
                             </div>
 
@@ -1306,7 +1483,7 @@ const Orders = () => {
 
                             <div className="mb-3">
                                 <label className="text-[10px] text-[var(--color-primary)] block mb-1 font-bold">
-                                    Total pagado<ChipCalculado campo="total" />
+                                    {porTotal ? 'Total pagado' : 'Total del Pedido'}<ChipCalculado campo="total" />
                                 </label>
                                 <div className="relative">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-primary)] font-bold">$</span>
@@ -1316,13 +1493,15 @@ const Orders = () => {
                                         value={lineaTotal}
                                         onChange={(e) => cambiarTotal(e.target.value)}
                                         min="0"
-                                        className="w-full bg-[var(--color-primary)]/10 border border-[var(--color-primary)] rounded-lg py-2.5 pl-7 pr-3 text-right text-lg font-bold text-[var(--color-primary)] focus:outline-none"
+                                        readOnly={!porTotal}
+                                        className={cn(
+                                            'w-full border rounded-lg py-2.5 pl-7 pr-3 text-right text-lg font-bold text-[var(--color-primary)] focus:outline-none',
+                                            porTotal ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]'
+                                                : 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/40 cursor-not-allowed'
+                                        )}
                                         placeholder="0"
                                     />
                                 </div>
-                                <p className="text-[9px] text-[var(--color-text-muted)] mt-1">
-                                    Completá dos de los tres y el otro se calcula solo.
-                                </p>
                             </div>
 
                             <button
