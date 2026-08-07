@@ -470,7 +470,9 @@ const Purchases = () => {
                         <h2 className="text-lg font-bold text-[var(--color-text)]">Detalles de la Compra</h2>
                     </div>
 
-                    <div className="p-4 pb-32 space-y-4">
+                    {/* pb generoso: el pie fijo mide ~160 px y con pb-32 (128 px) las
+                        últimas filas quedaban tapadas. Suma el alto de la barra de Android. */}
+                    <div className="p-4 pb-[calc(11rem+env(safe-area-inset-bottom))] space-y-4">
                         {/* Invoice Info Card */}
                         <div className="glass-card space-y-4">
                             <div>
@@ -523,33 +525,36 @@ const Purchases = () => {
                             </div>
                         </div>
 
-                        {/* Items Table - Mobile */}
+                        {/* Items - Mobile
+                            En vez de una tabla de 5 columnas: en un teléfono al nombre le
+                            quedaban ~90 px y "Arroz Perseguido Largo Fino 1kg" se veía como
+                            "Arroz Perseguido …". Ahora cada producto es una ficha: el nombre
+                            ocupa el ancho y puede saltar de línea, y debajo van los datos. */}
                         <div className="glass-card p-0 overflow-hidden">
-                            <div className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] text-[10px] uppercase font-bold px-3 py-2">
-                                <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-2 items-center">
-                                    <div className="w-20">CÓDIGO</div>
-                                    <div>PRODUCTO</div>
-                                    <div className="w-10 text-center">CANT.</div>
-                                    <div className="w-14 text-right">COSTO U.</div>
-                                    <div className="w-10 text-center">IVA</div>
-                                </div>
+                            <div className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] text-[10px] uppercase font-bold px-3 py-2 tracking-wider">
+                                Productos {invoiceItems.length > 0 && `(${invoiceItems.length})`}
                             </div>
                             <div className="divide-y divide-[var(--glass-border)]">
                                 {invoiceItems.length === 0 ? (
                                     <div className="text-center py-8 text-[var(--color-text-muted)] text-sm">No hay productos en la factura.</div>
                                 ) : (
                                     invoiceItems.map((item, index) => (
-                                        <div key={index} className="px-3 py-3">
-                                            <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-2 items-center text-sm">
-                                                <div className="w-20 text-[var(--color-text-muted)] text-xs truncate">{item.sku}</div>
-                                                <div className="text-[var(--color-text)] font-medium truncate">{item.name}</div>
-                                                <div className="w-10 text-center text-[var(--color-text-muted)]">{item.quantity}</div>
-                                                <div className="w-14 text-right text-[var(--color-text-muted)]">${item.cost.toLocaleString()}</div>
-                                                <div className="w-10 text-center text-[var(--color-text-muted)]">{item.tax}%</div>
+                                        <div key={index} className="px-3 py-3 flex gap-3">
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-medium text-[var(--color-text)] leading-snug break-words">{item.name}</p>
+                                                <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5 break-all">{item.sku}</p>
+                                                <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                                                    {item.quantity} × ${item.cost.toLocaleString()} · IVA {item.tax}%
+                                                </p>
                                             </div>
-                                            <div className="flex justify-end gap-2 mt-2">
-                                                <button onClick={() => { handleEditItem(index); setIsMobileDetailsOpen(false); }} className="p-1.5 text-blue-400"><Edit size={16} /></button>
-                                                <button onClick={() => handleRemoveItem(index)} className="p-1.5 text-red-400"><Trash2 size={16} /></button>
+                                            <div className="flex flex-col items-end justify-between shrink-0">
+                                                <span className="text-sm font-bold text-[var(--color-primary)] whitespace-nowrap">
+                                                    ${item.total.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                </span>
+                                                <div className="flex gap-1 mt-2">
+                                                    <button onClick={() => { handleEditItem(index); setIsMobileDetailsOpen(false); }} className="p-1.5 text-blue-400"><Edit size={16} /></button>
+                                                    <button onClick={() => handleRemoveItem(index)} className="p-1.5 text-red-400"><Trash2 size={16} /></button>
+                                                </div>
                                             </div>
                                         </div>
                                     ))
@@ -558,13 +563,21 @@ const Purchases = () => {
                         </div>
                     </div>
 
-                    {/* Fixed Footer with Totals */}
-                    <div className="fixed bottom-0 left-0 right-0 bg-[var(--glass-bg)] border-t border-[var(--glass-border)] p-4">
-                        <div className="text-right mb-3 space-y-1">
-                            <div className="text-xs text-[var(--color-text-muted)]">Subtotal: ${subtotal.toLocaleString()}</div>
-                            <div className="text-xs text-green-400">IVA 19%: ${taxAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                            <div className="text-xs text-[var(--color-text-muted)]">Total Factura:</div>
-                            <div className="text-2xl font-bold text-[var(--color-primary)]">${totalAmount.toLocaleString()}</div>
+                    {/* Fixed Footer with Totals
+                        Llevaba `bg-[var(--glass-bg)]`, que es rgba(255,255,255,0.05): casi
+                        transparente y sin z-index, así que la lista se veía POR DEBAJO del
+                        pie y parecía montada encima de los totales. Ahora es opaco, va por
+                        encima, y los totales van en dos líneas en vez de cuatro apiladas
+                        (menos alto = menos tapa). El padding inferior respeta la barra de
+                        navegación de Android. */}
+                    <div className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] border-t border-[var(--glass-border)] px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+                        <div className="flex items-center justify-between text-xs mb-1.5">
+                            <span className="text-[var(--color-text-muted)]">Subtotal ${subtotal.toLocaleString()}</span>
+                            <span className="text-green-400">IVA 19% ${taxAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                        </div>
+                        <div className="flex items-baseline justify-between mb-3">
+                            <span className="text-xs text-[var(--color-text-muted)]">Total Factura</span>
+                            <span className="text-2xl font-bold text-[var(--color-primary)] leading-none">${totalAmount.toLocaleString()}</span>
                         </div>
                         {can('purchases.create') && (
                             <AsyncButton
