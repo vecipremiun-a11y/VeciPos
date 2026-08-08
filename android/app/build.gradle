@@ -17,8 +17,12 @@ android {
         applicationId "com.posveci.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Subir en CADA APK que se entregue. Sin esto no hay forma de saber qué
+        // versión tiene puesta un cliente cuando reporta un problema —pasó con
+        // tres APK distintos declarados todos como 1.0, dos de ellos rotos— y
+        // Play Store rechaza una entrega con versionCode repetido.
+        versionCode 2
+        versionName "1.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
