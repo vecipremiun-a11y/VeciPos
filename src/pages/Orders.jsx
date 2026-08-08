@@ -40,6 +40,10 @@ const Orders = () => {
     const [filterLowStock, setFilterLowStock] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [supplierProducts, setSupplierProducts] = useState([]);
+    // La última búsqueda falló (conexión), distinto de "este proveedor no tiene
+    // productos". Sin esto los dos casos se veían igual: una lista vacía.
+    const [busquedaFallida, setBusquedaFallida] = useState(false);
+    const [reintento, setReintento] = useState(0);
     const [productStats, setProductStats] = useState(null);
     const [loadingStats, setLoadingStats] = useState(false);
     const supplierCacheRef = useRef({});
@@ -64,7 +68,15 @@ const Orders = () => {
     // Margen para el precio sugerido. Estaba clavado en 30%.
     const [orderMargen, setOrderMargen] = useState('30');
 
-    // Order cart states
+    // ── Borrador del pedido, a prueba de recargas ───────────────────────────
+    // El pedido vivía solo en memoria: bastaba con que la app se recargara (el
+    // gesto de deslizar hacia abajo la recargaba) o que hubiera que cerrarla por
+    // un error de búsqueda para perder todo lo cargado y tener que empezar de
+    // nuevo. Guardar antes de tiempo tampoco servía: quedaban dos facturas.
+    // Ahora el borrador se guarda en el dispositivo y se recupera al volver.
+    const BORRADOR_KEY = `pedidoBorrador:${activeCompanyId}`;
+    const borradorCargado = useRef(false);
+
     const [orderItems, setOrderItems] = useState([]);
     const [showOrderModal, setShowOrderModal] = useState(false);
     const [orderItemQuantityDrafts, setOrderItemQuantityDrafts] = useState({});
@@ -355,12 +367,14 @@ const Orders = () => {
 
         const result = await createSupplierOrder(orderData);
         if (result.success) {
-            // Success feedback could be improved (toast)
-            alert('Pedido creado exitosamente');
+            toast('Pedido creado correctamente', 'success');
             setOrderItems([]);
+            // El borrador solo se descarta cuando el pedido quedó guardado de
+            // verdad. Si falla, se conserva para no perder lo cargado.
+            try { localStorage.removeItem(BORRADOR_KEY); } catch { /* noop */ }
             setShowOrderModal(false);
         } else {
-            alert('Error al crear pedido: ' + result.error);
+            toast('No se pudo crear el pedido: ' + (result.error || 'error desconocido'), 'error');
         }
     };
 
@@ -478,6 +492,31 @@ const Orders = () => {
         return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
     }, [searchTerm]);
 
+    // Restaurar el borrador al entrar. Espera a saber la empresa: la clave depende
+    // de ella y no se puede leer antes de que el estado rehidrate.
+    useEffect(() => {
+        if (!activeCompanyId || borradorCargado.current) return;
+        try {
+            const raw = localStorage.getItem(BORRADOR_KEY);
+            const items = raw ? JSON.parse(raw) : null;
+            if (Array.isArray(items) && items.length) {
+                setOrderItems(items);
+                toast(`Se recuperó el pedido que estabas cargando (${items.length} productos)`, 'info');
+            }
+        } catch { /* borrador ilegible: se empieza vacío */ }
+        borradorCargado.current = true;
+    }, [activeCompanyId, BORRADOR_KEY]);
+
+    // Guardar cada cambio. Recién DESPUÉS de intentar restaurar: si no, el estado
+    // vacío del primer render borraría el borrador que se quiere recuperar.
+    useEffect(() => {
+        if (!activeCompanyId || !borradorCargado.current) return;
+        try {
+            if (orderItems.length) localStorage.setItem(BORRADOR_KEY, JSON.stringify(orderItems));
+            else localStorage.removeItem(BORRADOR_KEY);
+        } catch { /* sin localStorage: se sigue sin respaldo */ }
+    }, [orderItems, activeCompanyId, BORRADOR_KEY]);
+
     // Search products in Turso (with supplier filter if selected)
     useEffect(() => {
         if (!activeCompanyId) return;
@@ -506,19 +545,46 @@ const Orders = () => {
                 };
                 if (!cancelled) {
                     const rows = result.rows || [];
-                    supplierCacheRef.current[cacheKey] = rows;
+                    setBusquedaFallida(false);
+                    // Solo se cachean resultados CON productos. Antes, una consulta
+                    // fallida guardaba una lista vacía en la caché y esa empresa o
+                    // proveedor seguía apareciendo vacío aunque la conexión volviera:
+                    // había que cerrar la app y se perdía el pedido cargado.
+                    if (rows.length) supplierCacheRef.current[cacheKey] = rows;
                     setSupplierProducts(rows);
+
+                    // Las fotos ya no vienen en la lista (eran hasta 4 MB por carga):
+                    // se piden en una consulta aparte y se mezclan sobre la lista ya
+                    // dibujada, así la pantalla aparece de inmediato.
+                    const conFoto = rows.filter(p => p.has_image).map(p => p.id);
+                    if (conFoto.length) {
+                        reportCall(activeCompanyId, 'productImages', { ids: conFoto })
+                            .then(imgs => {
+                                if (cancelled || !Array.isArray(imgs)) return;
+                                const mapa = Object.fromEntries(imgs.map(i => [i.id, i.image]));
+                                const conImagenes = rows.map(p => (mapa[p.id] ? { ...p, image: mapa[p.id] } : p));
+                                if (conImagenes.length) supplierCacheRef.current[cacheKey] = conImagenes;
+                                setSupplierProducts(conImagenes);
+                            })
+                            .catch(() => { /* la lista ya se ve, sin fotos */ });
+                    }
                 }
             } catch (e) {
+                // Antes esto dejaba la lista vacía sin decir nada: parecía que el
+                // proveedor no tenía productos y no había forma de saber que en
+                // realidad había fallado la conexión.
                 console.error('Error searching products:', e);
-                if (!cancelled) setSupplierProducts([]);
+                if (!cancelled) {
+                    setSupplierProducts([]);
+                    setBusquedaFallida(true);
+                }
             } finally {
                 if (!cancelled) setIsLoading(false);
             }
         };
         search();
         return () => { cancelled = true; };
-    }, [debouncedSearch, selectedSupplierId, filterLowStock, activeCompanyId]);
+    }, [debouncedSearch, selectedSupplierId, filterLowStock, activeCompanyId, reintento]);
 
     // Handle supplier selection (filter, not load)
     const handleSupplierChange = (supplierId) => {
@@ -655,6 +721,23 @@ const Orders = () => {
                             <div className="p-8 text-center text-[var(--color-text-muted)]">
                                 <Search size={48} className="mx-auto mb-3 opacity-20" />
                                 <p className="text-sm">Escriba para buscar productos o seleccione un proveedor</p>
+                            </div>
+                        ) : busquedaFallida ? (
+                            /* Fallo de conexión, no "no hay productos". Antes se veían
+                               igual y el usuario terminaba cerrando la app. */
+                            <div className="p-8 text-center">
+                                <AlertTriangle size={40} className="mx-auto mb-3 text-amber-400" />
+                                <p className="text-sm text-[var(--color-text)] font-medium">No se pudo cargar la lista</p>
+                                <p className="text-xs text-[var(--color-text-muted)] mt-1 mb-4">
+                                    Es un problema de conexión, no del proveedor.<br />
+                                    Tu pedido está guardado: no vas a perder nada.
+                                </p>
+                                <button
+                                    onClick={() => { setBusquedaFallida(false); setReintento(n => n + 1); }}
+                                    className="px-4 py-2 rounded-lg bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/50 text-[var(--color-primary)] text-sm font-bold"
+                                >
+                                    Reintentar
+                                </button>
                             </div>
                         ) : supplierProducts.length === 0 ? (
                             <div className="p-8 text-center text-[var(--color-text-muted)]">

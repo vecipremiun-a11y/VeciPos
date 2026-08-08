@@ -310,6 +310,15 @@ select option {
   color: var(--color-text);
 }
 
+/* Deslizar hacia abajo estando arriba del todo recargaba la app dentro del
+   WebView (gesto de "tirar para actualizar"). En un POS eso es destructivo: se
+   perdía el pedido o la venta a medio cargar. `contain` deja el scroll normal
+   pero corta ese gesto. */
+html,
+body {
+  overscroll-behavior-y: contain;
+}
+
 body {
   @apply bg-[var(--color-background)] text-[var(--color-text)] font-sans overflow-x-hidden min-h-screen selection:bg-[var(--color-primary)] selection:text-white;
   /* Reduced gradient opacity for cleaner look in light mode, or use variables if needed */

@@ -6,7 +6,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import AsyncButton from '../components/AsyncButton';
 
 const Purchases = () => {
-    const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown } = useStore();
+    const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown, fetchProductImage } = useStore();
     const { can } = usePermissions();
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
     const [isMobileDetailsOpen, setIsMobileDetailsOpen] = useState(false);
@@ -87,6 +87,14 @@ const Purchases = () => {
     const handleSelectProduct = (product) => {
         setSelectedProduct(product);
         setSearchTerm(product.name);
+
+        // La búsqueda ya no trae la foto (pesaba de más). Se pide solo la del
+        // producto elegido, que es la única que se muestra en esta pantalla.
+        if (product.has_image && !product.image) {
+            fetchProductImage(product.id).then(img => {
+                if (img) setSelectedProduct(prev => (prev?.id === product.id ? { ...prev, image: img } : prev));
+            });
+        }
 
         // Calculate margin if possible using tax
         let margin = '';
