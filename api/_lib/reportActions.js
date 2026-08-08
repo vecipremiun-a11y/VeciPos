@@ -42,10 +42,30 @@ function invoiceWhere({ dateFrom, dateTo, supplierFilter, paymentType, search } 
     return { where: conds.join(' AND '), extra };
 }
 
+// Todas las columnas de products MENOS `image`.
+//
+// `image` guarda la foto en base64 y pesa el 99,5% de la tabla (153 MB sobre 154
+// medidos el 7-ago-2026, con 1.734 fotos de 39 KB promedio). Un `SELECT *` en la
+// búsqueda del POS bajaba entre 1,3 y 3,3 MB por búsqueda y tardaba hasta 1 s;
+// sin esta columna son 0,03 MB y 150 ms. Las fotos se piden aparte con
+// `productImages`, que es para lo que existe.
+export const PRODUCT_COLS_SIN_IMAGEN =
+    'id, name, price, stock, category, sku, cost, tax_rate, unit, supplier, '
+    + 'pending_adjustment, is_offer, offer_price, price_ranges, scale_group_id, '
+    + 'company_id, original_price, sale_mode, allow_item_notes, preorder_unit, '
+    + 'preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit, '
+    + 'preorder_use_base_price, units_per_box, updated_at';
+
 const REPORTS = {
     // Lecturas de catálogo del POS (Paso 24)
+    //
+    // Mismo patrón que `categoryProducts`: sin la foto y con `has_image`, para que
+    // los resultados aparezcan al instante y las imágenes lleguen después
+    // (loadProductImages). Esta consulta se había quedado en `SELECT *`.
     productsSearch: ({ term, limit = 50 }) => [{
-        sql: 'SELECT * FROM products WHERE company_id = ? AND (name LIKE ? OR sku LIKE ?) LIMIT ?',
+        sql: `SELECT ${PRODUCT_COLS_SIN_IMAGEN},
+                CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image
+              FROM products WHERE company_id = ? AND (name LIKE ? OR sku LIKE ?) LIMIT ?`,
         args: (cid) => [cid, `%${term}%`, `%${term}%`, Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200)],
     }],
     productByBarcode: ({ barcode }) => [{
@@ -201,7 +221,10 @@ const REPORTS = {
         }
         if (lowStock) conds.push('stock <= 5');
         return [{
-            sql: `SELECT id, name, sku, price, cost, stock, tax_rate, unit, image, category, supplier, price_ranges
+            // Sin `image`: eran hasta 100 fotos base64 (~4 MB) en cada carga de la
+            // pantalla de pedidos. Se marca cuáles tienen y se piden aparte.
+            sql: `SELECT id, name, sku, price, cost, stock, tax_rate, unit, category, supplier, price_ranges,
+                    CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image
                   FROM products WHERE ${conds.join(' AND ')} ORDER BY stock ASC LIMIT 100`,
             args: (cid) => [cid, ...extra],
         }];

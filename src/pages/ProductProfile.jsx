@@ -15,7 +15,7 @@ import { es } from 'date-fns/locale';
 // falla y debe usarse la JSON. Si supera ~1%, es señal de problema sistémico.
 
 const ProductProfile = () => {
-    const { activeCompanyId, currentCurrency, searchProductsForDropdown, users, currentCompanyTimezone } = useStore();
+    const { activeCompanyId, currentCurrency, searchProductsForDropdown, users, currentCompanyTimezone, fetchProductImage } = useStore();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -92,6 +92,12 @@ const ProductProfile = () => {
         setSearchResults([]);
         setSelectedProduct(product);
         setSearchTerm(product.name);
+        // La búsqueda ya no incluye la foto: se pide solo la del elegido.
+        if (product.has_image && !product.image) {
+            fetchProductImage(product.id).then(img => {
+                if (img) setSelectedProduct(prev => (prev?.id === product.id ? { ...prev, image: img } : prev));
+            });
+        }
         loadSalesStats(product.id, product.stock);
         loadProductLots(product.id);
         await loadProductMovements(product.id, product);

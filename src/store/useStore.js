@@ -735,6 +735,12 @@ export const useStore = create(persist((set, get) => ({
                 price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
             }));
             set({ products });
+
+            // Las fotos van aparte: la búsqueda ya no las trae (pesaban 40 veces
+            // más que el resto junto). Se piden en una sola consulta y aparecen
+            // sobre la grilla ya dibujada, igual que en categoryProducts.
+            const imgIds = products.filter(p => p.has_image).map(p => p.id);
+            if (imgIds.length) get().loadProductImages(imgIds);
         } catch (e) {
             console.error("Search failed", e);
         }
@@ -861,6 +867,21 @@ export const useStore = create(persist((set, get) => ({
         } catch (e) {
             console.error("❌ Load category products failed", e);
             return false;
+        }
+    },
+
+    // Foto de UN producto. Las búsquedas ya no traen la columna `image` (pesaba
+    // 40 veces más que el resto de los datos juntos), así que las pantallas que
+    // muestran la foto del producto ELEGIDO la piden acá al seleccionarlo.
+    fetchProductImage: async (id) => {
+        const { activeCompanyId } = get();
+        if (!id || !activeCompanyId) return null;
+        try {
+            const rows = await reportRows(activeCompanyId, 'productImages', { ids: [id] });
+            return rows[0]?.image || null;
+        } catch (e) {
+            console.warn('No se pudo cargar la foto del producto:', e);
+            return null;
         }
     },
 

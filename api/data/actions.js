@@ -6,7 +6,7 @@ import { registerActions } from '../_lib/registerActions.js';
 import { purchaseActions } from '../_lib/purchaseActions.js';
 import { preorderActions } from '../_lib/preorderActions.js';
 import { deliveryActions } from '../_lib/deliveryActions.js';
-import { reportRun } from '../_lib/reportActions.js';
+import { reportRun, PRODUCT_COLS_SIN_IMAGEN } from '../_lib/reportActions.js';
 import { sorteoActions } from '../_lib/sorteoActions.js';
 import { companyActions } from '../_lib/companyActions.js';
 import { paymentActions } from '../_lib/paymentActions.js';
@@ -453,10 +453,9 @@ async function fetchSales(turso, companyId, body) {
 // detectar lotes que llegan a 0). Mismas queries que hacía el navegador directo.
 // NOTA: products EXCLUYE la columna `image` (base64, ~150MB en empresas grandes):
 // no cabe en una respuesta serverless y las imágenes ya se cargan bajo demanda.
-const PRODUCT_COLS = 'id, name, price, stock, category, sku, cost, tax_rate, unit, supplier, '
-    + 'pending_adjustment, is_offer, offer_price, price_ranges, scale_group_id, company_id, '
-    + 'original_price, sale_mode, allow_item_notes, preorder_unit, preorder_billing_unit, '
-    + 'preorder_price_per_kg, preorder_gram_per_unit, preorder_use_base_price, units_per_box, updated_at';
+// Fuente única: la misma lista que usa la búsqueda del POS (todas las columnas
+// menos la foto en base64). Ver el porqué en reportActions.js.
+const PRODUCT_COLS = PRODUCT_COLS_SIN_IMAGEN;
 
 async function syncCatalog(turso, companyId, { since }) {
     const queries = since
