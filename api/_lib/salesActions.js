@@ -12,6 +12,7 @@
 // productsToUpdate, lotsToUpdate, productsInfo) y los flags de sii_config.
 
 import { mirrorSaleItems } from '../../src/lib/itemNormalization.js';
+import { PRODUCT_COLS_SIN_IMAGEN } from './reportActions.js';
 
 export async function saleCommit(turso, companyId, session, body) {
     const { sale } = body;
@@ -80,7 +81,15 @@ export async function saleCommit(turso, companyId, session, body) {
     // Un solo round-trip para productos, lotes y la caja abierta (antes eran dos).
     const [dbProductsRes, dbLotsRes, openRegRes] = await turso.batch([
         {
-            sql: `SELECT * FROM products WHERE id IN (${placeholders}) AND company_id = ?`,
+            // Sin la foto en base64. Medido el 9-ago-2026: una venta de 8 productos
+            // con imagen bajaba 0,619 MB y tardaba 252 ms; sin la columna son
+            // 0,004 MB y 149 ms (la latencia base hasta Turso es 134 ms).
+            //
+            // Es seguro y se verificó antes de tocar acá: `image` no aparece en
+            // ninguna parte de este archivo, estas filas solo alimentan búsquedas
+            // internas (stock, costo, impuesto) y lo que vuelve al navegador es
+            // `productsInfo`, que mapea seis campos explícitos sin la foto.
+            sql: `SELECT ${PRODUCT_COLS_SIN_IMAGEN} FROM products WHERE id IN (${placeholders}) AND company_id = ?`,
             args: [...itemIds, companyId],
         },
         {

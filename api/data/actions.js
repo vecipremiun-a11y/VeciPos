@@ -399,7 +399,9 @@ async function dashboard(turso, companyId, { todayStr, monthStartStr }) {
             args: [companyId],
         }),
         turso.execute({
-            sql: 'SELECT * FROM products WHERE company_id = ? AND stock <= 0 LIMIT 20',
+            // Sin la foto: 20 filas con `image` eran ~780 KB para un aviso que solo
+            // muestra nombre y cantidad.
+            sql: `SELECT ${PRODUCT_COLS_SIN_IMAGEN} FROM products WHERE company_id = ? AND stock <= 0 LIMIT 20`,
             args: [companyId],
         }),
         turso.execute({

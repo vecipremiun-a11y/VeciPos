@@ -136,8 +136,10 @@ const REPORTS = {
         sql: 'SELECT * FROM sales WHERE company_id = ? ORDER BY id DESC LIMIT 20',
         args: (cid) => [cid],
     }],
+    // Sin la foto: son 20 filas, pero con `image` eran ~780 KB para un aviso de
+    // stock que solo muestra nombre y cantidad.
     lowStockProducts: () => [{
-        sql: 'SELECT * FROM products WHERE company_id = ? AND stock <= 0 LIMIT 20',
+        sql: `SELECT ${PRODUCT_COLS_SIN_IMAGEN} FROM products WHERE company_id = ? AND stock <= 0 LIMIT 20`,
         args: (cid) => [cid],
     }],
     inventoryProducts: ({ searchTerm, category, offset = 0, limit = 50 }) => {
