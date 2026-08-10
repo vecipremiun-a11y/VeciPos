@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { usePermissions } from '../hooks/usePermissions'; // Import usePermissions
-import { Search, Filter, Calendar, Eye, Package, ArrowLeft, Trash2, Share2, Download } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, Filter, Calendar, Eye, Package, ArrowLeft, Trash2, Share2, Download, ShoppingCart, Plus } from 'lucide-react';
+import { toast } from '../lib/toast';
+import AgregarProductoPedidoModal from '../components/AgregarProductoPedidoModal';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -12,6 +15,7 @@ import autoTable from 'jspdf-autotable';
 const SupplierOrders = () => {
     const { fetchSupplierOrders, deleteSupplierOrder, suppliers, currentCurrency } = useStore(); // Add deleteSupplierOrder
     const { can } = usePermissions(); // Helper for permissions
+    const navigate = useNavigate();
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -20,6 +24,7 @@ const SupplierOrders = () => {
 
     // Detail Modal State
     const [selectedOrder, setSelectedOrder] = useState(null);
+    const [agregandoProducto, setAgregandoProducto] = useState(false);
 
     useEffect(() => {
         loadOrders();
@@ -84,6 +89,39 @@ const SupplierOrders = () => {
 
         // Save
         doc.save(`Pedido_${order.id}_${order.supplier_name}.pdf`);
+    };
+
+    // Pasa el pedido a la pantalla de Compras con todo cargado: proveedor,
+    // productos, cantidades y costos. Al recibir la mercadería solo queda
+    // revisar precios y guardar, en vez de volver a tipear la factura entera.
+    //
+    // Viaja por sessionStorage y no por el estado de la navegación: si la app se
+    // recarga (pasa en el móvil), el estado de ruta se pierde y el pedido habría
+    // que cargarlo de nuevo a mano.
+    const handlePasarACompra = (order) => {
+        const items = Array.isArray(order.items) ? order.items : [];
+        if (!items.length) {
+            toast('Este pedido no tiene productos.', 'error');
+            return;
+        }
+        // Un pedido ya recibido tiene su compra cargada: repetirlo duplicaría el
+        // stock y el gasto.
+        if (order.status === 'received') {
+            toast(`El pedido #${order.id} ya fue recibido y cargado como compra.`, 'error');
+            return;
+        }
+        try {
+            sessionStorage.setItem('compraDesdePedido', JSON.stringify({
+                orderId: order.id,
+                supplierId: order.supplier_id,
+                supplierName: order.supplier_name,
+                items,
+            }));
+        } catch {
+            toast('No se pudo preparar la compra.', 'error');
+            return;
+        }
+        navigate('/purchases');
     };
 
     const handleShareWhatsApp = (order) => {
@@ -293,7 +331,20 @@ const SupplierOrders = () => {
 
                             {/* Items Table */}
                             <div>
-                                <h3 className="font-bold mb-3 text-[var(--color-text)]">Productos Solicitados</h3>
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="font-bold text-[var(--color-text)]">Productos Solicitados</h3>
+                                    {/* Un pedido recibido ya tiene su compra cargada: sumarle
+                                        productos ahora dejaría los dos diciendo cosas distintas. */}
+                                    {can('supplier_orders.create') && selectedOrder.status !== 'received' && (
+                                        <button
+                                            onClick={() => setAgregandoProducto(true)}
+                                            className="px-3 py-1.5 rounded-lg bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/50 text-[var(--color-primary)] text-xs font-bold flex items-center gap-1.5 hover:bg-[var(--color-primary)]/25"
+                                        >
+                                            <Plus size={14} />
+                                            Agregar productos
+                                        </button>
+                                    )}
+                                </div>
                                 <div className="overflow-hidden rounded-xl border border-[var(--glass-border)]">
                                     <table className="w-full text-sm">
                                         <thead className="bg-[var(--glass-bg)]">
@@ -344,6 +395,15 @@ const SupplierOrders = () => {
                                 <Download size={18} />
                                 <span className="hidden sm:inline">Descargar PDF</span>
                             </button>
+                            {can('purchases.create') && selectedOrder.status !== 'received' && (
+                                <button
+                                    onClick={() => handlePasarACompra(selectedOrder)}
+                                    className="px-4 py-2 bg-[var(--color-primary)] text-black rounded-lg font-bold hover:brightness-110 transition-all flex items-center gap-2 mr-2"
+                                >
+                                    <ShoppingCart size={18} />
+                                    <span className="hidden sm:inline">Pasar a Compra</span>
+                                </button>
+                            )}
                             <button
                                 onClick={() => setSelectedOrder(null)}
                                 className="px-6 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg font-bold hover:bg-[var(--color-surface)] transition-colors"
@@ -353,6 +413,24 @@ const SupplierOrders = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {agregandoProducto && selectedOrder && (
+                <AgregarProductoPedidoModal
+                    orderId={selectedOrder.id}
+                    onClose={() => setAgregandoProducto(false)}
+                    onAgregado={(r) => {
+                        // El detalle se actualiza en el acto con lo que devolvió el
+                        // servidor, sin cerrar la ventana ni recargar la lista: así se
+                        // pueden agregar varios seguidos y ver el total crecer.
+                        setSelectedOrder(prev => prev && ({
+                            ...prev,
+                            items: r.items,
+                            total_amount: r.total_amount,
+                        }));
+                        loadOrders();
+                    }}
+                />
             )}
         </div>
     );

@@ -2466,6 +2466,32 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // Marca un pedido a proveedor como recibido/cancelado. Lo usa "Pasar a
+    // Compra": guardada la compra, el pedido deja de figurar como pendiente.
+    setSupplierOrderStatus: async (id, status) => {
+        try {
+            const { activeCompanyId } = get();
+            const r = await userApiCall('supplierOrderSetStatus', { companyId: activeCompanyId, id, status });
+            return r?.success ? { success: true } : (r || { success: false, error: 'Error' });
+        } catch (e) {
+            console.error('Set supplier order status error', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // Agrega productos a un pedido ya creado. La fusión y el nuevo total los
+    // calcula el servidor (ver purchaseActions.supplierOrderAddItems).
+    addItemsToSupplierOrder: async (id, items) => {
+        try {
+            const { activeCompanyId } = get();
+            const r = await userApiCall('supplierOrderAddItems', { companyId: activeCompanyId, id, items });
+            return r?.success ? r : (r || { success: false, error: 'Error' });
+        } catch (e) {
+            console.error('Add items to supplier order error', e);
+            return { success: false, error: e.message };
+        }
+    },
+
     deleteSupplierOrder: async (id) => {
         try {
             const { activeCompanyId, currentUser, validateCompanyAccess } = get();

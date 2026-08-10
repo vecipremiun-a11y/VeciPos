@@ -87,6 +87,18 @@ const REPORTS = {
             args: (cid) => [cid, ...extra, lim, off],
         }];
     },
+    // Datos actuales de varios productos por id. Lo usa "Pasar a Compra": el
+    // pedido guarda el costo con el que se pidió, pero no el precio de venta, y
+    // al recibir la mercadería hay que revisar el margen con el costo real.
+    productsByIds: ({ ids = [] }) => {
+        const list = (Array.isArray(ids) ? ids : []).map(Number).filter(Number.isFinite);
+        const ph = list.length ? list.map(() => '?').join(',') : '0';
+        return [{
+            sql: `SELECT id, name, sku, price, cost, tax_rate, unit
+                  FROM products WHERE company_id = ? AND id IN (${ph})`,
+            args: (cid) => [cid, ...list],
+        }];
+    },
     productImages: ({ ids = [] }) => {
         const list = (Array.isArray(ids) ? ids : []).map(Number).filter(Number.isFinite);
         const ph = list.length ? list.map(() => '?').join(',') : '0';

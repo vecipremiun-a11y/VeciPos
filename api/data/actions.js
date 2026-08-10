@@ -189,6 +189,8 @@ export default async function handler(req, res) {
             case 'supplierDelete':
             case 'supplierOrdersFetch':
             case 'supplierOrderCreate':
+            case 'supplierOrderSetStatus':
+            case 'supplierOrderAddItems':
             case 'supplierOrderDelete':
             case 'purchaseCreate':
             case 'purchasesFetch':

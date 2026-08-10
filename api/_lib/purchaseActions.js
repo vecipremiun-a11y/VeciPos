@@ -93,6 +93,79 @@ async function supplierOrderCreate(turso, companyId, session, { orderData }) {
     return { success: true, order: result.rows[0] };
 }
 
+// Cambia el estado de un pedido a proveedor. Lo usa "Pasar a Compra": una vez
+// guardada la compra, el pedido queda 'received' y deja de figurar como
+// pendiente —si no, seguía apareciendo por cobrar y se corría el riesgo de
+// cargarlo dos veces—.
+async function supplierOrderSetStatus(turso, companyId, session, { id, status }) {
+    if (!id || !status) return { success: false, error: 'Faltan datos' };
+    if (!['pending', 'received', 'cancelled'].includes(status)) {
+        return { success: false, error: 'Estado inválido' };
+    }
+    const r = await turso.execute({
+        sql: 'UPDATE supplier_orders SET status = ? WHERE id = ? AND company_id = ?',
+        args: [status, id, companyId],
+    });
+    if (!r.rowsAffected) return { success: false, error: 'Pedido no encontrado' };
+    return { success: true };
+}
+
+// Agrega productos a un pedido YA creado (se olvidó alguno al armarlo).
+//
+// La fusión se hace acá y no en el navegador: los items viven en una columna
+// JSON, así que leer-modificar-escribir desde el cliente pisaría lo que otro
+// haya agregado mientras tanto. El total se recalcula del lado del servidor por
+// lo mismo.
+async function supplierOrderAddItems(turso, companyId, session, { id, items }) {
+    if (!id || !Array.isArray(items) || !items.length) return { success: false, error: 'Faltan datos' };
+
+    const r = await turso.execute({
+        sql: 'SELECT items, status FROM supplier_orders WHERE id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    const row = r.rows[0];
+    if (!row) return { success: false, error: 'Pedido no encontrado' };
+    // Un pedido recibido ya tiene su compra cargada: sumarle productos ahora
+    // dejaría el pedido y la compra diciendo cosas distintas.
+    if (row.status === 'received') return { success: false, error: 'El pedido ya fue recibido' };
+
+    let actuales = [];
+    try { actuales = JSON.parse(row.items) || []; } catch { actuales = []; }
+    if (!Array.isArray(actuales)) actuales = [];
+
+    const fusionados = [...actuales];
+    for (const nuevo of items) {
+        const bruto = Number(nuevo.costWithTax) || Number(nuevo.cost) || 0;
+        const linea = {
+            id: nuevo.id,
+            name: nuevo.name,
+            sku: nuevo.sku || '',
+            cost: Number(nuevo.cost) || 0,
+            costWithTax: bruto,
+            quantity: Number(nuevo.quantity) || 0,
+            taxRate: Number(nuevo.taxRate) || 0,
+        };
+        linea.total = bruto * linea.quantity;
+
+        // Si el producto ya estaba en el pedido se suma la cantidad, en vez de
+        // dejar dos líneas del mismo producto.
+        const idx = fusionados.findIndex(i => String(i.id) === String(linea.id));
+        if (idx >= 0) {
+            const cantidad = (Number(fusionados[idx].quantity) || 0) + linea.quantity;
+            fusionados[idx] = { ...linea, quantity: cantidad, total: bruto * cantidad };
+        } else {
+            fusionados.push(linea);
+        }
+    }
+
+    const total = fusionados.reduce((s, i) => s + (Number(i.total) || 0), 0);
+    await turso.execute({
+        sql: 'UPDATE supplier_orders SET items = ?, total_amount = ? WHERE id = ? AND company_id = ?',
+        args: [JSON.stringify(fusionados), total, id, companyId],
+    });
+    return { success: true, items: fusionados, total_amount: total };
+}
+
 async function supplierOrderDelete(turso, companyId, session, { id }) {
     if (!id) return { success: false, error: 'Falta id' };
     await turso.execute({
@@ -264,6 +337,8 @@ export const purchaseActions = {
     supplierDelete,
     supplierOrdersFetch,
     supplierOrderCreate,
+    supplierOrderSetStatus,
+    supplierOrderAddItems,
     supplierOrderDelete,
     purchaseCreate,
     purchasesFetch,
