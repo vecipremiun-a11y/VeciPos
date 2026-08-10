@@ -4,9 +4,11 @@ import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus, Edit, X, ArrowLe
 import ProductModal from '../components/ProductModal';
 import { usePermissions } from '../hooks/usePermissions';
 import AsyncButton from '../components/AsyncButton';
+import { toast } from '../lib/toast';
+import { reportCall } from '../lib/dataApi';
 
 const Purchases = () => {
-    const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown, fetchProductImage } = useStore();
+    const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown, fetchProductImage, activeCompanyId, setSupplierOrderStatus } = useStore();
     const { can } = usePermissions();
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
     const [isMobileDetailsOpen, setIsMobileDetailsOpen] = useState(false);
@@ -44,6 +46,7 @@ const Purchases = () => {
         cost: '',
         price: '',
         quantity: '1',
+        total: '',
         margin: '',
         sku: '',
         tax: 0,
@@ -69,6 +72,68 @@ const Purchases = () => {
     // Derived
     // Derived
     const [filteredProducts, setFilteredProducts] = useState([]);
+
+    // Precarga desde "Pasar a Compra" (Pedidos Realizados). Trae proveedor,
+    // productos, cantidades y costos ya cargados: al recibir la mercadería solo
+    // hay que revisar precios y guardar, en vez de tipear la factura entera.
+    const [desdePedido, setDesdePedido] = useState(null);
+    useEffect(() => {
+        let raw;
+        try { raw = sessionStorage.getItem('compraDesdePedido'); } catch { return; }
+        if (!raw) return;
+        // Se consume una sola vez: si no, volver a Compras recargaría el pedido
+        // encima de una factura que el usuario ya empezó.
+        try { sessionStorage.removeItem('compraDesdePedido'); } catch { /* noop */ }
+
+        let datos;
+        try { datos = JSON.parse(raw); } catch { return; }
+        if (!datos?.items?.length) return;
+
+        setInvoiceData(prev => ({ ...prev, supplierId: String(datos.supplierId ?? '') }));
+        setDesdePedido({ orderId: datos.orderId, supplierName: datos.supplierName });
+
+        // El pedido guarda el costo con el que se pidió pero no el precio de
+        // venta; se trae el actual de cada producto para poder revisar el margen.
+        (async () => {
+            let precios = {};
+            let falloPrecios = false;
+            try {
+                const rows = await reportCall(activeCompanyId, 'productsByIds', {
+                    ids: datos.items.map(i => i.id).filter(Boolean),
+                });
+                if (Array.isArray(rows)) precios = Object.fromEntries(rows.map(p => [String(p.id), p]));
+                else falloPrecios = true;
+            } catch {
+                // Sin aviso, los precios quedaban en 0 y parecía que el producto
+                // no tenía precio de venta cargado.
+                falloPrecios = true;
+            }
+
+            setInvoiceItems(datos.items.map(i => {
+                const actual = precios[String(i.id)] || {};
+                const cantidad = parseFloat(i.quantity) || 0;
+                const costo = parseFloat(i.cost) || 0;
+                return {
+                    id: i.id,
+                    name: i.name,
+                    sku: i.sku || actual.sku || '',
+                    quantity: cantidad,
+                    cost: costo,
+                    price: parseFloat(actual.price) || 0,
+                    tax: parseFloat(i.taxRate ?? actual.tax_rate) || 0,
+                    total: cantidad * costo,
+                    expiryDate: null,
+                    batchNumber: null,
+                };
+            }));
+            if (falloPrecios) {
+                toast(`Pedido #${datos.orderId} cargado (${datos.items.length} productos), pero no se pudieron traer los precios de venta: quedan en 0 y hay que completarlos.`, 'error');
+            } else {
+                toast(`Pedido #${datos.orderId} cargado: ${datos.items.length} productos. Revisá precios y guardá.`, 'success');
+            }
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     useEffect(() => {
         const search = async () => {
@@ -105,10 +170,13 @@ const Purchases = () => {
             margin = (((netPrice - product.cost) / product.cost) * 100).toFixed(2);
         }
 
+        setTrioFijados(['cost', 'quantity']);
         setEntryForm({
             cost: product.cost || '',
             price: product.price || '',
             quantity: '1',
+            // Arranca coherente: costo × 1.
+            total: product.cost ? String(Math.round(product.cost * 100) / 100) : '',
             margin: margin,
             sku: product.sku || '',
             tax: taxRate,
@@ -117,21 +185,69 @@ const Purchases = () => {
         });
     };
 
+    // ── Costo · Cantidad · Total, ligados entre sí ──────────────────────────
+    //
+    // costo × cantidad = total, así que con dos sale el tercero. Se recalcula EL
+    // QUE HACE MÁS RATO QUE NO SE TOCA (mandan los dos últimos editados), igual
+    // que en Pedidos. Sirve para el caso real de recibir mercadería: la factura
+    // del proveedor trae el total de la línea y los kilos, y de ahí sale el costo.
+    //
+    // El IVA, la utilidad y el precio de venta NO entran en este juego: siguen
+    // dependiendo solo del costo, tal como estaban.
+    const TRIO = ['cost', 'quantity', 'total'];
+    const [trioFijados, setTrioFijados] = useState(['cost', 'quantity']);
+    const trioCalculado = TRIO.find(c => !trioFijados.includes(c));
+
+    // El precio de venta sale del costo. Se extrae para poder aplicarlo también
+    // cuando el costo se DEDUCE del total en vez de escribirse a mano.
+    const precioDesdeCosto = (cost, margin, tax) => {
+        if (!(cost > 0) || !margin) return null;
+        return (cost * (1 + margin / 100) * (1 + tax / 100)).toFixed(0);
+    };
+
+    const cambiarTrio = (campo, valor) => {
+        const fijados = [campo, ...trioFijados.filter(c => c !== campo)].slice(0, 2);
+        setTrioFijados(fijados);
+        const aCalcular = TRIO.find(c => !fijados.includes(c));
+
+        setEntryForm(prev => {
+            const next = { ...prev, [campo]: valor };
+            const c = parseFloat(next.cost) || 0;
+            const q = parseFloat(next.quantity) || 0;
+            const t = parseFloat(next.total) || 0;
+
+            if (aCalcular === 'total') {
+                next.total = c && q ? String(Math.round(c * q * 100) / 100) : '';
+            } else if (aCalcular === 'quantity') {
+                // 3 decimales: la mercadería por peso se recibe en gramos.
+                next.quantity = t && c > 0 ? String(Math.round((t / c) * 1000) / 1000) : '';
+            } else {
+                next.cost = t && q > 0 ? String(Math.round((t / q) * 100) / 100) : '';
+            }
+
+            // El precio se rehace solo si el costo cambió de verdad (escrito o
+            // deducido). Si no, se respeta el que haya puesto el usuario.
+            if (next.cost !== prev.cost) {
+                const p = precioDesdeCosto(parseFloat(next.cost) || 0,
+                    parseFloat(next.margin) || 0, parseFloat(next.tax) || 0);
+                if (p !== null) next.price = p;
+            }
+            return next;
+        });
+    };
+
+    // Marca cuál de los tres está calculando el sistema, para no adivinar.
+    const ChipTrio = ({ campo }) => trioCalculado === campo ? (
+        <span className="ml-1 px-1 py-px rounded bg-[var(--color-primary)]/20 text-[var(--color-primary)] text-[9px] font-bold align-middle">
+            se calcula
+        </span>
+    ) : null;
+
     const handleEntryChange = (e) => {
         const { name, value } = e.target;
 
-        if (name === 'cost') {
-            const cost = parseFloat(value) || 0;
-            const margin = parseFloat(entryForm.margin) || 0;
-            const tax = parseFloat(entryForm.tax) || 0;
-
-            if (cost > 0 && margin) {
-                const netPrice = cost * (1 + margin / 100);
-                const finalPrice = netPrice * (1 + tax / 100);
-                setEntryForm(prev => ({ ...prev, [name]: value, price: finalPrice.toFixed(0) }));
-            } else {
-                setEntryForm(prev => ({ ...prev, [name]: value }));
-            }
+        if (name === 'cost' || name === 'quantity' || name === 'total') {
+            cambiarTrio(name, value);
         } else if (name === 'price') {
             const price = parseFloat(value) || 0;
             const cost = parseFloat(entryForm.cost) || 0;
@@ -196,7 +312,8 @@ const Purchases = () => {
         // Reset Left
         setSelectedProduct(null);
         setSearchTerm('');
-        setEntryForm({ cost: '', price: '', quantity: '1', margin: '', sku: '', tax: 0, expiryDate: '', batchNumber: '' });
+        setEntryForm({ cost: '', price: '', quantity: '1', total: '', margin: '', sku: '', tax: 0, expiryDate: '', batchNumber: '' });
+        setTrioFijados(['cost', 'quantity']);
     };
 
     const handleRemoveItem = (index) => {
@@ -232,11 +349,15 @@ const Purchases = () => {
             cost: itemToEdit.cost,
             price: itemToEdit.price,
             quantity: itemToEdit.quantity,
+            // El total de la línea que se está editando, para que el trío
+            // costo/cantidad/total arranque coherente.
+            total: String(Math.round((itemToEdit.cost || 0) * (itemToEdit.quantity || 0) * 100) / 100),
             margin: margin,
             tax: itemToEdit.tax,
             expiryDate: itemToEdit.expiryDate || '',
             batchNumber: itemToEdit.batchNumber || ''
         });
+        setTrioFijados(['cost', 'quantity']);
 
         // Remove from list so it doesn't duplicate when re-added
         handleRemoveItem(index);
@@ -287,18 +408,32 @@ const Purchases = () => {
 
         const success = await addPurchase(purchase);
         if (success) {
-            alert('Compra guardada exitosamente');
+            // Si la compra vino de un pedido, ese pedido ya está recibido: se
+            // marca para que no siga figurando como pendiente ni se pueda pasar
+            // a compra por segunda vez.
+            if (desdePedido?.orderId) {
+                const r = await setSupplierOrderStatus(desdePedido.orderId, 'received');
+                if (r?.success) {
+                    toast(`Compra guardada. El pedido #${desdePedido.orderId} quedó como recibido.`, 'success');
+                } else {
+                    toast(`Compra guardada, pero el pedido #${desdePedido.orderId} sigue pendiente: marcalo a mano.`, 'error');
+                }
+                setDesdePedido(null);
+            } else {
+                toast('Compra guardada correctamente', 'success');
+            }
             setInvoiceItems([]);
             setInvoiceData({ ...invoiceData, invoiceNumber: '', observation: '', document: null });
         } else {
-            alert('Error al guardar la compra');
+            toast('No se pudo guardar la compra', 'error');
         }
     };
 
     const handleCancel = () => {
         setSelectedProduct(null);
         setSearchTerm('');
-        setEntryForm({ cost: '', price: '', quantity: '1', margin: '', sku: '', tax: 0, expiryDate: '', batchNumber: '' });
+        setEntryForm({ cost: '', price: '', quantity: '1', total: '', margin: '', sku: '', tax: 0, expiryDate: '', batchNumber: '' });
+        setTrioFijados(['cost', 'quantity']);
     };
 
     const handleSaveNewProduct = async (productData) => {
@@ -393,7 +528,7 @@ const Purchases = () => {
                                     <input type="text" name="sku" value={entryForm.sku} onChange={handleEntryChange} className="glass-input w-full text-sm" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Costo ($)</label>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Costo ($)<ChipTrio campo="cost" /></label>
                                     <input type="number" name="cost" value={entryForm.cost} onChange={handleEntryChange} className="glass-input w-full text-sm" required min="0" step="0.01" />
                                 </div>
                             </div>
@@ -421,7 +556,7 @@ const Purchases = () => {
 
                             {/* Quantity */}
                             <div>
-                                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Cantidad a ingresar</label>
+                                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Cantidad a ingresar<ChipTrio campo="quantity" /></label>
                                 <input type="number" name="quantity" value={entryForm.quantity} onChange={handleEntryChange} className="glass-input w-full text-sm font-bold" min="0.001" step="any" />
                             </div>
 
@@ -435,6 +570,31 @@ const Purchases = () => {
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">Fecha de Vencimiento</label>
                                     <input type="date" name="expiryDate" value={entryForm.expiryDate || ''} onChange={handleEntryChange} className="glass-input w-full text-sm" />
                                 </div>
+                            </div>
+
+                            {/* Total de esta línea: costo × cantidad. Es lo que se le
+                                paga al proveedor por este producto, y sirve para
+                                contrastarlo contra la factura que trae. Va acá, al
+                                final, como último dato antes de agregar a la factura. */}
+                            <div>
+                                <label className="block text-xs text-[var(--color-text-muted)] mb-1">
+                                    Total del costo
+                                    <ChipTrio campo="total" />
+                                </label>
+                                <input
+                                    type="number"
+                                    name="total"
+                                    inputMode="decimal"
+                                    value={entryForm.total}
+                                    onChange={handleEntryChange}
+                                    min="0"
+                                    step="any"
+                                    className="glass-input w-full text-base font-bold text-[var(--color-primary)]"
+                                    placeholder="0"
+                                />
+                                <p className="text-[10px] text-[var(--color-text-muted)] mt-1">
+                                    Editá dos de: costo, cantidad y total. El otro se calcula.
+                                </p>
                             </div>
 
                             {/* Action Buttons */}
@@ -684,7 +844,7 @@ const Purchases = () => {
 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-xs text-[var(--color-text-muted)] mb-1">Costo ($)</label>
+                                        <label className="block text-xs text-[var(--color-text-muted)] mb-1">Costo ($)<ChipTrio campo="cost" /></label>
                                         <input
                                             type="number"
                                             name="cost"
@@ -738,7 +898,7 @@ const Purchases = () => {
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Cantidad a ingresar</label>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Cantidad a ingresar<ChipTrio campo="quantity" /></label>
                                     <input
                                         type="number"
                                         name="quantity"
@@ -775,6 +935,29 @@ const Purchases = () => {
                                     </div>
                                 </div>
 
+                                {/* Total de esta línea: costo × cantidad. Es lo que se le
+                                    paga al proveedor por este producto y permite
+                                    contrastarlo con la factura que trae. */}
+                                <div>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">
+                                        Total del costo
+                                        <ChipTrio campo="total" />
+                                    </label>
+                                    <input
+                                        type="number"
+                                        name="total"
+                                        value={entryForm.total}
+                                        onChange={handleEntryChange}
+                                        min="0"
+                                        step="any"
+                                        className="glass-input w-full text-lg font-bold text-[var(--color-primary)]"
+                                        placeholder="0"
+                                    />
+                                    <p className="text-[10px] text-[var(--color-text-muted)] mt-1">
+                                        Editá dos de: costo, cantidad y total. El otro se calcula.
+                                    </p>
+                                </div>
+
                                 <div className="flex gap-2 mt-4">
                                     <button
                                         type="button"
@@ -808,6 +991,13 @@ const Purchases = () => {
                             <ShoppingCart size={20} className="text-[var(--color-primary)]" />
                             Detalles de la Compra
                         </h2>
+                        {desdePedido && (
+                            <div className="mb-4 px-3 py-2 rounded-lg bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/40 text-xs text-[var(--color-primary)] flex items-center gap-2">
+                                <PackagePlus size={14} />
+                                Cargado desde el <strong>pedido #{desdePedido.orderId}</strong> a {desdePedido.supplierName}.
+                                Revisá cantidades y precios antes de guardar.
+                            </div>
+                        )}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
                                 <label className="block text-xs text-[var(--color-text-muted)] mb-1">Proveedor</label>
