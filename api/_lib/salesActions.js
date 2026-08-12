@@ -23,6 +23,38 @@ export async function saleCommit(turso, companyId, session, body) {
     }
     const saleTotal = parseFloat(sale.total);
 
+    // ── Antes que nada: ¿esta venta ya entró? ────────────────────
+    //
+    // El navegador manda un identificador propio de la venta, el mismo en cada
+    // reintento. Si ya está en la base, esta llamada es un reintento de algo que
+    // salió bien —la venta se registró pero la respuesta no llegó a tiempo— y
+    // hay que devolver la venta existente, NO crear otra.
+    //
+    // Sin esto, una respuesta lenta se cobraba dos veces: el 12-ago-2026 una
+    // venta quedó cargada tres veces en trece segundos. Ver migración 0021.
+    const clientSaleId = typeof sale.clientSaleId === 'string' && sale.clientSaleId.length <= 64
+        ? sale.clientSaleId
+        : null;
+
+    if (clientSaleId) {
+        const yaEsta = await turso.execute({
+            sql: 'SELECT id, total, status FROM sales WHERE company_id = ? AND client_sale_id = ? LIMIT 1',
+            args: [companyId, clientSaleId],
+        });
+        const previa = yaEsta.rows[0];
+        if (previa) {
+            // Se responde como éxito a propósito: para quien vendió, la venta SÍ
+            // quedó registrada. Devolver un error acá haría que el POS la
+            // encolara otra vez y el ciclo no terminaría nunca.
+            return {
+                success: true,
+                saleId: Number(previa.id),
+                duplicada: true,
+                message: 'Esta venta ya estaba registrada.',
+            };
+        }
+    }
+
     // Flags de la empresa leídos de la BD (fuente de verdad, no del cliente)
     const coRes = await turso.execute({
         sql: 'SELECT inventory_adjustment_mode, credit_block_mode FROM companies WHERE id = ?',
@@ -239,13 +271,13 @@ export async function saleCommit(turso, companyId, session, body) {
 
         const saleResult = await tx.execute({
             sql: `INSERT INTO sales
-                  (company_id, user_id, date, items, total, summary, payment_method, payment_details, status, client_id, client_name, payment_due_date, register_id)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?)`,
+                  (company_id, user_id, date, items, total, summary, payment_method, payment_details, status, client_id, client_name, payment_due_date, register_id, client_sale_id)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?)`,
             args: [
                 companyId, session?.uid ?? null, now, itemsJson, saleTotal,
                 sale.summary ?? null, sale.paymentMethod ?? null, detailsJson,
                 sale.client?.id || null, sale.client?.name || null, paymentDueDate,
-                registerId,
+                registerId, clientSaleId,
             ],
         });
         const rawSaleId = saleResult.lastInsertRowid || Date.now();

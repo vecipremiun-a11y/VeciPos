@@ -3117,6 +3117,23 @@ export const useStore = create(persist((set, get) => ({
 
 
     addSale: async (sale) => {
+        // ── Identificador propio de esta venta ───────────────────────
+        //
+        // Se pone UNA vez y viaja con la venta a todos lados: al servidor, a la
+        // cola de reintento y a Dexie. Es lo que le permite al servidor
+        // reconocer un reintento y devolver la venta que ya registró en vez de
+        // cobrarla de nuevo.
+        //
+        // La condición `if (!sale.clientSaleId)` es la parte que importa: al
+        // reintentar desde la cola llega la MISMA venta, que ya trae su
+        // identificador, y hay que respetarlo. Generar uno nuevo acá sería
+        // volver al problema original — el 12-ago-2026 una venta se cobró tres
+        // veces en trece segundos por no tener esto.
+        if (!sale.clientSaleId) {
+            sale.clientSaleId = (globalThis.crypto?.randomUUID?.())
+                || `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+        }
+
         // ============================================
         // FASE 0: DETECCIÓN OFFLINE
         // ============================================
