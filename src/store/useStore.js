@@ -6,7 +6,7 @@ import { syncCatalogIncremental } from '../lib/db/sync';
 import { markActivity } from '../lib/smartPolling';
 import { setTabUserId, getTabUserId, broadcastLogin, broadcastLogout } from '../lib/sessionGuard';
 import { sinDobleEnvio } from '../lib/inFlight';
-import { hayConexion, reportarResultadoRed } from '../lib/conectividad';
+import { hayConexion, reportarResultadoRed, fetchConLimite } from '../lib/conectividad';
 import { getModuleByKey } from '../constants/modules';
 import { getPlanLevel } from '../config/mercadopago';
 import bcrypt from 'bcryptjs';
@@ -50,12 +50,9 @@ function userApiCall(action, payload = {}) {
 const API_TIMEOUT_MS = 12000;
 
 async function _userApiCall(action, payload = {}) {
-    const ctrl = new AbortController();
-    const corte = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
     try {
-        const r = await fetch('/api/data/actions', {
+        const r = await fetchConLimite('/api/data/actions', {
             method: 'POST',
-            signal: ctrl.signal,
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             // expectedUserId va al final: identifica a nombre de quién cree actuar ESTA
@@ -91,7 +88,7 @@ async function _userApiCall(action, payload = {}) {
         // _network: la petición ni llegó al servidor (offline / caída / se agotó el
         // tiempo) — addSale usa esto para encolar la venta en la cola failsafe en
         // vez de perderla.
-        const seCorto = e?.name === 'AbortError';
+        const seCorto = e?.name === 'AbortError' || e?.name === 'TimeoutError';
         // La petición ni llegó: el POS pasa a offline ya, para que la próxima
         // venta se guarde al instante en vez de volver a esperar.
         reportarResultadoRed(false);
@@ -100,8 +97,6 @@ async function _userApiCall(action, payload = {}) {
             error: seCorto ? 'Sin respuesta del servidor' : 'Error de red: ' + e.message,
             _network: true,
         };
-    } finally {
-        clearTimeout(corte);
     }
 }
 

@@ -3,6 +3,7 @@
 // que userApiCall del store. Fase 1 · Paso 19.
 import { getTabUserId } from './sessionGuard';
 import { sinDobleEnvio } from './inFlight';
+import { fetchConLimite } from './conectividad';
 
 // Mismo blindaje que userApiCall: un doble clic no manda la operación dos veces.
 export function dataApiCall(action, payload = {}) {
@@ -14,12 +15,9 @@ export function dataApiCall(action, payload = {}) {
 const API_TIMEOUT_MS = 12000;
 
 async function _dataApiCall(action, payload = {}) {
-    const ctrl = new AbortController();
-    const corte = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
     try {
-        const r = await fetch('/api/data/actions', {
+        const r = await fetchConLimite('/api/data/actions', {
             method: 'POST',
-            signal: ctrl.signal,
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             // Identifica a nombre de quién cree actuar esta pestaña; el servidor corta
@@ -30,14 +28,12 @@ async function _dataApiCall(action, payload = {}) {
         if (data && typeof data === 'object') data._status = r.status;
         return data;
     } catch (e) {
-        const seCorto = e?.name === 'AbortError';
+        const seCorto = e?.name === 'AbortError' || e?.name === 'TimeoutError';
         return {
             success: false,
             error: seCorto ? 'Sin respuesta del servidor' : 'Error de red: ' + e.message,
             _network: true,
         };
-    } finally {
-        clearTimeout(corte);
     }
 }
 

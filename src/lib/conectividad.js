@@ -39,6 +39,33 @@ const oyentes = new Set();
 
 const avisar = () => oyentes.forEach(fn => { try { fn(hayInternet); } catch { /* noop */ } });
 
+/**
+ * fetch con tiempo límite que funciona en TODOS los entornos.
+ *
+ * El AbortController solo no alcanza: dentro de la app (Capacitor) el plugin
+ * CapacitorHttp reemplaza `fetch` por peticiones nativas y NO conecta la señal
+ * de cancelación. O sea que en el teléfono —justo donde el offline más
+ * importa— el corte no se aplicaría y la venta seguiría colgada.
+ *
+ * Por eso además se corre una carrera contra un temporizador: la promesa
+ * siempre termina, respete o no la cancelación el transporte de abajo. El
+ * AbortController se mantiene porque en el navegador sí aborta de verdad la
+ * petición, en vez de dejarla viva en segundo plano.
+ */
+export function fetchConLimite(url, opciones = {}, ms = 12000) {
+    const ctrl = new AbortController();
+    const corte = setTimeout(() => ctrl.abort(), ms);
+    const peticion = fetch(url, { ...opciones, signal: ctrl.signal });
+    const reloj = new Promise((_, rechazar) => {
+        setTimeout(() => {
+            const e = new Error('Tiempo de espera agotado');
+            e.name = 'TimeoutError';
+            rechazar(e);
+        }, ms);
+    });
+    return Promise.race([peticion, reloj]).finally(() => clearTimeout(corte));
+}
+
 function fijar(nuevo) {
     if (nuevo === hayInternet) return;
     hayInternet = nuevo;
@@ -64,14 +91,11 @@ async function latir() {
         return;
     }
 
-    const ctrl = new AbortController();
-    const corte = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
-        const r = await fetch(`${PING_URL}?t=${Date.now()}`, {
+        const r = await fetchConLimite(`${PING_URL}?t=${Date.now()}`, {
             method: 'GET',
-            signal: ctrl.signal,
             cache: 'no-store',
-        });
+        }, TIMEOUT_MS);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         ultimoOk = Date.now();
         fallosSeguidos = 0;
@@ -80,7 +104,6 @@ async function latir() {
         fallosSeguidos++;
         if (fallosSeguidos >= FALLOS_PARA_CAER) fijar(false);
     } finally {
-        clearTimeout(corte);
         programar();
     }
 }
