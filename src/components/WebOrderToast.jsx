@@ -5,6 +5,8 @@ import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { playProductionSound } from '../utils/productionSounds';
 import WebOrderCard from './WebOrderCard';
+import { notificar, pedirPermisoNotificaciones } from '../lib/notificaciones';
+import { formatCurrency } from '../utils/formatCurrency';
 
 // Aviso global de encargos que entran desde la web (miniveci).
 // - Escucha el canal Pusher `preorders` en CUALQUIER pantalla, para todas las
@@ -44,6 +46,11 @@ const WebOrderToast = () => {
     useEffect(() => {
         fetchPendingWebOrders();
         fetchOrderBadges();
+        // Permiso de notificaciones. Se pide acá porque este componente se monta
+        // una vez con la sesión ya iniciada: pedirlo antes de entrar sería pedir
+        // permiso a alguien que todavía no sabe para qué. En Android 13+ es
+        // obligatorio; sin él los avisos se descartan sin decir nada.
+        pedirPermisoNotificaciones();
     }, []);
 
     // Canal Pusher en vivo.
@@ -59,8 +66,25 @@ const WebOrderToast = () => {
         const isForActiveCompany = (data) => !data?.company_id || data.company_id === useStore.getState().activeCompanyId;
 
         channel.bind('order.created', (data) => {
+            // pushWebOrder ya descarta lo que no es de la empresa activa, así que
+            // `added` es la señal correcta: solo avisa por pedidos propios.
             const added = pushWebOrder(data);
-            if (added) playProductionSound('zen-chime'); // campanita (no toca el sonido de Producción)
+            if (added) {
+                playProductionSound('zen-chime'); // campanita (no toca el sonido de Producción)
+                // Aviso del sistema: la tarjeta y el sonido solo sirven si
+                // alguien está mirando la pantalla. Esto suena y aparece en la
+                // barra aunque la app esté en segundo plano.
+                const esTienda = data.order_kind === 'store';
+                const cliente = data.client_name || 'Cliente web';
+                const monto = Number(data.total ?? data.total_amount) || 0;
+                notificar({
+                    titulo: esTienda ? '🛒 Nuevo pedido de la tienda' : '📦 Nuevo encargo',
+                    cuerpo: monto > 0
+                        ? `${cliente} · ${formatCurrency(monto, currentCurrency)}`
+                        : cliente,
+                    etiqueta: `pedido-${data.id}`,
+                });
+            }
             if (isForActiveCompany(data)) fetchOrderBadges(); // refrescar contadores de las pestañas
         });
         channel.bind('order.updated', (data) => {
