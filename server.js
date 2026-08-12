@@ -38,6 +38,7 @@ import expireCompaniesHandler from './api/cron/expire-companies.js';
 import authLoginHandler from './api/auth/login.js';
 import adminActionsHandler from './api/admin/actions.js';
 import dataActionsHandler from './api/data/actions.js';
+import pingHandler from './api/ping.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -70,6 +71,12 @@ app.use(express.urlencoded({ extended: true }));
 
 app.get('/health', (_req, res) => {
     return res.status(200).json({ success: true, service: 'pos-integration-api' });
+});
+
+// Latido de conectividad del POS (ver api/ping.js). En dev lo sirve Express.
+app.all('/api/ping', async (req, res) => {
+    try { return await pingHandler(req, res); }
+    catch (error) { return res.status(500).json({ ok: false, error: error.message }); }
 });
 
 app.all('/api/integration/config', async (req, res) => {

@@ -6,6 +6,7 @@ import { syncCatalogIncremental } from '../lib/db/sync';
 import { markActivity } from '../lib/smartPolling';
 import { setTabUserId, getTabUserId, broadcastLogin, broadcastLogout } from '../lib/sessionGuard';
 import { sinDobleEnvio } from '../lib/inFlight';
+import { hayConexion, reportarResultadoRed } from '../lib/conectividad';
 import { getModuleByKey } from '../constants/modules';
 import { getPlanLevel } from '../config/mercadopago';
 import bcrypt from 'bcryptjs';
@@ -35,10 +36,26 @@ function userApiCall(action, payload = {}) {
     return sinDobleEnvio(action, payload, () => _userApiCall(action, payload));
 }
 
+// Tiempo máximo de espera de una llamada al servidor.
+//
+// Sin esto, con el WiFi del local encendido pero SIN internet, `fetch` no
+// fallaba: se quedaba colgado. El cajero veía la venta "procesando" y el modo
+// offline nunca se activaba, porque el camino que encola la venta recién corre
+// cuando la llamada falla. Medido en Node contra una IP muerta: 10,7 s; en el
+// navegador puede ser mucho más, y si la conexión TCP se abre y el servidor no
+// responde, no termina nunca.
+//
+// 12 s es holgado: las funciones de Vercel cortan a los 10, así que una
+// respuesta más lenta que eso ya está muerta de todos modos.
+const API_TIMEOUT_MS = 12000;
+
 async function _userApiCall(action, payload = {}) {
+    const ctrl = new AbortController();
+    const corte = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
     try {
         const r = await fetch('/api/data/actions', {
             method: 'POST',
+            signal: ctrl.signal,
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             // expectedUserId va al final: identifica a nombre de quién cree actuar ESTA
@@ -56,6 +73,9 @@ async function _userApiCall(action, payload = {}) {
         });
         const data = await r.json().catch(() => ({ success: false, error: 'Respuesta inválida del servidor' }));
         if (data && typeof data === 'object') data._status = r.status;
+        // El servidor contestó: hay internet. Confirma el estado sin gastar un
+        // latido aparte.
+        reportarResultadoRed(true);
         if (data?.error === 'SESSION_MISMATCH') {
             // La sesión del navegador ya es de otro usuario: esta pestaña se alinea.
             try { useStore.getState().flagSessionTakeover(data); } catch { /* noop */ }
@@ -68,9 +88,20 @@ async function _userApiCall(action, payload = {}) {
         }
         return data;
     } catch (e) {
-        // _network: la petición ni llegó al servidor (offline / caída) — addSale usa
-        // esto para encolar la venta en la cola failsafe en vez de perderla.
-        return { success: false, error: 'Error de red: ' + e.message, _network: true };
+        // _network: la petición ni llegó al servidor (offline / caída / se agotó el
+        // tiempo) — addSale usa esto para encolar la venta en la cola failsafe en
+        // vez de perderla.
+        const seCorto = e?.name === 'AbortError';
+        // La petición ni llegó: el POS pasa a offline ya, para que la próxima
+        // venta se guarde al instante en vez de volver a esperar.
+        reportarResultadoRed(false);
+        return {
+            success: false,
+            error: seCorto ? 'Sin respuesta del servidor' : 'Error de red: ' + e.message,
+            _network: true,
+        };
+    } finally {
+        clearTimeout(corte);
     }
 }
 
@@ -1742,11 +1773,28 @@ export const useStore = create(persist((set, get) => ({
     deleteUser: async (id) => {
         try {
             const r = await userApiCall('userDelete', { companyId: get().activeCompanyId, id });
+            // El servidor puede rechazar con `tieneRegistrosLaborales`: se devuelve
+            // tal cual para que la pantalla ofrezca quitar el acceso en su lugar.
             if (!r?.success) return r || { success: false, error: 'Error eliminando usuario' };
             set((state) => ({ users: state.users.filter(u => u.id !== id) }));
             return { success: true };
         } catch (e) {
             console.error("Delete user error", e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // Le quita el acceso a la empresa sin borrar su historial laboral. Es lo que
+    // corresponde cuando alguien deja de trabajar y tiene asistencia o sueldos
+    // cargados: esos registros no se borran.
+    revokeUserAccess: async (id) => {
+        try {
+            const r = await userApiCall('userRevokeAccess', { companyId: get().activeCompanyId, id });
+            if (!r?.success) return r || { success: false, error: 'Error quitando el acceso' };
+            set((state) => ({ users: state.users.filter(u => u.id !== id) }));
+            return { success: true };
+        } catch (e) {
+            console.error('Revoke user access error', e);
             return { success: false, error: e.message };
         }
     },
@@ -3083,7 +3131,11 @@ export const useStore = create(persist((set, get) => ({
         // volver online (App.jsx + OfflineSync page).
         // Excepción: si la venta viene desde la cola de sincronización
         // (`_fromOfflineQueue`), NO re-encolar — debe procesarse online sí o sí.
-        if (typeof navigator !== 'undefined' && !navigator.onLine && !sale?._fromOfflineQueue) {
+        // `hayConexion()` es el monitor real (latido a /api/ping). Antes solo se
+        // miraba navigator.onLine, que con WiFi sin internet dice "sí hay" — y la
+        // venta salía a buscar el servidor en vez de guardarse offline.
+        const sinConexion = (typeof navigator !== 'undefined' && !navigator.onLine) || !hayConexion();
+        if (sinConexion && !sale?._fromOfflineQueue) {
             try {
                 return await get()._addSaleOffline(sale);
             } catch (offlineErr) {
@@ -6928,6 +6980,7 @@ export const useStore = create(persist((set, get) => ({
             let daysVacation = 0;
             let daysMedical = 0;
             let daysPermission = 0;
+            let daysUnpaidLeave = 0; // "Permiso sin Goce de Sueldo": siempre descuenta
             let daysUnjustified = 0;
             const detailDays = [];
 
@@ -6973,12 +7026,24 @@ export const useStore = create(persist((set, get) => ({
                     if (aType === 'vacation') { dayStatus = 'vacation'; daysVacation++; }
                     else if (aType === 'medical') { dayStatus = 'medical'; daysMedical++; }
                     else if (aType === 'permission') { dayStatus = 'permission'; daysPermission++; }
+                    // "Permiso sin Goce de Sueldo": por definición se descuenta
+                    // siempre, no depende del interruptor de permisos pagados.
+                    // Antes caía en "otras ausencias" y se mostraba con ese nombre.
+                    else if (aType === 'unpaid_leave') { dayStatus = 'unpaid_leave'; daysUnpaidLeave++; }
                     else if (aType === 'unjustified') { dayStatus = 'unjustified'; daysUnjustified++; daysAbsent++; }
                     else { dayStatus = 'absence_other'; daysAbsent++; }
                 } else {
-                    // Past date with no attendance and no absence = unjustified absence
+                    // Día pasado, con turno, sin marca de asistencia y sin ausencia
+                    // cargada. Contarlo como falta injustificada SOLO si la empresa
+                    // realmente usa el control de asistencia.
+                    //
+                    // Antes se daba por hecho, y en una empresa que no marca
+                    // entrada/salida eso descontaba a TODOS por todos los días:
+                    // medido el 10-ago-2026, a las 5 vendedoras se les descontaba
+                    // entre $100.000 y $133.333 de un sueldo de $500.000 sin que
+                    // hubieran faltado un solo día.
                     const today = new Date().toISOString().slice(0, 10);
-                    if (dateStr < today) {
+                    if (config?.absence_from_missing_attendance && dateStr < today) {
                         dayStatus = 'unjustified';
                         daysUnjustified++;
                         daysAbsent++;
@@ -7014,7 +7079,18 @@ export const useStore = create(persist((set, get) => ({
             const payType = user.pay_type || 'monthly';
             const baseRate = user.pay_base_amount || 0;
             const hourlyRate = user.pay_hourly_rate || 0;
-            const valorDia = workingDaysMonth > 0 ? baseRate / workingDaysMonth : 0;
+            // Valor de un día de trabajo, base de todos los descuentos por ausencia.
+            // Depende del tipo de pago: dividir siempre por los días del MES daba
+            // un valor absurdo en pago por hora (ahí `pay_base_amount` es el valor
+            // de la hora, así que salía "hora ÷ 30").
+            const horasDia = config?.working_hours_per_day || 8;
+            const valorDia = (() => {
+                if (payType === 'hourly') return baseRate * horasDia;
+                if (payType === 'mixed') return (workingDaysMonth > 0 ? baseRate / workingDaysMonth : 0) + hourlyRate * horasDia;
+                if (payType === 'weekly') return baseRate / 7;
+                if (payType === 'biweekly') return workingDaysMonth > 0 ? baseRate / (workingDaysMonth / 2) : 0;
+                return workingDaysMonth > 0 ? baseRate / workingDaysMonth : 0; // mensual
+            })();
 
             if (payType === 'monthly') {
                 baseAmount = baseRate;
@@ -7031,15 +7107,57 @@ export const useStore = create(persist((set, get) => ({
                 baseAmount = baseRate + (hourlyRate * hoursWorked);
             }
 
+            // ¿El sueldo base ya cubre el período completo?
+            //
+            // En mensual/quincenal/semanal el sueldo incluye TODOS los días del
+            // período, trabajados o no. Ahí los días no pagados hay que
+            // DESCONTARLOS, y los pagados no se suman porque ya están adentro.
+            //
+            // En por hora / mixto se paga lo efectivamente trabajado, así que es
+            // al revés: no hay nada que descontar (el día no trabajado ya no se
+            // pagó) y las ausencias pagadas sí se suman.
+            //
+            // Antes se sumaban las pagadas en TODOS los casos: a un mensual con 3
+            // días de vacaciones se le liquidaba $550 sobre un sueldo de $500 —
+            // los días iban dos veces—. Y un permiso sin goce no descontaba nada,
+            // porque nunca se restaba del base.
+            const baseCubrePeriodo = ['monthly', 'weekly', 'biweekly'].includes(payType);
+
             // 5. Discounts
             let autoDiscounts = 0;
             let discountDetails = [];
 
-            // Absence discount (unjustified only)
-            if (config?.absence_discount_enabled && daysUnjustified > 0) {
-                const absDsc = valorDia * daysUnjustified;
-                autoDiscounts += absDsc;
-                discountDetails.push({ label: `Faltas injustificadas (${daysUnjustified}d)`, amount: absDsc });
+            if (baseCubrePeriodo) {
+                // Días dentro del período que NO se pagan → se descuentan del sueldo.
+                const noPagados = [];
+                if (config?.absence_discount_enabled && daysUnjustified > 0) {
+                    noPagados.push({ dias: daysUnjustified, label: 'Faltas injustificadas' });
+                }
+                if (!config?.vacation_paid && daysVacation > 0) {
+                    noPagados.push({ dias: daysVacation, label: 'Vacaciones sin goce' });
+                }
+                if (!config?.medical_paid && daysMedical > 0) {
+                    noPagados.push({ dias: daysMedical, label: 'Licencias sin goce' });
+                }
+                if (!config?.permission_paid && daysPermission > 0) {
+                    noPagados.push({ dias: daysPermission, label: 'Permisos personales' });
+                }
+                // Este no depende de ningún interruptor: el tipo ya dice "sin goce".
+                if (daysUnpaidLeave > 0) {
+                    noPagados.push({ dias: daysUnpaidLeave, label: 'Permisos sin goce de sueldo' });
+                }
+                // Ausencias de otro tipo: se descuentan salvo que el descuento por
+                // ausencia esté apagado del todo.
+                const otras = Math.max(0, daysAbsent - daysUnjustified);
+                if (config?.absence_discount_enabled && otras > 0) {
+                    noPagados.push({ dias: otras, label: 'Otras ausencias' });
+                }
+
+                noPagados.forEach(({ dias, label }) => {
+                    const monto = valorDia * dias;
+                    autoDiscounts += monto;
+                    discountDetails.push({ label: `${label} (${dias}d × ${Math.round(valorDia)})`, amount: monto });
+                });
             }
 
             // Late discount
@@ -7049,16 +7167,20 @@ export const useStore = create(persist((set, get) => ({
                 discountDetails.push({ label: `Atrasos (${lateCount}x, ${lateMinutes}min)`, amount: lateDsc });
             }
 
-            // 6. Paid absences (vacation, medical, permission)
+            // 6. Ausencias pagadas — SOLO cuando el sueldo se paga por lo trabajado
+            // (por hora / mixto). En mensual ya están dentro del sueldo base:
+            // sumarlas las pagaría dos veces.
             let paidAbsenceAmount = 0;
-            if (config?.vacation_paid && daysVacation > 0) {
-                paidAbsenceAmount += valorDia * daysVacation;
-            }
-            if (config?.medical_paid && daysMedical > 0) {
-                paidAbsenceAmount += valorDia * daysMedical;
-            }
-            if (config?.permission_paid && daysPermission > 0) {
-                paidAbsenceAmount += valorDia * daysPermission;
+            if (!baseCubrePeriodo) {
+                if (config?.vacation_paid && daysVacation > 0) {
+                    paidAbsenceAmount += valorDia * daysVacation;
+                }
+                if (config?.medical_paid && daysMedical > 0) {
+                    paidAbsenceAmount += valorDia * daysMedical;
+                }
+                if (config?.permission_paid && daysPermission > 0) {
+                    paidAbsenceAmount += valorDia * daysPermission;
+                }
             }
 
             // 7. Automatic bonuses

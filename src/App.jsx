@@ -13,6 +13,7 @@ import RequireAdmin from './components/RequireAdmin';
 import ProtectedPage from './components/auth/ProtectedPage';
 import FeatureGatePage from './components/auth/FeatureGatePage';
 import ToastHost from './components/ToastHost';
+import AvisoSinConexion from './components/AvisoSinConexion';
 import { installAlertBridge } from './lib/toast';
 
 // Los alert() nativos ("app.posveci.com dice...") pasan a ser notificaciones
@@ -80,6 +81,7 @@ import { createSmartInterval } from './lib/smartPolling';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 import SessionTakeoverModal from './components/SessionTakeoverModal';
 import { setTabUserId } from './lib/sessionGuard';
+import { alCambiarConexion } from './lib/conectividad';
 
 // Protected Route Component - ROBUST RESTORE
 const ProtectedRoute = ({ children }) => {
@@ -276,6 +278,15 @@ function App() {
     // Startup: full sync (limpia stale y purga rows borradas server-side).
     syncAll({ incremental: false });
 
+    // Apenas el monitor confirma que volvió el internet, se manda lo que quedó
+    // pendiente. No alcanza con el evento 'online' del navegador: ese se dispara
+    // al reconectar el WiFi, aunque el internet siga caído.
+    const dejarDeEscuchar = alCambiarConexion((online) => {
+      if (!online) return;
+      processPendingSalesQueue();
+      syncAll({ incremental: true });
+    });
+
     // FASE 9 · Sync inteligente con smart-polling:
     //   - 60s mientras hay actividad reciente (venta / mutación)
     //   - 5min cuando la app está idle
@@ -305,6 +316,7 @@ function App() {
 
     return () => {
       stop();
+      dejarDeEscuchar();
     };
   }, [currentUser]);
 
@@ -312,6 +324,7 @@ function App() {
     <Router>
       <PWAUpdatePrompt />
       <ToastHost />
+      <AvisoSinConexion />
       <SessionTakeoverModal />
       <Suspense fallback={
         <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)]">
