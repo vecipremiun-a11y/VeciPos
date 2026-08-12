@@ -277,6 +277,7 @@ export default async function handler(req, res) {
             case 'userCreate':
             case 'userUpdate':
             case 'userDelete':
+            case 'userRevokeAccess':
                 return res.status(200).json(await userActions[action](turso, companyId, session, body));
             // Medios de pago: config + datáfonos + cuentas (Fase 1 · Paso 25)
             case 'paymentSettingsLoad':

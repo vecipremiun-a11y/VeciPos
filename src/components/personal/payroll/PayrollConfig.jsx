@@ -31,6 +31,7 @@ const PayrollConfig = () => {
             bonus_attendance_amount: cfg?.bonus_attendance_amount ?? 0,
             working_days_per_month: cfg?.working_days_per_month ?? 30,
             working_hours_per_day: cfg?.working_hours_per_day ?? 8,
+            absence_from_missing_attendance: cfg?.absence_from_missing_attendance ?? 0,
         });
         setLoading(false);
     };
@@ -132,6 +133,25 @@ const PayrollConfig = () => {
                         form.absence_discount_enabled ? "bg-cyan-500" : "bg-gray-600"
                     )}>
                         <div className={cn("w-5 h-5 rounded-full bg-white absolute top-0.5 transition-all", form.absence_discount_enabled ? "left-6" : "left-0.5")} />
+                    </button>
+                </div>
+
+                {/* Solo sirve si la empresa usa el kiosco. Con esto encendido y sin
+                    marcas, se descuenta a todos por todos los días. */}
+                <div className="flex items-center justify-between p-3 rounded-lg bg-[var(--color-surface)] border border-[var(--glass-border)]">
+                    <div className="pr-3">
+                        <p className="text-sm font-medium text-[var(--color-text)]">Contar día sin marca como falta</p>
+                        <p className="text-[11px] text-[var(--color-text-muted)]">
+                            Un día con turno y sin marca de entrada se toma como inasistencia.
+                            <strong className="text-amber-400"> Activalo solo si usás el control de asistencia</strong>, o
+                            se le descontará a todos por días que sí trabajaron.
+                        </p>
+                    </div>
+                    <button onClick={() => toggle('absence_from_missing_attendance')} className={cn(
+                        "w-12 h-6 rounded-full transition-all relative shrink-0",
+                        form.absence_from_missing_attendance ? "bg-cyan-500" : "bg-gray-600"
+                    )}>
+                        <div className={cn("w-5 h-5 rounded-full bg-white absolute top-0.5 transition-all", form.absence_from_missing_attendance ? "left-6" : "left-0.5")} />
                     </button>
                 </div>
 

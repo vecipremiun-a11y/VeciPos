@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Tags, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store, Bike, MapPin, Navigation } from 'lucide-react';
 import { useStore } from '../store/useStore';
@@ -28,6 +29,95 @@ const LockBadge = ({ moduleKey }) => {
         );
     }
     return <Crown size={15} fill="currentColor" title="Plan Profesional" className="text-amber-400 flex-shrink-0" />;
+};
+
+// Al pasar el mouse con la barra lateral contraída: el nombre del menú, y si
+// tiene submenú, sus opciones. Ahí solo se ven iconos y no hay forma de saber
+// qué es cada uno ni de llegar a lo de adentro sin desplegar la barra.
+//
+// Se dibuja fuera del árbol (portal, posición fija). Los items llevan
+// `overflow-hidden` por el efecto de fondo y la barra tiene scroll propio: un
+// panel dentro del item quedaría cortado por los dos lados.
+const EtiquetaMenu = ({ label, activa, subItems, onNavegar, children }) => {
+    const [pos, setPos] = useState(null);
+    const cierreRef = React.useRef(null);
+
+    const abrir = (e) => {
+        clearTimeout(cierreRef.current);
+        const r = e.currentTarget.getBoundingClientRect();
+        // Los submenús largos se anclan arriba y se limitan en alto para no
+        // salirse de la pantalla; la etiqueta simple va centrada con el icono.
+        setPos({ top: r.top, medio: r.top + r.height / 2, left: r.right + 10 });
+    };
+    // Pequeña demora al salir: sin esto, mover el mouse del icono al panel
+    // (hay un hueco de 10 px) lo cerraba antes de llegar.
+    const cerrar = () => {
+        clearTimeout(cierreRef.current);
+        cierreRef.current = setTimeout(() => setPos(null), 140);
+    };
+
+    React.useEffect(() => () => clearTimeout(cierreRef.current), []);
+
+    if (!activa) return children;
+
+    const conSubmenu = Array.isArray(subItems) && subItems.length > 0;
+    // Los subgrupos se aplanan: en un panel al vuelo, obligar a abrir otro nivel
+    // sería peor que mostrarlo todo.
+    const filas = conSubmenu
+        ? subItems.flatMap(s => s.isSubgroup
+            ? [{ tipo: 'grupo', label: s.label }, ...s.children.map(c => ({ tipo: 'hijo', ...c }))]
+            : [{ tipo: 'item', ...s }])
+        : [];
+
+    return (
+        <div className="relative" onMouseEnter={abrir} onMouseLeave={cerrar}>
+            {children}
+            {pos && createPortal(
+                conSubmenu ? (
+                    <div
+                        style={{ top: Math.min(pos.top, window.innerHeight - 60), left: pos.left, maxHeight: 'calc(100vh - 24px)' }}
+                        onMouseEnter={() => clearTimeout(cierreRef.current)}
+                        onMouseLeave={cerrar}
+                        className="fixed z-[9999] min-w-[210px] overflow-y-auto rounded-xl bg-[var(--color-surface)] border border-[var(--glass-border)] shadow-2xl py-2 animate-in fade-in slide-in-from-left-2 duration-150"
+                    >
+                        <p className="px-3 pb-2 mb-1 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] border-b border-[var(--glass-border)]">
+                            {label}
+                        </p>
+                        {filas.map((f, i) => f.tipo === 'grupo' ? (
+                            <p key={`g${i}`} className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+                                {f.label}
+                            </p>
+                        ) : (
+                            <NavLink
+                                key={f.path || `i${i}`}
+                                to={f.path}
+                                end
+                                onClick={() => { setPos(null); onNavegar?.(); }}
+                                className={({ isActive }) => cn(
+                                    'flex items-center gap-2.5 px-3 py-2 text-sm transition-colors',
+                                    f.tipo === 'hijo' && 'pl-6',
+                                    isActive
+                                        ? 'text-[var(--color-primary)] font-bold bg-[var(--color-primary)]/10'
+                                        : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--glass-bg)]'
+                                )}
+                            >
+                                {f.icon && <f.icon size={15} className="shrink-0" />}
+                                <span className="whitespace-nowrap">{f.label}</span>
+                            </NavLink>
+                        ))}
+                    </div>
+                ) : (
+                    <div
+                        style={{ top: pos.medio, left: pos.left }}
+                        className="fixed z-[9999] -translate-y-1/2 px-2.5 py-1.5 rounded-lg bg-[var(--color-surface)] border border-[var(--glass-border)] text-xs font-medium text-[var(--color-text)] shadow-2xl whitespace-nowrap pointer-events-none animate-in fade-in slide-in-from-left-2 duration-150"
+                    >
+                        {label}
+                    </div>
+                ),
+                document.body
+            )}
+        </div>
+    );
 };
 
 const MainLayout = () => {
@@ -279,8 +369,8 @@ const MainLayout = () => {
                             if (item.isLocked) {
                                 const firstSubPath = item.subItems[0]?.path || '/';
                                 return (
+                                    <EtiquetaMenu key={item.label} label={item.label} activa={!isSidebarOpen && !isMobile}>
                                     <NavLink
-                                        key={item.label}
                                         to={firstSubPath}
                                         onClick={() => isMobile && setIsSidebarOpen(false)}
                                         className={() => cn(
@@ -297,6 +387,7 @@ const MainLayout = () => {
                                             <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 shadow-lg shadow-amber-400/50" />
                                         )}
                                     </NavLink>
+                                    </EtiquetaMenu>
                                 );
                             }
 
@@ -309,6 +400,11 @@ const MainLayout = () => {
 
                             return (
                                 <div key={item.label} className="space-y-1">
+                                    <EtiquetaMenu
+                                        label={item.label}
+                                        activa={!isSidebarOpen && !isMobile}
+                                        subItems={item.subItems}
+                                    >
                                     <button
                                         onClick={() => toggleSubmenu(item.label)}
                                         className={cn(
@@ -331,6 +427,7 @@ const MainLayout = () => {
                                             />
                                         )}
                                     </button>
+                                    </EtiquetaMenu>
 
                                     {/* Subitems */}
                                     <div className={cn(
@@ -412,8 +509,8 @@ const MainLayout = () => {
                         }
 
                         return (
+                            <EtiquetaMenu key={item.path} label={item.label} activa={!isSidebarOpen && !isMobile}>
                             <NavLink
-                                key={item.path}
                                 to={item.path}
                                 onClick={() => isMobile && setIsSidebarOpen(false)}
                                 className={({ isActive }) => cn(
@@ -434,23 +531,26 @@ const MainLayout = () => {
                                     <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400 shadow-lg shadow-amber-400/50" />
                                 )}
                             </NavLink>
+                            </EtiquetaMenu>
                         );
                     })}
                 </nav>
 
                 <div className="p-4 border-t border-[var(--glass-border)]">
-                    <button
-                        onClick={handleLogout}
-                        className={cn(
-                            "flex items-center gap-3 px-3 py-3 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 w-full transition-all",
-                            !isSidebarOpen && "justify-center"
-                        )}
-                    >
-                        <LogOut size={20} />
-                        <span className={cn("whitespace-nowrap transition-all", !isSidebarOpen && "hidden")}>
-                            Cerrar Sesión
-                        </span>
-                    </button>
+                    <EtiquetaMenu label="Cerrar Sesión" activa={!isSidebarOpen && !isMobile}>
+                        <button
+                            onClick={handleLogout}
+                            className={cn(
+                                "flex items-center gap-3 px-3 py-3 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 w-full transition-all",
+                                !isSidebarOpen && "justify-center"
+                            )}
+                        >
+                            <LogOut size={20} />
+                            <span className={cn("whitespace-nowrap transition-all", !isSidebarOpen && "hidden")}>
+                                Cerrar Sesión
+                            </span>
+                        </button>
+                    </EtiquetaMenu>
                 </div>
             </aside>
 

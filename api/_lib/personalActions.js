@@ -27,6 +27,7 @@ const CONFIG_FIELDS = new Set([
     'bonus_punctuality_enabled', 'bonus_punctuality_amount',
     'bonus_attendance_enabled', 'bonus_attendance_amount',
     'working_days_per_month', 'working_hours_per_day',
+    'absence_from_missing_attendance',
 ]);
 
 const PERIOD_FIELDS = new Set([

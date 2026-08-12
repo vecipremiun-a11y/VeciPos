@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
 import { X, Save, Trash2, Lock } from 'lucide-react';
 import { format, startOfWeek, addWeeks, addDays } from 'date-fns';
+import { dataApiCall } from '../../../lib/dataApi';
 
 const SHIFT_TEMPLATES = {
     morning: { label: 'Manana', start: '07:00', end: '15:00' },
@@ -119,7 +120,7 @@ const buildShiftPayload = (shiftDate, userId, startTime, endTime, isDayOff = fal
 };
 
 const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, onSuccess, isLocked = false, isPast = false, isToday = false, hasRealAttendance = false }) => {
-    const { createShift, deleteShift, bulkSaveShifts, staffMembers, workShifts } = useStore();
+    const { createShift, deleteShift, bulkSaveShifts, staffMembers, workShifts, activeCompanyId } = useStore();
     const [loading, setLoading] = useState(false);
 
     // Form State
@@ -155,14 +156,52 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
         }
     }, [shiftData, selectedDate, selectedUser, isOpen]);
 
-    // Precarga la semana guardada del empleado al abrir en modo Horario Fijo:
-    // sin esto el modal mostraba siempre la plantilla por defecto y parecía
-    // que los cambios (p. ej. un Descanso el sábado) no se habían guardado.
+    // Precarga el horario que ese empleado YA tiene definido, al elegirlo en modo
+    // Horario Fijo. Si no tiene ninguno, quedan los días por defecto para
+    // activarlos y cargarles horas.
+    //
+    // Los turnos se piden al servidor para ESE empleado y ESA semana, en vez de
+    // buscarlos en los que tenga cargados el calendario: el calendario solo trae
+    // el rango que está mostrando, así que si la semana base caía fuera, no se
+    // encontraba nada y salía siempre la plantilla por defecto —parecía que la
+    // persona no tenía horario cuando sí lo tenía—.
+    const [cargandoHorario, setCargandoHorario] = useState(false);
+    const [horarioPrevio, setHorarioPrevio] = useState(null); // true | false | null
     useEffect(() => {
-        if (!isOpen || shiftData || scheduleMode !== 'fixed' || !userId) return;
-        const saved = weeklyConfigFromShifts(workShifts, userId, date);
-        setWeeklyConfig(saved || buildDefaultWeeklyConfig());
-    }, [isOpen, shiftData, scheduleMode, userId, date, workShifts]);
+        if (!isOpen || shiftData || scheduleMode !== 'fixed' || !userId || !date) {
+            setHorarioPrevio(null);
+            return;
+        }
+        let cancelado = false;
+        setCargandoHorario(true);
+
+        (async () => {
+            const inicio = startOfWeek(new Date(`${date}T00:00:00`), { weekStartsOn: 1 });
+            const fin = addDays(inicio, 6);
+            let filas = [];
+            try {
+                const r = await dataApiCall('personal.shiftsFetch', {
+                    companyId: activeCompanyId,
+                    startDate: format(inicio, 'yyyy-MM-dd'),
+                    endDate: format(fin, 'yyyy-MM-dd'),
+                    userId,
+                });
+                if (Array.isArray(r?.rows)) filas = r.rows;
+            } catch {
+                // Sin conexión se cae a lo que ya tenga cargado el calendario.
+                filas = workShifts;
+            }
+            if (cancelado) return;
+
+            const guardado = weeklyConfigFromShifts(filas, userId, date)
+                || weeklyConfigFromShifts(workShifts, userId, date);
+            setWeeklyConfig(guardado || buildDefaultWeeklyConfig());
+            setHorarioPrevio(!!guardado);
+            setCargandoHorario(false);
+        })();
+
+        return () => { cancelado = true; };
+    }, [isOpen, shiftData, scheduleMode, userId, date, workShifts, activeCompanyId]);
 
     const toggleDayEnabled = (dayValue) => {
         setWeeklyConfig((prev) => upsertDayConfig(prev, dayValue, { enabled: !prev[dayValue].enabled }));
@@ -393,6 +432,19 @@ const ShiftModal = ({ isOpen, onClose, shiftData, selectedDate, selectedUser, on
                         <>
                             <div>
                                 <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-2 uppercase">Turnos por Dia (Rotativo/Fijo)</label>
+                                {/* Decir de dónde salen los horarios que se ven: si son los que
+                                    la persona ya tenía o una plantilla para armarlos. */}
+                                {cargandoHorario ? (
+                                    <p className="text-[11px] text-[var(--color-text-muted)] mb-2">Buscando el horario de esta persona…</p>
+                                ) : horarioPrevio === true ? (
+                                    <p className="text-[11px] text-emerald-400 mb-2">
+                                        Se cargó el horario que ya tenía esta semana. Modificá lo que necesites.
+                                    </p>
+                                ) : horarioPrevio === false ? (
+                                    <p className="text-[11px] text-amber-400 mb-2">
+                                        Esta persona no tiene horario en esta semana. Activá los días y cargá las horas.
+                                    </p>
+                                ) : null}
                                 <div className="space-y-3 max-h-64 overflow-auto pr-1">
                                     {DAY_OPTIONS.map((day) => {
                                         const cfg = weeklyConfig[day.value] || { enabled: false, template: 'custom', start: '09:00', end: '18:00' };

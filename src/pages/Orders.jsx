@@ -1680,37 +1680,44 @@ const Orders = () => {
                                     {orderItems.map((item, idx) => (
                                         <div
                                             key={item.id}
-                                            className="glass-card p-4 flex items-center gap-4"
+                                            className="glass-card p-3 lg:p-4"
                                         >
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-medium text-[var(--color-text)] truncate">{item.name}</p>
-                                                <p className="text-xs text-[var(--color-text-muted)]">{item.sku}</p>
-                                                <div className="flex gap-3 mt-1 text-xs text-[var(--color-text-muted)]">
-                                                    <span>Costo: {formatCurrency(item.cost, currentCurrency)}</span>
-                                                    {item.taxRate > 0 && <span>+IVA: {formatCurrency(item.costWithTax, currentCurrency)}</span>}
+                                            {/* Fila 1: nombre + SKU + eliminar */}
+                                            <div className="flex items-start gap-2">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-medium text-[var(--color-text)] leading-snug break-words">{item.name}</p>
+                                                    <p className="text-xs text-[var(--color-text-muted)] mt-0.5 break-all">{item.sku}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => removeFromOrder(item.id)}
+                                                    className="shrink-0 p-2 -mt-1 -mr-1 hover:bg-red-500/20 rounded-lg transition-colors text-red-400"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                            </div>
+
+                                            {/* Fila 2: costo + cantidad + total */}
+                                            <div className="flex items-end justify-between gap-3 mt-3">
+                                                <div className="min-w-0 text-xs text-[var(--color-text-muted)] space-y-0.5">
+                                                    <p>Costo: {formatCurrency(item.cost, currentCurrency)}</p>
+                                                    {item.taxRate > 0 && <p>+IVA: {formatCurrency(item.costWithTax, currentCurrency)}</p>}
+                                                </div>
+                                                <div className="flex items-end gap-3 shrink-0">
+                                                    <div className="w-[72px] text-center">
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            step="1"
+                                                            value={orderItemQuantityDrafts[item.id] ?? String(item.quantity)}
+                                                            onChange={(e) => updateOrderItemQuantity(item.id, e.target.value)}
+                                                            onBlur={() => commitOrderItemQuantity(item.id)}
+                                                            className="w-full min-w-0 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-1 px-2 text-center text-lg font-bold text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                                        />
+                                                        <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">uds</p>
+                                                    </div>
+                                                    <p className="text-lg font-bold text-[var(--color-primary)] whitespace-nowrap pb-1">{formatCurrency(item.total, currentCurrency)}</p>
                                                 </div>
                                             </div>
-                                            <div className="text-center px-4 min-w-[90px]">
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    step="1"
-                                                    value={orderItemQuantityDrafts[item.id] ?? String(item.quantity)}
-                                                    onChange={(e) => updateOrderItemQuantity(item.id, e.target.value)}
-                                                    onBlur={() => commitOrderItemQuantity(item.id)}
-                                                    className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-1 px-2 text-center text-lg font-bold text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                                                />
-                                                <p className="text-xs text-[var(--color-text-muted)] mt-1">uds</p>
-                                            </div>
-                                            <div className="text-right">
-                                                <p className="text-lg font-bold text-[var(--color-primary)]">{formatCurrency(item.total, currentCurrency)}</p>
-                                            </div>
-                                            <button
-                                                onClick={() => removeFromOrder(item.id)}
-                                                className="p-2 hover:bg-red-500/20 rounded-lg transition-colors text-red-400"
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
                                         </div>
                                     ))}
                                 </div>

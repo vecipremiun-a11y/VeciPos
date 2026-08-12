@@ -3,9 +3,10 @@ import { Plus, Trash2, User, Pencil, Search, Users as UsersIcon, ShoppingCart, P
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { usePermissions } from '../hooks/usePermissions';
+import { toast } from '../lib/toast';
 
 const Users = () => {
-    const { users, currentUser, currentUserCompanyRole, addUser, deleteUser, updateUser, activeCompanyId, fetchCompanyRoles } = useStore();
+    const { users, currentUser, currentUserCompanyRole, addUser, deleteUser, revokeUserAccess, updateUser, activeCompanyId, fetchCompanyRoles } = useStore();
     const { can } = usePermissions();
 
     // Solo el dueño (o super admin) puede eliminar usuarios; y el dueño no se puede eliminar.
@@ -396,12 +397,28 @@ const Users = () => {
                                                 {isOwner && user.company_role !== 'owner' && user.username !== 'admin' && (
                                                     <button
                                                         onClick={async () => {
-                                                            if (window.confirm(`¿Eliminar usuario ${user.name}?`)) {
-                                                                const result = await deleteUser(user.id);
-                                                                if (result && !result.success) {
-                                                                    alert(result.error);
-                                                                }
+                                                            if (!window.confirm(`¿Eliminar usuario ${user.name}?`)) return;
+                                                            const result = await deleteUser(user.id);
+                                                            if (result?.success) return;
+
+                                                            // Si lo bloquean sus registros laborales, se ofrece la
+                                                            // salida correcta: quitarle el acceso conservando el
+                                                            // historial. Antes acá llegaba el error crudo de SQLite.
+                                                            if (result?.tieneRegistrosLaborales) {
+                                                                const quitar = window.confirm(
+                                                                    `${result.error}\n\n¿Querés quitarle el acceso ahora?`
+                                                                );
+                                                                if (!quitar) return;
+                                                                const r2 = await revokeUserAccess(user.id);
+                                                                toast(
+                                                                    r2?.success
+                                                                        ? `${user.name} ya no puede entrar al sistema. Su historial laboral se conservó.`
+                                                                        : (r2?.error || 'No se pudo quitar el acceso.'),
+                                                                    r2?.success ? 'success' : 'error'
+                                                                );
+                                                                return;
                                                             }
+                                                            toast(result?.error || 'No se pudo eliminar el usuario.', 'error');
                                                         }}
                                                         className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-all"
                                                         title="Eliminar"

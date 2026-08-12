@@ -122,6 +122,25 @@ async function userDelete(turso, companyId, session, { id }) {
     });
     if (tgt.rows[0]?.role === 'owner') return { success: false, error: 'El dueño del sistema no se puede eliminar, solo modificar.' };
 
+    // Ocho tablas del módulo Personal apuntan a `users` con ON DELETE NO ACTION:
+    // si el usuario tiene asistencia, ausencias, anticipos, nómina o vacaciones,
+    // la base rechaza el DELETE y el error de SQLite llegaba crudo a la pantalla
+    // ("FOREIGN KEY constraint failed"), sin decir qué lo bloquea ni qué hacer.
+    //
+    // Y está bien que lo bloquee: son registros laborales, no se borran porque
+    // alguien deje de trabajar. Lo que corresponde es quitarle el acceso.
+    const bloqueos = await contarRegistrosLaborales(turso, id);
+    if (bloqueos.total > 0) {
+        return {
+            success: false,
+            error: `No se puede eliminar: tiene ${bloqueos.detalle} en el módulo Personal. `
+                + 'Son registros laborales y no se borran. Usá "Quitar acceso" para que no pueda '
+                + 'volver a entrar, conservando su historial.',
+            tieneRegistrosLaborales: true,
+            registros: bloqueos.conteos,
+        };
+    }
+
     await turso.batch([
         { sql: 'DELETE FROM user_companies WHERE user_id = ? AND company_id = ?', args: [id, companyId] },
         { sql: 'DELETE FROM users WHERE id = ? AND company_id = ?', args: [id, companyId] },
@@ -129,4 +148,61 @@ async function userDelete(turso, companyId, session, { id }) {
     return { success: true };
 }
 
-export const userActions = { userCreate, userUpdate, userDelete };
+// Tablas del módulo Personal que impiden borrar un usuario, con el nombre que
+// el usuario ve en pantalla.
+const TABLAS_LABORALES = [
+    ['attendance_records', 'marcas de asistencia'],
+    ['attendance_corrections', 'correcciones de asistencia'],
+    ['labor_absences', 'ausencias'],
+    ['salary_advances', 'anticipos de sueldo'],
+    ['payroll_periods', 'períodos de nómina'],
+    ['payroll_payments', 'pagos de sueldo'],
+    ['vacation_balances', 'saldos de vacaciones'],
+    ['vacation_requests', 'solicitudes de vacaciones'],
+];
+
+async function contarRegistrosLaborales(turso, userId) {
+    const res = await turso.batch(
+        TABLAS_LABORALES.map(([tabla]) => ({
+            sql: `SELECT COUNT(*) AS n FROM ${tabla} WHERE user_id = ?`,
+            args: [userId],
+        })),
+        'read'
+    );
+    const conteos = {};
+    const partes = [];
+    let total = 0;
+    res.forEach((r, i) => {
+        const n = Number(r.rows[0]?.n) || 0;
+        if (!n) return;
+        const [tabla, etiqueta] = TABLAS_LABORALES[i];
+        conteos[tabla] = n;
+        partes.push(`${n} ${etiqueta}`);
+        total += n;
+    });
+    return { total, conteos, detalle: partes.join(', ') };
+}
+
+// Quita el acceso de un usuario a la empresa sin borrar su historial laboral.
+// Es lo que corresponde cuando alguien deja de trabajar: pierde el ingreso al
+// sistema, pero sus marcas, ausencias y sueldos siguen existiendo.
+async function userRevokeAccess(turso, companyId, session, { id }) {
+    const { isOwner } = await actorRoles(turso, companyId, session);
+    if (!isOwner) return { success: false, error: 'Solo el dueño del sistema puede quitar accesos.' };
+    if (!id) return { success: false, error: 'Falta id' };
+
+    const tgt = await turso.execute({
+        sql: 'SELECT role FROM user_companies WHERE user_id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    if (!tgt.rows[0]) return { success: false, error: 'El usuario no pertenece a esta empresa.' };
+    if (tgt.rows[0].role === 'owner') return { success: false, error: 'Al dueño del sistema no se le puede quitar el acceso.' };
+
+    await turso.execute({
+        sql: 'DELETE FROM user_companies WHERE user_id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    return { success: true };
+}
+
+export const userActions = { userCreate, userUpdate, userDelete, userRevokeAccess };
