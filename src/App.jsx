@@ -59,6 +59,7 @@ const InventoryReconciliation = lazy(() => import('./pages/InventoryReconciliati
 const InventoryControl = lazy(() => import('./pages/InventoryControl'));
 const ProductCombos = lazy(() => import('./pages/ProductCombos'));
 const LabelPrinting = lazy(() => import('./pages/LabelPrinting'));
+const Asistente = lazy(() => import('./pages/Asistente'));
 const DeliveryCouriers = lazy(() => import('./pages/delivery/Couriers'));
 const DeliveryShipments = lazy(() => import('./pages/delivery/Shipments'));
 const DeliveryTracking = lazy(() => import('./pages/delivery/Tracking'));
@@ -385,6 +386,9 @@ function App() {
           <Route path="inventory/reconciliation" element={<ProtectedPage permission="products.adjust_stock"><FeatureGatePage moduleKey="inventory_control"><InventoryReconciliation /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/control" element={<ProtectedPage permission="inventory_control.view"><FeatureGatePage moduleKey="inventory_control"><InventoryControl /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/combos" element={<ProtectedPage permission="combos.view"><FeatureGatePage moduleKey="combos"><ProductCombos /></FeatureGatePage></ProtectedPage>} />
+          {/* Asistente IA (App del Marketplace). El gate visual es FeatureGatePage;
+              el que cuida el gasto es la verificación server-side del endpoint. */}
+          <Route path="asistente" element={<ProtectedPage permission="reports.view"><FeatureGatePage moduleKey="ai"><Asistente /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/labels" element={<ProtectedPage permission="products.view"><FeatureGatePage moduleKey="labels"><LabelPrinting /></FeatureGatePage></ProtectedPage>} />
           {/* App Delivery */}
           <Route path="delivery/shipments" element={<ProtectedPage permission="delivery.view"><FeatureGatePage moduleKey="delivery"><DeliveryShipments /></FeatureGatePage></ProtectedPage>} />

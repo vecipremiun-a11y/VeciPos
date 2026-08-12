@@ -73,6 +73,21 @@ export const ALL_APPS = [
         icon: 'Bike',
     },
 
+    // Ojo: a diferencia del resto, esta App no desbloquea una pantalla sino un
+    // servicio que cuesta plata por uso. El gate de verdad NO es hasApp() sino
+    // la verificación server-side en api/ai/consultar.js — acá aparece para que
+    // se pueda comprar y para ocultar el asistente a quien no la tiene.
+    {
+        key: 'ia',
+        name: 'Asistente IA',
+        description: 'Preguntale a tu negocio en castellano: ventas, stock, márgenes. Incluye 2.000 consultas al mes.',
+        priceClp: 9500, priceUsd: 10,
+        scope: 'branch',
+        status: 'available',
+        moduleKeys: ['ai'],
+        icon: 'Sparkles',
+    },
+
     // ── Próximamente · por sucursal ───────────────────────────────────
     { key: 'fidelizacion', name: 'Fidelización', description: 'Puntos y recompensas para tus clientes.', scope: 'branch', status: 'coming_soon', icon: 'Gift' },
     { key: 'whatsapp', name: 'WhatsApp', description: 'Notifica y vende por WhatsApp.', scope: 'branch', status: 'coming_soon', icon: 'MessageCircle' },
@@ -84,7 +99,9 @@ export const ALL_APPS = [
     { key: 'rrhh', name: 'RRHH', description: 'Recursos humanos avanzado para toda la empresa.', scope: 'company', status: 'coming_soon', icon: 'UsersRound' },
     { key: 'contabilidad', name: 'Contabilidad', description: 'Contabilidad y libros para toda la empresa.', scope: 'company', status: 'coming_soon', icon: 'Calculator' },
     { key: 'api', name: 'API', description: 'Integra POSVECI con tus sistemas vía API.', scope: 'company', status: 'coming_soon', icon: 'Code' },
-    { key: 'ia', name: 'IA', description: 'Asistente inteligente y predicciones para tu negocio.', scope: 'company', status: 'coming_soon', icon: 'Sparkles' },
+    // 'ia' estaba acá como "Próximamente" y por empresa. Pasó arriba, comprable
+    // y por SUCURSAL: el costo lo genera cada local que la usa, así que la
+    // licencia tiene que seguir a quien consume, no a la empresa entera.
     { key: 'bi', name: 'Business Intelligence', description: 'Tableros y análisis avanzado de tus datos.', scope: 'company', status: 'coming_soon', icon: 'BarChart3' },
 ];
 

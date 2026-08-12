@@ -269,6 +269,15 @@ export const ALL_MODULES = [
         minLevel: 2,
         appKey: 'delivery',
     },
+    {
+        key: 'ai',
+        label: 'Asistente IA (App)',
+        description: 'Preguntas sobre el negocio en castellano: ventas, stock, márgenes y vendedores.',
+        defaultEnabled: false,
+        plan: 'professional',
+        minLevel: 2,
+        appKey: 'ia',
+    },
 ];
 
 // Helper: obtener módulo por key

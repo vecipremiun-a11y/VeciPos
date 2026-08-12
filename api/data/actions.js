@@ -565,11 +565,14 @@ async function productCreate(turso, companyId, session, product) {
     }
 
     const result = await turso.execute({
+        // created_at lo pone el servidor, no el cliente: es el dato con el que se
+        // distingue un producto recién dado de alta de uno detenido hace meses, y
+        // no puede depender del reloj (ni de la buena fe) del navegador.
         sql: `INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier,
                 is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes,
                 preorder_unit, preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit,
-                preorder_use_base_price, units_per_box)
-              VALUES (?, ?, ROUND(?, 3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+                preorder_use_base_price, units_per_box, created_at)
+              VALUES (?, ?, ROUND(?, 3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
         args: [
             product.name, product.price, product.stock, product.category, product.sku,
             product.image || null, product.cost || 0, product.tax_rate || 0, product.unit || 'Und',
@@ -580,6 +583,7 @@ async function productCreate(turso, companyId, session, product) {
             product.preorder_price_per_kg || 0, product.preorder_gram_per_unit || 0,
             product.preorder_use_base_price !== undefined ? (product.preorder_use_base_price ? 1 : 0) : 1,
             product.units_per_box || 0,
+            new Date().toISOString(),
         ],
     });
 

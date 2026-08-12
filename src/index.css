@@ -47,6 +47,11 @@
   --color-surface-hover: #1a1a3d;
   --color-text: #ffffff;
   --color-text-muted: #9ca3af;
+  /* Texto que va ENCIMA del color primario. Existe porque el primario cambia
+     de tema y el texto legible cambia con él: sobre el cyan #00f0ff, el blanco
+     da 1,41:1 —ilegible, el mínimo es 4,5— mientras que el oscuro da 13,66:1.
+     En el tema claro (#2563eb) es al revés. Fijar un color rompía uno de los dos. */
+  --color-on-primary: #04121a;
   --glass-bg: rgba(255, 255, 255, 0.05);
   --glass-border: rgba(255, 255, 255, 0.1);
   --sidebar-bg: rgba(255, 255, 255, 0.05);
@@ -55,6 +60,7 @@
 [data-theme="light"] {
   /* Light Mode */
   --color-primary: #2563eb;
+  --color-on-primary: #ffffff;
   /* Blue */
   --color-primary-dark: #1d4ed8;
   --color-secondary: #4f46e5;

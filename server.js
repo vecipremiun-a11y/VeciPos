@@ -39,6 +39,7 @@ import authLoginHandler from './api/auth/login.js';
 import adminActionsHandler from './api/admin/actions.js';
 import dataActionsHandler from './api/data/actions.js';
 import pingHandler from './api/ping.js';
+import aiConsultarHandler from './api/ai/consultar.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -77,6 +78,13 @@ app.get('/health', (_req, res) => {
 app.all('/api/ping', async (req, res) => {
     try { return await pingHandler(req, res); }
     catch (error) { return res.status(500).json({ ok: false, error: error.message }); }
+});
+
+// Asistente IA. En Vercel es su propia ruta con maxDuration largo; en dev lo
+// sirve Express igual que el resto.
+app.all('/api/ai/consultar', async (req, res) => {
+    try { return await aiConsultarHandler(req, res); }
+    catch (error) { return res.status(500).json({ success: false, error: error.message }); }
 });
 
 app.all('/api/integration/config', async (req, res) => {

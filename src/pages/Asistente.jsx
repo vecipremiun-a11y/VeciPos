@@ -1,0 +1,309 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { Sparkles, Send, AlertTriangle, Loader2, Mic, MicOff, ImagePlus, X } from 'lucide-react';
+import { useStore } from '../store/useStore';
+import { useShallow } from 'zustand/react/shallow';
+import { hayConexion, alCambiarConexion } from '../lib/conectividad';
+import { hayDictado, iniciarDictado, achicarImagen } from '../lib/dictado';
+
+// Asistente IA: preguntarle al negocio en castellano.
+//
+// La pantalla es deliberadamente tonta. Toda la lógica que importa —licencia,
+// cupo, ritmo, qué reportes se pueden consultar— vive en el servidor
+// (api/ai/consultar.js), porque acá controla gasto real y el navegador no es
+// una fuente confiable para eso.
+
+const SUGERENCIAS = [
+    '¿Cuánto vendí hoy?',
+    '¿Qué productos no se están moviendo?',
+    '¿Cuál vendedora rindió más este mes?',
+    '¿Qué se me está por acabar?',
+];
+
+const Asistente = () => {
+    const { activeCompanyId, currentCurrency } = useStore(useShallow(s => ({
+        activeCompanyId: s.activeCompanyId,
+        currentCurrency: s.currentCurrency,
+    })));
+
+    const [mensajes, setMensajes] = useState([]);
+    const [texto, setTexto] = useState('');
+    const [pensando, setPensando] = useState(false);
+    const [cupo, setCupo] = useState(null);
+    const [online, setOnline] = useState(hayConexion());
+    const [dictando, setDictando] = useState(false);
+    const [dictadoRoto, setDictadoRoto] = useState(null);
+    const [imagen, setImagen] = useState(null);   // { dataUrl, ancho, alto }
+    const finRef = useRef(null);
+    const cortarDictado = useRef(null);
+    const archivoRef = useRef(null);
+
+    // Cortar el micrófono si se sale de la pantalla: si no, sigue escuchando
+    // en segundo plano y el indicador de grabación queda prendido.
+    useEffect(() => () => cortarDictado.current?.(), []);
+
+    const alternarDictado = () => {
+        if (dictando) { cortarDictado.current?.(); return; }
+        setDictando(true);
+        cortarDictado.current = iniciarDictado({
+            onParcial: (t) => setTexto(t),
+            onError: (m) => {
+                // Una sola vez. El reconocimiento del navegador falla igual en
+                // cada intento —falta permiso, o el navegador no alcanza el
+                // servicio de voz, como pasa dentro del navegador de VS Code—,
+                // así que repetir el aviso solo apila mensajes idénticos.
+                setDictadoRoto(m);
+                setMensajes(x => x.some(i => i.texto === m) ? x : [...x, { rol: 'error', texto: m }]);
+            },
+            onFin: () => setDictando(false),
+        });
+    };
+
+    const elegirImagen = async (e) => {
+        const archivo = e.target.files?.[0];
+        e.target.value = '';   // permite volver a elegir la misma foto
+        if (!archivo) return;
+        try {
+            setImagen(await achicarImagen(archivo));
+        } catch (err) {
+            setMensajes(x => [...x, { rol: 'error', texto: err.message }]);
+        }
+    };
+
+    // El asistente necesita internet sí o sí. En vez de dejar que falle y
+    // mostrar un error feo, se avisa antes — la venta offline no se toca.
+    useEffect(() => alCambiarConexion(setOnline), []);
+
+    useEffect(() => {
+        finRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [mensajes, pensando]);
+
+    const preguntar = async (pregunta) => {
+        const q = (pregunta ?? texto).trim();
+        // Con foto adjunta se puede mandar sin escribir nada: se asume que la
+        // pregunta es sobre la imagen.
+        if ((!q && !imagen) || pensando) return;
+        const consulta = q || '¿Qué ves en esta imagen?';
+        const foto = imagen;
+
+        if (dictando) cortarDictado.current?.();
+        setTexto('');
+        setImagen(null);
+        setMensajes(m => [...m, { rol: 'user', texto: consulta, imagen: foto?.dataUrl }]);
+        setPensando(true);
+
+        try {
+            const r = await fetch('/api/ai/consultar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    companyId: activeCompanyId,
+                    pregunta: consulta,
+                    imagen: foto?.dataUrl || null,
+                    currency: currentCurrency,
+                    // Memoria corta: solo lo necesario para repreguntar ("¿y ayer?")
+                    // sin inflar el prompt de cada consulta.
+                    historial: mensajes.slice(-6).map(m => ({
+                        role: m.rol === 'user' ? 'user' : 'assistant',
+                        content: m.texto,
+                    })),
+                }),
+            });
+            const data = await r.json();
+
+            if (data?.cupo) setCupo(data.cupo);
+
+            if (!data?.success) {
+                setMensajes(m => [...m, {
+                    rol: 'error',
+                    texto: data?.message || data?.error || 'No pude responder esa consulta.',
+                    codigo: data?.error,
+                }]);
+            } else {
+                setMensajes(m => [...m, {
+                    rol: 'ia',
+                    texto: data.respuesta,
+                    reportes: data.reportes || [],
+                }]);
+            }
+        } catch (e) {
+            setMensajes(m => [...m, { rol: 'error', texto: 'No se pudo conectar: ' + e.message }]);
+        } finally {
+            setPensando(false);
+        }
+    };
+
+    return (
+        <div className="flex flex-col h-[calc(100vh-8rem)] max-w-3xl mx-auto">
+            {/* Cabecera */}
+            <div className="flex items-center justify-between gap-3 pb-3 border-b border-[var(--glass-border)]">
+                <div className="flex items-center gap-2 min-w-0">
+                    <Sparkles size={20} className="text-[var(--color-primary)] shrink-0" />
+                    <h1 className="text-lg font-bold text-[var(--color-text)] truncate">Asistente</h1>
+                </div>
+                {cupo && (
+                    <span className={`text-xs font-medium shrink-0 ${cupo.avisar ? 'text-amber-400' : 'text-[var(--color-text-muted)]'}`}>
+                        {cupo.restantes.toLocaleString('es-CL')} consultas este mes
+                    </span>
+                )}
+            </div>
+
+            {/* Aviso al 80%: informa sin cortar nada. */}
+            {cupo?.avisar && !cupo.agotado && (
+                <div className="mt-3 flex items-start gap-2 text-xs bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 text-amber-300">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <span>Te quedan {cupo.restantes.toLocaleString('es-CL')} consultas. El cupo se renueva el 1º.</span>
+                </div>
+            )}
+
+            {!online && (
+                <div className="mt-3 flex items-start gap-2 text-xs bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 text-amber-300">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <span>Sin conexión. El asistente necesita internet — la venta sigue funcionando igual.</span>
+                </div>
+            )}
+
+            {/* Conversación */}
+            <div className="flex-1 overflow-y-auto py-4 space-y-3">
+                {mensajes.length === 0 && (
+                    <div className="text-center py-8 space-y-4">
+                        <p className="text-sm text-[var(--color-text-muted)]">
+                            Preguntale a tu negocio lo que quieras saber.
+                        </p>
+                        <div className="flex flex-wrap gap-2 justify-center">
+                            {SUGERENCIAS.map(s => (
+                                <button
+                                    key={s}
+                                    onClick={() => preguntar(s)}
+                                    disabled={!online}
+                                    className="text-xs px-3 py-1.5 rounded-full border border-[var(--glass-border)] bg-[var(--glass-bg)] text-[var(--color-text-muted)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)] transition-colors disabled:opacity-40"
+                                >
+                                    {s}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {mensajes.map((m, i) => (
+                    <div key={i} className={`flex ${m.rol === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words ${
+                            m.rol === 'user'
+                                ? 'bg-[var(--color-primary)] text-[var(--color-on-primary)] font-medium'
+                                : m.rol === 'error'
+                                    ? 'bg-red-500/10 border border-red-500/30 text-red-300'
+                                    : 'bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)]'
+                        }`}>
+                            {m.imagen && (
+                                <img
+                                    src={m.imagen}
+                                    alt="Imagen enviada"
+                                    className="mb-2 rounded-lg max-h-56 w-auto"
+                                />
+                            )}
+                            {m.texto}
+                            {m.reportes?.length > 0 && (
+                                <div className="mt-2 pt-2 border-t border-[var(--glass-border)] text-[11px] text-[var(--color-text-muted)]">
+                                    Consultó: {m.reportes.join(', ')}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ))}
+
+                {pensando && (
+                    <div className="flex justify-start">
+                        <div className="flex items-center gap-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl px-3.5 py-2.5 text-sm text-[var(--color-text-muted)]">
+                            <Loader2 size={14} className="animate-spin" />
+                            Revisando tus datos…
+                        </div>
+                    </div>
+                )}
+                <div ref={finRef} />
+            </div>
+
+            {/* Entrada */}
+            <div className="pt-3 border-t border-[var(--glass-border)] space-y-2">
+                {/* Foto adjunta, con opción de sacarla antes de enviar */}
+                {imagen && (
+                    <div className="flex items-center gap-3 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-2">
+                        <img src={imagen.dataUrl} alt="Imagen adjunta" className="h-14 w-14 object-cover rounded-lg shrink-0" />
+                        <div className="flex-1 min-w-0 text-xs text-[var(--color-text-muted)]">
+                            <p className="text-[var(--color-text)]">Imagen lista para enviar</p>
+                            <p>{imagen.ancho}×{imagen.alto} · cuenta como 3 consultas del cupo</p>
+                        </div>
+                        <button
+                            onClick={() => setImagen(null)}
+                            className="shrink-0 p-2 rounded-lg hover:bg-red-500/20 text-red-400 transition-colors"
+                            aria-label="Quitar la imagen"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                )}
+
+                <div className="flex gap-2">
+                    <input
+                        ref={archivoRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={elegirImagen}
+                        className="hidden"
+                    />
+                    <button
+                        onClick={() => archivoRef.current?.click()}
+                        disabled={pensando || !online}
+                        title="Adjuntar una foto"
+                        className="shrink-0 bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text-muted)] rounded-xl px-3 hover:text-[var(--color-text)] hover:border-[var(--color-primary)] transition-colors disabled:opacity-40"
+                        aria-label="Adjuntar una foto"
+                    >
+                        <ImagePlus size={18} />
+                    </button>
+
+                    {/* El micrófono solo aparece si el navegador puede dictar: mejor
+                        que no esté a que esté y falle al apretarlo. */}
+                    {hayDictado() && !dictadoRoto && (
+                        <button
+                            onClick={alternarDictado}
+                            disabled={pensando || !online}
+                            title={dictando ? 'Dejar de dictar' : 'Dictar la pregunta'}
+                            className={`shrink-0 rounded-xl px-3 border transition-colors disabled:opacity-40 ${
+                                dictando
+                                    ? 'bg-red-500/20 border-red-500/50 text-red-400 animate-pulse'
+                                    : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-primary)]'
+                            }`}
+                            aria-label={dictando ? 'Dejar de dictar' : 'Dictar la pregunta'}
+                        >
+                            {dictando ? <MicOff size={18} /> : <Mic size={18} />}
+                        </button>
+                    )}
+
+                    <input
+                        value={texto}
+                        onChange={e => setTexto(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); preguntar(); } }}
+                        placeholder={
+                            !online ? 'Sin conexión'
+                                : dictando ? 'Escuchando… hablá tranquilo'
+                                    : imagen ? 'Preguntá algo sobre la imagen (o enviá sin texto)'
+                                        : 'Escribí tu pregunta…'
+                        }
+                        disabled={pensando || !online}
+                        className="flex-1 min-w-0 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] disabled:opacity-50"
+                    />
+                    <button
+                        onClick={() => preguntar()}
+                        disabled={pensando || (!texto.trim() && !imagen) || !online}
+                        className="shrink-0 bg-[var(--color-primary)] text-[var(--color-on-primary)] rounded-xl px-4 hover:opacity-90 transition-opacity disabled:opacity-40"
+                        aria-label="Enviar pregunta"
+                    >
+                        <Send size={18} />
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default Asistente;
