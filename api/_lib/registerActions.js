@@ -445,15 +445,40 @@ async function cashMovementsList(turso, companyId, session, { limit = 20, offset
 
 async function registerReport(turso, companyId, session, { register }) {
     if (!register?.id) return { success: false, error: 'Falta register' };
-    // Caja ya cerrada: las ventas propias se identifican por register_id, y las
-    // anteriores a la migración 0012 por la ventana apertura→cierre del mismo usuario.
-    const salesRes = await turso.execute({
-        sql: `SELECT * FROM sales
-              WHERE company_id = ?
-                AND (register_id = ?
-                     OR (register_id IS NULL AND user_id = ? AND date >= ? AND date <= ?))`,
-        args: [companyId, register.id, register.user_id, register.opening_time, register.closing_time],
+
+    // Las ventas de la caja se buscan en DOS pasos, no en uno con OR.
+    //
+    // La consulta anterior unía ambas condiciones en un solo OR, y esa segunda
+    // rama —`register_id IS NULL AND user_id = ? AND date BETWEEN ...`— no puede
+    // usar el índice por caja: obliga a recorrer las 76.778 ventas de la empresa.
+    // Medido sobre la caja #948: 49,3 segundos para devolver 108 ventas, contra
+    // 213 ms buscando solo por register_id. Doscientas treinta veces más lenta
+    // para traer exactamente lo mismo — la rama vieja aportaba CERO filas.
+    //
+    // Cuarenta y nueve segundos no solo hacen esperar: pasan el limite de Vercel
+    // y, desde que el POS corta a los 12 segundos, la pantalla se rendia y el
+    // sistema se declaraba sin internet teniendo internet.
+    //
+    // Solo se traen los cuatro campos que se usan más abajo. El SELECT * cargaba
+    // además la columna `items` completa de cada venta, sin que nadie la mire.
+    const COLS = 'id, total, payment_method, payment_details, status';
+    let salesRes = await turso.execute({
+        sql: `SELECT ${COLS} FROM sales WHERE company_id = ? AND register_id = ?`,
+        args: [companyId, register.id],
     });
+
+    // Respaldo para cajas cerradas ANTES de la migración 0012, que fue la que
+    // rellenó `register_id`. Solo corre si la vía rápida no encontró nada, así
+    // que el escaneo caro queda reservado para las cajas viejas de verdad, que
+    // son pocas y ya no se consultan a diario.
+    if (salesRes.rows.length === 0) {
+        salesRes = await turso.execute({
+            sql: `SELECT ${COLS} FROM sales
+                  WHERE company_id = ? AND register_id IS NULL
+                    AND user_id = ? AND date >= ? AND date <= ?`,
+            args: [companyId, register.user_id, register.opening_time, register.closing_time],
+        });
+    }
 
     let cashSalesTotal = 0;
     const salesBreakdown = { cash: 0, card: 0, transfer: 0, credit: 0, total: 0 };

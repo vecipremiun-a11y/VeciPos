@@ -166,7 +166,7 @@ export function comprobarConexionYa() {
  * Solo cuentan los fallos de RED. Un error del servidor (500) o un rechazo de
  * negocio no significan falta de internet.
  */
-export function reportarResultadoRed(ok) {
+export function reportarResultadoRed(ok, porTiempo = false) {
     if (ok) {
         ultimoOk = Date.now();
         fallosSeguidos = 0;
@@ -175,8 +175,25 @@ export function reportarResultadoRed(ok) {
         if (!estaba) programar();
         return;
     }
-    // Una llamada real que ni llegó al servidor es evidencia más fuerte que un
-    // latido perdido: se declara la caída sin esperar al segundo intento.
+
+    // Que una consulta se pase del tiempo NO significa que no haya internet.
+    // Significa que ESA consulta es lenta, que es otra cosa.
+    //
+    // Pasó de verdad: el detalle de cierre de caja tardaba 49 segundos por una
+    // consulta mal indexada. El POS lo tomaba como caída, se declaraba sin
+    // conexión y mandaba las ventas a la cola offline — con el internet
+    // andando perfecto. Un reporte lento no puede arrastrar a todo el sistema.
+    //
+    // Ante la duda se le pregunta al latido, que es barato y responde en
+    // milisegundos: si /api/ping contesta, hay internet y la lentitud era de esa
+    // consulta nomás.
+    if (porTiempo) {
+        latir();
+        return;
+    }
+
+    // Un fallo de red de verdad (la petición ni salió) sí es evidencia directa:
+    // se declara la caída sin esperar al segundo latido.
     fallosSeguidos = FALLOS_PARA_CAER;
     const estaba = hayInternet;
     fijar(false);

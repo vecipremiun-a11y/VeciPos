@@ -89,9 +89,12 @@ async function _userApiCall(action, payload = {}) {
         // tiempo) — addSale usa esto para encolar la venta en la cola failsafe en
         // vez de perderla.
         const seCorto = e?.name === 'AbortError' || e?.name === 'TimeoutError';
-        // La petición ni llegó: el POS pasa a offline ya, para que la próxima
-        // venta se guarde al instante en vez de volver a esperar.
-        reportarResultadoRed(false);
+        // Se distingue "tardó demasiado" de "no hay red", porque no son lo mismo
+        // y confundirlos tuvo consecuencias: el detalle de cierre de caja
+        // tardaba 49 segundos por una consulta mal indexada, y el POS se
+        // declaraba sin internet teniéndolo. Si fue por tiempo, decide el latido
+        // (ver conectividad.js); si la petición ni salió, se corta de una.
+        reportarResultadoRed(false, seCorto);
         return {
             success: false,
             error: seCorto ? 'Sin respuesta del servidor' : 'Error de red: ' + e.message,
