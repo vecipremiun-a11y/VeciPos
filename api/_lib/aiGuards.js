@@ -57,6 +57,33 @@ export async function ritmoExcedido(turso, companyId) {
 }
 
 /**
+ * Candado 0 — quién puede usarlo. Solo dueño y administradores.
+ *
+ * No es una restricción de comodidad: el asistente ve márgenes, costos, sueldos,
+ * liquidaciones, deudas de clientes y descuadres de caja. Eso no es información
+ * para el mostrador. Se descubrió en producción, cuando una cajera llegó a la
+ * pantalla.
+ *
+ * Se comprueba en el SERVIDOR y no solo en el menú, porque esconder la opción no
+ * impide llamar al endpoint: cualquiera con la sesión abierta puede hacerlo a
+ * mano. Mismo criterio que la licencia de la App.
+ */
+const ROLES_PERMITIDOS = new Set(['owner', 'super_admin', 'Administrador']);
+
+export async function puedeUsarIA(turso, userId, companyId) {
+    const r = await turso.execute({
+        sql: `SELECT uc.role AS rol_empresa, u.role AS rol_global
+              FROM user_companies uc
+              LEFT JOIN users u ON u.id = uc.user_id
+              WHERE uc.user_id = ? AND uc.company_id = ? LIMIT 1`,
+        args: [userId, companyId],
+    });
+    const fila = r.rows[0];
+    if (!fila) return false;
+    return ROLES_PERMITIDOS.has(fila.rol_empresa) || ROLES_PERMITIDOS.has(fila.rol_global);
+}
+
+/**
  * Candado 2 — licencia. La App tiene que estar activa o en prueba para ESTA
  * sucursal. Se consulta la misma tabla que usa el Marketplace, así que cancelar
  * la App corta el acceso sin ningún paso extra.

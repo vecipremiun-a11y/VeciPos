@@ -388,7 +388,7 @@ function App() {
           <Route path="inventory/combos" element={<ProtectedPage permission="combos.view"><FeatureGatePage moduleKey="combos"><ProductCombos /></FeatureGatePage></ProtectedPage>} />
           {/* Asistente IA (App del Marketplace). El gate visual es FeatureGatePage;
               el que cuida el gasto es la verificación server-side del endpoint. */}
-          <Route path="asistente" element={<ProtectedPage permission="reports.view"><FeatureGatePage moduleKey="ai"><Asistente /></FeatureGatePage></ProtectedPage>} />
+          <Route path="asistente" element={<ProtectedPage permission="reports.sales" soloAdmin><FeatureGatePage moduleKey="ai"><Asistente /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/labels" element={<ProtectedPage permission="products.view"><FeatureGatePage moduleKey="labels"><LabelPrinting /></FeatureGatePage></ProtectedPage>} />
           {/* App Delivery */}
           <Route path="delivery/shipments" element={<ProtectedPage permission="delivery.view"><FeatureGatePage moduleKey="delivery"><DeliveryShipments /></FeatureGatePage></ProtectedPage>} />

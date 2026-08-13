@@ -3,8 +3,13 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useStore } from '../../store/useStore';
 import AccessDenied from './AccessDenied';
 
-const ProtectedPage = ({ permission, children }) => {
-    const { can } = usePermissions();
+// `soloAdmin` deja la página fuera del alcance de los roles operativos (Caja,
+// Vendedor, Repartidor) aunque tengan el permiso suelto. Se agregó para el
+// Asistente IA, que muestra márgenes, sueldos y liquidaciones: eso no es
+// información de mostrador. El gate de verdad está igual en el servidor — esto
+// solo evita que la pantalla llegue a mostrarse.
+const ProtectedPage = ({ permission, soloAdmin = false, children }) => {
+    const { can, isSuperAdmin } = usePermissions();
     const isLoading = useStore(state => state.isLoading);
 
     if (isLoading) {
@@ -16,6 +21,10 @@ const ProtectedPage = ({ permission, children }) => {
                 </div>
             </div>
         );
+    }
+
+    if (soloAdmin && !isSuperAdmin) {
+        return <AccessDenied />;
     }
 
     if (!can(permission)) {

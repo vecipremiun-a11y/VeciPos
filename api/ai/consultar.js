@@ -18,7 +18,7 @@ import { fromZonedTime } from 'date-fns-tz';
 import { getSession, isCompanyMember } from '../_lib/guard.js';
 import { reportRun } from '../_lib/reportActions.js';
 import {
-    ritmoExcedido, tieneAppIA, estadoCupo, registrarConsumo,
+    ritmoExcedido, tieneAppIA, puedeUsarIA, estadoCupo, registrarConsumo,
     TOPE_POR_MIN, CUPO_MENSUAL,
 } from '../_lib/aiGuards.js';
 import { limpiarParaIA, REPORTES_VEDADOS } from '../_lib/aiRedaccion.js';
@@ -302,6 +302,18 @@ export default async function handler(req, res) {
         // Miembro de la empresa (mismo control que el resto de la API).
         if (!(await isCompanyMember(turso, session.uid, companyId))) {
             return res.status(403).json({ success: false, error: 'Sin acceso a esta empresa' });
+        }
+
+        // ── Candado 0: quién. Solo dueño y administradores.
+        //
+        // El asistente ve márgenes, costos, sueldos, liquidaciones y descuadres
+        // de caja. Esconder la opción del menú no alcanza: el endpoint se puede
+        // llamar a mano con la sesión abierta.
+        if (!(await puedeUsarIA(turso, session.uid, companyId))) {
+            return res.status(403).json({
+                success: false, error: 'SIN_ROL',
+                message: 'El Asistente IA está disponible solo para el dueño y los administradores.',
+            });
         }
 
         // ── Candado 1: ritmo. Primero porque es el más barato y es el que corta
