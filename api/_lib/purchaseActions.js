@@ -329,6 +329,163 @@ async function invoicePayPartial(turso, companyId, session, { id, newPaid, isPai
     return { success: true };
 }
 
+// ── Pedido armado desde una factura leída por el Asistente ───────────────
+//
+// Es la ÚNICA escritura que puede hacer la IA, y el objeto se eligió a
+// propósito: un pedido a proveedor no mueve stock, no mueve plata y se borra
+// con un clic. Lo que sí mueve —la compra— sigue necesitando que una persona
+// la revise y apriete Guardar, con el mismo flujo de "Pasar a Compra" de
+// siempre.
+//
+// El emparejamiento de productos es la parte delicada. La factura dice "TOALLA
+// FEM KOTEX COM&PROT NOCT C/A 24X8" y en el catálogo puede estar como "Kotex
+// Nocturna 8und": nunca coinciden literal. Se busca por palabras y se puntúa,
+// igual que en costoHistorico.
+//
+// Lo que NO se pudo emparejar no se inventa ni se descarta en silencio: vuelve
+// en `sinEmparejar` para que el asistente lo diga y la persona decida.
+function palabrasDe(texto) {
+    return String(texto || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9áéíóúñ\s]/gi, ' ')
+        .split(/\s+/)
+        .filter(p => p.length >= 3)
+        .slice(0, 8);
+}
+
+// Los nombres del catálogo llevan tildes y los de las facturas no. Sin esta
+// normalización, "instantanea" no encontraba "Instantánea" — y ese punto perdido
+// alcanzó para que "SOPA BOWL POLLO" terminara emparejado con el producto de
+// CARNE. Se normaliza la columna en la consulta, porque SQLite compara LIKE sin
+// distinguir mayúsculas pero sí distinguiendo tildes.
+const SIN_TILDES = (col) =>
+    `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(${col}),'á','a'),'é','e'),'í','i'),'ó','o'),'ú','u')`;
+
+const quitarTildes = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+async function buscarProducto(turso, companyId, descripcion) {
+    const palabras = palabrasDe(quitarTildes(descripcion));
+    if (!palabras.length) return null;
+    const campo = SIN_TILDES('name');
+    const puntaje = palabras.map(() => `(CASE WHEN ${campo} LIKE ? THEN 1 ELSE 0 END)`).join(' + ');
+    const alguna = palabras.map(() => `${campo} LIKE ?`).join(' OR ');
+    const comodines = palabras.map(p => `%${p}%`);
+    const r = await turso.execute({
+        sql: `SELECT id, name, sku, cost, tax_rate, ${puntaje} AS coincidencias
+              FROM products
+              WHERE company_id = ? AND (${alguna})
+              ORDER BY coincidencias DESC, LENGTH(name) ASC LIMIT 4`,
+        args: [...comodines, companyId, ...comodines],
+    });
+    const mejor = r.rows[0];
+    if (!mejor) return null;
+
+    // Con una sola palabra en común el riesgo de emparejar mal es alto ("huevo"
+    // matchea con el chocolate). Se exige la mitad de las palabras, y al menos
+    // dos cuando la descripción da para eso.
+    const minimo = Math.max(palabras.length >= 4 ? 2 : 1, Math.ceil(palabras.length / 2));
+    if (Number(mejor.coincidencias) < minimo) return null;
+
+    // EMPATE = NO EMPAREJAR. Si dos productos puntúan igual, la diferencia entre
+    // ellos está justo en la palabra que importa —el sabor, el tamaño, la
+    // variante— y elegir uno "porque el nombre es más corto" es exactamente cómo
+    // el pollo terminó cargado como carne. Un renglón sin emparejar se ve y se
+    // corrige; uno emparejado mal se guarda y desajusta el stock en silencio.
+    const segundo = r.rows[1];
+    if (segundo && Number(segundo.coincidencias) === Number(mejor.coincidencias)) {
+        return {
+            ambiguo: true,
+            candidatos: r.rows
+                .filter(x => Number(x.coincidencias) === Number(mejor.coincidencias))
+                .map(x => x.name),
+        };
+    }
+
+    return { ...mejor, alternativas: r.rows.slice(1).map(x => x.name) };
+}
+
+async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, lineas = [] }) {
+    if (!Array.isArray(lineas) || lineas.length === 0) {
+        return { success: false, error: 'La factura no trae renglones' };
+    }
+
+    // Proveedor: se busca por nombre; si no está, el pedido se crea igual sin
+    // vincularlo, porque perder la factura entera por eso sería peor.
+    let supplierId = null, supplierName = proveedor || 'Sin proveedor';
+    if (proveedor) {
+        const s = await turso.execute({
+            sql: 'SELECT id, name FROM suppliers WHERE company_id = ? AND LOWER(name) LIKE ? LIMIT 1',
+            args: [companyId, `%${String(proveedor).toLowerCase().split(/\s+/)[0]}%`],
+        });
+        if (s.rows[0]) { supplierId = s.rows[0].id; supplierName = s.rows[0].name; }
+    }
+
+    const items = [];
+    const sinEmparejar = [];
+    for (const l of lineas) {
+        const cantidad = Number(l.cantidad) || 0;
+        const costo = Number(l.costo) || 0;
+        if (cantidad <= 0 || costo <= 0) {
+            sinEmparejar.push({ descripcion: l.descripcion, motivo: 'sin cantidad o sin costo' });
+            continue;
+        }
+        const p = await buscarProducto(turso, companyId, l.descripcion);
+        if (!p) {
+            sinEmparejar.push({ descripcion: l.descripcion, cantidad, costo, motivo: 'no está en el catálogo' });
+            continue;
+        }
+        if (p.ambiguo) {
+            sinEmparejar.push({
+                descripcion: l.descripcion, cantidad, costo,
+                motivo: 'hay varios productos que le calzan igual; elegí vos cuál',
+                candidatos: p.candidatos,
+            });
+            continue;
+        }
+        const tasa = l.iva != null ? Number(l.iva) : Number(p.tax_rate) || 0;
+        items.push({
+            id: p.id,
+            name: p.name,
+            sku: p.sku || '',
+            cost: costo,
+            costWithTax: Math.round(costo * (1 + tasa / 100)),
+            quantity: cantidad,
+            taxRate: tasa,
+            total: Math.round(costo * cantidad),
+            // Se guarda cómo venía en la factura: al revisar en Compras, es lo
+            // único que permite darse cuenta de un emparejamiento equivocado.
+            desdeFactura: l.descripcion,
+            alternativas: p.alternativas,
+        });
+    }
+
+    if (items.length === 0) {
+        return { success: false, error: 'Ningún renglón se pudo emparejar con el catálogo', sinEmparejar };
+    }
+
+    const total = items.reduce((s, i) => s + i.total, 0);
+    const result = await turso.execute({
+        sql: `INSERT INTO supplier_orders (
+                company_id, user_id, supplier_id, supplier_name, seller_name,
+                total_amount, items, status, created_at, expected_delivery_date
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?) RETURNING id`,
+        args: [companyId, session?.uid ?? null, supplierId, supplierName, null,
+            total, JSON.stringify(items), nowIso(), null],
+    });
+
+    return {
+        success: true,
+        pedidoId: Number(result.rows[0].id),
+        proveedor: supplierName,
+        emparejados: items.length,
+        total,
+        items: items.map(i => ({ producto: i.name, desdeFactura: i.desdeFactura, cantidad: i.quantity, costo: i.cost })),
+        sinEmparejar,
+    };
+}
+
+export { supplierOrderFromInvoice };
+
 export const purchaseActions = {
     invoicePayFull,
     invoicePayPartial,

@@ -22,6 +22,7 @@ import {
     TOPE_POR_MIN, CUPO_MENSUAL,
 } from '../_lib/aiGuards.js';
 import { limpiarParaIA, REPORTES_VEDADOS } from '../_lib/aiRedaccion.js';
+import { supplierOrderFromInvoice } from '../_lib/purchaseActions.js';
 
 const MODELO = 'gpt-5.6-luna';
 const MAX_VUELTAS = 6;   // techo de idas y vueltas; sin esto un modelo confundido gira sin fin
@@ -93,6 +94,12 @@ export const HERRAMIENTAS = [
         'A cuánto se viene comprando UN producto a lo largo del tiempo y a qué proveedor. Devuelve `datos` con cada compra y `resumen` con una fila POR PRODUCTO (costo mín/prom/máx y unidades). La búsqueda es amplia, así que el resumen puede traer productos parecidos: elegí el que corresponde por nombre y usá SU promedio, nunca mezcles varios.',
         { buscar: ['string', 'Palabras sueltas del producto y/o proveedor, ej. "huevo ariztia". No hace falta el nombre exacto ni el orden correcto: busca por palabra y ordena por cuántas coinciden.'] }],
     ['comprasPorProveedor', 'Cuánto se le compró a cada proveedor en el período.', RANGO],
+    ['crearPedidoDeFactura',
+        'CREA un pedido a proveedor con lo que leiste en una factura. Usalo SOLO si te lo piden explicitamente. Cada renglon se empareja con el catalogo por nombre; los que no matcheen vuelven en `sinEmparejar` y HAY QUE decirselos al usuario, nunca los omitas. Despues la persona lo pasa a Compras, revisa y guarda.',
+        {
+            proveedor: ['string', 'Nombre del proveedor tal como figura en la factura'],
+            lineas: ['array', 'Los renglones de la factura. Cada uno: descripcion (texto tal cual), cantidad, costo (unitario sin IVA) e iva (porcentaje, opcional)'],
+        }],
     ['proveedoresLista', 'Con qué proveedores se trabaja, cuánto se les compró y cuándo fue la última vez. Usalo si no estás seguro de cómo se escribe el nombre de un proveedor.', {}],
     ['devoluciones', 'Devoluciones de venta y su motivo.', RANGO],
 
@@ -132,6 +139,21 @@ export const HERRAMIENTAS = [
         'invoiceMonthly',
         { desde: 'sixMonthsAgo' }],
 ];
+
+// ── La UNICA herramienta que ESCRIBE ─────────────────────────────────────
+//
+// Todo lo demas solo lee. Esta crea un pedido a proveedor, y el objeto se
+// eligio por ser el de menor riesgo del sistema: no mueve stock, no mueve
+// plata y se borra con un clic. Lo que si mueve —la compra— sigue necesitando
+// que una persona la revise en "Pasar a Compra" y apriete Guardar.
+//
+// Va en un registro aparte del de reportes para que quede evidente cuales
+// escriben: si algun dia son dos, se ven las dos aca y no perdidas entre
+// treinta y cinco lecturas.
+const ESCRITURAS = {
+    crearPedidoDeFactura: (turso, companyId, session, params) =>
+        supplierOrderFromInvoice(turso, companyId, session, params),
+};
 
 // ── Traducción de parámetros ─────────────────────────────────────────────
 //
@@ -179,11 +201,29 @@ const MAPEO_PARAMS = Object.fromEntries(HERRAMIENTAS.filter(h => h[4]).map(h => 
 
 const REPORTES_PERMITIDOS = new Set(HERRAMIENTAS.map(h => h[0]));
 
+// Los renglones de una factura no son un dato simple: cada uno es un objeto.
+// Sin declarar su forma, el modelo manda texto suelto y el emparejamiento falla.
+const ESQUEMA_LINEAS = {
+    type: 'array',
+    description: 'Los renglones de la factura, uno por producto.',
+    items: {
+        type: 'object',
+        properties: {
+            descripcion: { type: 'string', description: 'El texto del producto TAL CUAL figura en la factura' },
+            cantidad: { type: 'number', description: 'Unidades compradas' },
+            costo: { type: 'number', description: 'Costo unitario SIN IVA' },
+            iva: { type: 'number', description: 'Porcentaje de IVA del renglón (19 si no dice otra cosa)' },
+        },
+        required: ['descripcion', 'cantidad', 'costo', 'iva'],
+        additionalProperties: false,
+    },
+};
+
 export function definirHerramientas() {
     return HERRAMIENTAS.map(([name, description, params]) => {
         const properties = {};
         for (const [k, [type, desc]] of Object.entries(params)) {
-            properties[k] = { type, description: desc };
+            properties[k] = k === 'lineas' ? ESQUEMA_LINEAS : { type, description: desc };
         }
         return {
             type: 'function',
@@ -200,7 +240,7 @@ export function definirHerramientas() {
     });
 }
 
-export function instrucciones(hoy, moneda) {
+export function instrucciones(hoy, moneda, conImagen = false) {
     return [
         'Sos el asistente de POSVECI, un punto de venta chileno. Respondés al dueño o encargado del local.',
         `Hoy es ${hoy}. La moneda es ${moneda}.`,
@@ -208,6 +248,33 @@ export function instrucciones(hoy, moneda) {
         'Respondé SOLO con datos que hayas obtenido de las herramientas. Si una herramienta no devuelve el dato, decí que no lo tenés — nunca lo estimes ni lo inventes: quien pregunta va a tomar decisiones de plata con lo que respondas.',
         'Si la pregunta necesita varios reportes, pedilos todos antes de responder.',
         '',
+        // Sin esto, la regla de arriba se pasa de rosca: adjuntando una factura,
+        // el modelo leía bien el número impreso, iba a buscarla al sistema, no la
+        // encontraba y contestaba "no tengo esos datos" — teniendo la factura
+        // entera delante. La imagen que adjunta el usuario ES una fuente válida.
+        // Con imagen adjunta hay DOS fuentes válidas —lo que se ve en la foto y
+        // lo que hay en el sistema— y cuál usar depende de lo que pregunten.
+        //
+        // La primera versión de estas instrucciones decía "leela, NO la busques
+        // en el sistema". Arreglaba el caso de listar los productos de una
+        // factura nueva y rompía todos los demás: adjuntar la misma factura para
+        // ver si se cargó bien, o para comparar contra lo que ya está, necesita
+        // justamente ir al sistema. Una foto no significa siempre lo mismo.
+        ...(conImagen ? [
+            'HAY UNA IMAGEN ADJUNTA. Lo que se ve en ella es una fuente válida: podés leerla directamente, no hace falta que esté cargada en el sistema.',
+            'Qué hacer con ella depende de lo que te pidan:',
+            '  · Si piden leerla o listar lo que contiene → transcribí lo que ves, sin consultar nada.',
+            '  · Si preguntan si ya está cargada, si se cargó bien, si coincide, cuándo se cargó o quién la cargó → leé la foto Y consultá el sistema, después compará y decí en qué difieren.',
+            '  · Si preguntan por precios, márgenes o histórico de algo que aparece en la foto → leé la foto y usá las herramientas para lo demás.',
+            'Ante la duda, leé la imagen y consultá el sistema: sobra información, no falta.',
+            '',
+            'Al transcribir: copiá lo que ves tal cual, sin corregir ni completar. Si un dato está borroso o tapado, decilo en vez de suponerlo.',
+            'Los renglones sin cantidad ni precio son formulario en blanco, no compras: no los incluyas.',
+            'Cuidado con los descuentos: fijate si el total del renglón YA los tiene aplicados antes de restar nada.',
+            'Cuando transcribas una factura, sumá los renglones y compará con el total impreso. Si no coinciden, avisá que algo se leyó mal.',
+            'Que una factura recién fotografiada no aparezca en el sistema es lo esperado si todavía no se cargó — decilo así, sin presentarlo como un problema.',
+            '',
+        ] : []),
         'Escribí como le hablarías a un comerciante, no como un informe: la cifra primero, breve, en castellano de Chile. Los montos con separador de miles.',
         'Si la pregunta es ambigua (no dice de qué fecha, de qué producto), asumí lo más razonable y decí qué asumiste, en vez de preguntar de vuelta.',
     ].join('\n');
@@ -301,7 +368,7 @@ export default async function handler(req, res) {
         for (let vuelta = 0; vuelta < MAX_VUELTAS; vuelta++) {
             const r = await openai.responses.create({
                 model: MODELO,
-                instructions: instrucciones(hoy, body.currency || 'CLP'),
+                instructions: instrucciones(hoy, body.currency || 'CLP', Boolean(imagen)),
                 tools,
                 input,
             });
@@ -321,6 +388,22 @@ export default async function handler(req, res) {
                     // Segunda barrera además del schema: el nombre tiene que estar en
                     // la lista blanca. Sin esto, un nombre inventado por el modelo
                     // llegaría directo al catálogo de reportes.
+                    // Las escrituras van por su propio camino: no pasan por
+                    // reportRun ni por el filtro de redacción, porque no leen
+                    // datos —los crean— y su salida es el resultado de la
+                    // operación, no filas de la base.
+                    if (ESCRITURAS[llamada.name]) {
+                        const params = JSON.parse(llamada.arguments || '{}');
+                        salida = await ESCRITURAS[llamada.name](turso, companyId, session, params);
+                        consultados.push(llamada.name);
+                        input.push({
+                            type: 'function_call_output',
+                            call_id: llamada.call_id,
+                            output: JSON.stringify(salida).slice(0, 24000),
+                        });
+                        continue;
+                    }
+
                     // Doble cierre: lista blanca de herramientas Y reportes vedados
                     // (Configuracion: SII, boleta, integracion).
                     if (!REPORTES_PERMITIDOS.has(llamada.name) || REPORTES_VEDADOS.has(REPORTE_DE[llamada.name])) {

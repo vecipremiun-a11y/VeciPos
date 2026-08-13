@@ -29,6 +29,13 @@ export const hayDictado = () => Boolean(Reconocimiento);
 export function iniciarDictado({ onParcial, onFinal, onError, onFin }) {
     if (!Reconocimiento) { onError?.('Este navegador no permite dictar.'); return () => {}; }
 
+    // Cortar el reconocimiento NO es instantáneo: después de pedirle que pare
+    // todavía puede entregar un último resultado. Al enviar la pregunta eso
+    // volvía a escribir el texto en el campo, que quedaba con lo que uno acababa
+    // de mandar. Con esta bandera, apenas se corta se ignora todo lo que llegue
+    // tarde.
+    let cortado = false;
+
     const rec = new Reconocimiento();
     rec.lang = 'es-CL';
     // `continuous` deja seguir hablando entre pausas: dictar una pregunta larga
@@ -41,6 +48,7 @@ export function iniciarDictado({ onParcial, onFinal, onError, onFin }) {
     let final = '';
 
     rec.onresult = (e) => {
+        if (cortado) return;
         let parcial = '';
         for (let i = e.resultIndex; i < e.results.length; i++) {
             const t = e.results[i][0].transcript;
@@ -51,6 +59,7 @@ export function iniciarDictado({ onParcial, onFinal, onError, onFin }) {
     };
 
     rec.onerror = (e) => {
+        if (cortado) return;
         const motivos = {
             'not-allowed': 'No diste permiso para usar el micrófono.',
             'service-not-allowed': 'No diste permiso para usar el micrófono.',
@@ -63,12 +72,19 @@ export function iniciarDictado({ onParcial, onFinal, onError, onFin }) {
         if (e.error !== 'aborted') onError?.(motivos[e.error] || 'No se pudo dictar.');
     };
 
-    rec.onend = () => { onFinal?.(final.trim()); onFin?.(); };
+    rec.onend = () => {
+        if (cortado) { onFin?.(); return; }   // ya se envió: no devolver texto
+        onFinal?.(final.trim());
+        onFin?.();
+    };
 
     try { rec.start(); }
     catch { onError?.('No se pudo abrir el micrófono.'); onFin?.(); }
 
-    return () => { try { rec.stop(); } catch { /* ya estaba cerrado */ } };
+    return () => {
+        cortado = true;
+        try { rec.stop(); } catch { /* ya estaba cerrado */ }
+    };
 }
 
 /**
