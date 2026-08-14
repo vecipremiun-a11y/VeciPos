@@ -4,6 +4,8 @@ import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { hayConexion, alCambiarConexion } from '../lib/conectividad';
 import { hayDictado, iniciarDictado, achicarImagen } from '../lib/dictado';
+import { dataApiCall } from '../lib/dataApi';
+import { formatCurrency } from '../utils/formatCurrency';
 
 // Asistente IA: preguntarle al negocio en castellano.
 //
@@ -33,20 +35,38 @@ const Asistente = () => {
     const [dictando, setDictando] = useState(false);
     const [dictadoRoto, setDictadoRoto] = useState(null);
     const [imagen, setImagen] = useState(null);   // { dataUrl, ancho, alto }
+    const [propuesta, setPropuesta] = useState(null);
+    const [aplicando, setAplicando] = useState(false);
     const finRef = useRef(null);
     const cortarDictado = useRef(null);
     const archivoRef = useRef(null);
     const cajaTextoRef = useRef(null);
 
-    // El textarea crece con lo que se escribe, hasta un tope. Se hace midiendo el
-    // contenido (scrollHeight) porque CSS no puede: hay que poner la altura en 0
-    // primero, si no el navegador informa la altura vieja y el campo nunca achica
-    // al borrar texto. El tope evita que una pregunta larga se coma la pantalla.
+    // El textarea crece hasta LINEAS_MAX y recién ahí hace scroll.
+    //
+    // El tope se calcula con la altura real de línea en vez de un número fijo de
+    // píxeles. Con 160px puestos a ojo la barra aparecía antes de completar la
+    // sexta línea —había lugar y ya molestaba—, y además se rompería al cambiar
+    // el tamaño de letra. Midiendo, entran exactamente seis.
+    //
+    // El scroll se enciende solo cuando hace falta: con `overflow-y: auto` fijo,
+    // el navegador dibuja la barra apenas el contenido pasa un píxel.
+    //
+    // Y la altura se pone en 0 antes de medir porque si no el navegador informa
+    // la altura vieja, y al borrar texto el campo nunca volvería a achicarse.
+    const LINEAS_MAX = 6;
     useEffect(() => {
         const caja = cajaTextoRef.current;
         if (!caja) return;
+        const estilo = getComputedStyle(caja);
+        const alturaLinea = parseFloat(estilo.lineHeight) || 22;
+        const relleno = parseFloat(estilo.paddingTop) + parseFloat(estilo.paddingBottom);
+        const tope = alturaLinea * LINEAS_MAX + relleno;
+
         caja.style.height = '0px';
-        caja.style.height = Math.min(caja.scrollHeight, 160) + 'px';
+        const necesita = caja.scrollHeight;
+        caja.style.height = Math.min(necesita, tope) + 'px';
+        caja.style.overflowY = necesita > tope ? 'auto' : 'hidden';
     }, [texto]);
 
     // Cortar el micrófono si se sale de la pantalla: si no, sigue escuchando
@@ -89,6 +109,35 @@ const Asistente = () => {
         finRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [mensajes, pensando]);
 
+
+    // Acá SÍ se escribe, y solo desde un clic de la persona. Va por la acción
+    // normal del sistema (productPriceUpdate), que toca precio y costo y nada
+    // más: no puede pisar categoría, proveedor ni los otros 19 campos.
+    const aplicarPropuesta = async () => {
+        if (!propuesta || aplicando) return;
+        setAplicando(true);
+        try {
+            const r = await dataApiCall('productPriceUpdate', {
+                companyId: activeCompanyId,
+                id: propuesta.productoId,
+                valores: propuesta.valores,
+            });
+            if (r?.success) {
+                setMensajes(m => [...m, {
+                    rol: 'ia',
+                    texto: `Listo: ${r.producto} quedó actualizado.`,
+                }]);
+                setPropuesta(null);
+            } else {
+                setMensajes(m => [...m, { rol: 'error', texto: r?.error || 'No se pudo aplicar el cambio.' }]);
+            }
+        } catch (e) {
+            setMensajes(m => [...m, { rol: 'error', texto: 'No se pudo aplicar: ' + e.message }]);
+        } finally {
+            setAplicando(false);
+        }
+    };
+
     const preguntar = async (pregunta) => {
         const q = (pregunta ?? texto).trim();
         // Con foto adjunta se puede mandar sin escribir nada: se asume que la
@@ -100,6 +149,7 @@ const Asistente = () => {
         if (dictando) cortarDictado.current?.();
         setTexto('');
         setImagen(null);
+        setPropuesta(null);
         setMensajes(m => [...m, { rol: 'user', texto: consulta, imagen: foto?.dataUrl }]);
         setPensando(true);
 
@@ -137,6 +187,9 @@ const Asistente = () => {
                     texto: data.respuesta,
                     reportes: data.reportes || [],
                 }]);
+                // El modelo propone; el cambio lo confirma la persona en la
+                // tarjeta de abajo. Nada se escribió todavía.
+                if (data.propuesta) setPropuesta(data.propuesta);
             }
         } catch (e) {
             setMensajes(m => [...m, { rol: 'error', texto: 'No se pudo conectar: ' + e.message }]);
@@ -234,6 +287,61 @@ const Asistente = () => {
                 <div ref={finRef} />
             </div>
 
+            {/* Propuesta pendiente de confirmar. Se muestra separada del chat,
+                pegada al campo de escritura, para que no se pierda entre los
+                mensajes: es lo único de esta pantalla que modifica datos. */}
+            {propuesta && (
+                <div className="mt-3 rounded-xl border border-[var(--color-primary)]/50 bg-[var(--color-primary)]/10 p-3 space-y-3">
+                    <div>
+                        <p className="text-sm font-bold text-[var(--color-text)] break-words">{propuesta.producto}</p>
+                        <p className="text-[11px] text-[var(--color-text-muted)]">Así va a quedar si confirmás:</p>
+                    </div>
+
+                    {/* Todos los campos que se mueven, no solo los pedidos: los que
+                        cambian por consecuencia van marcados para que no sorprendan. */}
+                    <div className="rounded-lg overflow-hidden border border-[var(--glass-border)]">
+                        {(propuesta.campos || []).map((c, i) => (
+                            <div key={i} className={`flex items-baseline gap-2 px-2.5 py-1.5 text-xs ${i % 2 ? 'bg-[var(--glass-bg)]' : ''}`}>
+                                <span className="w-28 shrink-0 text-[var(--color-text-muted)]">{c.campo}</span>
+                                <span className="line-through text-[var(--color-text-muted)]">{String(c.antes)}</span>
+                                <span className="text-[var(--color-text-muted)]">→</span>
+                                <span className="font-bold text-[var(--color-text)]">{String(c.ahora)}</span>
+                                {c.motivo === 'consecuencia' && (
+                                    <span className="ml-auto shrink-0 text-[10px] text-amber-400">se ajusta solo</span>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+
+                    {(propuesta.avisos || []).length > 0 && (
+                        <div className="space-y-1">
+                            {propuesta.avisos.map((a, i) => (
+                                <p key={i} className="flex items-start gap-1.5 text-[11px] text-amber-300">
+                                    <AlertTriangle size={12} className="mt-0.5 shrink-0" />{a}
+                                </p>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="flex gap-2">
+                        <button
+                            onClick={aplicarPropuesta}
+                            disabled={aplicando}
+                            className="flex-1 bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold rounded-lg py-2 text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+                        >
+                            {aplicando ? 'Aplicando…' : 'Aplicar los cambios'}
+                        </button>
+                        <button
+                            onClick={() => setPropuesta(null)}
+                            disabled={aplicando}
+                            className="px-4 rounded-lg border border-[var(--glass-border)] text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors disabled:opacity-50"
+                        >
+                            Cancelar
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Entrada */}
             <div className="pt-3 border-t border-[var(--glass-border)] space-y-2">
                 {/* Foto adjunta, con opción de sacarla antes de enviar */}
@@ -314,7 +422,7 @@ const Asistente = () => {
                                         : 'Escribí tu pregunta…'
                         }
                         disabled={pensando || !online}
-                        className="flex-1 min-w-0 resize-none overflow-y-auto bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl px-4 py-2.5 text-sm leading-relaxed text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] disabled:opacity-50"
+                        className="flex-1 min-w-0 resize-none overflow-hidden bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl px-4 py-2.5 text-sm leading-relaxed text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] disabled:opacity-50"
                     />
                     <button
                         onClick={() => preguntar()}

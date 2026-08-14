@@ -23,6 +23,7 @@ import {
 } from '../_lib/aiGuards.js';
 import { limpiarParaIA, REPORTES_VEDADOS } from '../_lib/aiRedaccion.js';
 import { supplierOrderFromInvoice } from '../_lib/purchaseActions.js';
+import { proponerCambiosProducto } from '../_lib/aiPropuestaProducto.js';
 
 const MODELO = 'gpt-5.6-luna';
 const MAX_VUELTAS = 6;   // techo de idas y vueltas; sin esto un modelo confundido gira sin fin
@@ -99,6 +100,23 @@ export const HERRAMIENTAS = [
         'A cuánto se viene comprando UN producto a lo largo del tiempo y a qué proveedor. Devuelve `datos` con cada compra y `resumen` con una fila POR PRODUCTO (costo mín/prom/máx y unidades). La búsqueda es amplia, así que el resumen puede traer productos parecidos: elegí el que corresponde por nombre y usá SU promedio, nunca mezcles varios.',
         { buscar: ['string', 'Palabras sueltas del producto y/o proveedor, ej. "huevo ariztia". No hace falta el nombre exacto ni el orden correcto: busca por palabra y ordena por cuántas coinciden.'] }],
     ['comprasPorProveedor', 'Cuánto se le compró a cada proveedor en el período.', RANGO],
+    ['proponerCambioProducto',
+        'PROPONE cambios sobre UN producto: precio, costo, margen, IVA, categoría y oferta. NO los aplica — devuelve el estado final completo para que la persona lo confirme en pantalla.\n' +
+        'Necesitás el id exacto, sacalo de productoBuscar. Si hay varios parecidos, PREGUNTÁ cuál antes de proponer.\n' +
+        'Mandá el valor SOLO de los campos que te pidieron cambiar y null en todos los demás. NUNCA mandes 0 para decir "no lo toco": 0 es un valor real —costo cero, IVA exento— y se va a aplicar.\n' +
+        'El resto se calcula o se deja como está. Si el usuario no dijo un dato que hace falta (por ejemplo pone un producto en oferta pero no dice a cuánto), PREGUNTASELO en vez de inventarlo.\n' +
+        'El IVA y la categoría solo pueden ser de los que YA existen: si mandás uno que no está, te devuelvo la lista para que elijas.\n' +
+        'Cuando responda con la propuesta, contale a la persona TODOS los campos que van a cambiar —incluidos los que se mueven solos por consecuencia— y los avisos que vengan.',
+        {
+            productoId: ['number', 'El id exacto del producto, salido de productoBuscar'],
+            precio: [['number', 'null'], 'Nuevo precio de venta. null si no se toca.'],
+            costo: [['number', 'null'], 'Nuevo costo. null si no se toca.'],
+            margen: [['number', 'null'], 'Nuevo porcentaje de utilidad. null si no se toca. Si lo mandás, el precio se recalcula.'],
+            iva: [['number', 'null'], 'Nueva tasa de IVA en porcentaje (0 es Exento, un valor válido). null si no se toca.'],
+            categoria: [['string', 'null'], 'Nueva categoría, entre las existentes. null si no se toca.'],
+            oferta: [['boolean', 'null'], 'true para poner en oferta, false para sacarlo, null si no se toca.'],
+            precioOferta: [['number', 'null'], 'Precio de oferta. El precio normal se mantiene y se muestra tachado. null si no se toca.'],
+        }],
     ['crearPedidoDeFactura',
         'CREA un pedido a proveedor con lo que leiste en una factura. Usalo SOLO si te lo piden explicitamente. Cada renglon se empareja con el catalogo por nombre; los que no matcheen vuelven en `sinEmparejar` y HAY QUE decirselos al usuario, nunca los omitas. Despues la persona lo pasa a Compras, revisa y guarda.',
         {
@@ -156,6 +174,12 @@ export const HERRAMIENTAS = [
 // escriben: si algun dia son dos, se ven las dos aca y no perdidas entre
 // treinta y cinco lecturas.
 const ESCRITURAS = {
+    // No escribe: devuelve la propuesta con los valores actuales al lado, para
+    // que la pantalla pueda mostrar "de $1.100 a $1.300" y pedir confirmación.
+    // La escritura la dispara la persona, no el modelo.
+    proponerCambioProducto: (turso, companyId, session, params) =>
+        proponerCambiosProducto(turso, companyId, params),
+
     crearPedidoDeFactura: (turso, companyId, session, params) =>
         supplierOrderFromInvoice(turso, companyId, session, params),
 };
@@ -389,6 +413,7 @@ export default async function handler(req, res) {
         let respuesta = null;
         const consultados = [];
         const camposQuitados = new Set();
+        let propuesta = null;
 
         for (let vuelta = 0; vuelta < MAX_VUELTAS; vuelta++) {
             const r = await openai.responses.create({
@@ -420,6 +445,7 @@ export default async function handler(req, res) {
                     if (ESCRITURAS[llamada.name]) {
                         const params = JSON.parse(llamada.arguments || '{}');
                         salida = await ESCRITURAS[llamada.name](turso, companyId, session, params);
+                        if (salida?.propuesta) propuesta = salida.propuesta;
                         consultados.push(llamada.name);
                         input.push({
                             type: 'function_call_output',
@@ -496,6 +522,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
             success: true,
             respuesta,
+            propuesta,
             reportes: consultados,
             cupo: {
                 ...cupo,

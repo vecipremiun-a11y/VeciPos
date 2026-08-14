@@ -123,6 +123,8 @@ export default async function handler(req, res) {
             // Inventario (Fase 1 · Paso 7)
             case 'productCreate':
                 return res.status(200).json(await productCreate(turso, companyId, session, body.product));
+            case 'productPriceUpdate':
+                return res.status(200).json(await productPriceUpdate(turso, companyId, session, body));
             case 'productUpdate':
                 return res.status(200).json(await productUpdate(turso, companyId, session, body.id, body.product));
             case 'productDelete':
@@ -589,6 +591,83 @@ async function productCreate(turso, companyId, session, product) {
 
     await auditLog(turso, companyId, session, 'CREATE', 'PRODUCT', { name: product.name, sku: product.sku });
     return { success: true, product: result.rows[0] };
+}
+
+// Cambio de precio/costo de UN producto, y nada más.
+//
+// Existe aparte de productUpdate por una razón concreta: aquel reemplaza los 22
+// campos del producto, asi que cualquiera que omita el que llama se borra. Para
+// una accion propuesta por el Asistente eso es inaceptable — se corrige el
+// precio y de paso se vacia la categoria, el proveedor y los rangos.
+//
+// Esta solo puede tocar precio y costo. No es una restriccion de permisos: es
+// que la funcion, literalmente, no sabe escribir en ningun otro lado.
+//
+// La confirma una PERSONA desde la pantalla. El modelo propone, nunca ejecuta:
+// preguntando por "zapallo italiano" el asistente encontro dos productos con
+// precios distintos, y elegir mal habria cambiado el precio equivocado en todas
+// las ventas siguientes.
+async function productPriceUpdate(turso, companyId, session, { id, price, cost, valores }) {
+    // `valores` viene de una propuesta del Asistente ya resuelta: categoría, IVA,
+    // oferta y escala incluidas. Igual se sigue tocando SOLO este conjunto de
+    // campos — nunca los 22 de productUpdate.
+    if (valores && typeof valores === 'object') {
+        const prev0 = await turso.execute({
+            sql: 'SELECT id, name, price, cost, category, tax_rate, is_offer, offer_price FROM products WHERE id = ? AND company_id = ?',
+            args: [id, companyId],
+        });
+        const antes0 = prev0.rows[0];
+        if (!antes0) return { success: false, error: 'Producto no encontrado' };
+        await turso.execute({
+            sql: `UPDATE products SET price = ?, cost = ?, category = ?, tax_rate = ?,
+                         is_offer = ?, offer_price = ?, price_ranges = ?, updated_at = ?
+                   WHERE id = ? AND company_id = ?`,
+            args: [
+                Number(valores.price), Number(valores.cost), valores.category,
+                Number(valores.tax_rate), valores.is_offer ? 1 : 0, Number(valores.offer_price) || 0,
+                JSON.stringify(valores.price_ranges || []), new Date().toISOString(), id, companyId,
+            ],
+        });
+        await auditLog(turso, companyId, session, 'UPDATE', 'PRODUCT_PRICE', {
+            id, name: antes0.name, origen: 'asistente_ia', valores,
+        });
+        return { success: true, producto: antes0.name, aplicado: true };
+    }
+
+    if (!id) return { success: false, error: 'Falta el producto' };
+
+    const prev = await turso.execute({
+        sql: 'SELECT id, name, price, cost FROM products WHERE id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    const antes = prev.rows[0];
+    if (!antes) return { success: false, error: 'Producto no encontrado' };
+
+    const nuevoPrecio = price != null ? Number(price) : Number(antes.price);
+    const nuevoCosto = cost != null ? Number(cost) : Number(antes.cost);
+    if (!Number.isFinite(nuevoPrecio) || nuevoPrecio < 0) return { success: false, error: 'Precio inválido' };
+    if (!Number.isFinite(nuevoCosto) || nuevoCosto < 0) return { success: false, error: 'Costo inválido' };
+
+    await turso.execute({
+        sql: 'UPDATE products SET price = ?, cost = ?, updated_at = ? WHERE id = ? AND company_id = ?',
+        args: [nuevoPrecio, nuevoCosto, new Date().toISOString(), id, companyId],
+    });
+
+    // Queda registrado quién lo cambió y desde dónde: un precio que se movió sin
+    // que nadie recuerde por qué es de las cosas más difíciles de reconstruir.
+    await auditLog(turso, companyId, session, 'UPDATE', 'PRODUCT_PRICE', {
+        id, name: antes.name,
+        precio: { antes: Number(antes.price), ahora: nuevoPrecio },
+        costo: { antes: Number(antes.cost), ahora: nuevoCosto },
+        origen: 'asistente_ia',
+    });
+
+    return {
+        success: true,
+        producto: antes.name,
+        precio: { antes: Number(antes.price), ahora: nuevoPrecio },
+        costo: { antes: Number(antes.cost), ahora: nuevoCosto },
+    };
 }
 
 async function productUpdate(turso, companyId, session, id, product) {
