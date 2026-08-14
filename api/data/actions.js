@@ -687,13 +687,28 @@ async function productUpdate(turso, companyId, session, id, product) {
     const newStock = Math.round((parseFloat(product.stock) || 0) * 1000) / 1000;
 
     await turso.execute({
-        sql: `UPDATE products SET name=?, price=?, stock=ROUND(?, 3), category=?, sku=?, image=?, cost=?, tax_rate=?,
+        // `image` es el único campo que se actualiza con COALESCE.
+        //
+        // Las pantallas ya no traen la foto junto con el producto —pesa 39 KB
+        // promedio y hacía que la lista tardara medio minuto—, así que llega
+        // después, aparte. Si alguien abre a editar y guarda antes de que la
+        // foto llegue, el formulario mandaría `image` vacío y el UPDATE la
+        // borraría sin que nadie lo pidiera.
+        //
+        // Con COALESCE: no mandar el campo (null) significa "dejala como está";
+        // mandar cadena vacía —que es lo que hace el botón de quitar foto—
+        // sigue borrándola. Se puede seguir sacando una foto a propósito, pero
+        // no por accidente.
+        sql: `UPDATE products SET name=?, price=?, stock=ROUND(?, 3), category=?, sku=?, image=COALESCE(?, image), cost=?, tax_rate=?,
                 unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=?, sale_mode=?,
                 allow_item_notes=?, preorder_unit=?, preorder_billing_unit=?, preorder_price_per_kg=?,
                 preorder_gram_per_unit=?, preorder_use_base_price=?, units_per_box=?
               WHERE id = ? AND company_id = ?`,
         args: [
-            product.name, product.price, product.stock, product.category, product.sku, product.image,
+            // undefined no es un valor válido para el driver: se traduce a null,
+            // que acá significa "no la toques".
+            product.name, product.price, product.stock, product.category, product.sku,
+            product.image === undefined ? null : product.image,
             product.cost || 0, product.tax_rate || 0, product.unit || 'Und', product.supplier || null,
             product.is_offer ? 1 : 0, product.offer_price || 0, JSON.stringify(product.price_ranges || []),
             product.scale_group_id || null, product.sale_mode || 'sale_only', product.allow_item_notes ? 1 : 0,

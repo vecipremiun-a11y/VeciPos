@@ -132,6 +132,9 @@ const normalizeSku = (value) => {
 export const useStore = create(persist((set, get) => ({
     // Initial State
     products: [],
+    // Por qué falló la última carga del inventario, si falló. Sin esto, un corte
+    // por tiempo se ve igual que una empresa sin productos.
+    inventoryError: null,
     // Delivery (App): repartidores y tablero de envíos
     couriers: [],
     deliveries: [],
@@ -1226,6 +1229,7 @@ export const useStore = create(persist((set, get) => ({
         const { activeCompanyId, products: currentProducts } = get();
         try {
             const rows = await reportRows(activeCompanyId, 'inventoryProducts', { searchTerm, category, offset, limit: 50 });
+            set({ inventoryError: null });
 
             const newProducts = rows.map(p => ({
                 ...p,
@@ -1238,9 +1242,24 @@ export const useStore = create(persist((set, get) => ({
                 set({ products: [...currentProducts, ...newProducts] });
             }
 
+            // Las fotos se piden aparte y sin esperarlas: la lista ya se ve, y
+            // cada una aparece cuando llega. Es lo mismo que hace la grilla del
+            // POS desde que se le sacó la foto a su consulta.
+            const conFoto = newProducts.filter(p => p.has_image).map(p => p.id);
+            if (conFoto.length) get().loadProductImages(conFoto);
+
             return newProducts.length;
         } catch (e) {
-            console.error("Inventory fetch failed", e);
+            // Este catch se tragaba el problema: devolvía 0 y la pantalla decía
+            // "No se encontraron productos", que es exactamente lo que se ve
+            // cuando la empresa no tiene ninguno. Un corte por tiempo y un
+            // catálogo vacío no son lo mismo y no pueden mostrarse igual.
+            console.error('Inventory fetch failed', e);
+            const seCorto = e?.name === 'TimeoutError' || e?.name === 'AbortError'
+                || /tiempo|espera|network|fetch/i.test(e?.message || '');
+            set({ inventoryError: seCorto
+                ? 'La lista tardó demasiado y se cortó. Probá de nuevo.'
+                : ('No se pudo cargar el inventario: ' + (e?.message || 'error desconocido')) });
             return 0;
         }
     },

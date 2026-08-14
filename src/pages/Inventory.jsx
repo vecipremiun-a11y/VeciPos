@@ -19,7 +19,9 @@ const Inventory = () => {
         fetchInventoryProducts,
         activeCompanyId,
         currentCurrency,
-        taxRates
+        taxRates,
+        inventoryError,
+        loadProductImages
     } = useStore();
     const { can } = usePermissions();
 
@@ -187,8 +189,17 @@ const Inventory = () => {
         return filtered;
     }, [products, filterTax, filterStock, filterGroup]);
 
-    const handleEdit = (product) => {
-        setEditingProduct(product);
+    // La foto ya no viene con el producto: llega después, aparte. Si se abre a
+    // editar antes de que llegue, el formulario mostraría el recuadro vacío y
+    // parecería que el producto no tiene foto. Se espera solo esa —una consulta
+    // por id, instantánea— y solo si el producto declara tener.
+    const handleEdit = async (product) => {
+        let p = product;
+        if (product.has_image && !product.image) {
+            await loadProductImages([product.id]);
+            p = useStore.getState().products.find(x => x.id === product.id) || product;
+        }
+        setEditingProduct(p);
         setView('form');
         setIsModalOpen(true);
     };
@@ -471,6 +482,22 @@ const Inventory = () => {
                                 Limpiar Filtros
                             </button>
                         </div>
+                    </div>
+                )}
+
+                {/* Que se vea la diferencia entre "no hay productos" y "no se
+                    pudieron traer". Con el mismo cartel para las dos cosas, un
+                    corte de red parecía un catálogo vacío y nadie sabía que
+                    bastaba con reintentar. */}
+                {inventoryError && (
+                    <div className="mx-4 mb-3 p-3 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-between gap-3">
+                        <p className="text-sm text-red-400">{inventoryError}</p>
+                        <button
+                            onClick={() => loadProducts(0, true)}
+                            className="px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-300 text-xs font-bold hover:bg-red-500/30 shrink-0"
+                        >
+                            Reintentar
+                        </button>
                     </div>
                 )}
 

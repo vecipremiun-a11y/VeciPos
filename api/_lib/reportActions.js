@@ -49,6 +49,25 @@ function invoiceWhere({ dateFrom, dateTo, supplierFilter, paymentType, search } 
 // búsqueda del POS bajaba entre 1,3 y 3,3 MB por búsqueda y tardaba hasta 1 s;
 // sin esta columna son 0,03 MB y 150 ms. Las fotos se piden aparte con
 // `productImages`, que es para lo que existe.
+// Por qué el ORDER BY de las dos consultas de catálogo dice `COLLATE NOCASE`.
+//
+// Los índices que existen para ellas —idx_products_company_offer_name y
+// idx_products_company_category_offer_name— guardan el nombre en NOCASE. Un
+// `ORDER BY name ASC` pelado ordena en binario, que NO es el mismo orden, así
+// que SQLite no puede usarlos: arma un árbol temporal con los 4.362 productos
+// de la empresa y, como la consulta pide muchas columnas, para hacerlo tiene
+// que leer las filas enteras… con la foto en base64 adentro. Son unos 154 MB de
+// lectura para devolver 50 filas.
+//
+// Medido el 14-ago-2026 contra la base real, tres vueltas alternando:
+//
+//   Inventario, 50 filas   binario 50–62 s   NOCASE 0,8–1,6 s
+//   POS "Todos", 30 filas  binario 41–50 s   NOCASE 0,5–1,0 s
+//   POS 1 categoría        binario 0,5 s     NOCASE 0,14 s
+//
+// El navegador corta a los 12 segundos, así que esas pantallas quedaban vacías
+// o lentísimas según cómo viniera la red. De paso el orden queda como la gente
+// espera: alfabético sin importar mayúsculas.
 export const PRODUCT_COLS_SIN_IMAGEN =
     'id, name, price, stock, category, sku, cost, tax_rate, unit, supplier, '
     + 'pending_adjustment, is_offer, offer_price, price_ranges, scale_group_id, '
@@ -83,7 +102,7 @@ const REPORTS = {
                     CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image,
                     tax_rate, is_offer, offer_price, company_id, price_ranges, scale_group_id, original_price
                   FROM products WHERE ${conds.join(' AND ')}
-                  ORDER BY is_offer DESC, name ASC LIMIT ? OFFSET ?`,
+                  ORDER BY is_offer DESC, name COLLATE NOCASE ASC LIMIT ? OFFSET ?`,
             args: (cid) => [cid, ...extra, lim, off],
         }];
     },
@@ -165,7 +184,23 @@ const REPORTS = {
         const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
         const off = Math.max(parseInt(offset, 10) || 0, 0);
         return [{
-            sql: `SELECT * FROM products WHERE ${conds.join(' AND ')} ORDER BY is_offer DESC, name ASC LIMIT ? OFFSET ?`,
+            // Esta consulta se había quedado en `SELECT *`, igual que le pasó
+            // antes a la búsqueda del POS. Medido el 14-ago-2026 contra la base
+            // real: la primera página de 50 productos pesaba 3,88 MB y tardaba
+            // 27 segundos, porque arrastraba 46 fotos en base64 (la más grande,
+            // 184 KB). El navegador corta a los 12 segundos, así que la pantalla
+            // de Inventario se quedaba en "No se encontraron productos" sin
+            // decir por qué — y a veces sí cargaba, según cómo viniera la red.
+            //
+            // Sin la foto son las mismas 50 filas en una fracción del peso. Las
+            // fotos llegan después, en una sola consulta, con las que de verdad
+            // hay que mostrar (loadProductImages). `created_at` e `is_active`
+            // van sueltos porque no están en la lista compartida y la pantalla
+            // los usa.
+            sql: `SELECT ${PRODUCT_COLS_SIN_IMAGEN}, created_at, is_active,
+                    CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image
+                  FROM products WHERE ${conds.join(' AND ')}
+                  ORDER BY is_offer DESC, name COLLATE NOCASE ASC LIMIT ? OFFSET ?`,
             args: (cid) => [cid, ...extra, lim, off],
         }];
     },
