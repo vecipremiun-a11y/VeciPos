@@ -363,7 +363,15 @@ const Asistente = () => {
                 )}
 
                 {/* items-end: al crecer el campo, los botones quedan alineados
-                    abajo con la última línea, no estirados a lo alto. */}
+                    abajo con la última línea, no estirados a lo alto.
+
+                    Ojo con eso: antes la fila no tenía alineación y los botones
+                    se estiraban solos hasta la altura del campo. Al poner
+                    items-end se quedaron sin altura propia y encogieron al
+                    tamaño del ícono —quedaron como pastillas chatas—. Por eso
+                    ahora la llevan puesta: h-11 son los mismos 44 px que mide el
+                    campo con una línea (2 de borde + 20 de padding + 22,75 de
+                    interlineado). */}
                 <div className="flex items-end gap-2">
                     <input
                         ref={archivoRef}
@@ -377,7 +385,7 @@ const Asistente = () => {
                         onClick={() => archivoRef.current?.click()}
                         disabled={pensando || !online}
                         title="Adjuntar una foto"
-                        className="shrink-0 bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text-muted)] rounded-xl px-3 hover:text-[var(--color-text)] hover:border-[var(--color-primary)] transition-colors disabled:opacity-40"
+                        className="shrink-0 h-11 w-11 flex items-center justify-center bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text-muted)] rounded-xl hover:text-[var(--color-text)] hover:border-[var(--color-primary)] transition-colors disabled:opacity-40"
                         aria-label="Adjuntar una foto"
                     >
                         <ImagePlus size={18} />
@@ -390,7 +398,7 @@ const Asistente = () => {
                             onClick={alternarDictado}
                             disabled={pensando || !online}
                             title={dictando ? 'Dejar de dictar' : 'Dictar la pregunta'}
-                            className={`shrink-0 rounded-xl px-3 border transition-colors disabled:opacity-40 ${
+                            className={`shrink-0 h-11 w-11 flex items-center justify-center rounded-xl border transition-colors disabled:opacity-40 ${
                                 dictando
                                     ? 'bg-red-500/20 border-red-500/50 text-red-400 animate-pulse'
                                     : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-primary)]'
@@ -427,7 +435,7 @@ const Asistente = () => {
                     <button
                         onClick={() => preguntar()}
                         disabled={pensando || (!texto.trim() && !imagen) || !online}
-                        className="shrink-0 bg-[var(--color-primary)] text-[var(--color-on-primary)] rounded-xl px-4 hover:opacity-90 transition-opacity disabled:opacity-40"
+                        className="shrink-0 h-11 px-4 flex items-center justify-center bg-[var(--color-primary)] text-[var(--color-on-primary)] rounded-xl hover:opacity-90 transition-opacity disabled:opacity-40"
                         aria-label="Enviar pregunta"
                     >
                         <Send size={18} />
