@@ -353,6 +353,20 @@ function palabrasDe(texto) {
         .slice(0, 8);
 }
 
+// El texto reducido a lo que de verdad identifica: minúsculas, sin tildes, sin
+// espacios ni signos. "DETODITO II 64G" y "Detodito II 64g" dan lo mismo, y
+// "LAYS ORE 45G" da lo mismo que "LAYSORE45G" —que es como venía en la factura
+// antes de que el lector le metiera un espacio—.
+//
+// Es lo que permite resolver el caso más frecuente sin preguntar nada: el
+// proveedor escribe el mismo nombre en mayúscula y el emparejador por palabras
+// lo daba por empatado, porque descarta los tokens de menos de tres letras y
+// justo ahí estaba la diferencia ("II" contra "I").
+const compacto = (s) => String(s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+
 // Los nombres del catálogo llevan tildes y los de las facturas no. Sin esta
 // normalización, "instantanea" no encontraba "Instantánea" — y ese punto perdido
 // alcanzó para que "SOPA BOWL POLLO" terminara emparejado con el producto de
@@ -363,7 +377,39 @@ const SIN_TILDES = (col) =>
 
 const quitarTildes = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-async function buscarProducto(turso, companyId, descripcion) {
+// Busca el producto de un renglón de factura, de lo más confiable a lo más
+// difuso. Cada escalón que resuelve evita una pregunta a la persona.
+//
+//   1. El código que el proveedor imprime, si ya se aprendió. Es la llave
+//      fuerte: no cambia aunque cambien el nombre o la abreviatura.
+//   2. El texto de la factura, si ya se aprendió. Acá viven las abreviaturas
+//      que ninguna comparación podría adivinar ("DINAMITA FH 100").
+//   3. El nombre igual, ignorando mayúsculas, tildes y espacios.
+//   4. Puntaje por palabras (lo de siempre).
+async function buscarProducto(turso, companyId, descripcion, codigo = null) {
+    // ── 1 y 2: lo aprendido ──────────────────────────────────────────────
+    const codigoLimpio = codigo ? String(codigo).trim() : null;
+    const textoCompacto = compacto(descripcion);
+    if (codigoLimpio || textoCompacto) {
+        const a = await turso.execute({
+            sql: `SELECT p.id, p.name, p.sku, p.cost, p.tax_rate,
+                         a.alias_code IS NOT NULL AND a.alias_code = ? AS por_codigo
+                  FROM product_supplier_aliases a
+                  JOIN products p ON p.id = a.product_id AND p.company_id = a.company_id
+                  WHERE a.company_id = ?
+                    AND ((? IS NOT NULL AND a.alias_code = ?) OR (? <> '' AND a.alias_text = ?))
+                  ORDER BY por_codigo DESC LIMIT 1`,
+            args: [codigoLimpio, companyId, codigoLimpio, codigoLimpio, textoCompacto, textoCompacto],
+        });
+        if (a.rows[0]) {
+            return {
+                ...a.rows[0],
+                aprendido: Number(a.rows[0].por_codigo) === 1 ? 'código' : 'nombre',
+                alternativas: [],
+            };
+        }
+    }
+
     const palabras = palabrasDe(quitarTildes(descripcion));
     if (!palabras.length) return null;
     const campo = SIN_TILDES('name');
@@ -371,14 +417,48 @@ async function buscarProducto(turso, companyId, descripcion) {
     const alguna = palabras.map(() => `${campo} LIKE ?`).join(' OR ');
     const comodines = palabras.map(p => `%${p}%`);
     const r = await turso.execute({
+        // Se traen más filas que las 4 que se muestran: el nombre exacto puede
+        // no quedar primero por puntaje —le pasó a "Detodito II 64g", que
+        // empataba con "Detodito I 64g"— y hay que poder encontrarlo abajo.
         sql: `SELECT id, name, sku, cost, tax_rate, ${puntaje} AS coincidencias
               FROM products
               WHERE company_id = ? AND (${alguna})
-              ORDER BY coincidencias DESC, LENGTH(name) ASC LIMIT 4`,
+              ORDER BY coincidencias DESC, LENGTH(name) ASC LIMIT 10`,
         args: [...comodines, companyId, ...comodines],
     });
     const mejor = r.rows[0];
     if (!mejor) return null;
+
+    // ── 3: el nombre igual, sin importar cómo esté escrito ───────────────
+    //
+    // Antes esto no se miraba y era el error más molesto: la factura decía
+    // exactamente el nombre del producto, en mayúscula, y el sistema pedía
+    // elegir entre dos porque los tokens cortos que los diferencian ("II"
+    // contra "I") se descartan por ser de menos de tres letras.
+    const iguales = r.rows.filter(x => compacto(x.name) === textoCompacto);
+    if (iguales.length === 1) {
+        return { ...iguales[0], exacto: true, alternativas: [] };
+    }
+
+    // ── 3b: el nombre completo más el formato de la caja ─────────────────
+    //
+    // "DORITOS QUESO 240GX14" es el producto "Doritos Queso 240g" vendido en
+    // caja de 14. El nombre entero está ahí, con una cola corta pegada atrás.
+    // Sin esto quedaba empatado con los Doritos Queso de 54, 72, 100 y 172
+    // gramos, que comparten todas las palabras salvo el gramaje.
+    //
+    // Las tres condiciones son el freno: el nombre del catálogo tiene que estar
+    // completo desde el principio, medir al menos ocho caracteres (para que un
+    // producto de nombre corto no prefije media factura) y lo que sobra tiene
+    // que ser una cola de formato, no otro producto. Y tiene que calzar UNO
+    // solo: si calzan dos, sigue siendo una pregunta para la persona.
+    const conFormato = r.rows.filter(x => {
+        const c = compacto(x.name);
+        return c.length >= 8 && textoCompacto.startsWith(c) && textoCompacto.length - c.length <= 6;
+    });
+    if (conFormato.length === 1) {
+        return { ...conFormato[0], exacto: true, alternativas: [] };
+    }
 
     // Con una sola palabra en común el riesgo de emparejar mal es alto ("huevo"
     // matchea con el chocolate). Se exige la mitad de las palabras, y al menos
@@ -400,6 +480,10 @@ async function buscarProducto(turso, companyId, descripcion) {
             // nombre suelto habría que volver a buscarlo para engancharlo.
             candidatos: r.rows
                 .filter(x => Number(x.coincidencias) === Number(mejor.coincidencias))
+                // Seis botones ya es una pantalla incómoda; más que eso no ayuda
+                // a decidir, marea. Los que sobran se resuelven por el catálogo,
+                // no por esta lista.
+                .slice(0, 6)
                 .map(x => ({
                     id: Number(x.id),
                     name: x.name,
@@ -437,14 +521,20 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
             sinEmparejar.push({ descripcion: l.descripcion, motivo: 'sin cantidad o sin costo' });
             continue;
         }
-        const p = await buscarProducto(turso, companyId, l.descripcion);
+        const p = await buscarProducto(turso, companyId, l.descripcion, l.codigo);
         if (!p) {
-            sinEmparejar.push({ descripcion: l.descripcion, cantidad, costo, motivo: 'no está en el catálogo' });
+            sinEmparejar.push({
+                descripcion: l.descripcion, cantidad, costo,
+                codigo: l.codigo || null,
+                iva: l.iva != null ? Number(l.iva) : null,
+                motivo: 'no está en el catálogo',
+            });
             continue;
         }
         if (p.ambiguo) {
             sinEmparejar.push({
                 descripcion: l.descripcion, cantidad, costo,
+                codigo: l.codigo || null,
                 // El IVA del renglón viaja con él: si después se engancha a mano
                 // desde la pantalla, el costo con impuesto tiene que salir del
                 // que traía la factura, no del que el producto tenga en su ficha.
@@ -473,6 +563,10 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
             // único que permite darse cuenta de un emparejamiento equivocado.
             desdeFactura: l.descripcion,
             alternativas: p.alternativas,
+            // Cómo se resolvió: por lo aprendido, por nombre igual, o por
+            // puntaje. Se muestra en el resumen para que se note cuándo la
+            // memoria empezó a trabajar sola.
+            comoSeEmparejo: p.aprendido ? `aprendido por ${p.aprendido}` : (p.exacto ? 'nombre igual' : 'parecido'),
         });
     }
 
@@ -501,16 +595,76 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
         success: true,
         pedidoId: Number(result.rows[0].id),
         proveedor: supplierName,
+        // Se devuelve para poder anotar de qué proveedor viene cada equivalencia
+        // que la persona corrija en la pantalla.
+        supplierId: supplierId || null,
         numeroFactura: folio,
         emparejados: items.length,
         total,
         totalNeto,
-        items: items.map(i => ({ producto: i.name, desdeFactura: i.desdeFactura, cantidad: i.quantity, costo: i.cost })),
+        items: items.map(i => ({
+            producto: i.name, desdeFactura: i.desdeFactura,
+            cantidad: i.quantity, costo: i.cost, comoSeEmparejo: i.comoSeEmparejo,
+        })),
         sinEmparejar,
     };
 }
 
-export { supplierOrderFromInvoice };
+// Se acuerda de cómo escribe el proveedor un producto.
+//
+// Se llama cuando la persona corrige un renglón que quedó ambiguo: ella ya
+// resolvió la duda, y esa respuesta es información que no se puede deducir de
+// ningún lado. Guardarla es la diferencia entre volver a preguntar lo mismo
+// todos los meses y que la próxima factura entre sola.
+//
+// Se guardan las dos llaves cuando están: el código del proveedor (la fuerte,
+// no cambia aunque cambien el nombre) y el texto compactado. Si la equivalencia
+// ya existía apuntando a otro producto, se pisa — corregir de nuevo tiene que
+// poder arreglar una corrección equivocada.
+async function productAliasLearn(turso, companyId, session, { productId, codigo, texto, supplierId }) {
+    if (!productId) return { success: false, error: 'Falta el producto' };
+
+    const codigoLimpio = codigo ? String(codigo).trim().slice(0, 64) : null;
+    const textoCompacto = compacto(texto).slice(0, 120) || null;
+    if (!codigoLimpio && !textoCompacto) {
+        return { success: false, error: 'No hay nada que recordar de ese renglón' };
+    }
+
+    const p = await turso.execute({
+        sql: 'SELECT id FROM products WHERE id = ? AND company_id = ?',
+        args: [productId, companyId],
+    });
+    if (!p.rows[0]) return { success: false, error: 'Ese producto no es de esta empresa' };
+
+    const ahora = nowIso();
+    const guardar = async (campo, valor) => {
+        if (!valor) return;
+        await turso.execute({
+            sql: `INSERT INTO product_supplier_aliases
+                    (company_id, product_id, supplier_id, ${campo}, source, created_at, created_by)
+                  VALUES (?, ?, ?, ?, 'aprendido', ?, ?)
+                  -- El índice es parcial, así que el ON CONFLICT tiene que
+                  -- repetir su condición: sin el WHERE, SQLite no lo reconoce
+                  -- como el índice en conflicto y tira error.
+                  ON CONFLICT(company_id, ${campo}) WHERE ${campo} IS NOT NULL DO UPDATE SET
+                    product_id = excluded.product_id,
+                    supplier_id = excluded.supplier_id,
+                    created_at = excluded.created_at,
+                    created_by = excluded.created_by`,
+            args: [companyId, productId, supplierId || null, valor, ahora, session?.uid ?? null],
+        });
+    };
+
+    await guardar('alias_code', codigoLimpio);
+    await guardar('alias_text', textoCompacto);
+
+    return { success: true, recordado: { codigo: codigoLimpio, texto: textoCompacto } };
+}
+
+// `buscarProducto` se exporta para poder medirlo contra el catálogo real sin
+// crear pedidos de prueba: es la pieza que decide si un renglón entra solo, si
+// hay que preguntar o si no está, y equivocarse ahí desajusta el stock.
+export { supplierOrderFromInvoice, buscarProducto };
 
 export const purchaseActions = {
     invoicePayFull,
@@ -528,4 +682,5 @@ export const purchaseActions = {
     purchaseDetails,
     purchaseDelete,
     supplierPurchaseSummaryGet,
+    productAliasLearn,
 };

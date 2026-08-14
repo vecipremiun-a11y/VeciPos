@@ -54,12 +54,17 @@ const ESQUEMA = {
             items: {
                 type: 'object',
                 properties: {
+                    // El código del proveedor es el dato más valioso del renglón:
+                    // no cambia aunque cambien el nombre, el gramaje o la
+                    // abreviatura, así que una vez que se aprende a qué producto
+                    // corresponde, esa factura entra sola para siempre.
+                    codigo: { type: ['string', 'null'], description: 'El código del proveedor de la columna Código, tal cual. null si la factura no trae esa columna' },
                     descripcion: { type: 'string', description: 'El texto del producto TAL CUAL figura en la factura' },
                     cantidad: { type: 'number' },
                     costo: { type: 'number', description: 'Costo unitario SIN IVA, con el descuento ya aplicado si el total del renglón lo tiene' },
                     iva: { type: 'number', description: 'Porcentaje de IVA del renglón' },
                 },
-                required: ['descripcion', 'cantidad', 'costo', 'iva'],
+                required: ['codigo', 'descripcion', 'cantidad', 'costo', 'iva'],
                 additionalProperties: false,
             },
         },
@@ -72,6 +77,8 @@ const INSTRUCCIONES = [
     'Leé esta factura de compra de un comercio chileno y devolvé sus datos.',
     '',
     'Transcribí lo que ves, sin corregir ni completar. Si un dato está borroso, dejalo vacío en vez de suponerlo.',
+    'Si la factura trae una columna de código de producto, copiala EXACTA en `codigo`. Es lo que después permite reconocer el producto sin depender del nombre.',
+    'La descripción va tal cual está impresa, con sus abreviaturas: no la expandas ni la corrijas. "DINAMITA FH 100" se transcribe así, no como "Doritos Dinamita Flamin Hot".',
     'Los renglones sin cantidad ni precio son formulario en blanco, NO compras: no los incluyas. Un talonario preimpreso puede traer decenas de líneas vacías.',
     'No incluyas renglones que no son productos: fletes, "distribución y logística", redondeos.',
     'Si un renglón trae descuento, fijate si el TOTAL de esa línea ya lo tiene aplicado. El costo unitario que devuelvas tiene que ser el que, multiplicado por la cantidad, da ese total.',

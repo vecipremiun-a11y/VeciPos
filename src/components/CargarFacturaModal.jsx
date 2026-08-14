@@ -6,6 +6,7 @@ import { achicarImagen } from '../lib/dictado';
 import { fetchConLimite } from '../lib/conectividad';
 import { formatCurrency } from '../utils/formatCurrency';
 import { toast } from '../lib/toast';
+import { dataApiCall } from '../lib/dataApi';
 
 // Foto de factura → pedido creado, sin conversación de por medio.
 //
@@ -137,6 +138,22 @@ const CargarFacturaModal = ({ archivo, onClose, onCreado }) => {
             return;
         }
 
+        // Se guarda la corrección. Esta respuesta —que "DINAMITA FH 100" es el
+        // Doritos Flamin Hot— no se puede deducir de ningún lado: la sabe la
+        // persona que tiene la factura en la mano. Si no se guarda, la próxima
+        // factura del mismo proveedor vuelve a preguntar lo mismo.
+        //
+        // No se corta el flujo si falla: el producto YA quedó en el pedido, que
+        // es lo que la persona pidió. Perder la memoria es molesto; perder el
+        // enganche sería un error.
+        const memoria = await dataApiCall('productAliasLearn', {
+            companyId: activeCompanyId,
+            productId: candidato.id,
+            codigo: linea.codigo || null,
+            texto: linea.descripcion,
+            supplierId: resultado.supplierId || null,
+        });
+
         setResultado(prev => {
             if (!prev) return prev;
             const netoNuevo = (prev.totalNeto || 0) + linea.costo * linea.cantidad;
@@ -161,7 +178,12 @@ const CargarFacturaModal = ({ archivo, onClose, onCreado }) => {
                 },
             };
         });
-        toast(`${candidato.name} agregado al pedido`, 'success');
+        toast(
+            memoria?.success
+                ? `${candidato.name} agregado. La próxima factura lo va a reconocer solo.`
+                : `${candidato.name} agregado al pedido`,
+            'success'
+        );
         avisar.current?.({ pedidoId: resultado.pedidoId });
     };
 
@@ -267,6 +289,12 @@ const CargarFacturaModal = ({ archivo, onClose, onCreado }) => {
                                                         {i.desdeFactura && i.desdeFactura !== i.producto && (
                                                             <p className="text-xs text-[var(--color-text-muted)]">
                                                                 en la factura: {i.desdeFactura}
+                                                                {/* Que se note cuándo entró por memoria y no
+                                                                    por parecido: es la señal de que corregir
+                                                                    una vez sirvió. */}
+                                                                {i.comoSeEmparejo?.startsWith('aprendido') && (
+                                                                    <span className="text-green-400"> · {i.comoSeEmparejo}</span>
+                                                                )}
                                                             </p>
                                                         )}
                                                     </td>

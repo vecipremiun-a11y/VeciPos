@@ -121,7 +121,7 @@ export const HERRAMIENTAS = [
         'CREA un pedido a proveedor con lo que leiste en una factura. Usalo SOLO si te lo piden explicitamente. Cada renglon se empareja con el catalogo por nombre; los que no matcheen vuelven en `sinEmparejar` y HAY QUE decirselos al usuario, nunca los omitas. Despues la persona lo pasa a Compras, revisa y guarda.',
         {
             proveedor: ['string', 'Nombre del proveedor tal como figura en la factura'],
-            lineas: ['array', 'Los renglones de la factura. Cada uno: descripcion (texto tal cual), cantidad, costo (unitario sin IVA) e iva (porcentaje, opcional)'],
+            lineas: ['array', 'Los renglones de la factura. Cada uno: codigo (el codigo del proveedor de la columna Codigo, tal cual, si la factura lo trae), descripcion (texto tal cual, CON sus abreviaturas, sin expandirlas), cantidad, costo (unitario sin IVA) e iva (porcentaje, opcional)'],
         }],
     ['proveedoresLista', 'Con qué proveedores se trabaja, cuánto se les compró y cuándo fue la última vez. Usalo si no estás seguro de cómo se escribe el nombre de un proveedor.', {}],
     ['devoluciones', 'Devoluciones de venta y su motivo.', RANGO],

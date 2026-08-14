@@ -202,6 +202,10 @@ export default async function handler(req, res) {
             case 'invoicePayPartial':
             case 'supplierPurchaseSummaryGet':
                 return res.status(200).json(await purchaseActions[action](turso, companyId, session, body));
+            // Recuerda cómo escribe el proveedor un producto en su factura, a
+            // partir de la corrección que hizo la persona al cargarla.
+            case 'productAliasLearn':
+                return res.status(200).json(await purchaseActions.productAliasLearn(turso, companyId, session, body));
             // Encargos / preorders (Fase 1 · Paso 15)
             case 'preorderCreate':
             case 'preordersFetch':
