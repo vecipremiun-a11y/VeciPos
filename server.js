@@ -40,6 +40,7 @@ import adminActionsHandler from './api/admin/actions.js';
 import dataActionsHandler from './api/data/actions.js';
 import pingHandler from './api/ping.js';
 import aiConsultarHandler from './api/ai/consultar.js';
+import aiFacturaPedidoHandler from './api/ai/factura-pedido.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -84,6 +85,12 @@ app.all('/api/ping', async (req, res) => {
 // sirve Express igual que el resto.
 app.all('/api/ai/consultar', async (req, res) => {
     try { return await aiConsultarHandler(req, res); }
+    catch (error) { return res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Foto de factura → pedido, desde el botón de Pedidos Realizados.
+app.all('/api/ai/factura-pedido', async (req, res) => {
+    try { return await aiFacturaPedidoHandler(req, res); }
     catch (error) { return res.status(500).json({ success: false, error: error.message }); }
 });
 

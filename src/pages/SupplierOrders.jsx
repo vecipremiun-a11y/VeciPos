@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { usePermissions } from '../hooks/usePermissions'; // Import usePermissions
+import { useCompanyFeatures } from '../hooks/useCompanyFeatures';
 import { useNavigate } from 'react-router-dom';
-import { Search, Filter, Calendar, Eye, Package, ArrowLeft, Trash2, Share2, Download, ShoppingCart, Plus } from 'lucide-react';
+import { Search, Filter, Calendar, Eye, Package, ArrowLeft, Trash2, Share2, Download, ShoppingCart, Plus, Camera } from 'lucide-react';
 import { toast } from '../lib/toast';
 import AgregarProductoPedidoModal from '../components/AgregarProductoPedidoModal';
+import CargarFacturaModal from '../components/CargarFacturaModal';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -15,6 +17,7 @@ import autoTable from 'jspdf-autotable';
 const SupplierOrders = () => {
     const { fetchSupplierOrders, deleteSupplierOrder, suppliers, currentCurrency } = useStore(); // Add deleteSupplierOrder
     const { can } = usePermissions(); // Helper for permissions
+    const { isModuleLocked } = useCompanyFeatures();
     const navigate = useNavigate();
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -26,9 +29,46 @@ const SupplierOrders = () => {
     const [selectedOrder, setSelectedOrder] = useState(null);
     const [agregandoProducto, setAgregandoProducto] = useState(false);
 
+    // Carga de facturas por foto (App Asistente IA)
+    const inputFactura = useRef(null);
+    const [facturaArchivo, setFacturaArchivo] = useState(null);
+    const [pedidoCreado, setPedidoCreado] = useState(null);
+    const puedeCargarFactura = can('ai.use') && can('supplier_orders.create') && !isModuleLocked('ai');
+
     useEffect(() => {
         loadOrders();
     }, [selectedSupplier, statusFilter]);
+
+    // Sacar la foto y que el pedido quede hecho: sin escribir nada, sin elegir
+    // proveedor, sin buscar producto por producto. Es el mismo lector que usa el
+    // asistente, pero acá no hay que pedírselo — se abre la cámara y listo.
+    const elegirFactura = (e) => {
+        const archivo = e.target.files?.[0];
+        // El input se limpia SIEMPRE, incluso si se canceló: sin esto, sacar dos
+        // veces la misma foto no dispara el onChange y parece que el botón se rompió.
+        e.target.value = '';
+        if (!archivo) return;
+        setPedidoCreado(null);
+        setFacturaArchivo(archivo);
+    };
+
+    // Al cerrar el resumen se abre el pedido recién creado, que es lo que uno
+    // quiere mirar después: si emparejó bien y si conviene pasarlo a compra.
+    const cerrarFactura = async () => {
+        const id = pedidoCreado;
+        setFacturaArchivo(null);
+        setPedidoCreado(null);
+        // La lista se recarga siempre, incluso si se cerró la ventana antes de
+        // tiempo: el servidor pudo haber creado el pedido igual, y quedaría fuera
+        // de la pantalla hasta el próximo refresco.
+        //
+        // Se respetan los filtros de la pantalla; si el pedido nuevo no entra en
+        // ellos simplemente no se abre, en vez de mostrar algo que la lista no tiene.
+        const data = await loadOrders();
+        if (!id) return;
+        const nuevo = data?.find(o => Number(o.id) === Number(id));
+        if (nuevo) setSelectedOrder(nuevo);
+    };
 
 
 
@@ -144,6 +184,7 @@ const SupplierOrders = () => {
         const data = await fetchSupplierOrders(filters);
         setOrders(data);
         setIsLoading(false);
+        return data;
     };
 
     const filteredOrders = orders.filter(order => {
@@ -183,6 +224,29 @@ const SupplierOrders = () => {
                     <h1 className="text-3xl font-bold neon-text">Pedidos Realizados</h1>
                     <p className="text-[var(--color-text-muted)]">Historial de órdenes de compra a proveedores</p>
                 </div>
+
+                {puedeCargarFactura && (
+                    <>
+                        {/* `capture="environment"` hace que el teléfono abra la cámara
+                            de atrás directamente. En el computador se ignora y queda
+                            como un selector de archivos normal. */}
+                        <input
+                            ref={inputFactura}
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={elegirFactura}
+                            className="hidden"
+                        />
+                        <button
+                            onClick={() => inputFactura.current?.click()}
+                            className="px-4 py-2 bg-[var(--color-primary)] text-black rounded-lg font-bold hover:brightness-110 transition-all flex items-center gap-2 whitespace-nowrap"
+                        >
+                            <Camera size={18} />
+                            Cargar factura
+                        </button>
+                    </>
+                )}
             </div>
 
             {/* Filters */}
@@ -413,6 +477,14 @@ const SupplierOrders = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {facturaArchivo && (
+                <CargarFacturaModal
+                    archivo={facturaArchivo}
+                    onCreado={(r) => setPedidoCreado(r.pedidoId)}
+                    onClose={cerrarFactura}
+                />
             )}
 
             {agregandoProducto && selectedOrder && (

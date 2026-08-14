@@ -395,16 +395,24 @@ async function buscarProducto(turso, companyId, descripcion) {
     if (segundo && Number(segundo.coincidencias) === Number(mejor.coincidencias)) {
         return {
             ambiguo: true,
+            // Van con id y con su impuesto, no solo el nombre: la pantalla los
+            // muestra como botones para que la persona elija cuál era, y con el
+            // nombre suelto habría que volver a buscarlo para engancharlo.
             candidatos: r.rows
                 .filter(x => Number(x.coincidencias) === Number(mejor.coincidencias))
-                .map(x => x.name),
+                .map(x => ({
+                    id: Number(x.id),
+                    name: x.name,
+                    sku: x.sku || '',
+                    taxRate: Number(x.tax_rate) || 0,
+                })),
         };
     }
 
     return { ...mejor, alternativas: r.rows.slice(1).map(x => x.name) };
 }
 
-async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, lineas = [] }) {
+async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, lineas = [], numeroFactura = null }) {
     if (!Array.isArray(lineas) || lineas.length === 0) {
         return { success: false, error: 'La factura no trae renglones' };
     }
@@ -437,21 +445,30 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
         if (p.ambiguo) {
             sinEmparejar.push({
                 descripcion: l.descripcion, cantidad, costo,
+                // El IVA del renglón viaja con él: si después se engancha a mano
+                // desde la pantalla, el costo con impuesto tiene que salir del
+                // que traía la factura, no del que el producto tenga en su ficha.
+                iva: l.iva != null ? Number(l.iva) : null,
                 motivo: 'hay varios productos que le calzan igual; elegí vos cuál',
                 candidatos: p.candidatos,
             });
             continue;
         }
         const tasa = l.iva != null ? Number(l.iva) : Number(p.tax_rate) || 0;
+        const costoConIva = Math.round(costo * (1 + tasa / 100));
         items.push({
             id: p.id,
             name: p.name,
             sku: p.sku || '',
             cost: costo,
-            costWithTax: Math.round(costo * (1 + tasa / 100)),
+            costWithTax: costoConIva,
             quantity: cantidad,
             taxRate: tasa,
-            total: Math.round(costo * cantidad),
+            // Con IVA, igual que en "Realizar Pedido" (Orders.jsx). Antes acá se
+            // guardaba el neto y el pedido nacido de una foto mostraba un total
+            // 19% más bajo que el mismo pedido cargado a mano — y ese número es
+            // el que después viaja a Compras.
+            total: costoConIva * cantidad,
             // Se guarda cómo venía en la factura: al revisar en Compras, es lo
             // único que permite darse cuenta de un emparejamiento equivocado.
             desdeFactura: l.descripcion,
@@ -464,21 +481,30 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
     }
 
     const total = items.reduce((s, i) => s + i.total, 0);
+    // El neto se calcula aparte solo para poder compararlo contra el neto
+    // impreso en la factura: es el control de si entró todo o quedó algo afuera.
+    const totalNeto = items.reduce((s, i) => s + i.cost * i.quantity, 0);
+    // El número de factura queda guardado para poder detectar la misma foto
+    // cargada dos veces, y para volver del pedido al papel cuando algo no cuadra.
+    const folio = numeroFactura ? String(numeroFactura).trim() : null;
     const result = await turso.execute({
         sql: `INSERT INTO supplier_orders (
                 company_id, user_id, supplier_id, supplier_name, seller_name,
-                total_amount, items, status, created_at, expected_delivery_date
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?) RETURNING id`,
+                total_amount, items, status, created_at, expected_delivery_date,
+                invoice_number
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?) RETURNING id`,
         args: [companyId, session?.uid ?? null, supplierId, supplierName, null,
-            total, JSON.stringify(items), nowIso(), null],
+            total, JSON.stringify(items), nowIso(), null, folio || null],
     });
 
     return {
         success: true,
         pedidoId: Number(result.rows[0].id),
         proveedor: supplierName,
+        numeroFactura: folio,
         emparejados: items.length,
         total,
+        totalNeto,
         items: items.map(i => ({ producto: i.name, desdeFactura: i.desdeFactura, cantidad: i.quantity, costo: i.cost })),
         sinEmparejar,
     };
