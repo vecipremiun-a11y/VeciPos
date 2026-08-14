@@ -36,6 +36,18 @@ const Asistente = () => {
     const finRef = useRef(null);
     const cortarDictado = useRef(null);
     const archivoRef = useRef(null);
+    const cajaTextoRef = useRef(null);
+
+    // El textarea crece con lo que se escribe, hasta un tope. Se hace midiendo el
+    // contenido (scrollHeight) porque CSS no puede: hay que poner la altura en 0
+    // primero, si no el navegador informa la altura vieja y el campo nunca achica
+    // al borrar texto. El tope evita que una pregunta larga se coma la pantalla.
+    useEffect(() => {
+        const caja = cajaTextoRef.current;
+        if (!caja) return;
+        caja.style.height = '0px';
+        caja.style.height = Math.min(caja.scrollHeight, 160) + 'px';
+    }, [texto]);
 
     // Cortar el micrófono si se sale de la pantalla: si no, sigue escuchando
     // en segundo plano y el indicador de grabación queda prendido.
@@ -242,7 +254,9 @@ const Asistente = () => {
                     </div>
                 )}
 
-                <div className="flex gap-2">
+                {/* items-end: al crecer el campo, los botones quedan alineados
+                    abajo con la última línea, no estirados a lo alto. */}
+                <div className="flex items-end gap-2">
                     <input
                         ref={archivoRef}
                         type="file"
@@ -279,10 +293,20 @@ const Asistente = () => {
                         </button>
                     )}
 
-                    <input
+                    {/* Textarea y no input: una pregunta larga —o dictada— no entra
+                        en una línea, y con un input el texto se corría hacia el
+                        costado y no se veía lo que uno acababa de escribir. Crece
+                        con el contenido hasta un tope y ahí recién hace scroll. */}
+                    <textarea
+                        ref={cajaTextoRef}
+                        rows={1}
                         value={texto}
                         onChange={e => setTexto(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); preguntar(); } }}
+                        onKeyDown={e => {
+                            // Enter envía; Shift+Enter hace un salto de línea, que
+                            // ahora sirve de algo porque el campo tiene varias.
+                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); preguntar(); }
+                        }}
                         placeholder={
                             !online ? 'Sin conexión'
                                 : dictando ? 'Escuchando… hablá tranquilo'
@@ -290,7 +314,7 @@ const Asistente = () => {
                                         : 'Escribí tu pregunta…'
                         }
                         disabled={pensando || !online}
-                        className="flex-1 min-w-0 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl px-4 py-2.5 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] disabled:opacity-50"
+                        className="flex-1 min-w-0 resize-none overflow-y-auto bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl px-4 py-2.5 text-sm leading-relaxed text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] disabled:opacity-50"
                     />
                     <button
                         onClick={() => preguntar()}

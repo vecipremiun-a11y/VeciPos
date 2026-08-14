@@ -3194,6 +3194,14 @@ export const useStore = create(persist((set, get) => ({
                     paymentMethod: sale.paymentMethod,
                     paymentDetails: sale.paymentDetails,
                     client: sale.client ? { id: sale.client.id, name: sale.client.name } : null,
+                    // Sin esta línea, la clave anti-duplicado nunca llegaba al
+                    // servidor: acá NO se manda el objeto `sale` entero, se arma
+                    // uno nuevo campo por campo. Se puso la clave en addSale, se
+                    // guardó en la cola de reintento, se agregó la columna y el
+                    // índice único... y el dato se descartaba justo en este punto.
+                    // Diez horas de ventas duplicadas después del despliegue con
+                    // client_sale_id en NULL en las 167 ventas.
+                    clientSaleId: sale.clientSaleId,
                 },
             });
 

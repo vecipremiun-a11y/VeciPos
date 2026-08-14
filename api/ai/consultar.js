@@ -79,7 +79,12 @@ export const HERRAMIENTAS = [
     ['bestMarginProducts', 'Productos que dejan más ganancia, no los que más se venden.', { from: ['string', 'Desde AAAA-MM-DD'], to: ['string', 'Hasta AAAA-MM-DD'] }],
     ['productSalesStats', 'Historial de ventas de UN producto puntual.', { productId: ['number', 'ID del producto'] }],
     ['lowStockProducts', 'Productos por agotarse, bajo su stock mínimo.', {}],
-    ['inventoryProducts', 'Inventario: stock y valorización.', {}],
+    ['productoBuscar',
+        'Buscá UN producto y mirá todo lo suyo: stock actual, costo, precio de venta, margen, categoría y proveedor. USALO SIEMPRE para preguntas sobre un producto puntual ("cuánto stock queda de X", "a cuánto vendo Y"). NO uses inventoryProducts para eso: ese devuelve un listado parcial y te va a hacer creer que el producto no existe.',
+        { buscar: ['string', 'Palabras del nombre, ej. "huevo extra". No hace falta el nombre exacto ni el orden.'] }],
+    ['inventoryProducts',
+        'LISTADO del inventario, para recorrer o valorizar. Devuelve como máximo 50 productos de los miles que puede haber: si buscás uno puntual usá productoBuscar. Acepta un texto para filtrar.',
+        { searchTerm: ['string', 'Texto para filtrar por nombre o código. Mandá "" para el listado general.'] }],
     ['vendorRanking', 'Ranking de vendedores por ventas en un rango.', { from: ['string', 'Desde AAAA-MM-DD'], to: ['string', 'Hasta AAAA-MM-DD'] }],
     ['vendorSalesSummary', 'Detalle de ventas de UN vendedor.', { userId: ['number', 'ID del vendedor'], from: ['string', 'Desde AAAA-MM-DD'], to: ['string', 'Hasta AAAA-MM-DD'] }],
     ['salesByPaymentMethod', 'Cómo pagaron los clientes: efectivo, tarjeta, transferencia.', { from: ['string', 'Desde AAAA-MM-DD'], to: ['string', 'Hasta AAAA-MM-DD'] }],
@@ -247,6 +252,14 @@ export function instrucciones(hoy, moneda, conImagen = false) {
         '',
         'Respondé SOLO con datos que hayas obtenido de las herramientas. Si una herramienta no devuelve el dato, decí que no lo tenés — nunca lo estimes ni lo inventes: quien pregunta va a tomar decisiones de plata con lo que respondas.',
         'Si la pregunta necesita varios reportes, pedilos todos antes de responder.',
+        // Ojo con el equilibrio de estas dos reglas. La primera sola hacía que el
+        // modelo dijera "no existe" mirando 50 filas de 4.360. La segunda sola lo
+        // dejaría dudando para siempre, sin poder confirmar nunca que algo no
+        // está — y "no tengo ese producto cargado" es una respuesta que el
+        // comerciante NECESITA poder recibir.
+        'Un LISTADO devuelve una parte (los primeros 50, 100 o 120). Que algo no aparezca ahí no prueba que no exista: si buscabas algo puntual, usá la herramienta de BÚSQUEDA correspondiente antes de sacar conclusiones.',
+        'Pero una BÚSQUEDA que vuelve vacía sí es concluyente: si buscaste por nombre y no hay ninguna coincidencia, decí derecho que ese producto no está cargado. No lo dejes en duda ni sugieras que "quizás falte revisar": buscaste y no está.',
+        'Cuando un reporte traiga un `resumen.total` mayor que la cantidad de filas que recibiste, decí cuántos hay en total y aclará que estás mostrando una parte.',
         '',
         // Sin esto, la regla de arriba se pasa de rosca: adjuntando una factura,
         // el modelo leía bien el número impreso, iba a buscarla al sistema, no la

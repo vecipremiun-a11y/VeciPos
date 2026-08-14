@@ -637,6 +637,41 @@ const REPORTS = {
         args: (cid) => [cid, from, to],
     }],
 
+    // Buscar UN producto y ver todo lo suyo: stock, costo, precio, margen.
+    //
+    // Faltaba, y se noto: preguntando "cuanto stock me queda de huevo extra" el
+    // asistente usaba el listado de inventario, que devuelve los primeros 50 de
+    // 4.360 ordenados por nombre. El huevo esta en la posicion 239, asi que no
+    // aparecia y el modelo concluia que el producto no existe — cuando existe y
+    // tiene stock negativo, que es justo lo que habia que avisar.
+    //
+    // La busqueda es por palabras y tolerante a tildes, igual que costoHistorico:
+    // "huevo aristia extra" tiene que encontrar "Ariztia Huevo Extra".
+    productoBuscar: ({ buscar }) => {
+        const palabras = String(buscar || '')
+            .normalize('NFD').replace(/[̀-ͯ]/g, '')
+            .toLowerCase().split(/\s+/).filter(p => p.length >= 3).slice(0, 6);
+        if (!palabras.length) palabras.push(String(buscar || '').toLowerCase());
+        const campo = `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(name),'á','a'),'é','e'),'í','i'),'ó','o'),'ú','u')`;
+        const puntaje = palabras.map(() => `(CASE WHEN ${campo} LIKE ? THEN 1 ELSE 0 END)`).join(' + ');
+        const alguna = palabras.map(() => `${campo} LIKE ?`).join(' OR ');
+        const comodines = palabras.map(p => `%${p}%`);
+        return [{
+            sql: `SELECT id, name, sku, category, unit, stock, cost, price, tax_rate, supplier,
+                         ROUND(COALESCE(stock,0) * COALESCE(cost,0)) AS valor_en_stock,
+                         CASE WHEN COALESCE(cost,0) > 0
+                              THEN ROUND((price - cost) * 100.0 / cost, 1) END AS margen_pct,
+                         ${puntaje} AS coincidencias
+                  FROM products
+                  WHERE company_id = ? AND (${alguna})
+                  ORDER BY coincidencias DESC, LENGTH(name) ASC LIMIT 15`,
+            args: (cid) => [...comodines, cid, ...comodines],
+        }, {
+            sql: `SELECT COUNT(*) AS total FROM products WHERE company_id = ? AND (${alguna})`,
+            args: (cid) => [cid, ...comodines],
+        }];
+    },
+
     // Detalle de lo que se compró: el renglón de cada factura, no solo el total.
     //
     // Faltaba. El asistente tenía el gasto por mes y las facturas pendientes,
