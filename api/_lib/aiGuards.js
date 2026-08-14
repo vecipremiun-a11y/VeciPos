@@ -68,7 +68,16 @@ export async function ritmoExcedido(turso, companyId) {
  * impide llamar al endpoint: cualquiera con la sesión abierta puede hacerlo a
  * mano. Mismo criterio que la licencia de la App.
  */
-const ROLES_PERMITIDOS = new Set(['owner', 'super_admin', 'Administrador']);
+// Dueño y administradores entran sin configurar nada. Cualquier otro rol
+// necesita que el dueño le active el permiso `ai.use` desde la pantalla de
+// Roles — apagado por defecto.
+//
+// Antes esto era una lista fija en el código, lo que dejaba afuera al bodeguero
+// aunque el dueño quisiera dárselo. Pasarlo a permiso mueve la decisión a donde
+// corresponde: la toma el dueño de la sucursal, queda registrada, y se revisa o
+// se quita desde la misma pantalla que el resto.
+const ROLES_SIEMPRE = new Set(['owner', 'super_admin', 'Administrador']);
+const PERMISO_IA = 'ai.use';
 
 export async function puedeUsarIA(turso, userId, companyId) {
     const r = await turso.execute({
@@ -80,7 +89,16 @@ export async function puedeUsarIA(turso, userId, companyId) {
     });
     const fila = r.rows[0];
     if (!fila) return false;
-    return ROLES_PERMITIDOS.has(fila.rol_empresa) || ROLES_PERMITIDOS.has(fila.rol_global);
+    if (ROLES_SIEMPRE.has(fila.rol_empresa) || ROLES_SIEMPRE.has(fila.rol_global)) return true;
+
+    // Se exige granted = 1 explícito: una fila ausente es "no", igual que en el
+    // resto del sistema (negar por defecto).
+    const p = await turso.execute({
+        sql: `SELECT granted FROM role_permissions
+              WHERE company_id = ? AND role = ? AND permission = ? LIMIT 1`,
+        args: [companyId, fila.rol_empresa, PERMISO_IA],
+    });
+    return Number(p.rows[0]?.granted) === 1;
 }
 
 /**

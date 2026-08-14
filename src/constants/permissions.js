@@ -198,6 +198,11 @@ export const ALL_PERMISSIONS = [
             { id: 'reports.profit', label: 'Ver Reporte de Utilidades', desc: 'Muestra ganancias por producto y periodo (dato sensible)' },
             { id: 'reports.sales_analytics', label: 'Ver Análisis de Ventas', desc: 'Gráficos y análisis avanzado de tendencias de venta' },
             { id: 'reports.export', label: 'Exportar Reportes', desc: 'Permite descargar reportes como archivo Excel/PDF' },
+            // Apagado por defecto. El dueño y los administradores lo tienen sin
+            // configurar nada; para cualquier otro rol hay que activarlo acá a
+            // propósito, porque el asistente ve márgenes, costos, sueldos,
+            // liquidaciones y descuadres de caja.
+            { id: 'ai.use', label: 'Usar el Asistente IA', desc: 'Preguntar por el negocio y cargar facturas por foto. Da acceso a márgenes, costos y sueldos (dato sensible)' },
         ]
     },
     {

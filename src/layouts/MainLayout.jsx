@@ -227,7 +227,7 @@ const MainLayout = () => {
             subItems: [
                 // Primero a propósito: el asistente responde en una pregunta lo que
                 // en los reportes de abajo son varios clics y saber dónde mirar.
-                { icon: Sparkles, label: 'Asistente IA', path: '/asistente', permission: 'reports.sales', moduleKey: 'ai', ownerOnly: true },
+                { icon: Sparkles, label: 'Asistente IA', path: '/asistente', permission: 'ai.use', moduleKey: 'ai' },
                 {
                     icon: ShoppingCart, label: 'Ventas', isSubgroup: true,
                     children: [
