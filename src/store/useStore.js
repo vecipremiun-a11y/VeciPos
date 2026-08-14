@@ -1717,6 +1717,9 @@ export const useStore = create(persist((set, get) => ({
             categories: [],
             suppliers: [],
             users: [],        // ← CRÍTICO
+            // Ahora que los permisos se guardan en disco, hay que borrarlos al
+            // salir: si no, el set del usuario anterior queda en el navegador.
+            rolePermissions: [],
             clients: [],
             sales: [],
             purchases: [],
@@ -3612,6 +3615,14 @@ export const useStore = create(persist((set, get) => ({
                     client: sale.client || null,
                     tipoDte: sale.tipoDte ?? null,
                     invoiceData: sale.invoiceData || null,
+                    // La clave anti-duplicado tiene que viajar DENTRO de la cola.
+                    // Acá el payload se arma campo por campo, así que sin esta
+                    // línea se perdía —el mismo descuido que ya había pasado en
+                    // saleCommit—. Y sin ella la cola es el peor lugar donde
+                    // faltar: reintenta hasta diez veces, y cada reintento
+                    // llegaría al servidor con una clave nueva, o sea como una
+                    // venta distinta.
+                    clientSaleId: sale.clientSaleId,
                     _offlineCreatedAt: new Date().toISOString(),
                     _offlineUserId: currentUser.id,
                     _offlineUserName: currentUser.name || currentUser.username,
@@ -3705,6 +3716,11 @@ export const useStore = create(persist((set, get) => ({
                     client: sale.client || null,
                     tipoDte: sale.tipoDte ?? null,
                     invoiceData: sale.invoiceData || null,
+                    // Igual que en la cola de Dexie: sin la clave, cada reintento
+                    // de esta cola de emergencia sería una venta nueva. Y acá se
+                    // encola justamente cuando la respuesta no llegó — el caso en
+                    // que es más probable que la venta SÍ se haya registrado.
+                    clientSaleId: sale.clientSaleId,
                 },
             };
             queue.push(entry);
@@ -7656,6 +7672,20 @@ export const useStore = create(persist((set, get) => ({
         currentCompanyTimezone: state.currentCompanyTimezone,
         currentCurrency: state.currentCurrency,
         currentUserCompanyRole: state.currentUserCompanyRole,
+        // Los permisos del rol se guardan junto con la sesión, y no es un detalle:
+        // sin esto, cualquier arranque que no logre hablar con el servidor deja
+        // `rolePermissions` en [] y `hasPermission` niega TODO. Al dueño y a los
+        // administradores no les pasa nada —tienen bypass— pero un rol Caja queda
+        // con "Acceso Denegado" en el POS: no ve productos y no puede vender.
+        //
+        // Pasa en dos situaciones reales, las dos reportadas en producción: abrir
+        // la app sin señal (arranca por el camino offline, que carga el catálogo
+        // desde IndexedDB pero nunca los permisos) y un bootstrap que se cae o se
+        // pasa de los 12 segundos en una mañana cargada.
+        //
+        // Guardarlos convierte eso en lo que corresponde para un POS offline: los
+        // permisos son los últimos conocidos hasta que el servidor diga otra cosa.
+        rolePermissions: state.rolePermissions,
         darkMode: state.darkMode
     }),
     onRehydrateStorage: () => (state) => {

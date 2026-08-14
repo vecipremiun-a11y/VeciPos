@@ -236,6 +236,11 @@ const POS = () => {
     const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
     const [lastSaleDetails, setLastSaleDetails] = useState(null);
     const [isProcessingSale, setIsProcessingSale] = useState(false);
+    // Ver handlePaymentConfirm: candado sincrónico contra el doble cobro y clave
+    // única del cobro en curso. Van en referencias y no en estado a propósito —
+    // el estado llega tarde y de eso vivían las ventas duplicadas.
+    const cobrandoRef = useRef(false);
+    const claveCobroRef = useRef(null);
     const [isLoadingProducts, setIsLoadingProducts] = useState(true);
     const [showSuspendedModal, setShowSuspendedModal] = useState(false);
     const [showPreventasListModal, setShowPreventasListModal] = useState(false);
@@ -441,6 +446,27 @@ const POS = () => {
     };
 
     const handlePaymentConfirm = async (paymentData, dispatchOverride) => {
+        // Segundo candado, en el punto donde de verdad nace la venta. El modal ya
+        // tiene el suyo, pero acá también llega el flujo de despacho —que no pasa
+        // por el modal— y este es el único lugar por donde pasan todos.
+        if (cobrandoRef.current) return;
+        cobrandoRef.current = true;
+
+        // La clave anti-duplicado se fija por COBRO, no por intento.
+        //
+        // addSale genera una si no viene, y ahí estaba el agujero: tres toques
+        // eran tres llamadas, cada una con su clave nueva, o sea tres ventas
+        // distintas para el servidor. El índice único no tenía nada que comparar.
+        //
+        // Fijándola acá y manteniéndola hasta que la venta quede registrada,
+        // cualquier reenvío del mismo cobro —toques repetidos, un reintento, la
+        // cola offline— llega con la misma clave y el servidor devuelve la venta
+        // que ya tiene en vez de cobrarla de nuevo.
+        if (!claveCobroRef.current) {
+            claveCobroRef.current = (globalThis.crypto?.randomUUID?.())
+                || `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+        }
+
         const dispatch = dispatchOverride || pendingDispatch;
         const saleData = {
             items: cart,
@@ -450,7 +476,8 @@ const POS = () => {
             paymentDetails: paymentData,
             client: posSelectedClient,
             tipoDte: pendingInvoiceData?.tipoDte || posTipoDte,
-            invoiceData: pendingInvoiceData || null
+            invoiceData: pendingInvoiceData || null,
+            clientSaleId: claveCobroRef.current
         };
 
         // Capturar el código de preventa antes de limpiarlo
@@ -493,6 +520,10 @@ const POS = () => {
             }
             setPendingDispatch(null);
 
+            // La venta quedó registrada (o encolada con su clave adentro): el
+            // próximo cobro es otra venta y le toca clave nueva.
+            claveCobroRef.current = null;
+
             setLastSaleDetails({ ...saleData, id: result.saleId || null, _queued: !!result.queued });
             setIsSuccessModalOpen(true);
             setPosSelectedClient(null);
@@ -513,6 +544,11 @@ const POS = () => {
             alert(`Error inesperado: ${e?.message || e}`);
         } finally {
             setIsProcessingSale(false);
+            // Se libera el candado pero NO la clave: si esto terminó en error, el
+            // carrito sigue ahí y el cajero va a reintentar el mismo cobro. Con la
+            // misma clave, si la primera sí había entrado, el servidor devuelve
+            // esa y no cobra dos veces.
+            cobrandoRef.current = false;
         }
     };
 

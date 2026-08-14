@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Banknote, CreditCard, Landmark, Coins, ArrowLeft, Check, Plus, Trash2, FileText, Loader2, AlertTriangle, ShieldAlert, ShieldOff } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
@@ -63,8 +63,25 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
 
     const [isProcessing, setIsProcessing] = useState(false);
 
+    // El candado real contra el doble cobro.
+    //
+    // `isProcessing` es estado de React: `setIsProcessing(true)` no cambia el
+    // valor en el acto, se aplica en el siguiente render. Dos o tres toques
+    // rápidos en Cobrar caen todos en el mismo render, todos leen `false` y
+    // todos cobran. Así se generaron las ventas triplicadas del 14-ago-2026:
+    // tres ventas del mismo monto en menos de un segundo, cada una con su
+    // propio identificador —o sea, tres cobros distintos para el servidor—.
+    //
+    // Una referencia se actualiza en el mismo instante en que se asigna, así que
+    // el segundo toque ya la encuentra cerrada. El estado se conserva solo para
+    // lo visual (el botón en gris y el "Procesando...").
+    const cobrando = useRef(false);
+
     useEffect(() => {
-        if (isOpen) setIsProcessing(false);
+        if (isOpen) {
+            setIsProcessing(false);
+            cobrando.current = false;
+        }
     }, [isOpen]);
 
     useEffect(() => {
@@ -226,7 +243,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
         // 🔒 VALIDACIÓN ROBUSTA DE PAGOS
         // ============================================
 
-        if (isProcessing) return;
+        if (cobrando.current) return;
 
         // Validar método de pago seleccionado
         if (!method) {
@@ -349,6 +366,10 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
         // ⚡ CONFIRMACIÓN INSTANTÁNEA (OPTIMISTIC UI)
         // ============================================
 
+        // El candado se cierra recién acá, pasadas todas las validaciones: si se
+        // cerrara arriba, un método sin elegir o un pago mixto mal sumado dejaría
+        // el botón muerto y habría que cerrar y reabrir para cobrar.
+        cobrando.current = true;
         setIsProcessing(true);
         console.log('✅ Payment validated (Instant UI):', finalPayData);
 
