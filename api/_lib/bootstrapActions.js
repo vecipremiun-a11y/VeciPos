@@ -22,12 +22,28 @@ async function userCompanies(turso, session) {
 // Metadata completa de la empresa activa (mismo set que cargaba el navegador).
 async function bootstrap(turso, companyId) {
     const results = await turso.batch([
+        // Primero se recortan los 200 lotes, DESPUÉS se les busca el nombre.
+        //
+        // Escrito al revés —join y después LIMIT— esta sola consulta se llevaba
+        // todo el tiempo de entrada al sistema. El plan lo explica: el ORDER BY
+        // no lo cubre ningún índice, así que SQLite tiene que armar la lista
+        // entera antes de cortarla, y para armarla busca el producto de CADA
+        // uno de los 3.883 lotes con stock. Cada una de esas búsquedas lee la
+        // fila completa del producto, con la foto en base64 adentro: unos 150 MB
+        // para devolver 200 filas de 0,05 MB.
+        //
+        // Medido el 14-ago-2026 contra la base real: 11-15 s la primera vez
+        // (caché frío), ~2 s despues. Con el recorte adentro, 157 ms — se
+        // ordenan 3.883 filas de lotes, que son chicas y no tienen foto, y solo
+        // se buscan 200 productos. Mismas filas y mismo orden, verificado.
+        //
+        // Esto corría en CADA arranque de la app, para todos, aunque los lotes
+        // solo los muestre el panel "por vencer" del Dashboard.
         { sql: `SELECT pl.id, pl.product_id, pl.batch_number, pl.expiry_date, pl.quantity, pl.cost, pl.supplier_name, pl.created_at, pl.status, pl.company_id, p.name AS product_name, p.unit AS product_unit
-                  FROM product_lots pl
-                  LEFT JOIN products p ON p.id = pl.product_id
-                  WHERE pl.company_id = ? AND pl.quantity > 0
-                  ORDER BY pl.expiry_date ASC
-                  LIMIT 200`, args: [companyId] },
+                  FROM (SELECT * FROM product_lots
+                        WHERE company_id = ? AND quantity > 0
+                        ORDER BY expiry_date ASC LIMIT 200) pl
+                  LEFT JOIN products p ON p.id = pl.product_id`, args: [companyId] },
         { sql: 'SELECT * FROM categories WHERE company_id = ? ORDER BY name ASC', args: [companyId] },
         { sql: 'SELECT * FROM suppliers WHERE company_id = ? ORDER BY name ASC', args: [companyId] },
         { sql: 'SELECT u.*, uc.role AS company_role FROM users u LEFT JOIN user_companies uc ON uc.user_id = u.id AND uc.company_id = ? WHERE u.company_id = ?', args: [companyId, companyId] },
