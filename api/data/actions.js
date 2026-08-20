@@ -461,37 +461,112 @@ async function fetchSales(turso, companyId, body) {
 
 // Catálogo para el sync offline (Dexie). Sin `since`: full (lots con quantity > 0).
 // Con `since`: incremental (updated_at > since; lots SIN filtro de quantity para
-// detectar lotes que llegan a 0). Mismas queries que hacía el navegador directo.
-// NOTA: products EXCLUYE la columna `image` (base64, ~150MB en empresas grandes):
-// no cabe en una respuesta serverless y las imágenes ya se cargan bajo demanda.
-// Fuente única: la misma lista que usa la búsqueda del POS (todas las columnas
-// menos la foto en base64). Ver el porqué en reportActions.js.
-const PRODUCT_COLS = PRODUCT_COLS_SIN_IMAGEN;
+// detectar lotes que llegan a 0).
+//
+// NOTA: products EXCLUYE la columna `image` (base64, ~160 MB en la empresa más
+// grande): no cabe en una respuesta serverless y las imágenes ya se cargan bajo
+// demanda. Sí viaja `has_image`, para que el POS sepa sin conexión qué productos
+// tienen foto guardada. Fuente única: la misma lista que usa la búsqueda del POS
+// (todas las columnas menos la foto en base64). Ver el porqué en reportActions.js.
+const PRODUCT_COLS = `${PRODUCT_COLS_SIN_IMAGEN},
+                CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image`;
 
-async function syncCatalog(turso, companyId, { since }) {
-    const queries = since
-        ? [
-            { sql: `SELECT ${PRODUCT_COLS} FROM products WHERE company_id = ? AND updated_at > ?`, args: [companyId, since] },
-            { sql: 'SELECT * FROM product_lots WHERE company_id = ? AND updated_at > ?', args: [companyId, since] },
-            { sql: 'SELECT * FROM clients WHERE company_id = ? AND updated_at > ?', args: [companyId, since] },
-            { sql: 'SELECT * FROM categories WHERE company_id = ? AND updated_at > ?', args: [companyId, since] },
-            { sql: 'SELECT * FROM tax_rates WHERE company_id = ? AND updated_at > ?', args: [companyId, since] },
-        ]
-        : [
-            { sql: `SELECT ${PRODUCT_COLS} FROM products WHERE company_id = ?`, args: [companyId] },
-            { sql: 'SELECT * FROM product_lots WHERE company_id = ? AND quantity > 0', args: [companyId] },
-            { sql: 'SELECT * FROM clients WHERE company_id = ?', args: [companyId] },
-            { sql: 'SELECT * FROM categories WHERE company_id = ?', args: [companyId] },
-            { sql: 'SELECT * FROM tax_rates WHERE company_id = ?', args: [companyId] },
-        ];
+// Cuántas filas como máximo por respuesta.
+//
+// Por qué se pagina: medido el 19-ago-2026 contra la base real, el catálogo de la
+// empresa más grande (4.367 productos + 3.792 lotes) pesaba 3,53 MB en UNA sola
+// respuesta — 78% del techo de 4,5 MB de las funciones de Vercel. Un cliente con
+// ~6.000 productos lo reventaba sin aviso y se quedaba sin catálogo offline, que
+// es justo lo que hace falta cuando se cae el internet.
+//
+// products (~600 B/fila) y product_lots (~270 B/fila) son las únicas tablas que
+// crecen sin techo; clients, categories y tax_rates viajan enteras en la primera
+// página (juntas no llegan a 20 KB).
+const PAGINA_SYNC = 1500;
 
-    const [productsRes, lotsRes, clientsRes, catsRes, taxesRes] = await turso.batch(queries, 'read');
+/**
+ * Paginado por cursor de id (no por OFFSET): si mientras baja el catálogo alguien
+ * crea o borra un producto, OFFSET saltearía o repetiría filas. Con `id > ?` cada
+ * fila se ve exactamente una vez.
+ *
+ * Contrato:
+ *  - Primera llamada: sin `cursor` → devuelve también las tablas chicas.
+ *  - Si una tabla trajo la página completa, el `cursor` de la respuesta trae su
+ *    último id; si trajo menos, esa tabla terminó y desaparece del cursor.
+ *  - Cuando no queda ninguna, la respuesta NO trae `cursor`: ahí termina el sync.
+ *
+ * PAGINAR ES OPCIONAL Y LO PIDE EL CLIENTE (`paginado`). No es un detalle de
+ * estilo: durante un despliegue conviven las dos versiones. Una pestaña que ya
+ * estaba abierta corre el JS viejo, que no sabe de cursores — si el servidor le
+ * contestara paginado, se guardaría solo la primera página y BORRARÍA el resto
+ * del catálogo local (el sync viejo borra y reescribe). O sea que el despliegue
+ * en sí dejaría cajas sin catálogo offline, que es justo lo que vinimos a
+ * arreglar. Sin `paginado`, la respuesta sale entera como siempre.
+ *
+ * Al revés también funciona: el cliente nuevo contra un servidor viejo recibe
+ * todo de una y sin `cursor`, así que su bucle termina en la primera vuelta.
+ */
+export async function syncCatalog(turso, companyId, { since, cursor, limit, paginado }) {
+    // Sin paginar: un tope enorme que en la práctica trae todo, y nunca hay cursor.
+    const lim = paginado
+        ? Math.min(Math.max(parseInt(limit, 10) || PAGINA_SYNC, 1), 5000)
+        : 1_000_000_000;
+    const primeraPagina = !cursor;
+    const seguirProductos = primeraPagina || Number.isFinite(Number(cursor?.product));
+    const seguirLotes = primeraPagina || Number.isFinite(Number(cursor?.lot));
+    const desdeProducto = primeraPagina ? 0 : Number(cursor?.product) || 0;
+    const desdeLote = primeraPagina ? 0 : Number(cursor?.lot) || 0;
+
+    const queries = [];
+    const indices = {};
+
+    if (seguirProductos) {
+        indices.products = queries.length;
+        queries.push(since
+            ? { sql: `SELECT ${PRODUCT_COLS} FROM products WHERE company_id = ? AND updated_at > ? AND id > ? ORDER BY id LIMIT ?`, args: [companyId, since, desdeProducto, lim] }
+            : { sql: `SELECT ${PRODUCT_COLS} FROM products WHERE company_id = ? AND id > ? ORDER BY id LIMIT ?`, args: [companyId, desdeProducto, lim] });
+    }
+    if (seguirLotes) {
+        indices.productLots = queries.length;
+        queries.push(since
+            ? { sql: 'SELECT * FROM product_lots WHERE company_id = ? AND updated_at > ? AND id > ? ORDER BY id LIMIT ?', args: [companyId, since, desdeLote, lim] }
+            : { sql: 'SELECT * FROM product_lots WHERE company_id = ? AND quantity > 0 AND id > ? ORDER BY id LIMIT ?', args: [companyId, desdeLote, lim] });
+    }
+    if (primeraPagina) {
+        indices.clients = queries.length;
+        queries.push(since
+            ? { sql: 'SELECT * FROM clients WHERE company_id = ? AND updated_at > ?', args: [companyId, since] }
+            : { sql: 'SELECT * FROM clients WHERE company_id = ?', args: [companyId] });
+        indices.categories = queries.length;
+        queries.push(since
+            ? { sql: 'SELECT * FROM categories WHERE company_id = ? AND updated_at > ?', args: [companyId, since] }
+            : { sql: 'SELECT * FROM categories WHERE company_id = ?', args: [companyId] });
+        indices.taxRates = queries.length;
+        queries.push(since
+            ? { sql: 'SELECT * FROM tax_rates WHERE company_id = ? AND updated_at > ?', args: [companyId, since] }
+            : { sql: 'SELECT * FROM tax_rates WHERE company_id = ?', args: [companyId] });
+    }
+
+    const res = queries.length ? await turso.batch(queries, 'read') : [];
+    const filas = (nombre) => (indices[nombre] === undefined ? [] : res[indices[nombre]].rows);
+
+    const products = filas('products');
+    const productLots = filas('productLots');
+
+    // Una tabla siguió si llenó la página completa. Si trajo menos, ya no queda nada.
+    const siguiente = {};
+    if (paginado) {
+        if (products.length === lim) siguiente.product = products[products.length - 1].id;
+        if (productLots.length === lim) siguiente.lot = productLots[productLots.length - 1].id;
+    }
+
     return {
-        products: productsRes.rows,
-        productLots: lotsRes.rows,
-        clients: clientsRes.rows,
-        categories: catsRes.rows,
-        taxRates: taxesRes.rows,
+        products,
+        productLots,
+        clients: filas('clients'),
+        categories: filas('categories'),
+        taxRates: filas('taxRates'),
+        ...(Object.keys(siguiente).length ? { cursor: siguiente } : {}),
     };
 }
 

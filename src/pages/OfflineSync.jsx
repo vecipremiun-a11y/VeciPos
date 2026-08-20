@@ -198,6 +198,7 @@ export default function OfflineSync() {
             <Stat label="Categorías" value={stats.categories} />
             <Stat label="Tasas IVA" value={stats.taxRates} />
             <Stat label="Folios SII" value={stats.siiFolios} />
+            <Stat label="Fotos guardadas" value={stats.productImages} />
             <Stat
               label="Última sync"
               value={

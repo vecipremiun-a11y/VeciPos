@@ -20,7 +20,6 @@ import PreventasListModal from '../components/PreventasListModal';
 import ScaleReadButton from '../components/ScaleReadButton';
 import { usePermissions } from '../hooks/usePermissions';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
-import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { dataApiCall, reportCall } from '../lib/dataApi';
 
 // Component for Kg quantity input that allows typing decimals with comma
@@ -247,8 +246,6 @@ const POS = () => {
     const [showPreventaSuccessModal, setShowPreventaSuccessModal] = useState(false);
     const [lastPreventaData, setLastPreventaData] = useState(null);
 
-    // Detector de conexión para mostrar banner offline en el POS
-    const { online } = useOnlineStatus();
     const [activePreventaCode, setActivePreventaCode] = useState(null);
     const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
     // Despacho a domicilio: datos capturados antes de cobrar. Si queda seteado,
@@ -719,13 +716,7 @@ const POS = () => {
                 canOpen={can('pos.open_register')}
             />
 
-            {/* Banner offline — visible cuando se cae internet */}
-            {!online && (
-                <div className="fixed top-0 left-0 right-0 z-[9998] bg-amber-500 text-black text-xs md:text-sm font-semibold px-3 py-1.5 flex items-center justify-center gap-2 shadow-md">
-                    <span className="w-2 h-2 rounded-full bg-black animate-pulse" />
-                    Modo offline · Las ventas se guardarán localmente y se sincronizarán al volver internet
-                </div>
-            )}
+            {/* El aviso de "sin conexión" es global: ver <AvisoSinConexion /> en App.jsx */}
 
             {/* Overlay breve de "procesando venta" — bloquea doble click pero dura solo el commit */}
             {isProcessingSale && (
@@ -866,7 +857,7 @@ const POS = () => {
                     className="pos-product-grid flex-1 overflow-y-auto pr-2 grid gap-2 lg:gap-4 content-start pb-28 lg:pb-4 custom-scrollbar grid-cols-2 md:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] lg:grid-cols-2"
                     onScroll={handleScroll}
                 >
-                    {isLoadingProducts ? (
+                    {isLoadingProducts && visibleProducts.length === 0 ? (
                         <div className="col-span-full flex items-center justify-center py-12">
                             <div className="text-center">
                                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mx-auto mb-4"></div>

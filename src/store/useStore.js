@@ -3,6 +3,8 @@ import { persist } from 'zustand/middleware';
 import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFromDateString, getEndFromDateString, formatInCompanyTime } from '../lib/dateHelpers';
 import { localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
 import { syncCatalogIncremental } from '../lib/db/sync';
+import { buscarProductosLocal, productosPorCategoriaLocal, productoPorCodigoLocal } from '../lib/db/catalogoLocal';
+import { guardarImagenes } from '../lib/db/imagenesLocal';
 import { markActivity } from '../lib/smartPolling';
 import { setTabUserId, getTabUserId, broadcastLogin, broadcastLogout } from '../lib/sessionGuard';
 import { sinDobleEnvio } from '../lib/inFlight';
@@ -112,6 +114,39 @@ async function reportRows(companyId, name, params = {}, queryIndex = 0) {
 }
 
 let fetchInProgress = false;
+
+// ¿El POS está sin internet AHORA?
+//
+// No alcanza con `navigator.onLine`: con el WiFi del local prendido y el
+// internet caído contesta que sí hay conexión. Quien sabe de verdad es el
+// monitor de conectividad, que late contra /api/ping (ver src/lib/conectividad.js).
+//
+// Las ventas ya preguntaban así —por eso seguían funcionando sin internet—;
+// el catálogo no, y por eso el buscador quedaba esperando 12 segundos y volvía
+// vacío con el catálogo entero guardado en IndexedDB.
+const sinInternet = () => (typeof navigator !== 'undefined' && !navigator.onLine) || !hayConexion();
+
+// Turno de la última lectura de catálogo pedida.
+//
+// La pantalla se pinta primero con lo guardado y después con lo que contesta el
+// servidor. Si el cajero siguió escribiendo mientras tanto, la respuesta vieja
+// llega cuando ya no corresponde: se descarta en vez de pisar lo que se está
+// buscando ahora.
+let secuenciaCatalogo = 0;
+
+// Espera una promesa hasta `ms`. Si se pasa, devuelve { llego: false } sin
+// cancelarla: la respuesta tardía simplemente ya no se usa.
+function conCorte(promesa, ms) {
+    return Promise.race([
+        promesa.then((valor) => ({ llego: true, valor })),
+        new Promise((resolver) => setTimeout(() => resolver({ llego: false }), ms)),
+    ]);
+}
+
+// Cuánto se le espera al servidor al escanear un código antes de resolver con lo
+// guardado. Escanear tiene que ser instantáneo: si la red está pesada, el precio
+// del último sync es mejor respuesta que una pantalla trabada.
+const ESPERA_ESCANEO_MS = 1200;
 
 const safeJsonStringify = (value) => JSON.stringify(value, (_key, currentValue) => {
     if (typeof currentValue === 'bigint') {
@@ -475,7 +510,7 @@ export const useStore = create(persist((set, get) => ({
 
         // OFFLINE: bloquear cambio de empresa porque no podemos descargar
         // el catálogo de la empresa nueva. Solo permitir si es la misma empresa.
-        if (typeof navigator !== 'undefined' && !navigator.onLine && companyId !== previousCompanyId) {
+        if (sinInternet() && companyId !== previousCompanyId) {
             console.warn("Cannot switch company while offline");
             return {
                 success: false,
@@ -538,7 +573,7 @@ export const useStore = create(persist((set, get) => ({
         // Sincronizar catálogo a IndexedDB local en background (no bloquear UI).
         // INCREMENTAL: la 1ª vez por empresa baja todo (fallback a full); los siguientes
         // cambios solo traen filas con updated_at más nuevo → cambio casi instantáneo.
-        if (typeof navigator !== 'undefined' && navigator.onLine) {
+        if (!sinInternet()) {
             syncCatalogIncremental(companyId).catch((e) =>
                 console.warn('[sync] catálogo background falló:', e)
             );
@@ -569,7 +604,11 @@ export const useStore = create(persist((set, get) => ({
         // ============================================
         // Si no hay internet, leer el catálogo desde Dexie en lugar de Turso.
         // Esto permite que el POS funcione tras refrescar la pestaña sin red.
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        //
+        // Quién decide es el monitor de conectividad, no `navigator.onLine`: con el
+        // WiFi del local prendido y el internet caído, `navigator.onLine` dice que sí
+        // hay conexión y el arranque se iba a buscar el servidor que no contesta.
+        if (sinInternet()) {
             try {
                 const { activeCompanyId } = get();
                 if (activeCompanyId) {
@@ -586,7 +625,10 @@ export const useStore = create(persist((set, get) => ({
                         products,
                         productLots,
                         clients,
-                        categories,
+                        // Mismo mapeo que el arranque con internet: sin esto las
+                        // categorías marcadas como ocultas en el POS aparecían igual
+                        // cuando la app arrancaba sin conexión.
+                        categories: categories.map(c => ({ ...c, showInPos: c.show_in_pos !== 0 })),
                         taxRates,
                         pendingSalesCount: pendingCount,
                         isLoading: false,
@@ -733,35 +775,45 @@ export const useStore = create(persist((set, get) => ({
 
     // 🏷️ COMPANY MODULES — see definition in "COMPANY MODULE MANAGEMENT" section below
 
-    // NEW: Server-Side Search Actions
+    // Búsqueda de productos: primero lo guardado, después el servidor.
+    //
+    // Antes preguntaba `navigator.onLine`, que con el WiFi del local prendido y el
+    // internet caído contesta que sí. La búsqueda salía a la red, esperaba los 12 s
+    // del tiempo límite y volvía vacía: el cajero veía "cargando" y ningún producto,
+    // con el catálogo entero guardado en IndexedDB sin que nadie lo mirara.
+    //
+    // Ahora la lista se pinta con lo guardado —al instante, haya red o no— y la
+    // respuesta del servidor, si llega, la reemplaza. Las dos salen con el mismo
+    // orden, así que al llegar la red lo único que cambia son el stock y las fotos,
+    // igual que ya pasaba con loadProductImages.
     searchProducts: async (term) => {
         const { activeCompanyId } = get();
         if (!term) return;
 
-        // OFFLINE: buscar en Dexie
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            try {
-                const t = String(term).toLowerCase();
-                const all = await localDb.products.where('companyId').equals(activeCompanyId).toArray();
-                const filtered = all.filter(p =>
-                    (p.name && String(p.name).toLowerCase().includes(t)) ||
-                    (p.sku && String(p.sku).toLowerCase().includes(t)) ||
-                    (p.barcode && String(p.barcode).toLowerCase().includes(t))
-                ).slice(0, 50).map(p => ({
-                    ...p,
-                    price_ranges: typeof p.price_ranges === 'string'
-                        ? (() => { try { return JSON.parse(p.price_ranges); } catch { return []; } })()
-                        : (p.price_ranges || [])
-                }));
-                set({ products: filtered });
-            } catch (e) {
-                console.error('Search offline failed', e);
+        const miTurno = ++secuenciaCatalogo;
+        const vigente = () => secuenciaCatalogo === miTurno;
+
+        // 1) Lo guardado, ya. Si no hay nada guardado NO se pinta vacío: se espera
+        //    al servidor, para no mostrar "sin resultados" en un equipo recién
+        //    instalado que todavía no alcanzó a sincronizar.
+        let hayLocal = false;
+        try {
+            const locales = await buscarProductosLocal(activeCompanyId, term);
+            if (!vigente()) return;
+            if (locales.length > 0) {
+                hayLocal = true;
+                set({ products: locales });
             }
-            return;
+        } catch (e) {
+            console.error('Búsqueda local falló', e);
         }
 
+        if (sinInternet()) return;
+
+        // 2) El servidor manda cuando contesta.
         try {
             const rows = await reportRows(activeCompanyId, 'productsSearch', { term, limit: 50 });
+            if (!vigente()) return;
             const products = rows.map(p => ({
                 ...p,
                 price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
@@ -775,49 +827,55 @@ export const useStore = create(persist((set, get) => ({
             if (imgIds.length) get().loadProductImages(imgIds);
         } catch (e) {
             console.error("Search failed", e);
+            // El servidor no contestó: se queda lo guardado. Si tampoco había nada
+            // guardado, la lista queda vacía —que es la verdad— y el aviso de "sin
+            // conexión" ya está en pantalla.
+            if (!hayLocal && vigente()) set({ products: [] });
         }
     },
 
+    // Producto por código escaneado.
+    //
+    // Con internet manda el servidor, porque el precio puede haber cambiado hace un
+    // minuto. Pero no se le espera para siempre: si tarda más de ESPERA_ESCANEO_MS y
+    // el producto está guardado, se sigue con el guardado. Escanear no puede quedar
+    // trabado esperando una red pesada.
     getProductByBarcode: async (barcode) => {
         const { activeCompanyId } = get();
 
-        // OFFLINE: buscar en Dexie
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            try {
-                const all = await localDb.products.where('companyId').equals(activeCompanyId).toArray();
-                const p = all.find(x => x.sku === barcode || x.barcode === barcode || x.name === barcode);
-                if (!p) return null;
-                return {
-                    ...p,
-                    price_ranges: typeof p.price_ranges === 'string'
-                        ? (() => { try { return JSON.parse(p.price_ranges); } catch { return []; } })()
-                        : (p.price_ranges || [])
-                };
-            } catch (e) {
-                console.error('Barcode lookup offline failed', e);
-                return null;
-            }
-        }
+        // Lo guardado se pide siempre: sirve de respuesta y de red de seguridad.
+        const guardado = productoPorCodigoLocal(activeCompanyId, barcode).catch((e) => {
+            console.error('Barcode lookup offline failed', e);
+            return null;
+        });
+
+        if (sinInternet()) return await guardado;
 
         try {
-            const rows = await reportRows(activeCompanyId, 'productByBarcode', { barcode });
-            if (rows.length > 0) {
-                const p = rows[0];
-                return {
-                    ...p,
-                    price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
-                };
-            }
-            return null;
+            const r = await conCorte(
+                reportRows(activeCompanyId, 'productByBarcode', { barcode }),
+                ESPERA_ESCANEO_MS
+            );
+            if (!r.llego) return await guardado;
+            const p = r.valor[0];
+            if (!p) return null;
+            return {
+                ...p,
+                price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
+            };
         } catch (e) {
             console.error("Barcode lookup failed", e);
-            return null;
+            return await guardado;
         }
     },
 
     searchProductsForDropdown: async (term) => {
         const { activeCompanyId } = get();
         if (!term) return [];
+
+        // Sin internet, lo guardado es lo único que hay.
+        // Sin fotos: es un desplegable de texto, no la grilla del POS.
+        if (sinInternet()) return buscarProductosLocal(activeCompanyId, term, 50, { conFotos: false }).catch(() => []);
 
         try {
             const rows = await reportRows(activeCompanyId, 'productsSearch', { term, limit: 50 });
@@ -827,7 +885,7 @@ export const useStore = create(persist((set, get) => ({
             }));
         } catch (e) {
             console.error("Dropdown search failed", e);
-            return [];
+            return buscarProductosLocal(activeCompanyId, term, 50, { conFotos: false }).catch(() => []);
         }
     },
 
@@ -835,58 +893,53 @@ export const useStore = create(persist((set, get) => ({
 
     loadCategoryProducts: async (category, offset = 0, limit = 30) => {
         const { activeCompanyId } = get();
+        const primeraPagina = offset === 0;
 
-        // OFFLINE: leer de Dexie
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            try {
-                let all = await localDb.products.where('companyId').equals(activeCompanyId).toArray();
-                if (category && category !== 'Todos') {
-                    all = all.filter(p => p.category === category);
-                }
-                // Ordenar: ofertas primero, luego nombre
-                all.sort((a, b) => {
-                    const ao = a.is_offer ? 1 : 0;
-                    const bo = b.is_offer ? 1 : 0;
-                    if (ao !== bo) return bo - ao;
-                    return String(a.name || '').localeCompare(String(b.name || ''));
-                });
-                const slice = all.slice(offset, offset + limit).map(p => ({
-                    ...p,
-                    price_ranges: typeof p.price_ranges === 'string'
-                        ? (() => { try { return JSON.parse(p.price_ranges); } catch { return []; } })()
-                        : (p.price_ranges || [])
-                }));
-                if (offset === 0) {
-                    set({ products: slice });
-                } else {
-                    const current = get().products;
-                    set({ products: [...current, ...slice] });
-                }
-                return slice.length === limit;
-            } catch (e) {
-                console.error('Load category offline failed', e);
-                return false;
+        const miTurno = ++secuenciaCatalogo;
+        const vigente = () => secuenciaCatalogo === miTurno;
+
+        // La primera página reemplaza la grilla; las siguientes (scroll infinito) suman.
+        const pintar = (filas) => {
+            if (primeraPagina) set({ products: filas });
+            else set({ products: [...get().products, ...filas] });
+        };
+
+        // 1) Lo guardado.
+        //    La primera página se pinta al instante, para que la grilla nunca
+        //    aparezca vacía mientras se espera al servidor. Las páginas del scroll
+        //    NO se pintan si hay internet: sumarían filas que el servidor va a
+        //    volver a sumar (quedarían duplicadas).
+        let hayMasLocal = false;
+        let pinteLocal = false;
+        let sinRed = sinInternet();
+        try {
+            const locales = await productosPorCategoriaLocal(activeCompanyId, category, offset, limit);
+            if (!vigente()) return false;
+            sinRed = sinInternet();
+            hayMasLocal = locales.length === limit;
+            if (locales.length > 0 && (primeraPagina || sinRed)) {
+                pintar(locales);
+                pinteLocal = true;
             }
+        } catch (e) {
+            console.error('Catálogo local falló', e);
         }
 
+        if (sinRed) return hayMasLocal;
+
+        // 2) El servidor manda cuando contesta.
         try {
             // Query server-side SIN 'image' (base64 pesado): la grilla aparece al
             // instante y las imágenes se cargan después en 1 consulta (loadProductImages).
             const rows = await reportRows(activeCompanyId, 'categoryProducts', { category, offset, limit });
+            if (!vigente()) return hayMasLocal;
 
             const products = rows.map(p => ({
                 ...p,
                 price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
             }));
 
-            // Si es primera página (offset=0), reemplazar productos
-            // Si es paginación, agregar a los existentes
-            if (offset === 0) {
-                set({ products });
-            } else {
-                const currentProducts = get().products;
-                set({ products: [...currentProducts, ...products] });
-            }
+            pintar(products);
 
             // Cargar las imágenes en SEGUNDO PLANO (1 sola consulta) para esta página.
             // No se espera: la grilla ya se ve; las fotos aparecen al llegar.
@@ -895,10 +948,10 @@ export const useStore = create(persist((set, get) => ({
 
             // Retornar si hay más productos
             return rows.length === limit; // true si hay más
-
         } catch (e) {
             console.error("❌ Load category products failed", e);
-            return false;
+            // El servidor no contestó: vale lo que ya se pintó desde lo guardado.
+            return pinteLocal ? hayMasLocal : false;
         }
     },
 
@@ -910,7 +963,9 @@ export const useStore = create(persist((set, get) => ({
         if (!id || !activeCompanyId) return null;
         try {
             const rows = await reportRows(activeCompanyId, 'productImages', { ids: [id] });
-            return rows[0]?.image || null;
+            const foto = rows[0]?.image || null;
+            if (foto) guardarImagenes(activeCompanyId, { [id]: foto }).catch(() => {});
+            return foto;
         } catch (e) {
             console.warn('No se pudo cargar la foto del producto:', e);
             return null;
@@ -929,6 +984,12 @@ export const useStore = create(persist((set, get) => ({
             set(state => ({
                 products: state.products.map(p => (imgMap[p.id] !== undefined ? { ...p, image: imgMap[p.id] } : p)),
             }));
+
+            // Las fotos que ya bajamos quedan guardadas para verlas sin internet.
+            // No se espera: la grilla ya las está mostrando (ver imagenesLocal.js).
+            guardarImagenes(activeCompanyId, imgMap).catch((e) =>
+                console.warn('No se pudieron guardar las fotos para offline:', e)
+            );
         } catch (e) {
             console.warn('No se pudieron cargar imágenes de productos:', e);
         }
@@ -3171,7 +3232,7 @@ export const useStore = create(persist((set, get) => ({
         // `hayConexion()` es el monitor real (latido a /api/ping). Antes solo se
         // miraba navigator.onLine, que con WiFi sin internet dice "sí hay" — y la
         // venta salía a buscar el servidor en vez de guardarse offline.
-        const sinConexion = (typeof navigator !== 'undefined' && !navigator.onLine) || !hayConexion();
+        const sinConexion = sinInternet();
         if (sinConexion && !sale?._fromOfflineQueue) {
             try {
                 return await get()._addSaleOffline(sale);

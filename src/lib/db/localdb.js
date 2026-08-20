@@ -42,6 +42,22 @@ localDb.version(1).stores({
   meta: '&key',
 });
 
+// v2: se cae el índice `barcode` de products.
+//
+// Nunca indexó nada: la tabla `products` de Turso NO tiene columna `barcode`
+// —el código de barras se guarda en `sku`— así que el índice quedaba siempre
+// vacío y la búsqueda offline que filtraba por `p.barcode` no matcheaba nunca.
+// Dexie solo necesita las tablas que cambian; el resto queda igual que en v1.
+// También entra la tabla de fotos guardadas: el catálogo viaja sin la columna
+// `image` (base64, 161 MB en la empresa más grande), así que las fotos se
+// guardan aparte y solo las que la app ya descargó. Ver imagenesLocal.js.
+// El índice [companyId+ts] permite elegir las más viejas para borrar sin tener
+// que cargar las fotos en memoria.
+localDb.version(2).stores({
+  products: '&id, companyId, sku, name, category',
+  productImages: '&id, companyId, [companyId+ts]',
+});
+
 /**
  * Purga TODO el catálogo de una empresa específica.
  * Se llama al cambiar de empresa para evitar datos cruzados.
@@ -49,7 +65,7 @@ localDb.version(1).stores({
  */
 export async function purgeCompanyData(companyId) {
   if (!companyId) return;
-  const tables = ['products', 'productLots', 'clients', 'categories', 'taxRates', 'paymentMethods', 'siiFolios'];
+  const tables = ['products', 'productLots', 'clients', 'categories', 'taxRates', 'paymentMethods', 'siiFolios', 'productImages'];
   await Promise.all(
     tables.map((t) => localDb[t].where('companyId').equals(companyId).delete())
   );
@@ -61,7 +77,7 @@ export async function purgeCompanyData(companyId) {
  * NO toca pendingOps.
  */
 export async function purgeAllCatalog() {
-  const tables = ['products', 'productLots', 'clients', 'categories', 'taxRates', 'paymentMethods', 'siiFolios'];
+  const tables = ['products', 'productLots', 'clients', 'categories', 'taxRates', 'paymentMethods', 'siiFolios', 'productImages'];
   await Promise.all(tables.map((t) => localDb[t].clear()));
   await localDb.meta.clear();
 }
@@ -72,7 +88,7 @@ export async function purgeAllCatalog() {
  */
 export async function getLocalCatalogStats(companyId) {
   if (!companyId) return null;
-  const [products, productLots, clients, categories, taxRates, paymentMethods, siiFolios] = await Promise.all([
+  const [products, productLots, clients, categories, taxRates, paymentMethods, siiFolios, productImages] = await Promise.all([
     localDb.products.where('companyId').equals(companyId).count(),
     localDb.productLots.where('companyId').equals(companyId).count(),
     localDb.clients.where('companyId').equals(companyId).count(),
@@ -80,6 +96,7 @@ export async function getLocalCatalogStats(companyId) {
     localDb.taxRates.where('companyId').equals(companyId).count(),
     localDb.paymentMethods.where('companyId').equals(companyId).count(),
     localDb.siiFolios.where('companyId').equals(companyId).count(),
+    localDb.productImages.where('companyId').equals(companyId).count(),
   ]);
   const lastSync = await localDb.meta.get(`lastSync:${companyId}`);
   return {
@@ -91,6 +108,7 @@ export async function getLocalCatalogStats(companyId) {
     taxRates,
     paymentMethods,
     siiFolios,
+    productImages,
     lastSync: lastSync?.value || null,
   };
 }

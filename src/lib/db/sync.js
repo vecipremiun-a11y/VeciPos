@@ -9,22 +9,79 @@
 // la UI online — Dexie es el respaldo para offline + arranque rápido.
 
 import { localDb, pendingOpsApi, siiFoliosApi } from './localdb';
+import { olvidarCatalogoLocal } from './catalogoLocal';
 import { getTabUserId } from '../sessionGuard';
+import { hayConexion, fetchConLimite, reportarResultadoRed } from '../conectividad';
+
+// Igual que en el store: `navigator.onLine` dice que hay conexión con solo estar
+// el WiFi del local prendido. Quien sabe si el servidor CONTESTA es el monitor
+// (ver src/lib/conectividad.js). Sin esto, el sync salía a la red igual y se
+// quedaba esperando en vez de reintentar cuando volviera el internet de verdad.
+const sinInternet = () => (typeof navigator !== 'undefined' && !navigator.onLine) || !hayConexion();
+
+// Tiempo máximo de espera. Sin esto —y era el caso— el sync usaba `fetch` pelado:
+// con el WiFi prendido y el internet caído la petición no fallaba, se quedaba
+// colgada para siempre y el catálogo local nunca se actualizaba ni volvía a
+// intentarse. Las funciones de Vercel cortan a los 10 s, así que una respuesta
+// más lenta que esto ya está muerta.
+const ESPERA_SYNC_MS = 12000;
 
 // Llama al endpoint autenticado de datos (sesión + membresía validadas server-side).
 // Desde Fase 1 · Paso 6 el catálogo ya NO se lee con el token de Turso en el navegador.
 async function dataApi(action, payload) {
-  const r = await fetch('/api/data/actions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ action, ...payload, expectedUserId: getTabUserId() }),
-  });
+  let r;
+  try {
+    r = await fetchConLimite('/api/data/actions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ action, ...payload, expectedUserId: getTabUserId() }),
+    }, ESPERA_SYNC_MS);
+  } catch (e) {
+    // Igual que las llamadas del store: se distingue "tardó demasiado" de "la
+    // petición ni salió". Un sync lento no puede declarar al POS sin internet.
+    const seCorto = e?.name === 'AbortError' || e?.name === 'TimeoutError';
+    reportarResultadoRed(false, seCorto);
+    throw e;
+  }
+  // El servidor contestó: hay internet, sin gastar un latido aparte.
+  reportarResultadoRed(true);
   const data = await r.json().catch(() => ({}));
   if (!r.ok || data?.success === false) {
     throw new Error(data?.error || `HTTP ${r.status}`);
   }
   return data.data;
+}
+
+// Tope de páginas del catálogo (1.500 filas cada una) antes de darse por vencido.
+// 40 páginas = 60.000 productos: mucho más de lo que tiene cualquier cliente hoy,
+// y suficiente para que un bug de paginación no gire para siempre.
+const MAX_PAGINAS = 40;
+
+/**
+ * Baja el catálogo entero, de a páginas, y lo junta en memoria.
+ *
+ * Se acumula todo antes de escribir para no perder la transacción atómica de
+ * Dexie: si se borrara y escribiera página por página, un corte de internet a
+ * mitad de camino dejaría el catálogo local partido —peor que viejo—.
+ */
+async function descargarCatalogo(companyId, since = null) {
+  const todo = { products: [], productLots: [], clients: [], categories: [], taxRates: [] };
+  let cursor;
+  let paginas = 0;
+
+  for (paginas = 1; paginas <= MAX_PAGINAS; paginas++) {
+    // `paginado` le avisa al servidor que este cliente sí sabe seguir cursores.
+    // Ver el porqué en syncCatalog (api/data/actions.js).
+    const pagina = await dataApi('syncCatalog', { companyId, since, cursor, paginado: true });
+    for (const tabla of Object.keys(todo)) {
+      if (pagina[tabla]?.length) todo[tabla].push(...pagina[tabla]);
+    }
+    if (!pagina.cursor) return { ...todo, paginas };
+    cursor = pagina.cursor;
+  }
+
+  throw new Error(`El catálogo no terminó de bajar en ${MAX_PAGINAS} páginas`);
 }
 
 /**
@@ -39,13 +96,14 @@ async function dataApi(action, payload) {
  */
 export async function syncCatalogFromServer(companyId) {
   if (!companyId) return { ok: false, error: 'companyId requerido' };
-  if (!navigator.onLine) return { ok: false, error: 'offline' };
+  if (sinInternet()) return { ok: false, error: 'offline' };
 
   try {
     // Lecturas vía API autenticada — el servidor filtra por company_id y
-    // valida membresía. products llega SIN la columna image (carga bajo demanda).
-    const { products, productLots, clients, categories, taxRates } =
-      await dataApi('syncCatalog', { companyId });
+    // valida membresía. products llega SIN la columna image (carga bajo demanda)
+    // pero CON has_image, para saber sin conexión qué productos tienen foto.
+    const { products, productLots, clients, categories, taxRates, paginas } =
+      await descargarCatalogo(companyId);
 
     const stamp = (rows, extra = {}) =>
       rows.map((r) => ({ ...r, companyId, ...extra }));
@@ -88,6 +146,10 @@ export async function syncCatalogFromServer(companyId) {
       }
     );
 
+    // El buscador del POS guarda una copia en memoria del catálogo local para no
+    // releer IndexedDB en cada tecla. Acabamos de reescribirlo: esa copia caducó.
+    olvidarCatalogoLocal(companyId);
+
     const counts = {
       products: products.length,
       productLots: productLots.length,
@@ -96,7 +158,7 @@ export async function syncCatalogFromServer(companyId) {
       taxRates: taxRates.length,
     };
 
-    console.log('[sync] Catálogo sincronizado:', counts);
+    console.log(`[sync] Catálogo sincronizado (${paginas} página/s):`, counts);
     return { ok: true, counts };
   } catch (err) {
     console.error('[sync] Error sincronizando catálogo:', err);
@@ -134,7 +196,7 @@ export async function syncCatalogFromServer(companyId) {
  */
 export async function syncCatalogIncremental(companyId) {
   if (!companyId) return { ok: false, error: 'companyId requerido' };
-  if (!navigator.onLine) return { ok: false, error: 'offline' };
+  if (sinInternet()) return { ok: false, error: 'offline' };
 
   const lastSyncRow = await localDb.meta.get(`lastSync:${companyId}`);
   const lastSync = lastSyncRow?.value;
@@ -147,7 +209,7 @@ export async function syncCatalogIncremental(companyId) {
   try {
     // Incremental vía API autenticada (updated_at > lastSync, server-side)
     const { products, productLots, clients, categories, taxRates } =
-      await dataApi('syncCatalog', { companyId, since: lastSync });
+      await descargarCatalogo(companyId, lastSync);
 
     const stamp = (rows, extra = {}) => rows.map((r) => ({ ...r, companyId, ...extra }));
     const allRows = [
@@ -202,6 +264,8 @@ export async function syncCatalogIncremental(companyId) {
       }
     );
 
+    if (products.length) olvidarCatalogoLocal(companyId);
+
     const counts = {
       products: products.length,
       productLots: productLots.length,
@@ -231,8 +295,8 @@ export async function syncCatalogIncremental(companyId) {
  * @returns {Promise<{processed: number, remaining: number, errors: number}>}
  */
 export async function syncPendingOpsToServer(companyId, storeApi) {
-  if (!companyId || !navigator.onLine) {
-    return { processed: 0, remaining: 0, errors: 0, offline: !navigator.onLine };
+  if (!companyId || sinInternet()) {
+    return { processed: 0, remaining: 0, errors: 0, offline: sinInternet() };
   }
 
   const pending = await pendingOpsApi.list(companyId);
@@ -391,7 +455,7 @@ export async function migrateLegacyQueueToDexie() {
  */
 export async function syncReservedFoliosFromServer(companyId, tipoDte = 39, userId = null) {
   if (!companyId) return { ok: false, error: 'companyId requerido' };
-  if (!navigator.onLine) return { ok: false, error: 'offline' };
+  if (sinInternet()) return { ok: false, error: 'offline' };
 
   try {
     const params = new URLSearchParams({ tipo_dte: String(tipoDte) });
@@ -433,7 +497,7 @@ export async function syncReservedFoliosFromServer(companyId, tipoDte = 39, user
  * @param {number} want cantidad a reservar si se gatilla (default 100)
  */
 export async function ensureMinimumFolios(companyId, tipoDte = 39, userId = null, min = 30, want = 100, opts = {}) {
-  if (!companyId || !navigator.onLine) return { ok: false, skipped: true };
+  if (!companyId || sinInternet()) return { ok: false, skipped: true };
   try {
     await syncReservedFoliosFromServer(companyId, tipoDte, userId);
     const have = await siiFoliosApi.count(companyId, tipoDte, 'available');
