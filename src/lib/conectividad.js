@@ -19,8 +19,15 @@
 // Además escucha los eventos del navegador: si avisa que se cayó la red, no hay
 // nada que comprobar y se pasa a offline en el acto.
 
-const PING_URL = '/api/ping';
-const TIMEOUT_MS = 4000;
+// `?db=1`: el latido comprueba también que la base conteste. Sin esto, el
+// 23-ago-2026 hubo internet y servidor vivos con Turso tardando 9-24 s por
+// consulta: el POS se creyó online todo el día, se colgaba en cada operación y
+// NUNCA entró en modo offline — porque para él no había ninguna caída.
+const PING_URL = '/api/ping?db=1';
+// Ahora el latido espera a que la base conteste, y el servidor le da hasta 3 s a
+// esa comprobación. 6 s deja margen para la red sin dejar de ser "si tarda más
+// que esto, en una caja es lo mismo que no tener conexión".
+const TIMEOUT_MS = 6000;
 const INTERVALO_ONLINE = 15000;
 const INTERVALO_OFFLINE = 4000;
 
@@ -69,7 +76,7 @@ export function fetchConLimite(url, opciones = {}, ms = 12000) {
 function fijar(nuevo) {
     if (nuevo === hayInternet) return;
     hayInternet = nuevo;
-    console.log(nuevo ? '🌐 Conexión recuperada' : '📴 Sin conexión: el POS pasa a modo offline');
+    console.log(nuevo ? '🌐 Conexión recuperada' : '📴 Sin conexión (o base sin responder): el POS pasa a modo offline');
     avisar();
 }
 
@@ -92,11 +99,22 @@ async function latir() {
     }
 
     try {
-        const r = await fetchConLimite(`${PING_URL}?t=${Date.now()}`, {
+        const r = await fetchConLimite(`${PING_URL}&t=${Date.now()}`, {
             method: 'GET',
             cache: 'no-store',
         }, TIMEOUT_MS);
         if (!r.ok) throw new Error('HTTP ' + r.status);
+
+        // El servidor puede estar perfecto y la base caída. Para una caja es lo
+        // mismo: no se puede trabajar. Si el endpoint contesta `db: false`, el POS
+        // pasa a offline igual que si no hubiera internet.
+        const datos = await r.json().catch(() => ({}));
+        if (datos && datos.db === false) {
+            fallosSeguidos++;
+            if (fallosSeguidos >= FALLOS_PARA_CAER) fijar(false);
+            return; // el finally reprograma el próximo latido
+        }
+
         ultimoOk = Date.now();
         fallosSeguidos = 0;
         fijar(true);

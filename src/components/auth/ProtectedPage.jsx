@@ -2,10 +2,12 @@ import React from 'react';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useStore } from '../../store/useStore';
 import AccessDenied from './AccessDenied';
+import SinDatos from './SinDatos';
 
 const ProtectedPage = ({ permission, children }) => {
-    const { can } = usePermissions();
+    const { can, isSuperAdmin } = usePermissions();
     const isLoading = useStore(state => state.isLoading);
+    const rolePermissions = useStore(state => state.rolePermissions);
 
     if (isLoading) {
         return (
@@ -19,6 +21,14 @@ const ProtectedPage = ({ permission, children }) => {
     }
 
     if (!can(permission)) {
+        // Permisos vacíos = nunca se pudieron cargar, porque el arranque no logró
+        // hablar con el servidor. Eso NO es falta de permisos, y decirle "Acceso
+        // Denegado" a una cajera la deja mirando un candado —sin poder vender ni
+        // pasar a offline— cuando el problema es que la base no contesta.
+        // Pasó el 23-ago-2026 con Turso degradado.
+        if (!isSuperAdmin && (!rolePermissions || rolePermissions.length === 0)) {
+            return <SinDatos />;
+        }
         return <AccessDenied />;
     }
 
