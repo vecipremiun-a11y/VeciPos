@@ -165,14 +165,25 @@ const SupplierOrders = () => {
     };
 
     const handleShareWhatsApp = (order) => {
-        const itemsList = order.items.map(i => `- ${i.quantity}x ${i.name}`).join('%0A');
-        const text = `*Orden de Compra #${order.id}*%0A%0A` +
-            `*Proveedor:* ${order.supplier_name}%0A` +
-            `*Fecha:* ${formatDate(order.created_at)}%0A` +
-            `*Total:* ${formatCurrency(order.total_amount, currentCurrency)}%0A%0A` +
-            `*Productos Solicitados:*%0A${itemsList}`;
+        // El código va con el nombre: es lo que el proveedor necesita para
+        // encontrar el producto, y es lo mismo que sale en el PDF y en pantalla.
+        const itemsList = order.items
+            .map(i => `- ${i.quantity}x ${i.name}${i.sku ? ` (${i.sku})` : ''}`)
+            .join('\n');
 
-        window.open(`https://wa.me/?text=${text}`, '_blank');
+        const text = `*Orden de Compra #${order.id}*\n\n` +
+            `*Proveedor:* ${order.supplier_name}\n` +
+            `*Fecha:* ${formatDate(order.created_at)}\n` +
+            `*Total:* ${formatCurrency(order.total_amount, currentCurrency)}\n\n` +
+            `*Productos Solicitados:*\n${itemsList}`;
+
+        // encodeURIComponent sobre TODO el texto, y no un %0A escrito a mano.
+        //
+        // Sin esto solo llegaba la primera línea: el "#" del número de pedido es el
+        // comienzo del fragmento de una URL, así que el navegador cortaba ahí y
+        // mandaba "*Orden de Compra " y nada más. Lo mismo habría pasado con
+        // cualquier "&" en el nombre de un proveedor o de un producto.
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
     };
 
     const loadOrders = async () => {

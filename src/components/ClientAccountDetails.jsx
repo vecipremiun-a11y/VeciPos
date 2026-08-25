@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Calendar, FileText, Check, Eye, MessageCircle, Banknote, Shield, ShieldAlert, ShieldOff, AlertTriangle, Clock, Download } from 'lucide-react';
+import { ArrowLeft, Calendar, FileText, Check, Eye, MessageCircle, Banknote, Shield, ShieldAlert, ShieldOff, AlertTriangle, Clock, Download, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import ClientReceiptModal from './ClientReceiptModal';
@@ -9,6 +9,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
 import AccessDenied from './auth/AccessDenied';
 import { generateAccountStatementPDF } from '../utils/generateAccountPDF';
+import { tieneDeuda, estaSaldada } from '../utils/deuda';
 
 const ClientAccountDetails = ({ client, onBack }) => {
     const { users, registerClientPayment, fetchClientSales, currentCurrency, activeCompanyId } = useStore();
@@ -19,6 +20,12 @@ const ClientAccountDetails = ({ client, onBack }) => {
     const [viewMode, setViewMode] = useState('pending'); // 'pending' | 'history'
     const [selectedSale, setSelectedSale] = useState(null);
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+
+    // Ventas tildadas para abonar solo esas. Guarda ids; qué significa cada id se
+    // resuelve más abajo contra lo que hay en pantalla.
+    const [seleccionadas, setSeleccionadas] = useState(() => new Set());
+    // Ids que se le pasan al modal: null = repartir sobre toda la deuda (lo de siempre).
+    const [idsAPagar, setIdsAPagar] = useState(null);
 
     // Filters
     const [startDate, setStartDate] = useState('');
@@ -39,9 +46,13 @@ const ClientAccountDetails = ({ client, onBack }) => {
         };
 
         loadClientData();
+        setSeleccionadas(new Set());
 
         return () => { mounted = false; };
     }, [client]);
+
+    // El historial no se abona: al cambiar de pestaña la selección deja de tener sentido.
+    useEffect(() => { setSeleccionadas(new Set()); }, [viewMode]);
 
     // Permission Check
     if (!can('clients.view_account')) {
@@ -50,10 +61,11 @@ const ClientAccountDetails = ({ client, onBack }) => {
 
     if (!client) return null;
 
-    // Calculate Total Debt (Always from pending credit sales)
-    const pendingSales = rawClientSales.filter(s =>
-        s.payment_method === 'Crédito' && s.status !== 'paid' && s.status !== 'cancelled'
-    );
+    // Calculate Total Debt (Always from pending credit sales).
+    // `tieneDeuda` también descarta las que quedaron con un resto de centavos por
+    // el redondeo de un abono: en la base siguen 'completed', pero no se les puede
+    // cobrar nada. Ver src/utils/deuda.js
+    const pendingSales = rawClientSales.filter(tieneDeuda);
     const totalDebt = pendingSales.reduce((sum, sale) => sum + parseFloat(sale.total) - parseFloat(sale.amount_paid || 0), 0);
 
     // Credit status info
@@ -72,13 +84,13 @@ const ClientAccountDetails = ({ client, onBack }) => {
     const salesToShow = rawClientSales.filter(sale => {
         // Mode Filter
         if (viewMode === 'pending') {
-            if (sale.payment_method !== 'Crédito' || sale.status === 'paid' || sale.status === 'cancelled') return false;
+            if (!tieneDeuda(sale)) return false;
         } else {
             // History: Show Paid, Cancelled, or non-credit sales
             // User asked for "ventas pagadas o canceladas", basically history.
             // We usually exclude pending from history to avoid duplication, or show everything?
             // "cambiar de estado de cuentas [pending] a ventas pagadas..." implies they are mutually exclusive sets.
-            if (sale.payment_method === 'Crédito' && sale.status !== 'paid' && sale.status !== 'cancelled') return false;
+            if (tieneDeuda(sale)) return false;
         }
 
         // Apply Common Filters (Date/Amount)
@@ -93,10 +105,41 @@ const ClientAccountDetails = ({ client, onBack }) => {
         return true;
     });
 
+    // Solo se puede seleccionar lo que está a la vista: si un filtro de fecha o
+    // monto esconde una venta tildada, deja de contar. Así lo que dice la barra
+    // ("3 seleccionadas") siempre coincide con lo que el ojo ve en la tabla.
+    const puedeSeleccionar = viewMode === 'pending' && can('clients.manage_payments');
+    const ventasSeleccionadas = puedeSeleccionar
+        ? salesToShow.filter(s => seleccionadas.has(s.id))
+        : [];
+    const totalSeleccionado = ventasSeleccionadas.reduce(
+        (suma, s) => suma + (parseFloat(s.total) - parseFloat(s.amount_paid || 0)), 0
+    );
+    const todasTildadas = salesToShow.length > 0 && ventasSeleccionadas.length === salesToShow.length;
+
+    const alternarVenta = (id) => {
+        setSeleccionadas(previas => {
+            const copia = new Set(previas);
+            if (copia.has(id)) copia.delete(id); else copia.add(id);
+            return copia;
+        });
+    };
+
+    const alternarTodas = () => {
+        setSeleccionadas(todasTildadas ? new Set() : new Set(salesToShow.map(s => s.id)));
+    };
+
+    const abrirAbono = (ids = null) => {
+        setIdsAPagar(ids);
+        setIsPaymentModalOpen(true);
+    };
+
     const handlePaymentConfirm = async (distribution, amount, paymentMethod) => {
         const result = await registerClientPayment(client, amount, distribution, paymentMethod);
         if (result.success) {
             setIsPaymentModalOpen(false);
+            setSeleccionadas(new Set());
+            setIdsAPagar(null);
             // Reload client sales to reflect partial payments
             const updatedSales = await fetchClientSales(client.id);
             setRawClientSales(updatedSales);
@@ -286,7 +329,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
 
                         {can('clients.manage_payments') && (
                             <button
-                                onClick={() => setIsPaymentModalOpen(true)}
+                                onClick={() => abrirAbono(null)}
                                 disabled={pendingSales.length === 0}
                                 className="flex-1 lg:flex-none justify-center btn-primary px-4 lg:px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] disabled:opacity-50 disabled:shadow-none text-sm"
                             >
@@ -452,6 +495,36 @@ const ClientAccountDetails = ({ client, onBack }) => {
                     </div>
                 </div>
 
+                {/* Barra de acción: aparece solo cuando hay ventas tildadas. */}
+                {ventasSeleccionadas.length > 0 && (
+                    <div className="px-4 py-3 border-b border-cyan-500/30 bg-cyan-500/10 flex flex-wrap items-center justify-between gap-3">
+                        <div className="text-sm">
+                            <span className="font-bold text-cyan-300">
+                                {ventasSeleccionadas.length} venta{ventasSeleccionadas.length === 1 ? '' : 's'} seleccionada{ventasSeleccionadas.length === 1 ? '' : 's'}
+                            </span>
+                            <span className="text-[var(--color-text-muted)]"> · deuda de estas: </span>
+                            <span className="font-bold text-[var(--color-text)]">
+                                {formatCurrency(totalSeleccionado, currentCurrency)}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setSeleccionadas(new Set())}
+                                className="text-xs text-[var(--color-text-muted)] hover:text-white flex items-center gap-1 px-2 py-1.5"
+                            >
+                                <X size={14} /> Limpiar
+                            </button>
+                            <button
+                                onClick={() => abrirAbono(ventasSeleccionadas.map(v => v.id))}
+                                className="btn-primary px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm"
+                            >
+                                <Banknote size={18} />
+                                Abonar solo estas
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 <div className="lg:flex-1 lg:overflow-y-auto">
                     {salesToShow.length > 0 ? (
                         <>
@@ -459,13 +532,29 @@ const ClientAccountDetails = ({ client, onBack }) => {
                             (sin scroll horizontal). */}
                         <div className="lg:hidden divide-y divide-[var(--glass-border)]">
                             {salesToShow.map(sale => (
-                                <button
+                                // Era un <button> con más botones adentro (WhatsApp, Ver detalle),
+                                // que no es HTML válido y encima ahora tiene que llevar una casilla.
+                                // Pasa a <div>: el detalle se sigue abriendo al tocar la tarjeta.
+                                <div
                                     key={sale.id}
                                     onClick={() => setSelectedSale(sale)}
-                                    className="w-full text-left p-3 flex flex-col gap-2 hover:bg-white/5 active:bg-white/10 transition-colors"
+                                    className={cn(
+                                        "w-full text-left p-3 flex flex-col gap-2 transition-colors cursor-pointer",
+                                        seleccionadas.has(sale.id) ? "bg-cyan-500/10" : "hover:bg-white/5 active:bg-white/10"
+                                    )}
                                 >
                                     <div className="flex items-start justify-between gap-2">
-                                        <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+                                        <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                                            {puedeSeleccionar && (
+                                                <input
+                                                    type="checkbox"
+                                                    checked={seleccionadas.has(sale.id)}
+                                                    onChange={() => alternarVenta(sale.id)}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="w-4 h-4 shrink-0 accent-[var(--color-primary)] cursor-pointer"
+                                                    aria-label="Seleccionar esta venta para abonar"
+                                                />
+                                            )}
                                             <Calendar size={12} className="shrink-0" />
                                             {new Date(sale.date).toLocaleString()}
                                         </div>
@@ -493,7 +582,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
                                             <Eye size={14} /> Ver detalle
                                         </button>
                                     </div>
-                                </button>
+                                </div>
                             ))}
                         </div>
 
@@ -501,6 +590,18 @@ const ClientAccountDetails = ({ client, onBack }) => {
                         <table className="hidden lg:table w-full text-left border-collapse">
                             <thead className="bg-black/20 sticky top-0 backdrop-blur-md z-10">
                                 <tr>
+                                    {puedeSeleccionar && (
+                                        <th className="p-4 w-10">
+                                            <input
+                                                type="checkbox"
+                                                checked={todasTildadas}
+                                                ref={el => { if (el) el.indeterminate = ventasSeleccionadas.length > 0 && !todasTildadas; }}
+                                                onChange={alternarTodas}
+                                                className="w-4 h-4 accent-[var(--color-primary)] cursor-pointer"
+                                                aria-label="Seleccionar todas las ventas de la lista"
+                                            />
+                                        </th>
+                                    )}
                                     <th className="p-4 text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Fecha</th>
                                     <th className="p-4 text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Detalle</th>
                                     <th className="p-4 text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider">Vence</th>
@@ -510,7 +611,25 @@ const ClientAccountDetails = ({ client, onBack }) => {
                             </thead>
                             <tbody className="divide-y divide-[var(--glass-border)]">
                                 {salesToShow.map(sale => (
-                                    <tr key={sale.id} className="hover:bg-white/5 transition-colors group cursor-pointer" onClick={() => setSelectedSale(sale)}>
+                                    <tr
+                                        key={sale.id}
+                                        className={cn(
+                                            "transition-colors group cursor-pointer",
+                                            seleccionadas.has(sale.id) ? "bg-cyan-500/10" : "hover:bg-white/5"
+                                        )}
+                                        onClick={() => setSelectedSale(sale)}
+                                    >
+                                        {puedeSeleccionar && (
+                                            <td className="p-4 w-10" onClick={(e) => e.stopPropagation()}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={seleccionadas.has(sale.id)}
+                                                    onChange={() => alternarVenta(sale.id)}
+                                                    className="w-4 h-4 accent-[var(--color-primary)] cursor-pointer"
+                                                    aria-label="Seleccionar esta venta para abonar"
+                                                />
+                                            </td>
+                                        )}
                                         <td className="p-4 text-[var(--color-text-muted)] text-sm whitespace-nowrap">
                                             <div className="flex items-center gap-2">
                                                 <Calendar size={14} />
@@ -527,9 +646,16 @@ const ClientAccountDetails = ({ client, onBack }) => {
                                                     DEUDA PAGADA
                                                 </span>
                                             )}
-                                            {sale.payment_method === 'Crédito' && sale.status !== 'paid' && sale.status !== 'cancelled' && parseFloat(sale.amount_paid || 0) > 0 && (
+                                            {/* Solo si de verdad falta plata: un "ABONO PARCIAL: $6.082 / $6.082"
+                                                con Resta $0 decía lo contrario de lo que pasaba. */}
+                                            {tieneDeuda(sale) && parseFloat(sale.amount_paid || 0) > 0 && (
                                                 <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
                                                     ABONO PARCIAL: {formatCurrency(parseFloat(sale.amount_paid), currentCurrency)} / {formatCurrency(parseFloat(sale.total), currentCurrency)}
+                                                </span>
+                                            )}
+                                            {sale.payment_method === 'Crédito' && sale.status !== 'paid' && sale.status !== 'cancelled' && estaSaldada(sale) && (
+                                                <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-500/20 text-green-400 border border-green-500/30">
+                                                    SALDADA
                                                 </span>
                                             )}
                                             {sale.status === 'cancelled' && (
@@ -659,6 +785,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
                 onClose={() => setIsPaymentModalOpen(false)}
                 client={client}
                 sales={rawClientSales}
+                soloVentas={idsAPagar}
                 onConfirm={handlePaymentConfirm}
             />
         </div>

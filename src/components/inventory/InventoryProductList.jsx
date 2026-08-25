@@ -75,7 +75,16 @@ const InventoryProductList = ({
                         </div>
                     </div>
                 ))}
-                {products.length === 0 && (
+                {/* Mientras se está buscando NO se puede decir "no hay": es lo mismo
+                    que ve alguien cuya empresa está vacía, y confunde igual que
+                    confundía cuando la base no respondía. */}
+                {products.length === 0 && isLoading && (
+                    <div className="p-10 text-center text-[var(--color-text-muted)] flex items-center justify-center gap-3">
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
+                        Cargando productos...
+                    </div>
+                )}
+                {products.length === 0 && !isLoading && (
                     <div className="p-10 text-center text-[var(--color-text-muted)]">
                         No se encontraron productos
                     </div>
@@ -204,7 +213,16 @@ const InventoryProductList = ({
                         ))}
                     </tbody>
                 </table>
-                {products.length === 0 && (
+                {/* Mientras se está buscando NO se puede decir "no hay": es lo mismo
+                    que ve alguien cuya empresa está vacía, y confunde igual que
+                    confundía cuando la base no respondía. */}
+                {products.length === 0 && isLoading && (
+                    <div className="p-10 text-center text-[var(--color-text-muted)] flex items-center justify-center gap-3">
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
+                        Cargando productos...
+                    </div>
+                )}
+                {products.length === 0 && !isLoading && (
                     <div className="p-10 text-center text-[var(--color-text-muted)]">
                         No se encontraron productos
                     </div>

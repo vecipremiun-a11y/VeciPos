@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ArrowLeft, Trash2, Plus, Bell, ScanBarcode } from 'lucide-react';
+import { X, ArrowLeft, Trash2, Plus, Bell, ScanBarcode, Truck, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { usePermissions } from '../hooks/usePermissions';
@@ -7,11 +7,18 @@ import { compressImage, validateImage } from '../lib/imageCompression';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
-    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, hasModule } = useStore();
+    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, hasModule, fetchProductAliases } = useStore();
     // Sin módulo Pedidos (Medium+) no se pueden crear productos con encargo
     const canPreorders = hasModule('preorders');
     const { can } = usePermissions();
     const [showSkuScanner, setShowSkuScanner] = useState(false);
+
+    // Códigos con los que el proveedor nombra este producto en sus facturas.
+    // Se editan como el resto del formulario —nada se guarda hasta apretar
+    // Guardar— así que se llevan en memoria y se mandan juntos al final.
+    const [codigos, setCodigos] = useState([]);
+    const [codigosBorrados, setCodigosBorrados] = useState([]);
+    const [nuevoCodigo, setNuevoCodigo] = useState('');
     const skuScannerRef = useRef(null);
     const skuScannerContainerId = 'sku-barcode-reader';
 
@@ -120,6 +127,20 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         }
     }, [productToEdit, isOpen]);
 
+    // Los códigos de proveedor ya guardados (los escritos a mano y los que el
+    // sistema aprendió solo al corregir facturas).
+    useEffect(() => {
+        if (!isOpen) return;
+        setNuevoCodigo('');
+        setCodigosBorrados([]);
+        if (!productToEdit?.id) { setCodigos([]); return; }
+        let vigente = true;
+        fetchProductAliases(productToEdit.id).then((filas) => {
+            if (vigente) setCodigos(filas || []);
+        });
+        return () => { vigente = false; };
+    }, [productToEdit, isOpen, fetchProductAliases]);
+
     // Load alert settings when editing a product
     useEffect(() => {
         if (productToEdit?.id && isOpen) {
@@ -197,6 +218,27 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
     const toNum = (v) => parseFloat(String(v).replace(',', '.')) || 0;
 
+    const agregarCodigo = () => {
+        const limpio = nuevoCodigo.trim();
+        if (!limpio) return;
+        // Comparación sin distinguir mayúsculas: el mismo código escrito de dos
+        // formas es el mismo código, y el servidor lo guardaría una sola vez.
+        const yaEsta = codigos.some(
+            (c) => (c.alias_code || '').toLowerCase() === limpio.toLowerCase()
+        );
+        if (yaEsta) { setNuevoCodigo(''); return; }
+        setCodigos((prev) => [{ alias_code: limpio, source: 'manual', nuevo: true }, ...prev]);
+        setNuevoCodigo('');
+    };
+
+    const quitarCodigo = (indice) => {
+        const c = codigos[indice];
+        // Si ya estaba guardado hay que borrarlo en el servidor; si se acaba de
+        // escribir, alcanza con sacarlo de la lista.
+        if (c?.id) setCodigosBorrados((prev) => [...prev, c.id]);
+        setCodigos((prev) => prev.filter((_, i) => i !== indice));
+    };
+
     const handleSubmit = (e) => {
         e.preventDefault();
         const dataToSave = {
@@ -212,6 +254,15 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         if (!canPreorders) dataToSave.sale_mode = 'sale_only';
         // Save alert settings in background (needs product ID, so we pass alertConfig for the caller to handle)
         dataToSave._alertConfig = alertConfig;
+
+        // Los códigos de proveedor se aplican después de guardar el producto: si
+        // es nuevo, recién ahí existe el id al que atarlos. Ver el store.
+        const idProveedor = suppliers.find((sup) => sup.name === formData.supplier)?.id || null;
+        dataToSave._codigosProveedor = {
+            agregar: codigos.filter((c) => c.nuevo).map((c) => ({ codigo: c.alias_code, supplierId: idProveedor })),
+            borrar: codigosBorrados,
+        };
+
         onSave(dataToSave);
     };
 
@@ -341,6 +392,76 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 </button>
                             </div>
                         </div>
+                    </div>
+
+                    {/* Códigos del proveedor.
+                        No es lo mismo que el SKU: el SKU es cómo llamás vos al
+                        producto; esto es cómo lo llama el proveedor en SU factura.
+                        Escribirlo acá hace que la próxima factura entre sola. */}
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                            <Truck size={15} className="text-[var(--color-primary)]" />
+                            <span className="text-sm font-medium text-gray-300">Códigos del proveedor</span>
+                        </div>
+                        <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">
+                            El código con el que el proveedor nombra este producto en su factura.
+                            Cargándolo acá, sus próximas facturas se emparejan solas.
+                        </p>
+
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={nuevoCodigo}
+                                onChange={(e) => setNuevoCodigo(e.target.value)}
+                                onKeyDown={(e) => {
+                                    // Enter agrega el código; sin esto mandaría el formulario entero.
+                                    if (e.key === 'Enter') { e.preventDefault(); agregarCodigo(); }
+                                }}
+                                placeholder="Ej: 390065281"
+                                className="glass-input w-full text-sm"
+                            />
+                            <button
+                                type="button"
+                                onClick={agregarCodigo}
+                                disabled={!nuevoCodigo.trim()}
+                                className="shrink-0 px-3 rounded-xl bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/40 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/25 disabled:opacity-40 transition-colors"
+                                title="Agregar código"
+                            >
+                                <Plus size={18} />
+                            </button>
+                        </div>
+
+                        {codigos.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-3">
+                                {codigos.map((c, i) => (
+                                    <span
+                                        key={c.id || `nuevo-${i}`}
+                                        className={cn(
+                                            "inline-flex items-center gap-1.5 pl-2.5 pr-1 py-1 rounded-lg text-xs border",
+                                            c.alias_code
+                                                ? "bg-[var(--color-primary)]/10 border-[var(--color-primary)]/30 text-[var(--color-text)]"
+                                                : "bg-white/5 border-white/10 text-gray-400"
+                                        )}
+                                        title={c.supplier_name ? `Proveedor: ${c.supplier_name}` : undefined}
+                                    >
+                                        {/* Los que aprendió el sistema solo van marcados, para que se
+                                            note la diferencia con los que alguien escribió a mano. */}
+                                        {c.source === 'aprendido' && (
+                                            <Sparkles size={11} className="text-amber-400 shrink-0" title="Aprendido de una factura" />
+                                        )}
+                                        <span className="font-mono">{c.alias_code || c.alias_text}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => quitarCodigo(i)}
+                                            className="p-0.5 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
+                                            title="Quitar"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </span>
+                                ))}
+                            </div>
+                        )}
                     </div>
 
                     {/* Camera Scanner Modal for SKU */}

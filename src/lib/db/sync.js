@@ -12,6 +12,7 @@ import { localDb, pendingOpsApi, siiFoliosApi } from './localdb';
 import { olvidarCatalogoLocal } from './catalogoLocal';
 import { getTabUserId } from '../sessionGuard';
 import { hayConexion, fetchConLimite, reportarResultadoRed } from '../conectividad';
+import { esSesionExpirada, sesionExpirada } from '../sesion';
 
 // Igual que en el store: `navigator.onLine` dice que hay conexión con solo estar
 // el WiFi del local prendido. Quien sabe si el servidor CONTESTA es el monitor
@@ -47,6 +48,9 @@ async function dataApi(action, payload) {
   // El servidor contestó: hay internet, sin gastar un latido aparte.
   reportarResultadoRed(true);
   const data = await r.json().catch(() => ({}));
+  // El sync corre en segundo plano: si la sesión venció, sería el único que se
+  // entera y se quedaría reintentando en silencio para siempre.
+  if (r.status === 401 || esSesionExpirada(data)) sesionExpirada();
   if (!r.ok || data?.success === false) {
     throw new Error(data?.error || `HTTP ${r.status}`);
   }
@@ -100,8 +104,8 @@ export async function syncCatalogFromServer(companyId) {
 
   try {
     // Lecturas vía API autenticada — el servidor filtra por company_id y
-    // valida membresía. products llega SIN la columna image (carga bajo demanda)
-    // pero CON has_image, para saber sin conexión qué productos tienen foto.
+    // valida membresía. products llega SIN la columna image: las fotos se guardan
+    // aparte y solo las que ya se descargaron (ver imagenesLocal.js).
     const { products, productLots, clients, categories, taxRates, paginas } =
       await descargarCatalogo(companyId);
 

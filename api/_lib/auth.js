@@ -54,3 +54,34 @@ export function getSession(req) {
     if (!m) return null;
     return verifySession(decodeURIComponent(m[1]));
 }
+
+// Cada cuántas horas se vuelve a firmar la sesión de quien está trabajando.
+// Un día: suficiente para que un turno normal nunca gaste un Set-Cookie de más,
+// y suficiente para que la sesión no se venza mientras se usa el sistema.
+const RENOVAR_TRAS_HORAS = 24;
+
+/**
+ * Sesión deslizante: mientras se trabaje, la sesión se renueva sola.
+ *
+ * El token dura 7 días FIJOS desde el login. Sin esto, a una cajera que entra el
+ * lunes se le vence el lunes siguiente en medio del turno, con el cliente
+ * esperando — y hasta ahora el POS respondía a eso con un 401 mudo y pantallas
+ * vacías. Ahora cada llamada al servidor empuja el vencimiento hacia adelante,
+ * así que solo caduca de verdad tras 7 días SIN usar el sistema.
+ *
+ * Devuelve true si renovó (útil para pruebas).
+ */
+export function renovarSesionSiHaceFalta(session, res) {
+    if (!session?.iat) return false;
+    const horas = (Date.now() / 1000 - session.iat) / 3600;
+    if (horas < RENOVAR_TRAS_HORAS) return false;
+
+    const token = signSession({ uid: session.uid, username: session.username, role: session.role });
+    if (!token) return false;
+
+    // Se suma al Set-Cookie que ya hubiera, en vez de pisarlo: si algún día este
+    // endpoint escribe otra cookie, borrarla acá sería un bug silencioso.
+    const previo = res.getHeader?.('Set-Cookie');
+    res.setHeader('Set-Cookie', previo ? [].concat(previo, sessionCookie(token)) : sessionCookie(token));
+    return true;
+}

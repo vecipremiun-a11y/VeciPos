@@ -41,6 +41,16 @@ const Inventory = () => {
     const [hasMore, setHasMore] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
 
+    // ¿Ya llegó la PRIMERA lista pedida por esta pantalla?
+    //
+    // `products` del store es una sola lista compartida: la usan el POS, Inventario,
+    // Compras... Al entrar acá todavía tiene lo que dejó la pantalla anterior, así
+    // que Inventario arrancaba mostrando los resultados de la búsqueda del POS —con
+    // sus fotos ya cargadas— y recién al llegar su propia consulta se reemplazaba
+    // todo. De ahí los dos síntomas: la búsqueda del POS "seguía puesta" en
+    // Inventario, y las fotos aparecían, desaparecían y volvían.
+    const [primeraCargaLista, setPrimeraCargaLista] = useState(false);
+
     // Advanced Filters State
     const [showFilters, setShowFilters] = useState(false);
     const [filterCategory, setFilterCategory] = useState('Todos');
@@ -126,6 +136,7 @@ const Inventory = () => {
 
     const loadProducts = async (currentOffset, reset = false) => {
         setIsLoading(true);
+        if (reset) setPrimeraCargaLista(false);
         if (reset) {
             setOffset(0);
             setHasMore(true);
@@ -138,6 +149,7 @@ const Inventory = () => {
         );
 
         setHasMore(count === 50);
+        setPrimeraCargaLista(true);
         setIsLoading(false);
     };
 
@@ -151,6 +163,10 @@ const Inventory = () => {
     };
 
     const visibleProducts = React.useMemo(() => {
+        // Hasta que no llegue la lista de ESTA pantalla no se muestra nada: lo que
+        // haya en el store es de la pantalla anterior.
+        if (!primeraCargaLista) return [];
+
         const filtered = products.filter(product => {
             let matchesTax = true;
             if (filterTax !== 'Todos') {
@@ -187,7 +203,7 @@ const Inventory = () => {
         }
 
         return filtered;
-    }, [products, filterTax, filterStock, filterGroup]);
+    }, [products, filterTax, filterStock, filterGroup, primeraCargaLista]);
 
     // La foto ya no viene con el producto: llega después, aparte. Si se abre a
     // editar antes de que llegue, el formulario mostraría el recuadro vacío y

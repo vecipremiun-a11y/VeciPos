@@ -1,13 +1,30 @@
 import React, { useState } from 'react';
-import { Plus, Edit, Trash2, X, Phone, Mail } from 'lucide-react';
+import { Plus, Edit, Trash2, X, Phone, Mail, Search } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { usePermissions } from '../hooks/usePermissions';
+
+// Sin tildes y en minúsculas: escribir "munoz" tiene que encontrar "Muñoz".
+const normalizar = (txt) => String(txt ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 
 const Suppliers = () => {
     const { suppliers, addSupplier, updateSupplier, deleteSupplier } = useStore();
     const { can } = usePermissions();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingSupplier, setEditingSupplier] = useState(null);
+    const [searchTerm, setSearchTerm] = useState('');
+
+    // Busca por nombre, teléfono o email: el proveedor se puede tener anotado de
+    // cualquiera de las tres formas.
+    const termino = normalizar(searchTerm.trim());
+    const proveedoresFiltrados = termino
+        ? suppliers.filter((supplier) =>
+            normalizar(supplier.name).includes(termino) ||
+            normalizar(supplier.phone).includes(termino) ||
+            normalizar(supplier.email).includes(termino))
+        : suppliers;
 
     const handleEdit = (supplier) => {
         setEditingSupplier(supplier);
@@ -50,13 +67,39 @@ const Suppliers = () => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-4">
                 <div>
                     <h1 className="text-xl lg:text-3xl font-bold text-[var(--color-text)] neon-text">Proveedores</h1>
-                    <p className="text-xs lg:text-base text-[var(--color-text-muted)]">Gestiona tus proveedores y contactos</p>
+                    <p className="text-xs lg:text-base text-[var(--color-text-muted)]">
+                        {termino
+                            ? `${proveedoresFiltrados.length} de ${suppliers.length} proveedores`
+                            : 'Gestiona tus proveedores y contactos'}
+                    </p>
                 </div>
-                {can('suppliers.create') && (
-                    <button onClick={handleNewSupplier} className="btn-primary flex items-center gap-2 text-sm lg:text-base px-3 lg:px-4 py-2">
-                        <Plus size={18} /> Nuevo Proveedor
-                    </button>
-                )}
+
+                <div className="flex gap-2 lg:gap-4 w-full md:w-auto shrink-0">
+                    <div className="relative flex-1 md:w-64">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
+                        <input
+                            type="text"
+                            placeholder="Buscar proveedor..."
+                            className="glass-input !pl-10 !pr-9 w-full text-sm"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                        {searchTerm && (
+                            <button
+                                onClick={() => setSearchTerm('')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                                aria-label="Limpiar búsqueda"
+                            >
+                                <X size={16} />
+                            </button>
+                        )}
+                    </div>
+                    {can('suppliers.create') && (
+                        <button onClick={handleNewSupplier} className="btn-primary flex items-center gap-2 text-sm lg:text-base px-3 lg:px-4 py-2 whitespace-nowrap">
+                            <Plus size={18} /> <span className="hidden sm:inline">Nuevo Proveedor</span>
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Suppliers List - Compact rows on Mobile, Table on Desktop */}
@@ -75,12 +118,12 @@ const Suppliers = () => {
 
                     {/* Mobile Rows */}
                     <div className="divide-y divide-[var(--glass-border)] pb-20">
-                        {suppliers.length === 0 ? (
+                        {proveedoresFiltrados.length === 0 ? (
                             <div className="text-center py-10 text-[var(--color-text-muted)] text-sm">
-                                No hay proveedores registrados.
+                                {termino ? `Ningún proveedor coincide con "${searchTerm}".` : 'No hay proveedores registrados.'}
                             </div>
                         ) : (
-                            suppliers.map((supplier) => (
+                            proveedoresFiltrados.map((supplier) => (
                                 <div key={supplier.id} className="px-3 py-3 hover:bg-[var(--glass-bg)] transition-colors">
                                     <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center">
                                         {/* Name */}
@@ -138,14 +181,14 @@ const Suppliers = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-[var(--glass-border)]">
-                            {suppliers.length === 0 ? (
+                            {proveedoresFiltrados.length === 0 ? (
                                 <tr>
                                     <td colSpan="5" className="text-center py-10 text-[var(--color-text-muted)]">
-                                        No hay proveedores registrados.
+                                        {termino ? `Ningún proveedor coincide con "${searchTerm}".` : 'No hay proveedores registrados.'}
                                     </td>
                                 </tr>
                             ) : (
-                                suppliers.map((supplier) => (
+                                proveedoresFiltrados.map((supplier) => (
                                     <tr key={supplier.id} className="hover:bg-[var(--glass-bg)] transition-colors group">
                                         <td className="px-6 py-5 font-medium text-[var(--color-text)] text-lg">{supplier.name}</td>
                                         <td className="px-6 py-5 text-[var(--color-text-muted)]">{supplier.phone || '-'}</td>

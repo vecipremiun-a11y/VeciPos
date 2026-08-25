@@ -81,6 +81,7 @@ import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncCatalogIncrementa
 import { createSmartInterval } from './lib/smartPolling';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 import SessionTakeoverModal from './components/SessionTakeoverModal';
+import SesionExpiradaModal from './components/SesionExpiradaModal';
 import { setTabUserId } from './lib/sessionGuard';
 import { alCambiarConexion } from './lib/conectividad';
 
@@ -327,6 +328,7 @@ function App() {
       <ToastHost />
       <AvisoSinConexion />
       <SessionTakeoverModal />
+      <SesionExpiradaModal />
       <Suspense fallback={
         <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)]">
           <div className="flex flex-col items-center gap-3">

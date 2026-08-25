@@ -661,6 +661,93 @@ async function productAliasLearn(turso, companyId, session, { productId, codigo,
     return { success: true, recordado: { codigo: codigoLimpio, texto: textoCompacto } };
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Códigos de proveedor escritos A MANO desde la ficha del producto.
+//
+// Van a la misma tabla que los que el sistema aprende solo al corregir una
+// factura, y por eso funcionan igual de bien: escribir acá el código que el
+// proveedor imprime hace que la próxima factura de ese proveedor entre sola.
+// La tabla ya tenía previsto este caso con `source = 'manual'`; lo único que
+// faltaba era la pantalla.
+// ─────────────────────────────────────────────────────────────────
+
+/** Los códigos y textos que tiene atados un producto. */
+async function productAliasesList(turso, companyId, session, { productId }) {
+    if (!productId) return { success: false, error: 'Falta el producto' };
+    const r = await turso.execute({
+        sql: `SELECT a.id, a.alias_code, a.alias_text, a.source, a.supplier_id, a.created_at,
+                     s.name AS supplier_name
+              FROM product_supplier_aliases a
+              LEFT JOIN suppliers s ON s.id = a.supplier_id AND s.company_id = a.company_id
+              WHERE a.company_id = ? AND a.product_id = ?
+              ORDER BY a.alias_code IS NULL, a.created_at DESC`,
+        args: [companyId, productId],
+    });
+    return { success: true, rows: r.rows };
+}
+
+/**
+ * Agrega un código a mano.
+ *
+ * Un mismo código no puede apuntar a dos productos: el índice de la tabla lo
+ * impide, y tiene sentido —si la factura dice 390065281, es UN producto—. Si el
+ * código ya estaba en otro, se MUEVE (igual que cuando alguien corrige dos veces
+ * un renglón mal emparejado) pero se avisa de dónde vino, para que nadie se
+ * entere por casualidad de que se lo sacó a otro producto.
+ */
+async function productAliasAdd(turso, companyId, session, { productId, codigo, supplierId }) {
+    if (!productId) return { success: false, error: 'Falta el producto' };
+
+    const limpio = codigo ? String(codigo).trim().slice(0, 64) : '';
+    if (!limpio) return { success: false, error: 'Escribí el código del proveedor' };
+
+    const p = await turso.execute({
+        sql: 'SELECT id FROM products WHERE id = ? AND company_id = ?',
+        args: [productId, companyId],
+    });
+    if (!p.rows[0]) return { success: false, error: 'Ese producto no es de esta empresa' };
+
+    // ¿A quién apuntaba antes?
+    const previo = await turso.execute({
+        sql: `SELECT a.product_id, p.name
+              FROM product_supplier_aliases a
+              JOIN products p ON p.id = a.product_id AND p.company_id = a.company_id
+              WHERE a.company_id = ? AND a.alias_code = ?`,
+        args: [companyId, limpio],
+    });
+    const anterior = previo.rows[0];
+    if (anterior && Number(anterior.product_id) === Number(productId)) {
+        return { success: false, error: 'Ese producto ya tiene ese código' };
+    }
+
+    await turso.execute({
+        sql: `INSERT INTO product_supplier_aliases
+                (company_id, product_id, supplier_id, alias_code, source, created_at, created_by)
+              VALUES (?, ?, ?, ?, 'manual', ?, ?)
+              -- El índice es parcial: el ON CONFLICT tiene que repetir su WHERE
+              -- o SQLite no lo reconoce como el índice en conflicto.
+              ON CONFLICT(company_id, alias_code) WHERE alias_code IS NOT NULL DO UPDATE SET
+                product_id = excluded.product_id,
+                supplier_id = excluded.supplier_id,
+                source = 'manual',
+                created_at = excluded.created_at,
+                created_by = excluded.created_by`,
+        args: [companyId, productId, supplierId || null, limpio, nowIso(), session?.uid ?? null],
+    });
+
+    return { success: true, codigo: limpio, movidoDe: anterior ? anterior.name : null };
+}
+
+/** Saca un código (o un texto aprendido) de un producto. */
+async function productAliasDelete(turso, companyId, session, { id }) {
+    if (!id) return { success: false, error: 'Falta el código a borrar' };
+    await turso.execute({
+        sql: 'DELETE FROM product_supplier_aliases WHERE id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    return { success: true };
+}
+
 // `buscarProducto` se exporta para poder medirlo contra el catálogo real sin
 // crear pedidos de prueba: es la pieza que decide si un renglón entra solo, si
 // hay que preguntar o si no está, y equivocarse ahí desajusta el stock.
@@ -683,4 +770,7 @@ export const purchaseActions = {
     purchaseDelete,
     supplierPurchaseSummaryGet,
     productAliasLearn,
+    productAliasesList,
+    productAliasAdd,
+    productAliasDelete,
 };

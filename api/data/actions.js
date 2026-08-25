@@ -1,5 +1,6 @@
 import { createClient } from '@libsql/client';
 import { getSession, isCompanyMember } from '../_lib/guard.js';
+import { renovarSesionSiHaceFalta } from '../_lib/auth.js';
 import { personalActions } from '../_lib/personalActions.js';
 import { saleCommit, saleAggregations, saleAggregationsReverse, saleCancel, saleDetails } from '../_lib/salesActions.js';
 import { registerActions } from '../_lib/registerActions.js';
@@ -46,6 +47,10 @@ export default async function handler(req, res) {
     // 1) Sesión válida
     const session = getSession(req);
     if (!session) return res.status(401).json({ success: false, error: 'No autenticado' });
+
+    // 1a) Sesión deslizante. Este endpoint lo toca TODO el POS, así que renovar
+    // acá alcanza para que a nadie se le venza la sesión mientras trabaja.
+    renovarSesionSiHaceFalta(session, res);
 
     try {
         const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
@@ -206,6 +211,13 @@ export default async function handler(req, res) {
             // partir de la corrección que hizo la persona al cargarla.
             case 'productAliasLearn':
                 return res.status(200).json(await purchaseActions.productAliasLearn(turso, companyId, session, body));
+            // Códigos de proveedor escritos a mano desde la ficha del producto.
+            // Misma tabla que los aprendidos: lo que se escribe acá también hace
+            // que las facturas de ese proveedor se emparejen solas.
+            case 'productAliasesList':
+            case 'productAliasAdd':
+            case 'productAliasDelete':
+                return res.status(200).json(await purchaseActions[action](turso, companyId, session, body));
             // Encargos / preorders (Fase 1 · Paso 15)
             case 'preorderCreate':
             case 'preordersFetch':
@@ -465,11 +477,18 @@ async function fetchSales(turso, companyId, body) {
 //
 // NOTA: products EXCLUYE la columna `image` (base64, ~160 MB en la empresa más
 // grande): no cabe en una respuesta serverless y las imágenes ya se cargan bajo
-// demanda. Sí viaja `has_image`, para que el POS sepa sin conexión qué productos
-// tienen foto guardada. Fuente única: la misma lista que usa la búsqueda del POS
-// (todas las columnas menos la foto en base64). Ver el porqué en reportActions.js.
-const PRODUCT_COLS = `${PRODUCT_COLS_SIN_IMAGEN},
-                CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image`;
+// demanda. Fuente única: la misma lista que usa la búsqueda del POS (todas las
+// columnas menos la foto en base64). Ver el porqué en reportActions.js.
+//
+// Acá NO va `has_image`. Se probó y se sacó: la consulta seguía leyendo las mismas
+// filas (no gastaba más cuota) pero tardaba 67% más por página —36 ms contra 60 ms
+// en 1.500 productos—, porque preguntar si la foto existe obliga a ir a buscarla a
+// las páginas donde viven esos 160 MB. Medido aparte: recorrer 4.379 productos
+// tocando `name` cuesta 0 ms; tocando `image`, 1.079 ms. Y no lo usaba nadie: todo
+// el código que mira `has_image` trabaja sobre filas de las consultas online
+// (productsSearch, categoryProducts), que sí lo traen. Lo que guarda el sync en el
+// equipo nunca se consultaba — las fotos offline se buscan por id (imagenesLocal.js).
+const PRODUCT_COLS = PRODUCT_COLS_SIN_IMAGEN;
 
 // Cuántas filas como máximo por respuesta.
 //
@@ -971,9 +990,18 @@ async function clientSyncDebt(turso, companyId, clientId) {
     if (!clientId) return { success: false, error: 'Falta clientId' };
 
     let debtFormula = 'total';
+    let sinCentavos = '';
     try {
         const cols = await turso.execute('PRAGMA table_info(sales)');
-        if (cols.rows.some(c => c.name === 'amount_paid')) debtFormula = 'total - COALESCE(amount_paid, 0)';
+        if (cols.rows.some(c => c.name === 'amount_paid')) {
+            debtFormula = 'total - COALESCE(amount_paid, 0)';
+            // Las boletas a las que solo les quedan centavos no son deuda: repartir
+            // un abono en pesos enteros entre boletas con decimales (los productos
+            // por peso los tienen) deja restos que nadie puede pagar, y sin esto
+            // seguían sumando a la deuda y contando como venta pendiente.
+            // Ver src/utils/deuda.js
+            sinCentavos = 'AND (total - COALESCE(amount_paid, 0)) >= 1';
+        }
     } catch { /* columna probablemente existe */ }
 
     const res = await turso.execute({
@@ -982,7 +1010,7 @@ async function clientSyncDebt(turso, companyId, clientId) {
                      COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date < datetime('now') THEN 1 END) as overdue_count
               FROM sales
               WHERE client_id = ? AND company_id = ? AND payment_method = 'Crédito'
-                AND status NOT IN ('paid', 'cancelled')`,
+                AND status NOT IN ('paid', 'cancelled') ${sinCentavos}`,
         args: [clientId, companyId],
     });
     const r = res.rows[0] || {};
@@ -1003,9 +1031,18 @@ async function clientSyncDebt(turso, companyId, clientId) {
 async function clientCreditStatus(turso, companyId, { clientId }) {
     if (!clientId) return { success: false, error: 'Falta clientId' };
     let debtFormula = 'total';
+    let sinCentavos = '';
     try {
         const cols = await turso.execute('PRAGMA table_info(sales)');
-        if (cols.rows.some(c => c.name === 'amount_paid')) debtFormula = 'total - COALESCE(amount_paid, 0)';
+        if (cols.rows.some(c => c.name === 'amount_paid')) {
+            debtFormula = 'total - COALESCE(amount_paid, 0)';
+            // Las boletas a las que solo les quedan centavos no son deuda: repartir
+            // un abono en pesos enteros entre boletas con decimales (los productos
+            // por peso los tienen) deja restos que nadie puede pagar, y sin esto
+            // seguían sumando a la deuda y contando como venta pendiente.
+            // Ver src/utils/deuda.js
+            sinCentavos = 'AND (total - COALESCE(amount_paid, 0)) >= 1';
+        }
     } catch { /* columna probablemente existe */ }
 
     const result = await turso.execute({
@@ -1017,7 +1054,7 @@ async function clientCreditStatus(turso, companyId, { clientId }) {
                 COUNT(CASE WHEN payment_due_date IS NOT NULL AND payment_due_date >= datetime('now') AND payment_due_date <= datetime('now', '+3 days') AND status NOT IN ('paid','cancelled') THEN 1 END) as due_soon_count
               FROM sales
               WHERE client_id = ? AND company_id = ? AND payment_method = 'Crédito'
-              AND status NOT IN ('paid', 'cancelled')`,
+              AND status NOT IN ('paid', 'cancelled') ${sinCentavos}`,
         args: [clientId, companyId],
     });
     return { success: true, row: result.rows[0] || null };
@@ -1096,8 +1133,12 @@ async function clientRegisterPayment(turso, companyId, session, body) {
                 args: [Number(d.saleId), companyId],
             });
         } else {
+            // `total - ? < 0.5` y no `? >= total`: repartir un abono en pesos enteros
+            // entre boletas con decimales (los productos por peso los tienen) deja
+            // restos de centavos. Con la comparación exacta, esa boleta se quedaba
+            // "pendiente" para siempre por 20 centavos que nadie puede pagar.
             queries.push({
-                sql: "UPDATE sales SET amount_paid = ?, status = CASE WHEN ? >= total THEN 'paid' ELSE status END WHERE id = ? AND company_id = ?",
+                sql: "UPDATE sales SET amount_paid = ?, status = CASE WHEN total - ? < 1 THEN 'paid' ELSE status END WHERE id = ? AND company_id = ?",
                 args: [d.newTotalPaid, d.newTotalPaid, Number(d.saleId), companyId],
             });
         }

@@ -4,6 +4,7 @@
 import { getTabUserId } from './sessionGuard';
 import { sinDobleEnvio } from './inFlight';
 import { fetchConLimite } from './conectividad';
+import { esSesionExpirada, sesionExpirada } from './sesion';
 
 // Mismo blindaje que userApiCall: un doble clic no manda la operación dos veces.
 export function dataApiCall(action, payload = {}) {
@@ -26,6 +27,7 @@ async function _dataApiCall(action, payload = {}) {
         });
         const data = await r.json().catch(() => ({ success: false, error: 'Respuesta inválida del servidor' }));
         if (data && typeof data === 'object') data._status = r.status;
+        if (esSesionExpirada(data)) sesionExpirada();
         return data;
     } catch (e) {
         const seCorto = e?.name === 'AbortError' || e?.name === 'TimeoutError';

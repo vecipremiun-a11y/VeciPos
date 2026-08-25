@@ -4,9 +4,10 @@ import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFrom
 import { localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
 import { syncCatalogIncremental } from '../lib/db/sync';
 import { buscarProductosLocal, productosPorCategoriaLocal, productoPorCodigoLocal } from '../lib/db/catalogoLocal';
-import { guardarImagenes } from '../lib/db/imagenesLocal';
+import { guardarImagenes, imagenesGuardadas } from '../lib/db/imagenesLocal';
 import { markActivity } from '../lib/smartPolling';
 import { setTabUserId, getTabUserId, broadcastLogin, broadcastLogout } from '../lib/sessionGuard';
+import { alExpirarSesion, esSesionExpirada, sesionExpirada, reiniciarAvisoSesion } from '../lib/sesion';
 import { sinDobleEnvio } from '../lib/inFlight';
 import { hayConexion, reportarResultadoRed, fetchConLimite } from '../lib/conectividad';
 import { getModuleByKey } from '../constants/modules';
@@ -23,7 +24,10 @@ async function adminApiCall(action, payload = {}) {
             credentials: 'include',
             body: JSON.stringify({ action, ...payload }),
         });
-        return await r.json().catch(() => ({ success: false, error: 'Respuesta inválida del servidor' }));
+        const data = await r.json().catch(() => ({ success: false, error: 'Respuesta inválida del servidor' }));
+        if (data && typeof data === 'object') data._status = r.status;
+        if (esSesionExpirada(data)) sesionExpirada();
+        return data;
     } catch (e) {
         return { success: false, error: 'Error de red: ' + e.message };
     }
@@ -75,6 +79,9 @@ async function _userApiCall(action, payload = {}) {
         // El servidor contestó: hay internet. Confirma el estado sin gastar un
         // latido aparte.
         reportarResultadoRed(true);
+        // La sesión venció o la cookie no llegó. Antes esto se devolvía como un
+        // error cualquiera y la app seguía como si nada, mostrando pantallas vacías.
+        if (esSesionExpirada(data)) sesionExpirada();
         if (data?.error === 'SESSION_MISMATCH') {
             // La sesión del navegador ya es de otro usuario: esta pestaña se alinea.
             try { useStore.getState().flagSessionTakeover(data); } catch { /* noop */ }
@@ -282,6 +289,16 @@ export const useStore = create(persist((set, get) => ({
     // navegador, así que esta ya no puede operar (ver src/lib/sessionGuard.js).
     // Lo levanta el aviso entre pestañas o el rechazo SESSION_MISMATCH del servidor.
     sessionTakeover: null,
+
+    // La sesión del servidor venció (401). Ver src/lib/sesion.js y el cartel en
+    // src/components/SesionExpiradaModal.jsx
+    sesionExpirada: false,
+
+    marcarSesionExpirada: () => {
+        if (get().sesionExpirada) return;
+        console.warn('⚠️ La sesión expiró: el servidor ya no reconoce la cookie.');
+        set({ sesionExpirada: true, isLoading: false });
+    },
 
     flagSessionTakeover: (info = {}) => {
         if (get().sessionTakeover) return; // ya en marcha, no repetir
@@ -955,6 +972,65 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // ─────────────────────────────────────────────────────────────
+    // Códigos de proveedor de un producto.
+    //
+    // Viven en la misma tabla que los que el sistema aprende solo al corregir un
+    // renglón de factura (product_supplier_aliases), así que lo que se escribe a
+    // mano en la ficha también hace que las facturas de ese proveedor entren
+    // solas. Ver api/_lib/purchaseActions.js
+    // ─────────────────────────────────────────────────────────────
+
+    fetchProductAliases: async (productId) => {
+        const { activeCompanyId } = get();
+        if (!productId || !activeCompanyId) return [];
+        try {
+            const r = await userApiCall('productAliasesList', { companyId: activeCompanyId, productId });
+            return r?.success ? r.rows : [];
+        } catch (e) {
+            console.warn('No se pudieron leer los códigos de proveedor:', e);
+            return [];
+        }
+    },
+
+    addProductAlias: async (productId, codigo, supplierId = null) => {
+        const { activeCompanyId } = get();
+        return await userApiCall('productAliasAdd', { companyId: activeCompanyId, productId, codigo, supplierId });
+    },
+
+    deleteProductAlias: async (id) => {
+        const { activeCompanyId } = get();
+        return await userApiCall('productAliasDelete', { companyId: activeCompanyId, id });
+    },
+
+    /**
+     * Aplica lo que se tocó en la ficha: primero los borrados, después los altas.
+     *
+     * En ese orden a propósito. Si alguien saca un código de este producto y lo
+     * vuelve a agregar en la misma edición —o lo mueve de un producto a otro— al
+     * revés se borraría el que se acaba de crear.
+     *
+     * Devuelve los avisos que valga la pena mostrar (por ejemplo, que un código
+     * se movió desde otro producto).
+     */
+    aplicarCodigosProveedor: async (productId, cambios) => {
+        if (!productId || !cambios) return [];
+        const avisos = [];
+
+        for (const id of cambios.borrar || []) {
+            const r = await get().deleteProductAlias(id);
+            if (!r?.success) avisos.push(`No se pudo borrar un código: ${r?.error || 'error'}`);
+        }
+
+        for (const c of cambios.agregar || []) {
+            const r = await get().addProductAlias(productId, c.codigo, c.supplierId);
+            if (!r?.success) avisos.push(`Código ${c.codigo}: ${r?.error || 'no se pudo guardar'}`);
+            else if (r.movidoDe) avisos.push(`El código ${c.codigo} se movió desde "${r.movidoDe}"`);
+        }
+
+        return avisos;
+    },
+
     // Foto de UN producto. Las búsquedas ya no traen la columna `image` (pesaba
     // 40 veces más que el resto de los datos juntos), así que las pantallas que
     // muestran la foto del producto ELEGIDO la piden acá al seleccionarlo.
@@ -1297,6 +1373,19 @@ export const useStore = create(persist((set, get) => ({
                 price_ranges: p.price_ranges ? JSON.parse(p.price_ranges) : []
             }));
 
+            // Las fotos que ya se vieron alguna vez están guardadas en el equipo, así
+            // que se pegan ANTES de pintar. Sin esto la lista aparecía sin fotos y
+            // cada una entraba después: se veía como si las imágenes se recargaran
+            // solas cada vez que entrabas a Inventario. Leer local cuesta unos ms.
+            try {
+                const guardadas = await imagenesGuardadas(newProducts.map(p => p.id));
+                if (Object.keys(guardadas).length) {
+                    for (const p of newProducts) {
+                        if (guardadas[p.id]) p.image = guardadas[p.id];
+                    }
+                }
+            } catch { /* sin fotos guardadas se sigue igual */ }
+
             if (offset === 0) {
                 set({ products: newProducts });
             } else {
@@ -1306,7 +1395,8 @@ export const useStore = create(persist((set, get) => ({
             // Las fotos se piden aparte y sin esperarlas: la lista ya se ve, y
             // cada una aparece cuando llega. Es lo mismo que hace la grilla del
             // POS desde que se le sacó la foto a su consulta.
-            const conFoto = newProducts.filter(p => p.has_image).map(p => p.id);
+            // Solo se piden al servidor las que NO estaban guardadas.
+            const conFoto = newProducts.filter(p => p.has_image && !p.image).map(p => p.id);
             if (conFoto.length) get().loadProductImages(conFoto);
 
             return newProducts.length;
@@ -1718,6 +1808,9 @@ export const useStore = create(persist((set, get) => ({
             setTabUserId(user.id);
             broadcastLogin(user.id);
 
+            // Sesión nueva: el aviso de vencimiento vuelve a quedar armado.
+            reiniciarAvisoSesion();
+
             // 5. Guardar en localStorage
             localStorage.setItem(`activeCompanyId:${user.id}`, activeCompanyId);
 
@@ -1819,8 +1912,10 @@ export const useStore = create(persist((set, get) => ({
             posSelectedClient: null,
             isLoading: false,
             error: null,
-            sessionTakeover: null
+            sessionTakeover: null,
+            sesionExpirada: false
         });
+        reiniciarAvisoSesion();
 
         console.log('✅ Logout complete - All state cleared');
     },
@@ -2109,7 +2204,14 @@ export const useStore = create(persist((set, get) => ({
                 get().saveAlertSettings(newProduct.id, product._alertConfig).catch(e => console.warn('Alert settings save error:', e));
             }
 
-            return { success: true, product: newProduct };
+            // Los códigos de proveedor necesitan el id, así que recién ahora se pueden
+            // guardar. Se espera: si alguno choca con otro producto hay que avisarlo.
+            let avisosCodigos = [];
+            if (product._codigosProveedor) {
+                avisosCodigos = await get().aplicarCodigosProveedor(newProduct.id, product._codigosProveedor);
+            }
+
+            return { success: true, product: newProduct, avisosCodigos };
         } catch (e) {
             console.error("Add product error", e);
             return { success: false, error: e.message };
@@ -2193,7 +2295,12 @@ export const useStore = create(persist((set, get) => ({
                 get().saveAlertSettings(id, updatedProduct._alertConfig).catch(e => console.warn('Alert settings save error:', e));
             }
 
-            return { success: true };
+            let avisosCodigos = [];
+            if (updatedProduct._codigosProveedor) {
+                avisosCodigos = await get().aplicarCodigosProveedor(id, updatedProduct._codigosProveedor);
+            }
+
+            return { success: true, avisosCodigos };
         } catch (e) {
             console.error("Update product error", e);
             return { success: false, error: e.message };
@@ -7777,3 +7884,9 @@ export const useStore = create(persist((set, get) => ({
     }
 }));
 
+
+// El 401 puede llegar por fuera del store (src/lib/dataApi.js, src/lib/db/sync.js),
+// así que el aviso vive en un módulo aparte y acá se le dice qué hacer.
+alExpirarSesion(() => {
+    try { useStore.getState().marcarSesionExpirada(); } catch { /* noop */ }
+});

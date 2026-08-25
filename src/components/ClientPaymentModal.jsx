@@ -4,8 +4,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
 import AsyncButton from './AsyncButton';
+import { estaSaldada } from '../utils/deuda';
 
-const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
+/**
+ * @param {number[]|null} soloVentas  Si viene una lista de ids, el abono se reparte
+ *   ÚNICAMENTE entre esas ventas. Si es null, se comporta como siempre: reparte
+ *   sobre toda la deuda, de la más vieja a la más nueva.
+ */
+const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm, soloVentas = null }) => {
     const { currentCurrency } = useStore();
     const [paymentMethod, setPaymentMethod] = useState('Efectivo');
     const [customAmount, setCustomAmount] = useState('');
@@ -21,15 +27,27 @@ const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
         }
     }, [isOpen]);
 
-    // Filter pending sales (oldest first), accounting for partial payments
+    // Filter pending sales (oldest first), accounting for partial payments.
+    // Si el usuario eligió ventas puntuales en el estado de cuenta, el reparto se
+    // limita a esas: sirve para cobrarle a alguien una factura concreta sin que la
+    // plata se vaya a tapar las más viejas.
+    const soloEstas = useMemo(
+        () => (Array.isArray(soloVentas) && soloVentas.length ? new Set(soloVentas.map(String)) : null),
+        [soloVentas]
+    );
+
     const pendingSales = useMemo(() => {
         if (!client || !sales) return [];
         return sales.filter(s =>
             (s.clientId === client.id || s.client_id === client.id) &&
             (s.paymentMethod === 'Crédito' || s.payment_method === 'Crédito') &&
-            s.status !== 'paid' && s.status !== 'cancelled'
+            s.status !== 'paid' && s.status !== 'cancelled' &&
+            // Las que ya no deben nada cobrable quedan afuera aunque el estado siga
+            // en 'completed': si no, el abono intentaría repartirles centavos.
+            !estaSaldada(s) &&
+            (!soloEstas || soloEstas.has(String(s.id)))
         ).sort((a, b) => new Date(a.date) - new Date(b.date));
-    }, [sales, client]);
+    }, [sales, client, soloEstas]);
 
     // Calculate remaining debt per sale (total - already paid)
     const salesWithDebt = useMemo(() => pendingSales.map(s => {
@@ -51,12 +69,15 @@ const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
             const apply = Math.min(remaining, sale.remaining);
             remaining -= apply;
             const newRemaining = sale.remaining - apply;
+            // Una deuda de menos de un peso está saldada: no hay con qué pagarla.
+            // Ver el porqué en src/utils/deuda.js
+            const saldada = newRemaining < 1;
             return {
                 ...sale,
                 applied: apply,
                 newRemaining,
-                fullyPaid: newRemaining <= 0,
-                partiallyPaid: apply > 0 && newRemaining > 0
+                fullyPaid: saldada,
+                partiallyPaid: apply > 0 && !saldada
             };
         });
     }, [paymentAmount, salesWithDebt]);
@@ -133,6 +154,12 @@ const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm }) => {
                                 <p className="text-green-500/70 font-mono text-sm tracking-widest mt-1">
                                     {client.name}
                                 </p>
+                                {soloEstas && (
+                                    <p className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide px-2 py-1 rounded-md bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                                        <CheckCircle2 size={12} />
+                                        Solo {pendingSales.length} venta{pendingSales.length === 1 ? '' : 's'} seleccionada{pendingSales.length === 1 ? '' : 's'}
+                                    </p>
+                                )}
                             </div>
                             <button onClick={onClose} className="p-2 rounded-full hover:bg-white/5 text-white/50 hover:text-white transition-colors">
                                 <X size={20} />
