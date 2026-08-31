@@ -1,10 +1,119 @@
 import React, { useState } from 'react';
 import { Plus, Edit, Trash2, X, ChevronDown } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { reportCall } from '../lib/dataApi';
 import { usePermissions } from '../hooks/usePermissions';
+
+// Tres niveles: categoría → subcategoría → sub-subcategoría. El tope lo impone
+// también el servidor; acá se usa para no ofrecer madres que dejarían una cuarta.
+const NIVELES_MAXIMOS = 3;
+
+const madreDe = (c) => (c.parent_id == null ? null : Number(c.parent_id));
+
+/** Profundidad de una categoría: 1 = primer nivel. */
+function nivelDe(cat, porId) {
+    let n = 1;
+    let actual = madreDe(cat);
+    while (actual != null && n < 10) {
+        const madre = porId.get(actual);
+        if (!madre) break;
+        n++;
+        actual = madreDe(madre);
+    }
+    return n;
+}
+
+/** ¿`posible` es descendiente de `raizId`? Se usa para no permitir ciclos. */
+function esDescendiente(posible, raizId, porId) {
+    let actual = madreDe(posible);
+    for (let i = 0; actual != null && i < 10; i++) {
+        if (actual === Number(raizId)) return true;
+        actual = madreDe(porId.get(actual));
+    }
+    return false;
+}
+
+/**
+ * Ordena las categorías como se leen: cada madre seguida de sus hijas.
+ * Devuelve cada una con su `nivel` para poder indentarla.
+ */
+function enOrdenDeArbol(categorias) {
+    const hijasDe = new Map();
+    for (const c of categorias) {
+        const m = madreDe(c) ?? 'raiz';
+        if (!hijasDe.has(m)) hijasDe.set(m, []);
+        hijasDe.get(m).push(c);
+    }
+    for (const lista of hijasDe.values()) {
+        lista.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+    }
+    const salida = [];
+    const bajar = (clave, nivel) => {
+        for (const c of hijasDe.get(clave) || []) {
+            salida.push({ ...c, nivel });
+            bajar(Number(c.id), nivel + 1);
+        }
+    };
+    bajar('raiz', 1);
+    // Si alguna quedó colgando de una madre que ya no está, igual se muestra:
+    // esconderla sería perderla de vista con sus productos adentro.
+    const vistas = new Set(salida.map((c) => c.id));
+    for (const c of categorias) if (!vistas.has(c.id)) salida.push({ ...c, nivel: 1 });
+    return salida;
+}
 
 const Categories = () => {
     const { categories, addCategory, updateCategory, deleteCategory } = useStore();
+    const activeCompanyId = useStore((s) => s.activeCompanyId);
+
+    // Cuántos productos tiene cada categoría. No sale del store: ahí solo vive la
+    // página de productos que se esté mirando, no el catálogo entero.
+    const [conteos, setConteos] = React.useState({});
+    React.useEffect(() => {
+        if (!activeCompanyId) { setConteos({}); return; }
+        let vigente = true;
+        reportCall(activeCompanyId, 'categoryProductCounts', {})
+            .then((filas) => {
+                if (!vigente) return;
+                const mapa = {};
+                for (const f of filas || []) {
+                    if (f.category_id != null) mapa[Number(f.category_id)] = Number(f.n);
+                }
+                setConteos(mapa);
+            })
+            .catch((e) => console.warn('No se pudieron contar los productos por categoría:', e));
+        return () => { vigente = false; };
+    }, [activeCompanyId, categories.length]);
+
+    // Cada madre seguida de sus hijas, con el nivel para indentar.
+    const enArbol = React.useMemo(() => enOrdenDeArbol(categories), [categories]);
+
+    // El total de la RAMA: lo propio más todo lo que cuelga debajo.
+    //
+    // Se muestran los dos números porque responden preguntas distintas: "Mascota
+    // tiene 0 productos propios" y "por Mascota se llega a 48" son las dos cosas
+    // que uno quiere saber, y con un solo número siempre falta la otra.
+    const totalesDeRama = React.useMemo(() => {
+        const hijasDe = new Map();
+        for (const c of categories) {
+            const m = c.parent_id == null ? 'raiz' : Number(c.parent_id);
+            if (!hijasDe.has(m)) hijasDe.set(m, []);
+            hijasDe.get(m).push(Number(c.id));
+        }
+        const cache = new Map();
+        const sumar = (id, visitados = new Set()) => {
+            if (cache.has(id)) return cache.get(id);
+            if (visitados.has(id)) return 0; // red de seguridad ante un ciclo
+            visitados.add(id);
+            let total = conteos[id] || 0;
+            for (const hija of hijasDe.get(id) || []) total += sumar(hija, visitados);
+            cache.set(id, total);
+            return total;
+        };
+        const salida = {};
+        for (const c of categories) salida[Number(c.id)] = sumar(Number(c.id));
+        return salida;
+    }, [categories, conteos]);
     const { can } = usePermissions();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCategory, setEditingCategory] = useState(null);
@@ -72,12 +181,25 @@ const Categories = () => {
                                 No hay categorías registradas.
                             </div>
                         ) : (
-                            categories.map((category) => (
+                            enArbol.map((category) => (
                                 <div key={category.id} className="px-3 py-3 hover:bg-[var(--glass-bg)] transition-colors">
                                     <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-2 items-center">
                                         {/* Name */}
-                                        <div className="font-bold text-[var(--color-text)] text-sm truncate">
-                                            {category.name}
+                                        <div className="min-w-0" style={{ paddingLeft: (category.nivel - 1) * 14 }}>
+                                            <div className="font-bold text-[var(--color-text)] text-sm truncate">
+                                                {category.nivel > 1 && <span className="text-[var(--color-text-muted)] mr-1">└</span>}
+                                                {category.name}
+                                            </div>
+                                            {(() => {
+                                                const propios = conteos[Number(category.id)] || 0;
+                                                const rama = totalesDeRama[Number(category.id)] || 0;
+                                                return (
+                                                    <div className="text-[10px] text-[var(--color-text-muted)]">
+                                                        {propios.toLocaleString('es-CL')} producto{propios === 1 ? '' : 's'}
+                                                        {rama > propios && ' · ' + rama.toLocaleString('es-CL') + ' con subcategorías'}
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
 
                                         {/* Color */}
@@ -143,6 +265,7 @@ const Categories = () => {
                             <tr>
                                 <th className="px-6 py-5">Nombre</th>
                                 <th className="px-6 py-5">Color</th>
+                                <th className="px-6 py-5 text-center">Productos</th>
                                 <th className="px-6 py-5">Estado</th>
                                 <th className="px-6 py-5 text-center">POS</th>
                                 <th className="px-6 py-5 text-center">Encargo</th>
@@ -152,14 +275,41 @@ const Categories = () => {
                         <tbody className="divide-y border-[var(--glass-border)]">
                             {categories.length === 0 ? (
                                 <tr>
-                                    <td colSpan="6" className="text-center py-10 text-[var(--color-text-muted)]">
+                                    <td colSpan="7" className="text-center py-10 text-[var(--color-text-muted)]">
                                         No hay categorías registradas.
                                     </td>
                                 </tr>
                             ) : (
-                                categories.map((category) => (
+                                enArbol.map((category) => (
                                     <tr key={category.id} className="hover:bg-[var(--glass-bg)] transition-colors group">
-                                        <td className="px-6 py-5 font-medium text-[var(--color-text)] text-lg">{category.name}</td>
+                                        <td className="px-6 py-5 font-medium text-[var(--color-text)] text-lg">
+                                            {/* Indentación por nivel: se lee de un vistazo qué cuelga de qué. */}
+                                            <span className="flex items-center" style={{ paddingLeft: (category.nivel - 1) * 28 }}>
+                                                {category.nivel > 1 && (
+                                                    <span className="text-[var(--color-text-muted)] mr-2 select-none">└</span>
+                                                )}
+                                                <span className={category.nivel > 1 ? 'text-base' : ''}>{category.name}</span>
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-5 text-center">
+                                            {(() => {
+                                                const propios = conteos[Number(category.id)] || 0;
+                                                const rama = totalesDeRama[Number(category.id)] || 0;
+                                                const tieneHijas = rama > propios;
+                                                return (
+                                                    <div className="leading-tight">
+                                                        <span className={propios > 0 ? 'font-bold text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}>
+                                                            {propios.toLocaleString('es-CL')}
+                                                        </span>
+                                                        {tieneHijas && (
+                                                            <span className="block text-[11px] text-[var(--color-text-muted)]">
+                                                                {rama.toLocaleString('es-CL')} con sus subcategorías
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </td>
                                         <td className="px-6 py-5">
                                             <div
                                                 className="w-8 h-8 rounded-full border border-[var(--glass-border)] shadow-sm"
@@ -214,29 +364,44 @@ const Categories = () => {
                 onClose={() => setIsModalOpen(false)}
                 onSave={handleSave}
                 categoryToEdit={editingCategory}
+                categorias={categories}
             />
         </div>
     );
 };
 
-const CategoryModal = ({ isOpen, onClose, onSave, categoryToEdit }) => {
+const CategoryModal = ({ isOpen, onClose, onSave, categoryToEdit, categorias = [] }) => {
     const [formData, setFormData] = useState({
         name: '',
         color: '#3b82f6', // Default blue
         status: 'active',
         showInPos: true,
-        showInPreorders: true
+        showInPreorders: true,
+        parentId: null,
     });
+
+    // De quién PUEDE colgar esta categoría. Se sacan de la lista:
+    //   · ella misma y su descendencia → sería un ciclo
+    //   · las que ya están en el último nivel → dejarían una cuarta generación
+    const posiblesMadres = React.useMemo(() => {
+        const porId = new Map(categorias.map((c) => [Number(c.id), c]));
+        return enOrdenDeArbol(categorias).filter((c) => {
+            if (categoryToEdit && Number(c.id) === Number(categoryToEdit.id)) return false;
+            if (categoryToEdit && esDescendiente(c, categoryToEdit.id, porId)) return false;
+            return nivelDe(c, porId) < NIVELES_MAXIMOS;
+        });
+    }, [categorias, categoryToEdit]);
 
     React.useEffect(() => {
         if (categoryToEdit) {
             setFormData({
                 ...categoryToEdit,
                 showInPos: categoryToEdit.showInPos !== false,
-                showInPreorders: categoryToEdit.showInPreorders !== false
+                showInPreorders: categoryToEdit.showInPreorders !== false,
+                parentId: categoryToEdit.parent_id ?? null,
             });
         } else {
-            setFormData({ name: '', color: '#3b82f6', status: 'active', showInPos: true, showInPreorders: true });
+            setFormData({ name: '', color: '#3b82f6', status: 'active', showInPos: true, showInPreorders: true, parentId: null });
         }
     }, [categoryToEdit, isOpen]);
 
@@ -280,6 +445,31 @@ const CategoryModal = ({ isOpen, onClose, onSave, categoryToEdit }) => {
                             placeholder="Ej. Bebidas, Postres..."
                             autoFocus
                         />
+                    </div>
+
+                    {/* Madre: lo que convierte la lista plana en árbol */}
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-[var(--color-text-muted)]">
+                            Depende de
+                        </label>
+                        <select
+                            value={formData.parentId ?? ''}
+                            onChange={(e) => setFormData({ ...formData, parentId: e.target.value === '' ? null : Number(e.target.value) })}
+                            className="glass-input w-full appearance-none !pl-4 !pr-10 py-3 cursor-pointer hover:border-[var(--color-primary)] transition-colors"
+                        >
+                            <option value="" className="bg-gray-900 text-white py-2">
+                                — Ninguna: es una categoría principal —
+                            </option>
+                            {posiblesMadres.map((c) => (
+                                <option key={c.id} value={c.id} className="bg-gray-900 text-white py-2">
+                                    {'\u00A0\u00A0\u00A0'.repeat(c.nivel - 1)}{c.nivel > 1 ? '└ ' : ''}{c.name}
+                                </option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">
+                            Dejala en blanco para que sea una categoría principal, o elegí de cuál cuelga.
+                            Se permiten hasta {NIVELES_MAXIMOS} niveles: categoría, subcategoría y sub-subcategoría.
+                        </p>
                     </div>
 
                     {/* Color Picker */}

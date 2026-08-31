@@ -2586,7 +2586,12 @@ export const useStore = create(persist((set, get) => ({
 
             // Update Local State
             set((state) => ({
-                categories: state.categories.map((c) => c.id === id ? { ...c, ...updatedCategory } : c),
+                // parent_id explícito: el formulario manda `parentId` (camelCase) y la
+                // lista guarda `parent_id` (como viene de la base). Sin esta línea el
+                // árbol no se reacomodaba hasta recargar la página.
+                categories: state.categories.map((c) => c.id === id
+                    ? { ...c, ...updatedCategory, parent_id: updatedCategory.parentId ?? null }
+                    : c),
                 products: r.nameChanged
                     ? state.products.map(p => p.category === r.oldName ? { ...p, category: updatedCategory.name } : p)
                     : state.products

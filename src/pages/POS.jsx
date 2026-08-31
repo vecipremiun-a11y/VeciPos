@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect as useEffectReact } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, Gift, FileText, Receipt, ScanBarcode, Package, Store, Truck } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, ChevronRight, Gift, FileText, Receipt, ScanBarcode, Package, Store, Truck } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -367,15 +368,71 @@ const POS = () => {
     }, [showCameraScanner]);
 
     const categoryList = React.useMemo(
-        () => [
-            'Todos',
-            ...storedCategories
-                .filter((c) => c.status === 'active' && c.showInPos !== false)
-                .map((c) => c.name),
-            'Combos',
-        ],
+        () => {
+            // Solo las de primer nivel. Antes entraban TODAS, así que una
+            // subcategoría como "Granel" aparecía suelta al lado de su propia
+            // madre "Mascota", como si no tuvieran nada que ver.
+            const visibles = storedCategories.filter(
+                (c) => c.status === 'active' && c.showInPos !== false
+            );
+            const idsVisibles = new Set(visibles.map((c) => Number(c.id)));
+            const raices = visibles.filter(
+                (c) => c.parent_id == null || !idsVisibles.has(Number(c.parent_id))
+            );
+            return ['Todos', ...raices.map((c) => c.name), 'Combos'];
+        },
         [storedCategories]
     );
+
+    // Hijas visibles de una categoría, por nombre.
+    const hijasDe = React.useCallback(
+        (nombre) => {
+            if (!nombre || nombre === 'Todos' || nombre === 'Combos') return [];
+            const madre = storedCategories.find((c) => c.name === nombre);
+            if (!madre) return [];
+            return storedCategories.filter(
+                (c) =>
+                    c.status === 'active' &&
+                    c.showInPos !== false &&
+                    Number(c.parent_id) === Number(madre.id)
+            );
+        },
+        [storedCategories]
+    );
+
+    // Menú desplegable de categorías.
+    //
+    // Va en un portal con posición fija, no dentro de la barra: la barra tiene
+    // overflow-x para poder desplazarse, y cualquier cosa que cuelgue de un botón
+    // ahí adentro queda recortada. Se guardan las coordenadas del botón que lo
+    // abrió para plantar el panel justo debajo.
+    const [menu, setMenu] = React.useState(null); // { nombre, x, y }
+    const [ramaAbierta, setRamaAbierta] = React.useState(null);
+
+    // En qué rama estamos parados, aunque lo elegido sea una subcategoría.
+    // Solo se usa para marcar el botón de la barra: al elegir "Granel" ningún
+    // botón quedaba encendido y se perdía de vista dónde estabas.
+    const [raizActiva, setRaizActiva] = React.useState(null);
+
+    const subcategorias = React.useMemo(() => hijasDe(menu?.nombre), [hijasDe, menu]);
+    const subsubcategorias = React.useMemo(() => hijasDe(ramaAbierta), [hijasDe, ramaAbierta]);
+
+    const cerrarMenu = React.useCallback(() => { setMenu(null); setRamaAbierta(null); }, []);
+
+    // Se cierra con Escape o al tocar fuera, como cualquier menú.
+    React.useEffect(() => {
+        if (!menu) return;
+        const porTecla = (e) => { if (e.key === 'Escape') cerrarMenu(); };
+        const porScroll = () => cerrarMenu();
+        window.addEventListener('keydown', porTecla);
+        // `true`: se escucha en captura para enterarse también del scroll de la
+        // barra de categorías, que no burbujea hasta window.
+        window.addEventListener('scroll', porScroll, true);
+        return () => {
+            window.removeEventListener('keydown', porTecla);
+            window.removeEventListener('scroll', porScroll, true);
+        };
+    }, [menu, cerrarMenu]);
 
     const visibleProducts = products;
 
@@ -607,8 +664,19 @@ const POS = () => {
         setActivePreventaCode(preventa.code);
     };
 
-    const handleCategoryChange = async (category) => {
+    /**
+     * @param nivel  1 = barra de arriba · 2 = subcategoría · 3 = sub-subcategoría
+     *
+     * Al tocar una madre se muestran TODOS los productos de su rama, no una
+     * pantalla vacía esperando que elijas una hija: "Mascota" tiene 36 productos
+     * propios y si la grilla quedara en blanco no habría dónde verlos.
+     */
+    const handleCategoryChange = async (category, nivel = 1) => {
         console.log('🔄 Changing category to:', category);
+        // Elegir algo del menú lo cierra, sea subcategoría o sub-subcategoría:
+        // ya se eligió, no hay nada más que decidir ahí. Para bajar un nivel más
+        // está la flechita de la derecha, que abre sin elegir.
+        if (nivel > 1) cerrarMenu();
         setSelectedCategory(category);
         setIsLoadingProducts(true);
         setOffset(0);
@@ -834,21 +902,55 @@ const POS = () => {
                     </div>
 
                     <div className="flex gap-1.5 lg:gap-2 overflow-x-auto pb-1 lg:pb-2 scrollbar-thin">
-                        {categoryList.map(cat => (
-                            <button
-                                key={cat}
-                                onClick={() => handleCategoryChange(cat)}
-                                className={cn(
-                                    "px-3 lg:px-4 py-1.5 lg:py-2 rounded-full text-xs lg:text-sm font-medium whitespace-nowrap transition-all",
-                                    selectedCategory === cat
-                                        ? "bg-[var(--color-primary)] text-black shadow-[0_0_10px_rgba(0,240,255,0.4)]"
-                                        : "glass text-[var(--color-text-muted)] hover:bg-[var(--glass-bg)] hover:text-[var(--color-text)]"
-                                )}
-                            >
-                                {cat}
-                            </button>
-                        ))}
+                        {categoryList.map(cat => {
+                            const tieneHijas = hijasDe(cat).length > 0;
+                            return (
+                                <button
+                                    key={cat}
+                                    onClick={(e) => {
+                                        // Tocar la categoría SIEMPRE trae su rama completa, aunque
+                                        // ya estemos parados en ella.
+                                        //
+                                        // Se probó lo contrario —no recargar si ya estabas en la
+                                        // rama, para ahorrarse la consulta— y estaba mal: una vez
+                                        // que elegías "Granel" no había forma de volver a ver los 85
+                                        // de "Mascota" completa. El botón de la madre quedaba
+                                        // sirviendo solo para abrir el menú, y su contenido se
+                                        // volvía inalcanzable.
+                                        handleCategoryChange(cat);
+                                        setRaizActiva(tieneHijas ? cat : null);
+                                        if (!tieneHijas) { cerrarMenu(); return; }
+                                        if (menu?.nombre === cat) { cerrarMenu(); return; }
+                                        const r = e.currentTarget.getBoundingClientRect();
+                                        setMenu({ nombre: cat, x: r.left, y: r.bottom + 6 });
+                                        setRamaAbierta(null);
+                                    }}
+                                    className={cn(
+                                        "px-3 lg:px-4 py-1.5 lg:py-2 rounded-full text-xs lg:text-sm font-medium whitespace-nowrap transition-all flex items-center gap-1",
+                                        selectedCategory === cat
+                                            ? "bg-[var(--color-primary)] text-black shadow-[0_0_10px_rgba(0,240,255,0.4)]"
+                                            // La rama activa queda marcada aunque lo elegido sea una
+                                            // subcategoría: si no, al elegir "Granel" ningún botón de
+                                            // la barra quedaba encendido y se perdía de vista dónde estabas.
+                                            : raizActiva === cat
+                                                ? "bg-[var(--color-primary)]/20 border border-[var(--color-primary)]/50 text-[var(--color-primary)]"
+                                                : "glass text-[var(--color-text-muted)] hover:bg-[var(--glass-bg)] hover:text-[var(--color-text)]"
+                                    )}
+                                >
+                                    {cat}
+                                    {/* La flechita avisa que hay más adentro; sin ella no hay
+                                        forma de saber qué botón despliega y cuál no. */}
+                                    {tieneHijas && (
+                                        <ChevronDown
+                                            size={13}
+                                            className={cn('transition-transform shrink-0', menu?.nombre === cat && 'rotate-180')}
+                                        />
+                                    )}
+                                </button>
+                            );
+                        })}
                     </div>
+
                 </div>
 
                 {/* Grid - Responsive columns based on available space */}
@@ -1622,6 +1724,101 @@ const POS = () => {
                 onConfirm={handleInvoiceConfirm}
                 initialTipoDte={posTipoDte}
             />
+
+            {/* Menú de categorías: cuelga del botón y flota sobre todo.
+
+                Va en un portal porque la barra de categorías tiene overflow-x para
+                poder desplazarse, y ahí adentro cualquier panel que cuelgue de un
+                botón queda recortado por el borde del recuadro. Con posición fija
+                y las coordenadas del botón, se dibuja encima de todo. */}
+            {menu && subcategorias.length > 0 && createPortal(
+                <>
+                    {/* Capa para cerrar tocando afuera. Transparente a propósito:
+                        no tiene que oscurecer el POS, solo capturar el toque. */}
+                    <div className="fixed inset-0 z-[9998]" onClick={cerrarMenu} />
+
+                    <div
+                        className="fixed z-[9999] w-52 max-h-[60vh] overflow-y-auto rounded-xl border border-[var(--glass-border)] bg-[#0f0f2d] shadow-2xl shadow-black/60 py-1.5 custom-scrollbar"
+                        style={{
+                            left: Math.min(menu.x, window.innerWidth - 208 - 12),
+                            top: menu.y,
+                        }}
+                    >
+                        <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                            {menu.nombre}
+                        </div>
+                        {subcategorias.map((sub) => {
+                            const conNietas = hijasDe(sub.name).length > 0;
+                            return (
+                                // Dos zonas separadas a propósito: el NOMBRE elige la
+                                // subcategoría y cierra el menú; la FLECHITA solo abre lo que
+                                // cuelga, sin elegir. Con un solo botón para las dos cosas no
+                                // había forma de elegir la subcategoría sin quedarse atrapado
+                                // en el submenú, ni de mirar las hijas sin salirse.
+                                <div
+                                    key={sub.id}
+                                    onMouseEnter={() => conNietas && setRamaAbierta(sub.name)}
+                                    className={cn(
+                                        "w-full flex items-stretch transition-colors",
+                                        selectedCategory === sub.name || ramaAbierta === sub.name
+                                            ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
+                                            : "text-[var(--color-text)] hover:bg-white/5"
+                                    )}
+                                >
+                                    <button
+                                        onClick={() => handleCategoryChange(sub.name, 2)}
+                                        className="flex-1 min-w-0 text-left px-3 py-2 text-sm truncate"
+                                    >
+                                        {sub.name}
+                                    </button>
+                                    {conNietas && (
+                                        <button
+                                            onClick={() => setRamaAbierta(ramaAbierta === sub.name ? null : sub.name)}
+                                            className="px-2 flex items-center hover:bg-white/10 transition-colors"
+                                            title="Ver subcategorías"
+                                        >
+                                            <ChevronRight
+                                                size={14}
+                                                className={cn('shrink-0 opacity-70 transition-transform', ramaAbierta === sub.name && 'rotate-90')}
+                                            />
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Tercer nivel: sale al costado derecho del panel anterior. */}
+                    {subsubcategorias.length > 0 && (
+                        <div
+                            className="fixed z-[9999] w-48 max-h-[60vh] overflow-y-auto rounded-xl border border-[var(--glass-border)] bg-[#0f0f2d] shadow-2xl shadow-black/60 py-1.5 custom-scrollbar"
+                            style={{
+                                left: Math.min(menu.x + 208 + 6, window.innerWidth - 192 - 12),
+                                top: menu.y,
+                            }}
+                        >
+                            <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] truncate">
+                                {ramaAbierta}
+                            </div>
+                            {subsubcategorias.map((nieta) => (
+                                <button
+                                    key={nieta.id}
+                                    onClick={() => handleCategoryChange(nieta.name, 3)}
+                                    className={cn(
+                                        "w-full text-left px-3 py-2 text-sm truncate transition-colors",
+                                        selectedCategory === nieta.name
+                                            ? "bg-[var(--color-primary)]/15 text-[var(--color-primary)]"
+                                            : "text-[var(--color-text)] hover:bg-white/5"
+                                    )}
+                                >
+                                    {nieta.name}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </>,
+                document.body
+            )}
 
             <PaymentModal
                 isOpen={isPaymentModalOpen}

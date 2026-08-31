@@ -116,24 +116,72 @@ export function olvidarCatalogoLocal(companyId = null) {
  */
 export async function buscarProductosLocal(companyId, term, limite = 50, { conFotos = true } = {}) {
     if (!companyId || !term) return [];
-    const t = normalizar(term);
+
+    // Cada palabra por separado, y todas tienen que aparecer. Así "entera leche"
+    // encuentra "Leche Entera Soprole": uno no siempre recuerda en qué orden
+    // quedó escrito el producto y empieza por la palabra que sí recuerda.
+    // Mismo criterio que el servidor (ver filtroBusquedaProducto en
+    // api/_lib/reportActions.js), para que con y sin internet se busque igual.
+    const palabras = normalizar(term).split(/\s+/).filter(Boolean).slice(0, 6);
+    if (!palabras.length) return [];
+
     const filas = await filasDe(companyId);
-    const encontrados = filas.filter((p) => p._nombre.includes(t) || p._sku.includes(t));
+    const encontrados = filas.filter((p) =>
+        palabras.every((w) => p._nombre.includes(w) || p._sku.includes(w))
+    );
     encontrados.sort((a, b) => Number(a.id) - Number(b.id));
     const pagina = encontrados.slice(0, limite).map(paraLaUI);
     return conFotos ? conFotosGuardadas(pagina) : pagina;
 }
 
 /**
- * Una página de una categoría, con el mismo orden que `categoryProducts` del
- * servidor: ofertas primero y después por nombre, sin distinguir mayúsculas.
+ * Los nombres e ids de una categoría y de TODO lo que cuelga de ella.
+ *
+ * Sin esto, sin internet tocar "Mascota" mostraría solo lo suyo y no lo de sus
+ * subcategorías — al revés de lo que hace el servidor cuando hay conexión. El POS
+ * resuelve las lecturas con lo guardado antes de preguntar, así que si acá la
+ * jerarquía no existiera, la primera pantalla siempre saldría incompleta.
+ */
+async function ramaDe(companyId, nombre) {
+    const cats = await localDb.categories.where('companyId').equals(companyId).toArray();
+    const raiz = cats.find((c) => c.name === nombre);
+    if (!raiz) return { ids: new Set(), nombres: new Set([nombre]) };
+
+    const ids = new Set([Number(raiz.id)]);
+    const nombres = new Set([raiz.name]);
+    // Se recorre hacia abajo hasta que no aparezcan hijas nuevas. El tope de
+    // vueltas es la red de seguridad por si quedara un ciclo en los datos.
+    for (let vuelta = 0; vuelta < 10; vuelta++) {
+        const antes = ids.size;
+        for (const c of cats) {
+            if (c.parent_id != null && ids.has(Number(c.parent_id))) {
+                ids.add(Number(c.id));
+                nombres.add(c.name);
+            }
+        }
+        if (ids.size === antes) break;
+    }
+    return { ids, nombres };
+}
+
+/**
+ * Una página de una categoría Y DE SU RAMA, con el mismo orden que
+ * `categoryProducts` del servidor: ofertas primero y después por nombre, sin
+ * distinguir mayúsculas.
  */
 export async function productosPorCategoriaLocal(companyId, category, offset = 0, limite = 30) {
     if (!companyId) return [];
     const filas = await filasDe(companyId);
-    const dela = (category && category !== 'Todos')
-        ? filas.filter((p) => p.category === category)
-        : filas.slice();
+
+    let dela;
+    if (category && category !== 'Todos') {
+        // Por id y por nombre, igual que el servidor: si un producto quedó sin
+        // category_id, igual aparece bajo su categoría.
+        const { ids, nombres } = await ramaDe(companyId, category);
+        dela = filas.filter((p) => ids.has(Number(p.category_id)) || nombres.has(p.category));
+    } else {
+        dela = filas.slice();
+    }
 
     dela.sort((a, b) => {
         const oa = a.is_offer ? 1 : 0;

@@ -9,9 +9,85 @@ import {
 import { billingSummary } from './billing.js';
 
 // Reportes con lógica (fallback normalizado→JSON, Fase 5) — módulo compartido
+// Columnas de la grilla del POS. Sin la foto: llega después, aparte.
+const COLS_GRILLA = `id, name, sku, price, cost, stock, category, unit,
+    CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image,
+    tax_rate, is_offer, offer_price, company_id, price_ranges, scale_group_id, original_price`;
+
 const SPECIAL = {
     // Resumen de facturación (plan + Apps + total mensual + próximo cobro). Solo lectura.
     billingSummary: async (turso, companyId) => billingSummary(turso, companyId),
+
+    /**
+     * Productos de una categoría Y DE TODA SU RAMA (subcategorías y sub-subcategorías).
+     *
+     * Son DOS consultas a propósito, y esto costó descubrirlo: hacerlo en una sola
+     * con un CTE recursivo se colgaba. El motivo es que el `OR` entre category_id y
+     * category deja a SQLite sin poder usar el índice, y la subconsulta de la rama
+     * se reevalúa por cada una de las 5.023 filas. Medido: "Mascota" tardaba 17
+     * segundos y "Granel" no terminaba nunca, contra 191 ms de la consulta sin rama.
+     *
+     * Resolver primero la rama (milisegundos, son 4 categorías) y después filtrar
+     * con una lista de ids concreta deja a las dos consultas usando su índice.
+     */
+    categoryProducts: async (turso, companyId, { category, offset = 0, limit = 30 }) => {
+        const lim = Math.min(Math.max(parseInt(limit, 10) || 30, 1), 200);
+        const off = Math.max(parseInt(offset, 10) || 0, 0);
+
+        if (!category || category === 'Todos') {
+            const r = await turso.execute({
+                sql: `SELECT ${COLS_GRILLA} FROM products WHERE company_id = ?
+                      ORDER BY is_offer DESC, name COLLATE NOCASE ASC LIMIT ? OFFSET ?`,
+                args: [companyId, lim, off],
+            });
+            return r.rows;
+        }
+
+        // 1) La rama: la categoría tocada y todo lo que cuelga de ella.
+        const rama = await turso.execute({
+            sql: `WITH RECURSIVE rama(id, nombre) AS (
+                      SELECT id, name FROM categories WHERE company_id = ? AND name = ?
+                      UNION
+                      SELECT c.id, c.name FROM categories c
+                        JOIN rama r ON c.parent_id = r.id
+                       WHERE c.company_id = ?
+                  )
+                  SELECT id, nombre FROM rama`,
+            args: [companyId, category, companyId],
+        });
+
+        const ids = rama.rows.map((r) => Number(r.id));
+        // Los nombres son la red de seguridad: si un producto quedó con category_id
+        // en NULL o desactualizado, igual aparece bajo su categoría en vez de
+        // desaparecer del POS sin que nadie lo note.
+        const nombres = rama.rows.map((r) => r.nombre);
+        if (!ids.length) return [];
+
+        const phId = ids.map(() => '?').join(',');
+        const phNom = nombres.map(() => '?').join(',');
+
+        // UNION de dos consultas, no un OR. Medido sobre 5.023 productos:
+        //
+        //   con OR y parámetros ......... 1.353 ms
+        //   con UNION ...................   128 ms
+        //
+        // Con un OR entre dos columnas distintas, SQLite no sabe qué índice usar y
+        // escanea la tabla entera. Partido en dos, cada mitad usa el suyo
+        // (idx_products_company_category_id y idx_products_category_company) y el
+        // UNION saca los repetidos.
+        const r = await turso.execute({
+            sql: `SELECT * FROM (
+                      SELECT ${COLS_GRILLA} FROM products
+                       WHERE company_id = ? AND category_id IN (${phId})
+                      UNION
+                      SELECT ${COLS_GRILLA} FROM products
+                       WHERE company_id = ? AND category IN (${phNom})
+                  )
+                  ORDER BY is_offer DESC, name COLLATE NOCASE ASC LIMIT ? OFFSET ?`,
+            args: [companyId, ...ids, companyId, ...nombres, lim, off],
+        });
+        return r.rows;
+    },
     productSalesHistory: async (turso, companyId, { productId, dateFrom, dateTo, limit = 200 }) => {
         const ctx = { turso, companyId, productId, dateFrom, dateTo, limit };
         try { return await productSalesHistoryNormalized(ctx); }
@@ -75,37 +151,91 @@ export const PRODUCT_COLS_SIN_IMAGEN =
     + 'preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit, '
     + 'preorder_use_base_price, units_per_box, updated_at';
 
+// ── Buscar productos como los busca una persona ──────────────────────────
+//
+// Dos cosas que el LIKE crudo no hacía:
+//
+// 1. TILDES. Los productos están cargados sin tilde ("Aji Amarillo"), pero el
+//    autocorrector del teléfono escribe "ají". Medido contra la base real:
+//    buscar "aji" traía 40 productos y "ají" solo 3. La misma persona buscando
+//    lo mismo, con y sin corrector, veía catálogos distintos.
+//
+// 2. ORDEN DE LAS PALABRAS. "entera leche" traía CERO resultados, porque LIKE
+//    busca la frase entera y en ese orden. Uno no siempre recuerda cómo quedó
+//    escrito el producto y empieza por la palabra que sí recuerda.
+//
+// SQLite no trae una función para sacar tildes, así que se arma con REPLACE.
+// Parece caro y no lo es: la consulta ya recorría toda la tabla (un LIKE que
+// empieza con % no puede usar índice). Medido: 133 ms antes, 139 ms después.
+const SIN_TILDES = (col) => {
+    let e = `lower(${col})`;
+    for (const [de, a] of [['á','a'],['é','e'],['í','i'],['ó','o'],['ú','u'],['ü','u'],['ñ','n']]) {
+        e = `REPLACE(${e},'${de}','${a}')`;
+    }
+    return e;
+};
+
+/**
+ * Arma el filtro de búsqueda de productos: cada palabra tiene que aparecer en
+ * el nombre o en el SKU, sin importar el orden ni las tildes.
+ *
+ * @returns {{ sql: string, args: string[] }} o null si no hay nada que buscar
+ */
+function filtroBusquedaProducto(termino) {
+    const limpio = String(termino ?? '').trim();
+    if (!limpio) return null;
+
+    // Tope de palabras: sin él, pegar un párrafo en el buscador arma una
+    // consulta con decenas de condiciones sobre toda la tabla.
+    const palabras = limpio.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+    if (!palabras.length) return null;
+
+    const nombre = SIN_TILDES('name');
+    const sku = SIN_TILDES('sku');
+    const partes = palabras.map(() => `(${nombre} LIKE ? OR ${sku} LIKE ?)`);
+    const args = [];
+    for (const w of palabras) {
+        // Las tildes que escriba la persona también se sacan, para comparar
+        // manzanas con manzanas: "ají" y "aji" quedan iguales de los dos lados.
+        const w2 = w.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        args.push(`%${w2}%`, `%${w2}%`);
+    }
+    return { sql: partes.join(' AND '), args };
+}
+
 const REPORTS = {
     // Lecturas de catálogo del POS (Paso 24)
     //
     // Mismo patrón que `categoryProducts`: sin la foto y con `has_image`, para que
     // los resultados aparezcan al instante y las imágenes lleguen después
     // (loadProductImages). Esta consulta se había quedado en `SELECT *`.
-    productsSearch: ({ term, limit = 50 }) => [{
-        sql: `SELECT ${PRODUCT_COLS_SIN_IMAGEN},
-                CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image
-              FROM products WHERE company_id = ? AND (name LIKE ? OR sku LIKE ?) LIMIT ?`,
-        args: (cid) => [cid, `%${term}%`, `%${term}%`, Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200)],
+    productsSearch: ({ term, limit = 50 }) => {
+        const f = filtroBusquedaProducto(term);
+        const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+        // Sin término no se devuelve el catálogo entero: la pantalla que llama
+        // acá solo busca cuando hay algo escrito.
+        if (!f) return [{ sql: 'SELECT 1 WHERE 0', args: () => [] }];
+        return [{
+            sql: `SELECT ${PRODUCT_COLS_SIN_IMAGEN},
+                    CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image
+                  FROM products WHERE company_id = ? AND ${f.sql} LIMIT ?`,
+            args: (cid) => [cid, ...f.args, lim],
+        }];
+    },
+    // Cuántos productos tiene cada categoría, para la pantalla de Categorías.
+    // Se agrupa por category_id (la verdad desde la migración 0024) y aparte se
+    // cuentan los que quedaron sin id — si alguna vez los hay, tienen que verse.
+    categoryProductCounts: () => [{
+        sql: `SELECT category_id, COUNT(*) AS n
+              FROM products
+              WHERE company_id = ?
+              GROUP BY category_id`,
+        args: (cid) => [cid],
     }],
     productByBarcode: ({ barcode }) => [{
         sql: 'SELECT * FROM products WHERE company_id = ? AND (sku = ? OR name = ?) LIMIT 1',
         args: (cid) => [cid, barcode, barcode],
     }],
-    categoryProducts: ({ category, offset = 0, limit = 30 }) => {
-        const conds = ['company_id = ?'];
-        const extra = [];
-        if (category && category !== 'Todos') { conds.push('category = ?'); extra.push(category); }
-        const lim = Math.min(Math.max(parseInt(limit, 10) || 30, 1), 200);
-        const off = Math.max(parseInt(offset, 10) || 0, 0);
-        return [{
-            sql: `SELECT id, name, sku, price, cost, stock, category, unit,
-                    CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image,
-                    tax_rate, is_offer, offer_price, company_id, price_ranges, scale_group_id, original_price
-                  FROM products WHERE ${conds.join(' AND ')}
-                  ORDER BY is_offer DESC, name COLLATE NOCASE ASC LIMIT ? OFFSET ?`,
-            args: (cid) => [cid, ...extra, lim, off],
-        }];
-    },
     // Datos actuales de varios productos por id. Lo usa "Pasar a Compra": el
     // pedido guarda el costo con el que se pidió, pero no el precio de venta, y
     // al recibir la mercadería hay que revisar el margen con el costo real.
@@ -176,9 +306,10 @@ const REPORTS = {
     inventoryProducts: ({ searchTerm, category, offset = 0, limit = 50 }) => {
         const conds = ['company_id = ?'];
         const extra = [];
-        if (searchTerm) {
-            conds.push('(name LIKE ? OR sku LIKE ?)');
-            extra.push('%' + searchTerm + '%', '%' + searchTerm + '%');
+        const f = filtroBusquedaProducto(searchTerm);
+        if (f) {
+            conds.push(`(${f.sql})`);
+            extra.push(...f.args);
         }
         if (category && category !== 'Todos') { conds.push('category = ?'); extra.push(category); }
         const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);

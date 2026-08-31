@@ -671,8 +671,12 @@ async function productCreate(turso, companyId, session, product) {
         sql: `INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier,
                 is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes,
                 preorder_unit, preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit,
-                preorder_use_base_price, units_per_box, created_at)
-              VALUES (?, ?, ROUND(?, 3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+                preorder_use_base_price, units_per_box, created_at, category_id)
+              VALUES (?, ?, ROUND(?, 3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                -- El nombre se sigue guardando (lo usan 19 consultas y 12 pantallas),
+                -- pero la verdad pasa a ser el id: es lo que permite que "Granel"
+                -- exista colgando de Mascotas y de Abarrotes a la vez.
+                (SELECT id FROM categories WHERE company_id = ? AND name = ? LIMIT 1)) RETURNING *`,
         args: [
             product.name, product.price, product.stock, product.category, product.sku,
             product.image || null, product.cost || 0, product.tax_rate || 0, product.unit || 'Und',
@@ -684,6 +688,7 @@ async function productCreate(turso, companyId, session, product) {
             product.preorder_use_base_price !== undefined ? (product.preorder_use_base_price ? 1 : 0) : 1,
             product.units_per_box || 0,
             new Date().toISOString(),
+            companyId, product.category,
         ],
     });
 
@@ -796,7 +801,8 @@ async function productUpdate(turso, companyId, session, id, product) {
         sql: `UPDATE products SET name=?, price=?, stock=ROUND(?, 3), category=?, sku=?, image=COALESCE(?, image), cost=?, tax_rate=?,
                 unit=?, supplier=?, is_offer=?, offer_price=?, price_ranges=?, scale_group_id=?, sale_mode=?,
                 allow_item_notes=?, preorder_unit=?, preorder_billing_unit=?, preorder_price_per_kg=?,
-                preorder_gram_per_unit=?, preorder_use_base_price=?, units_per_box=?
+                preorder_gram_per_unit=?, preorder_use_base_price=?, units_per_box=?,
+                category_id=(SELECT id FROM categories WHERE company_id = ? AND name = ? LIMIT 1)
               WHERE id = ? AND company_id = ?`,
         args: [
             // undefined no es un valor válido para el driver: se traduce a null,
@@ -810,6 +816,7 @@ async function productUpdate(turso, companyId, session, id, product) {
             product.preorder_price_per_kg || 0, product.preorder_gram_per_unit || 0,
             product.preorder_use_base_price !== undefined ? (product.preorder_use_base_price ? 1 : 0) : 1,
             product.units_per_box || 0,
+            companyId, product.category,
             id, companyId,
         ],
     });
@@ -837,16 +844,88 @@ async function productDelete(turso, companyId, session, id) {
     return { success: true };
 }
 
+// ── Jerarquía de categorías ─────────────────────────────────────────────
+//
+// Tres niveles: categoría → subcategoría → sub-subcategoría. Una categoría
+// cuelga de una sola madre (parent_id NULL = primer nivel).
+//
+// El tope de tres no es capricho: la barra del POS despliega las hijas hacia
+// abajo y las nietas hacia el costado. Un cuarto nivel no tendría dónde ir, y
+// permitirlo en la base para que después la pantalla no lo sepa mostrar es
+// prometer algo que no se cumple.
+const NIVELES_MAXIMOS = 3;
+
+/**
+ * Devuelve la cadena de madres de una categoría, de la más cercana a la raíz.
+ * Sirve para dos cosas: saber a qué profundidad quedaría una categoría, y
+ * detectar que alguien no la esté colgando de su propia descendencia.
+ */
+async function cadenaDeMadres(turso, companyId, parentId) {
+    const cadena = [];
+    let actual = parentId;
+    // El tope de vueltas es la red de seguridad por si algún día quedara un
+    // ciclo en la base: sin él, esto giraría para siempre.
+    for (let i = 0; actual && i < 20; i++) {
+        const r = await turso.execute({
+            sql: 'SELECT id, parent_id FROM categories WHERE id = ? AND company_id = ?',
+            args: [actual, companyId],
+        });
+        const fila = r.rows[0];
+        if (!fila) break;
+        cadena.unshift(Number(fila.id));
+        actual = fila.parent_id;
+    }
+    return cadena;
+}
+
+/**
+ * Valida a quién se le puede colgar una categoría.
+ * @param idPropio  al editar, para no dejar que se cuelgue de sí misma ni de una hija
+ */
+async function validarMadre(turso, companyId, parentId, idPropio = null) {
+    if (parentId == null || parentId === '') return { ok: true, parentId: null };
+
+    const madre = Number(parentId);
+    if (!Number.isFinite(madre)) return { ok: false, error: 'Categoría madre inválida' };
+    if (idPropio && madre === Number(idPropio)) {
+        return { ok: false, error: 'Una categoría no puede colgar de sí misma' };
+    }
+
+    const existe = await turso.execute({
+        sql: 'SELECT id FROM categories WHERE id = ? AND company_id = ?',
+        args: [madre, companyId],
+    });
+    if (!existe.rows[0]) return { ok: false, error: 'Esa categoría madre no es de esta empresa' };
+
+    const cadena = await cadenaDeMadres(turso, companyId, madre);
+    if (idPropio && cadena.includes(Number(idPropio))) {
+        return { ok: false, error: 'No se puede colgar una categoría de una de sus propias subcategorías' };
+    }
+    // cadena incluye a la madre; la nueva quedaría un nivel más abajo.
+    if (cadena.length + 1 > NIVELES_MAXIMOS) {
+        return { ok: false, error: `Solo se permiten ${NIVELES_MAXIMOS} niveles: categoría, subcategoría y sub-subcategoría` };
+    }
+    return { ok: true, parentId: madre };
+}
+
 async function categoryCreate(turso, companyId, session, category) {
     if (!category?.name) return { success: false, error: 'Falta el nombre de la categoría' };
+
+    const madre = await validarMadre(turso, companyId, category.parentId ?? category.parent_id);
+    if (!madre.ok) return { success: false, error: madre.error };
+
     const result = await turso.execute({
-        sql: 'INSERT INTO categories (name, color, status, show_in_pos, show_in_preorders, company_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING *',
+        sql: 'INSERT INTO categories (name, color, status, show_in_pos, show_in_preorders, company_id, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *',
         args: [
-            category.name, category.color, category.status || 'active',
+            // `?? null`: el driver no acepta undefined, y una subcategoría creada
+            // sin elegir color es un caso normal —no todas las pantallas piden uno—.
+            // Sin esto reventaba con "Unsupported type of value".
+            category.name, category.color ?? null, category.status || 'active',
             category.showInPos !== false ? 1 : 0, category.showInPreorders !== false ? 1 : 0, companyId,
+            madre.parentId,
         ],
     });
-    await auditLog(turso, companyId, session, 'CREATE', 'CATEGORY', { name: category.name });
+    await auditLog(turso, companyId, session, 'CREATE', 'CATEGORY', { name: category.name, parentId: madre.parentId });
     return { success: true, category: result.rows[0] };
 }
 
@@ -861,12 +940,16 @@ async function categoryUpdate(turso, companyId, session, id, category) {
     const oldName = prev.rows[0].name;
     const nameChanged = oldName !== category.name;
 
+    const madre = await validarMadre(turso, companyId, category.parentId ?? category.parent_id, id);
+    if (!madre.ok) return { success: false, error: madre.error };
+
     const queries = [
         {
-            sql: 'UPDATE categories SET name = ?, color = ?, status = ?, show_in_pos = ?, show_in_preorders = ? WHERE id = ? AND company_id = ?',
+            sql: 'UPDATE categories SET name = ?, color = ?, status = ?, show_in_pos = ?, show_in_preorders = ?, parent_id = ? WHERE id = ? AND company_id = ?',
             args: [
-                category.name, category.color, category.status,
-                category.showInPos !== false ? 1 : 0, category.showInPreorders !== false ? 1 : 0, id, companyId,
+                category.name, category.color ?? null, category.status || 'active',
+                category.showInPos !== false ? 1 : 0, category.showInPreorders !== false ? 1 : 0,
+                madre.parentId, id, companyId,
             ],
         },
     ];
@@ -886,8 +969,31 @@ async function categoryUpdate(turso, companyId, session, id, category) {
     return { success: true, nameChanged, oldName };
 }
 
+// Se exportan para poder probar la jerarquía contra la base real sin pasar por
+// HTTP (Vercel usa solo el default export, así que esto no cambia nada en runtime).
+export const categoryActions = {
+    crear: (...a) => categoryCreate(...a),
+    actualizar: (...a) => categoryUpdate(...a),
+    borrar: (...a) => categoryDelete(...a),
+};
+
 async function categoryDelete(turso, companyId, session, id) {
     if (!id) return { success: false, error: 'Falta id' };
+
+    // Con hijas colgando no se borra: dejarlas huérfanas las haría desaparecer de
+    // la pantalla sin que nadie se entere, con sus productos adentro. Que la
+    // persona decida qué hacer con ellas primero.
+    const hijas = await turso.execute({
+        sql: 'SELECT COUNT(*) n FROM categories WHERE parent_id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    if (Number(hijas.rows[0].n) > 0) {
+        return {
+            success: false,
+            error: `Esta categoría tiene ${hijas.rows[0].n} subcategoría(s) colgando. Movelas o borralas primero.`,
+        };
+    }
+
     await turso.execute({
         sql: 'DELETE FROM categories WHERE id = ? AND company_id = ?',
         args: [id, companyId],

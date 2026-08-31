@@ -316,12 +316,19 @@ select option {
   color: var(--color-text);
 }
 
-/* Deslizar hacia abajo estando arriba del todo recargaba la app dentro del
-   WebView (gesto de "tirar para actualizar"). En un POS eso es destructivo: se
-   perdía el pedido o la venta a medio cargar. `contain` deja el scroll normal
-   pero corta ese gesto. */
-html,
-body {
+/* Deslizar hacia abajo estando arriba del todo recarga la app dentro del
+   WebView (gesto de "tirar para actualizar").
+
+   Estuvo cortado en TODA la app, y era demasiado: en el Dashboard, en los
+   reportes y en el historial de pagos ese gesto es justo lo que se quiere —
+   volver a pedir los datos. Ahí no hay nada que perder.
+
+   Donde sí hay algo que perder es armando un pedido a proveedor o cargando una
+   compra: una recarga a mitad de camino se lleva el trabajo. Por eso el corte
+   ahora se activa por pantalla, poniéndole esta clase al <html>.
+   Ver RUTAS_SIN_GESTO_RECARGA en src/layouts/MainLayout.jsx */
+html.sin-gesto-recarga,
+html.sin-gesto-recarga body {
   overscroll-behavior-y: contain;
 }
 

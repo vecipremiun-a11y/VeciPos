@@ -120,6 +120,10 @@ const EtiquetaMenu = ({ label, activa, subItems, onNavegar, children }) => {
     );
 };
 
+// Solo estas dos. Se comparan exactas a propósito: /orders/history es una
+// lista donde recargar no cuesta nada, y ahí el gesto sirve.
+const RUTAS_SIN_GESTO_RECARGA = ['/orders', '/purchases'];
+
 const MainLayout = () => {
     // Helper to check window width strictly for initial state (avoid hydration mismatch if SSR, but this is SPA)
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -139,6 +143,14 @@ const MainLayout = () => {
     const isOwner = currentUserCompanyRole === 'owner' || currentUserCompanyRole === 'super_admin' || currentUser?.role === 'super_admin';
     const navigate = useNavigate();
     const location = useLocation();
+
+    // Pantallas donde "tirar para actualizar" recargaría la app y se llevaría
+    // trabajo a medio hacer: el pedido a proveedor que se está armando y la
+    // compra que se está cargando. En el resto el gesto queda habilitado.
+    React.useEffect(() => {
+        const hayQueCortar = RUTAS_SIN_GESTO_RECARGA.includes(location.pathname);
+        document.documentElement.classList.toggle('sin-gesto-recarga', hayQueCortar);
+    }, [location.pathname]);
 
     const [openSubmenu, setOpenSubmenu] = useState(null);
     const [openSubgroup, setOpenSubgroup] = useState(null);
@@ -199,7 +211,10 @@ const MainLayout = () => {
             moduleKey: 'supplier_orders',
             subItems: [
                 { icon: ClipboardList, label: 'Pedido', path: '/orders', permission: 'supplier_orders.create' },
-                { icon: ClipboardList, label: 'Pedidos Realizados', path: '/orders/history', permission: 'supplier_orders.view' }
+                { icon: ClipboardList, label: 'Pedidos Realizados', path: '/orders/history', permission: 'supplier_orders.view' },
+                // Movida desde Inventario: una compra es el final del circuito de
+                // una orden de compra, no un dato del catálogo.
+                { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view', moduleKey: 'purchases' }
             ]
         },
         {
@@ -212,7 +227,6 @@ const MainLayout = () => {
                 { icon: Tag, label: 'Categorías', path: '/categories', permission: 'categories.view' },
                 { icon: Truck, label: 'Proveedores', path: '/suppliers', permission: 'suppliers.view', moduleKey: 'purchases' },
                 { icon: FileText, label: 'Facturas', path: '/invoices', permission: 'invoices.view', moduleKey: 'purchases' },
-                { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view', moduleKey: 'purchases' },
                 { icon: Percent, label: 'Impuestos', path: '/taxes', permission: 'taxes.view', moduleKey: 'taxes' },
                 { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', permission: 'product_profile.view', moduleKey: 'product_profile' },
                 { icon: ShieldCheck, label: 'Conciliación', path: '/inventory/reconciliation', permission: 'products.adjust_stock', moduleKey: 'inventory_control' },
