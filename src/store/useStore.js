@@ -2811,6 +2811,84 @@ export const useStore = create(persist((set, get) => ({
 
 
     // Purchases
+    /**
+     * Avisa a la tienda de los productos que acaba de tocar una compra.
+     *
+     * Una compra cambia stock, costo, precio de venta y —al recalcularse— los
+     * tramos por cantidad. Todo eso se guardaba solo en la base del POS: la
+     * tienda seguía mostrando lo viejo, con productos "Sin stock" que en el local
+     * estaban recién ingresados.
+     *
+     * Vender sí avisaba, crear y editar un producto también. La compra era la
+     * única que no. Se usa la misma vía que ya usa editar (sync-product), que
+     * manda el producto completo, no solo el stock.
+     *
+     * De a uno y en segundo plano: son las mismas peticiones que haría editar
+     * cada producto a mano, y no hay nadie esperándolas. Si la tienda está caída
+     * la compra ya quedó guardada igual — no se pierde nada, solo hay que volver
+     * a guardar el producto cuando la tienda vuelva.
+     */
+    sincronizarCompraConTienda: async (productIds) => {
+        const { activeCompanyId, products } = get();
+        if (!activeCompanyId || !productIds?.length) return;
+
+        const aEnviar = products.filter(
+            (p) => productIds.includes(p.id) && p.sku && normalizeSku(p.sku)
+        );
+        if (!aEnviar.length) return;
+
+        let enviados = 0;
+        for (const p of aEnviar) {
+            // Mismo payload que al editar un producto (ver updateProduct). La foto
+            // NO va: la compra no la cambia y son ~200 KB por producto.
+            const payload = {
+                id: p.id,
+                sku: p.sku,
+                name: p.name,
+                category: p.category,
+                stock: p.stock,
+                price: p.price,
+                cost: Number(p.cost || 0),
+                unit: p.unit || 'Und',
+                tax_rate: Number(p.tax_rate || 0),
+                is_offer: p.is_offer ? true : false,
+                offer_price: p.is_offer ? Number(p.offer_price || 0) : 0,
+                price_ranges: p.price_ranges || [],
+                sale_mode: p.sale_mode || 'sale_only',
+                preorder_unit: p.preorder_unit || null,
+                preorder_billing_unit: p.preorder_billing_unit || 'unit',
+                preorder_price_per_kg: Number(p.preorder_price_per_kg || 0),
+                preorder_gram_per_unit: Number(p.preorder_gram_per_unit || 0),
+                preorder_use_base_price: p.preorder_use_base_price !== undefined
+                    ? Boolean(p.preorder_use_base_price)
+                    : true,
+                units_per_box: Number(p.units_per_box || 0),
+            };
+
+            try {
+                const res = await fetch(
+                    `/api/integration/sync-product?company_id=${encodeURIComponent(activeCompanyId)}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ product: payload }),
+                    }
+                );
+                const data = await res.json().catch(() => null);
+                if (!res.ok || !data?.success) {
+                    console.warn('Sync post-compra falló:', { sku: p.sku, status: res.status, data });
+                } else {
+                    enviados++;
+                }
+            } catch (e) {
+                console.warn('Sync post-compra error:', { sku: p.sku, error: e?.message });
+            }
+        }
+
+        if (enviados) console.log(`✅ Tienda actualizada: ${enviados} de ${aEnviar.length} producto(s) de la compra`);
+        return { enviados, total: aEnviar.length };
+    },
+
     addPurchase: async (purchase) => {
         try {
             const { currentUser, activeCompanyId, validateCompanyAccess } = get();
@@ -2876,6 +2954,14 @@ export const useStore = create(persist((set, get) => ({
             }));
 
             // (El resumen por proveedor ya lo actualizó purchaseCreate server-side)
+
+            // POS → Tienda. Va DESPUÉS del set() a propósito: así se manda lo que
+            // el POS ya está mostrando (stock sumado, costo y precio nuevos), y no
+            // lo que venía en la factura antes de aplicarse.
+            const idsComprados = purchase.items.map((i) => i.id).filter(Boolean);
+            get().sincronizarCompraConTienda(idsComprados).catch((e) =>
+                console.warn('No se pudo avisar a la tienda de la compra:', e)
+            );
 
             // Check inventory alerts after purchase (non-blocking)
             setTimeout(() => {

@@ -43,6 +43,43 @@ const OptimizedImage = ({
         // elemento real para que se muestre aunque no estuviera en viewport antes.
     }, [priority, src]);
 
+    // Al cambiar de foto hay que olvidar lo que pasó con la anterior.
+    //
+    // Sin esto `hasError` quedaba pegado para siempre: bastaba UN fallo para que
+    // ese recuadro mostrara "Sin imagen" el resto de la sesión. Y como React
+    // reutiliza el mismo componente para el producto que caiga después en esa
+    // posición de la grilla, el hueco se contagiaba a productos con la foto
+    // perfecta.
+    //
+    // Los dos casos donde se veía: al volver de segundo plano —el WebView corta
+    // las peticiones en curso y fallan todas las fotos a medio cargar de una— y
+    // después de buscar varias veces, que va dejando huecos acumulados.
+    useEffect(() => {
+        setHasError(false);
+        setIsLoaded(false);
+    }, [src]);
+
+    // Volver a intentar al regresar a la app.
+    //
+    // El efecto de arriba solo se dispara si CAMBIA la foto, y al volver de
+    // segundo plano el producto es el mismo: mismo src, efecto que no corre,
+    // recuadro que sigue roto. Acá se limpia el fallo cuando la pantalla vuelve
+    // a estar a la vista, que es justo cuando conviene reintentar.
+    //
+    // Solo hace algo si esta imagen falló: sin esa condición, cada vez que se
+    // vuelve a la app se redibujarían todas las fotos de la grilla para nada.
+    useEffect(() => {
+        if (!hasError) return;
+        const alVolver = () => {
+            if (document.visibilityState === 'visible') {
+                setHasError(false);
+                setIsLoaded(false);
+            }
+        };
+        document.addEventListener('visibilitychange', alVolver);
+        return () => document.removeEventListener('visibilitychange', alVolver);
+    }, [hasError]);
+
     const handleLoad = () => {
         setIsLoaded(true);
     };
