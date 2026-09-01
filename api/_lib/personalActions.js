@@ -5,18 +5,22 @@
 // vacaciones — huecos cross-tenant cerrados en esta migración) y los updates
 // dinámicos usan whitelist de columnas.
 
+import { appendAttendanceRecord, verifyChain } from './attendanceChain.js';
+import { rutIsValid, normalizeRut } from './rut.js';
+
 // Columnas de users que el módulo Personal puede tocar (ficha laboral + pago).
 const LABOR_FIELDS = new Set([
     'has_labor_profile', 'labor_position', 'labor_branch', 'labor_start_date',
-    'labor_status', 'labor_pin',
+    'labor_status', 'labor_pin', 'rut', 'labor_weekly_hours', 'labor_exempt_art22',
     'pay_type', 'pay_method', 'pay_day', 'pay_base_amount',
     'pay_fixed_bonus', 'pay_fixed_discount',
     'pay_bank_name', 'pay_bank_account', 'pay_bank_account_type', 'pay_bank_owner',
 ]);
 
 // Columnas visibles de un empleado (NUNCA password)
-const STAFF_COLS = `id, username, name, role, company_id, has_labor_profile, labor_position,
-    labor_branch, labor_start_date, labor_status, labor_pin, pay_type, pay_method, pay_day,
+const STAFF_COLS = `id, username, name, role, company_id, rut, has_labor_profile, labor_position,
+    labor_branch, labor_start_date, labor_status, labor_pin, labor_weekly_hours, labor_exempt_art22,
+    pay_type, pay_method, pay_day,
     pay_base_amount, pay_fixed_bonus, pay_fixed_discount,
     pay_bank_name, pay_bank_account, pay_bank_account_type, pay_bank_owner`;
 
@@ -28,6 +32,7 @@ const CONFIG_FIELDS = new Set([
     'bonus_attendance_enabled', 'bonus_attendance_amount',
     'working_days_per_month', 'working_hours_per_day',
     'absence_from_missing_attendance',
+    'legal_weekly_hours', 'legal_daily_max_hours', 'legal_max_overtime_daily',
 ]);
 
 const PERIOD_FIELDS = new Set([
@@ -64,6 +69,10 @@ async function staffList(turso, companyId) {
 
 async function laborProfileUpdate(turso, companyId, session, { userId, data }) {
     if (!userId) return { success: false, error: 'Falta userId' };
+    if (data?.rut != null && String(data.rut).trim() !== '') {
+        if (!rutIsValid(data.rut)) return { success: false, error: 'El RUT no es válido' };
+        data = { ...data, rut: normalizeRut(data.rut) };
+    }
     const { sets, args } = pickWhitelisted(data, LABOR_FIELDS);
     if (!sets.length) return { success: true };
     await turso.execute({
@@ -104,9 +113,20 @@ async function staffUser(turso, companyId, session, { userId }) {
 
 // ── Asistencia ───────────────────────────────────────────────────
 
+// Identidad congelada en la marca. Un registro de asistencia identifica al
+// trabajador por nombre + RUT ante un tercero, no por el id de nuestra base.
+async function identityFor(turso, companyId, userId) {
+    const r = await turso.execute({
+        sql: 'SELECT name, rut FROM users WHERE id = ? AND company_id = ?',
+        args: [userId, companyId],
+    });
+    const u = r.rows[0];
+    return { userName: u?.name ?? null, userRut: u?.rut ?? null };
+}
+
 async function attendanceToday(turso, companyId, session, { today }) {
     const r = await turso.execute({
-        sql: `SELECT ar.*, u.username, u.name FROM attendance_records ar
+        sql: `SELECT ar.*, u.username, u.name, u.rut FROM attendance_records ar
               JOIN users u ON ar.user_id = u.id
               WHERE ar.company_id = ? AND ar.date = ? ORDER BY ar.recorded_at ASC`,
         args: [companyId, today],
@@ -115,22 +135,29 @@ async function attendanceToday(turso, companyId, session, { today }) {
 }
 
 async function attendanceRange(turso, companyId, session, { startDate, endDate, userId }) {
-    let sql = `SELECT ar.*, u.username, u.name FROM attendance_records ar
+    let sql = `SELECT ar.*, u.username, u.name, u.rut, u.labor_weekly_hours, u.labor_exempt_art22
+               FROM attendance_records ar
                JOIN users u ON ar.user_id = u.id
                WHERE ar.company_id = ? AND ar.date BETWEEN ? AND ?`;
     const args = [companyId, startDate, endDate];
     if (userId) { sql += ' AND ar.user_id = ?'; args.push(userId); }
-    sql += ' ORDER BY ar.date DESC, ar.recorded_at DESC';
+    // Ascendente: la primera entrada del día tiene que ser la PRIMERA. Con el
+    // orden descendente que había antes, en un turno partido el panel mostraba
+    // como hora de llegada la del reingreso de la tarde.
+    sql += ' ORDER BY ar.date ASC, ar.recorded_at ASC';
     const r = await turso.execute({ sql, args });
     return { success: true, rows: r.rows };
 }
 
-async function attendanceMark(turso, companyId, session, { userId, type, deviceLabel, branch, date }) {
+async function attendanceMark(turso, companyId, session, { userId, type, deviceLabel, branch, date, deviceId }) {
     if (!userId || !date) return { success: false, error: 'Faltan datos' };
     const recordedAt = nowIso();
 
+    // Solo las marcas vigentes deciden si toca entrada o salida: una marca
+    // anulada por corrección aprobada ya no cuenta.
     const lastRes = await turso.execute({
-        sql: `SELECT * FROM attendance_records WHERE company_id = ? AND user_id = ? AND date = ?
+        sql: `SELECT * FROM attendance_records
+              WHERE company_id = ? AND user_id = ? AND date = ? AND COALESCE(is_corrected, 0) = 0
               ORDER BY recorded_at DESC LIMIT 1`,
         args: [companyId, userId, date],
     });
@@ -150,32 +177,81 @@ async function attendanceMark(turso, companyId, session, { userId, type, deviceL
         }
     }
 
-    await turso.execute({
-        sql: `INSERT INTO attendance_records (company_id, user_id, type, recorded_at, date, source, device_label, branch)
-              VALUES (?, ?, ?, ?, ?, 'kiosk', ?, ?)`,
-        args: [companyId, userId, finalType, recordedAt, date, deviceLabel ?? null, branch ?? null],
+    const { userName, userRut } = await identityFor(turso, companyId, userId);
+    const saved = await appendAttendanceRecord(turso, companyId, {
+        userId, type: finalType, recordedAt, date, source: 'kiosk',
+        deviceLabel, branch, deviceId, originIp: session?.ip ?? null,
+        userName, userRut, createdAt: recordedAt,
     });
-    return { success: true, type: finalType, recordedAt };
+
+    return {
+        success: true,
+        type: finalType,
+        recordedAt,
+        // Datos del comprobante que se le entrega al trabajador.
+        receipt: {
+            id: saved.id,
+            folio: saved.seq,
+            hash: saved.hash,
+            name: userName,
+            rut: userRut,
+            type: finalType,
+            recordedAt,
+            branch: branch ?? null,
+            deviceLabel: deviceLabel ?? null,
+        },
+    };
 }
 
 async function attendanceManual(turso, companyId, session, { userId, type, datetime, date, notes, recordedBy }) {
     if (!userId || !datetime || !date) return { success: false, error: 'Faltan datos' };
-    await turso.execute({
-        sql: `INSERT INTO attendance_records (company_id, user_id, type, recorded_at, date, source, notes, recorded_by)
-              VALUES (?, ?, ?, ?, ?, 'manual', ?, ?)`,
-        args: [companyId, userId, type, datetime, date, notes ?? null, recordedBy ?? session?.uid ?? null],
+    // Una marca que no puso el trabajador tiene que decir por qué existe: es lo
+    // primero que se pregunta en una fiscalización.
+    if (!String(notes || '').trim()) {
+        return { success: false, error: 'Una marca manual necesita un motivo escrito.' };
+    }
+
+    const { userName, userRut } = await identityFor(turso, companyId, userId);
+    const saved = await appendAttendanceRecord(turso, companyId, {
+        userId, type, recordedAt: datetime, date, source: 'manual',
+        notes, recordedBy: recordedBy ?? session?.uid ?? null,
+        originIp: session?.ip ?? null, userName, userRut, createdAt: nowIso(),
     });
-    return { success: true };
+    return { success: true, folio: saved.seq };
 }
 
 async function attendanceStatus(turso, companyId, session, { userId, today }) {
     const r = await turso.execute({
-        sql: `SELECT type FROM attendance_records WHERE company_id = ? AND user_id = ? AND date = ?
+        sql: `SELECT type FROM attendance_records
+              WHERE company_id = ? AND user_id = ? AND date = ? AND COALESCE(is_corrected, 0) = 0
               ORDER BY recorded_at DESC LIMIT 1`,
         args: [companyId, userId, today],
     });
     if (r.rows.length === 0) return { success: true, status: 'not_marked' };
     return { success: true, status: r.rows[0].type === 'entry' ? 'inside' : 'outside' };
+}
+
+// Recupera una marca por folio para reimprimir su comprobante. El trabajador
+// que perdió el papel tiene derecho a pedirlo de nuevo.
+async function attendanceReceipt(turso, companyId, session, { folio, recordId }) {
+    const where = recordId ? 'ar.id = ?' : 'ar.seq = ?';
+    const r = await turso.execute({
+        sql: `SELECT ar.*, u.name, u.rut FROM attendance_records ar
+              JOIN users u ON ar.user_id = u.id
+              WHERE ar.company_id = ? AND ${where} LIMIT 1`,
+        args: [companyId, recordId ?? folio],
+    });
+    const row = r.rows[0];
+    if (!row) return { success: false, error: 'Folio no encontrado' };
+    return { success: true, record: row };
+}
+
+// Verificación de integridad de la cadena. Es lo que se le muestra a un
+// fiscalizador —o a un trabajador que duda— para probar que las marcas no se
+// tocaron después de guardarse.
+async function attendanceVerify(turso, companyId, session, { fromSeq, limit }) {
+    const result = await verifyChain(turso, companyId, { fromSeq, limit });
+    return { success: true, ...result, intact: result.problems.length === 0 };
 }
 
 // ── Correcciones de asistencia ───────────────────────────────────
@@ -213,6 +289,19 @@ async function correctionRequest(turso, companyId, session, { data }) {
     return { success: true };
 }
 
+// Anular una marca no es borrarla: la fila original se queda donde está, con
+// el motivo, el revisor y la hora en que se anuló. Lo que la reemplaza entra
+// como marca NUEVA en la cadena, así que el histórico muestra las dos cosas:
+// lo que se registró y lo que se corrigió después.
+async function voidRecord(turso, companyId, recordId, { reason, reviewedBy, replacedBy = null }) {
+    await turso.execute({
+        sql: `UPDATE attendance_records
+              SET is_corrected = 1, voided_at = ?, voided_by = ?, void_reason = ?, replaced_by_record_id = ?
+              WHERE id = ? AND company_id = ?`,
+        args: [nowIso(), reviewedBy ?? null, reason ?? null, replacedBy, recordId, companyId],
+    });
+}
+
 async function correctionApprove(turso, companyId, session, { correctionId, reviewerNotes, reviewedBy }) {
     const corrRes = await turso.execute({
         sql: 'SELECT * FROM attendance_corrections WHERE id = ? AND company_id = ?',
@@ -220,42 +309,46 @@ async function correctionApprove(turso, companyId, session, { correctionId, revi
     });
     const correction = corrRes.rows[0];
     if (!correction) return { success: false, error: 'Corrección no encontrada' };
+    if (correction.status !== 'pending') {
+        return { success: false, error: 'Esta corrección ya fue resuelta' };
+    }
+
+    const reviewer = reviewedBy ?? session?.uid ?? null;
+    const { userName, userRut } = await identityFor(turso, companyId, correction.user_id);
+    const motivo = `Corrección #${correctionId}: ${correction.reason || 'sin motivo'}`;
 
     if (correction.correction_type === 'edit_time') {
         if (correction.original_record_id) {
-            await turso.execute({
-                sql: 'UPDATE attendance_records SET is_corrected = 1 WHERE id = ? AND company_id = ?',
-                args: [correction.original_record_id, companyId],
-            });
             const origRes = await turso.execute({
                 sql: 'SELECT * FROM attendance_records WHERE id = ? AND company_id = ?',
                 args: [correction.original_record_id, companyId],
             });
             const orig = origRes.rows[0];
             if (orig) {
-                await turso.execute({
-                    sql: `INSERT INTO attendance_records
-                          (company_id, user_id, type, recorded_at, date, source, notes, is_corrected, recorded_by)
-                          VALUES (?, ?, ?, ?, ?, 'manual', ?, 0, ?)`,
-                    args: [companyId, correction.user_id, orig.type, correction.requested_at, orig.date,
-                        `Corrección aprobada: ${correction.reason}`, reviewedBy],
+                const saved = await appendAttendanceRecord(turso, companyId, {
+                    userId: correction.user_id, type: orig.type,
+                    recordedAt: correction.requested_at, date: orig.date,
+                    source: 'correction', notes: motivo, recordedBy: reviewer,
+                    branch: orig.branch, deviceLabel: orig.device_label,
+                    originIp: session?.ip ?? null, userName, userRut, createdAt: nowIso(),
+                });
+                await voidRecord(turso, companyId, orig.id, {
+                    reason: motivo, reviewedBy: reviewer, replacedBy: saved.id,
                 });
             }
         }
     } else if (correction.correction_type === 'add_entry' || correction.correction_type === 'add_exit') {
-        const type = correction.correction_type === 'add_entry' ? 'entry' : 'exit';
-        await turso.execute({
-            sql: `INSERT INTO attendance_records
-                  (company_id, user_id, type, recorded_at, date, source, notes, recorded_by)
-                  VALUES (?, ?, ?, ?, ?, 'manual', ?, ?)`,
-            args: [companyId, correction.user_id, type, correction.requested_at, correction.requested_date,
-                `Corrección (Agregar): ${correction.reason}`, reviewedBy],
+        await appendAttendanceRecord(turso, companyId, {
+            userId: correction.user_id,
+            type: correction.correction_type === 'add_entry' ? 'entry' : 'exit',
+            recordedAt: correction.requested_at, date: correction.requested_date,
+            source: 'correction', notes: motivo, recordedBy: reviewer,
+            originIp: session?.ip ?? null, userName, userRut, createdAt: nowIso(),
         });
     } else if (correction.correction_type === 'delete') {
         if (correction.original_record_id) {
-            await turso.execute({
-                sql: 'UPDATE attendance_records SET is_corrected = 1 WHERE id = ? AND company_id = ?',
-                args: [correction.original_record_id, companyId],
+            await voidRecord(turso, companyId, correction.original_record_id, {
+                reason: motivo, reviewedBy: reviewer,
             });
         }
     }
@@ -263,7 +356,7 @@ async function correctionApprove(turso, companyId, session, { correctionId, revi
     await turso.execute({
         sql: `UPDATE attendance_corrections SET status = 'approved', reviewed_by = ?, reviewed_at = ?, reviewer_notes = ?
               WHERE id = ? AND company_id = ?`,
-        args: [reviewedBy, nowIso(), reviewerNotes ?? null, correctionId, companyId],
+        args: [reviewer, nowIso(), reviewerNotes ?? null, correctionId, companyId],
     });
     return { success: true };
 }
@@ -717,6 +810,8 @@ export const personalActions = {
     attendanceMark,
     attendanceManual,
     attendanceStatus,
+    attendanceReceipt,
+    attendanceVerify,
     correctionsPending,
     correctionsByStatus,
     correctionRequest,

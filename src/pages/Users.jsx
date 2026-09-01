@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { usePermissions } from '../hooks/usePermissions';
 import { toast } from '../lib/toast';
+import { validateRut, formatRutInput, formatRut } from '../utils/rutValidation';
 
 const Users = () => {
     const { users, currentUser, currentUserCompanyRole, addUser, deleteUser, revokeUserAccess, updateUser, activeCompanyId, fetchCompanyRoles } = useStore();
@@ -18,8 +19,11 @@ const Users = () => {
     const [companyRoles, setCompanyRoles] = useState([]);
     const [formData, setFormData] = useState({
         name: '', username: '', role: 'Caja', password: '', email: '',
+        rut: '',
         // Labor Profile
         has_labor_profile: false,
+        labor_weekly_hours: 42,
+        labor_exempt_art22: false,
         labor_position: '',
         labor_branch: '',
         labor_start_date: '',
@@ -127,8 +131,11 @@ const Users = () => {
                 role: user.role,
                 password: '',
                 email: user.email || '',
+                rut: user.rut || '',
                 // Labor
                 has_labor_profile: !!user.has_labor_profile,
+                labor_weekly_hours: user.labor_weekly_hours ?? 42,
+                labor_exempt_art22: !!user.labor_exempt_art22,
                 labor_position: user.labor_position || '',
                 labor_branch: user.labor_branch || '',
                 labor_start_date: user.labor_start_date || '',
@@ -149,8 +156,8 @@ const Users = () => {
         } else {
             setEditingUser(null);
             setFormData({
-                name: '', username: '', role: 'Caja', password: '', email: '',
-                has_labor_profile: false,
+                name: '', username: '', role: 'Caja', password: '', email: '', rut: '',
+                has_labor_profile: false, labor_weekly_hours: 42, labor_exempt_art22: false,
                 labor_position: '', labor_branch: '', labor_start_date: '',
                 labor_status: 'active', labor_pin: '',
                 pay_type: 'monthly', pay_method: 'transfer', pay_day: '',
@@ -163,6 +170,11 @@ const Users = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        if (formData.rut && !validateRut(formData.rut)) {
+            toast.error('El RUT no es válido. Revisa el dígito verificador.');
+            return;
+        }
 
         let result;
         if (editingUser) {
@@ -569,6 +581,28 @@ const Users = () => {
                                     />
                                 </div>
 
+                                {/* El RUT identifica al trabajador en el libro de asistencia y en su
+                                    comprobante de marcación. Sin él, el registro no prueba quién marcó. */}
+                                <div>
+                                    <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
+                                        RUT
+                                    </label>
+                                    <input
+                                        className={cn(
+                                            "glass-input w-full",
+                                            formData.rut && !validateRut(formData.rut) && "border-red-500/50"
+                                        )}
+                                        value={formData.rut}
+                                        onChange={e => setFormData({ ...formData, rut: formatRutInput(e.target.value) })}
+                                        placeholder="12345678-9"
+                                    />
+                                    {formData.rut
+                                        ? (validateRut(formData.rut)
+                                            ? <p className="text-[10px] text-green-400 mt-1">{formatRut(formData.rut)}</p>
+                                            : <p className="text-[10px] text-red-400 mt-1">El dígito verificador no cuadra.</p>)
+                                        : <p className="text-[10px] text-[var(--color-text-muted)] mt-1">Necesario para el libro de asistencia y los comprobantes.</p>}
+                                </div>
+
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
@@ -699,6 +733,47 @@ const Users = () => {
                                                     <option value="inactive">Inactivo</option>
                                                     <option value="suspended">Suspendido</option>
                                                 </select>
+                                            </div>
+                                        </div>
+
+                                        {/* Jornada del contrato. El informe de horas compara contra lo
+                                            PACTADO, no contra el máximo legal: un part-time de 30 h no
+                                            está en déficit por no llegar a 42. */}
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
+                                                    Jornada pactada (h/semana)
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    max="45"
+                                                    step="0.5"
+                                                    className="glass-input w-full"
+                                                    value={formData.labor_weekly_hours}
+                                                    disabled={formData.labor_exempt_art22}
+                                                    onChange={e => setFormData({ ...formData, labor_weekly_hours: e.target.value })}
+                                                />
+                                                <p className="text-[10px] text-[var(--color-text-muted)] mt-1">
+                                                    Máximo legal vigente: 42 h (Ley 21.561).
+                                                </p>
+                                            </div>
+                                            <div className="flex flex-col justify-center">
+                                                <label className="flex items-start gap-2 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="mt-0.5"
+                                                        checked={formData.labor_exempt_art22}
+                                                        onChange={e => setFormData({ ...formData, labor_exempt_art22: e.target.checked })}
+                                                    />
+                                                    <span className="text-xs text-[var(--color-text)]">
+                                                        Excluido de limitación de jornada
+                                                        <span className="block text-[10px] text-[var(--color-text-muted)]">
+                                                            Art. 22 inc. 2°: sin fiscalización superior inmediata. No se le
+                                                            calculan horas extra ni se le exige registro.
+                                                        </span>
+                                                    </span>
+                                                </label>
                                             </div>
                                         </div>
 

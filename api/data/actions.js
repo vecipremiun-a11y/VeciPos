@@ -93,6 +93,11 @@ export default async function handler(req, res) {
             return res.status(403).json({ success: false, error: 'No perteneces a esta empresa' });
         }
 
+        // La IP queda en el registro de asistencia: una marca de kiosco tiene que
+        // poder decir desde dónde se hizo. Se toma del proxy, nunca del cliente.
+        session.ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+            || req.socket?.remoteAddress || null;
+
         // 3a) Dominio Personal/Nómina (Fase 1 · Paso 9): acciones 'personal.<clave>'
         if (typeof action === 'string' && action.startsWith('personal.')) {
             const handler = personalActions[action.slice('personal.'.length)];

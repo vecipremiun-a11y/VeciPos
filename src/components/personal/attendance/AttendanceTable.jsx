@@ -34,6 +34,34 @@ const AttendanceTable = () => {
         return user ? user.name : 'Desconocido';
     };
 
+    // El botón existía sin onClick desde siempre: no exportaba nada.
+    const handleExport = () => {
+        if (!attendanceData.length) return;
+        const head = ['Fecha', 'Empleado', 'Entrada', 'Salida', 'Horas', 'Sucursal', 'Notas'];
+        const lines = [head.join(';')];
+        for (const r of attendanceData) {
+            const hrs = r.check_in && r.check_out
+                ? ((new Date(r.check_out) - new Date(r.check_in)) / 3600000).toFixed(2)
+                : '';
+            lines.push([
+                r.date || '',
+                getUserName(r.user_id),
+                r.check_in ? format(new Date(r.check_in), 'HH:mm') : '',
+                r.check_out ? format(new Date(r.check_out), 'HH:mm') : '',
+                hrs,
+                r.branch || '',
+                String(r.notes || '').replace(/[;\n\r]/g, ' '),
+            ].join(';'));
+        }
+        // BOM para que Excel en español respete los acentos.
+        const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `asistencia_${startDate}_${endDate}.csv`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    };
+
     return (
         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Filters Bar */}
@@ -73,7 +101,11 @@ const AttendanceTable = () => {
                 </div>
 
                 <div className="flex gap-2">
-                    <button className="btn-secondary flex items-center gap-2">
+                    <button
+                        onClick={handleExport}
+                        disabled={!attendanceData.length}
+                        className="btn-secondary flex items-center gap-2 disabled:opacity-50"
+                    >
                         <Download size={16} />
                         Exportar
                     </button>

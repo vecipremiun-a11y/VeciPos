@@ -6,6 +6,7 @@ import { cn } from '../lib/utils';
 import DailyPanel from '../components/personal/attendance/DailyPanel';
 import KioskView from '../components/personal/attendance/KioskView';
 import AttendanceTable from '../components/personal/attendance/AttendanceTable';
+import AttendanceBook from '../components/personal/attendance/AttendanceBook';
 import CorrectionsInbox from '../components/personal/corrections/CorrectionsInbox';
 import ShiftCalendar from '../components/personal/shifts/ShiftCalendar';
 import AbsencesList from '../components/personal/absences/AbsencesList';
@@ -66,6 +67,7 @@ const Personal = () => {
                             <button onClick={() => setAttendanceSubTab('daily')} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-all", attendanceSubTab === 'daily' ? "bg-[var(--glass-bg)] shadow-sm text-[var(--color-text)] border border-[var(--glass-border)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]")}>Panel del Día</button>
                             <button onClick={() => setAttendanceSubTab('kiosk')} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-all", attendanceSubTab === 'kiosk' ? "bg-[var(--glass-bg)] shadow-sm text-[var(--color-text)] border border-[var(--glass-border)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]")}>Modo Kiosco</button>
                             <button onClick={() => setAttendanceSubTab('history')} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-all", attendanceSubTab === 'history' ? "bg-[var(--glass-bg)] shadow-sm text-[var(--color-text)] border border-[var(--glass-border)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]")}>Historial</button>
+                            <button onClick={() => setAttendanceSubTab('book')} className={cn("px-4 py-2 rounded-lg text-sm font-medium transition-all", attendanceSubTab === 'book' ? "bg-[var(--glass-bg)] shadow-sm text-[var(--color-text)] border border-[var(--glass-border)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]")}>Libro de Asistencia</button>
                         </div>
 
                         {attendanceSubTab === 'daily' && <DailyPanel />}
@@ -84,6 +86,7 @@ const Personal = () => {
                             </div>
                         )}
                         {attendanceSubTab === 'history' && <AttendanceTable />}
+                        {attendanceSubTab === 'book' && <AttendanceBook />}
                     </div>
                 )}
 

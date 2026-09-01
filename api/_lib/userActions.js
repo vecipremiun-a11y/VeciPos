@@ -4,14 +4,25 @@
 // La contraseña se hashea con bcrypt EN EL SERVIDOR (el navegador ya no la ve).
 
 import { hashPassword } from './auth.js';
+import { rutIsValid, normalizeRut } from './rut.js';
 
 // libSQL no acepta `undefined` como valor de bind → coercionar a null.
 const nn = (v) => (v === undefined ? null : v);
 
-const USER_COLS = `id, name, username, role, company_id, has_labor_profile, labor_position,
-    labor_branch, labor_start_date, labor_status, labor_pin, pay_type, pay_method, pay_day,
+const USER_COLS = `id, name, username, role, company_id, rut, has_labor_profile, labor_position,
+    labor_branch, labor_start_date, labor_status, labor_pin, labor_weekly_hours, labor_exempt_art22,
+    pay_type, pay_method, pay_day,
     pay_base_amount, pay_fixed_bonus, pay_fixed_discount, pay_bank_name, pay_bank_account,
     pay_bank_account_type, pay_bank_owner`;
+
+// El RUT identifica al trabajador en el registro de asistencia. Si viene, tiene
+// que ser válido: guardarlo malo es peor que no tenerlo, porque da falsa certeza.
+function checkRut(user) {
+    const raw = user?.rut;
+    if (raw == null || String(raw).trim() === '') return { ok: true, value: null };
+    if (!rutIsValid(raw)) return { ok: false, error: 'El RUT no es válido' };
+    return { ok: true, value: normalizeRut(raw) };
+}
 
 // Rol del actor en la empresa (user_companies) + rol global (users)
 async function actorRoles(turso, companyId, session) {
@@ -32,6 +43,9 @@ async function userCreate(turso, companyId, session, { user }) {
     if (!isAdmin) return { success: false, error: 'Acceso denegado. Solo administradores pueden crear usuarios.' };
     if (!user?.username) return { success: false, error: 'Falta username' };
 
+    const rutCheck = checkRut(user);
+    if (!rutCheck.ok) return { success: false, error: rutCheck.error };
+
     // Unicidad POR SUCURSAL (no global): el mismo nombre puede existir en otra
     // empresa, pero no dos veces en ESTA. Mensaje claro antes que el error de BD.
     const dup = await turso.execute({
@@ -44,13 +58,16 @@ async function userCreate(turso, companyId, session, { user }) {
     const result = await turso.execute({
         sql: `INSERT INTO users (
                 name, username, password, role, company_id,
-                has_labor_profile, labor_position, labor_branch, labor_start_date, labor_status, labor_pin,
+                rut, has_labor_profile, labor_position, labor_branch, labor_start_date, labor_status, labor_pin,
+                labor_weekly_hours, labor_exempt_art22,
                 pay_type, pay_method, pay_day, pay_base_amount, pay_fixed_bonus, pay_fixed_discount,
                 pay_bank_name, pay_bank_account, pay_bank_account_type, pay_bank_owner
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${USER_COLS}`,
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${USER_COLS}`,
         args: [
             nn(user.name), user.username, hashedPw, nn(user.role), companyId,
+            rutCheck.value,
             user.has_labor_profile ? 1 : 0, nn(user.labor_position), nn(user.labor_branch), nn(user.labor_start_date), nn(user.labor_status), nn(user.labor_pin),
+            user.labor_weekly_hours == null ? 42 : Number(user.labor_weekly_hours), user.labor_exempt_art22 ? 1 : 0,
             nn(user.pay_type), nn(user.pay_method), nn(user.pay_day), nn(user.pay_base_amount), nn(user.pay_fixed_bonus), nn(user.pay_fixed_discount),
             nn(user.pay_bank_name), nn(user.pay_bank_account), nn(user.pay_bank_account_type), nn(user.pay_bank_owner),
         ],
@@ -72,6 +89,9 @@ async function userUpdate(turso, companyId, session, { id, user }) {
     if (!isAdmin) return { success: false, error: 'Acceso denegado. Solo administradores pueden modificar usuarios.' };
     if (!id || !user) return { success: false, error: 'Faltan datos' };
 
+    const rutCheck = checkRut(user);
+    if (!rutCheck.ok) return { success: false, error: rutCheck.error };
+
     // Al renombrar: no chocar con otro usuario de ESTA sucursal.
     if (user.username) {
         const dup = await turso.execute({
@@ -82,14 +102,16 @@ async function userUpdate(turso, companyId, session, { id, user }) {
     }
 
     await turso.execute({
-        sql: `UPDATE users SET name = ?, username = ?, role = ?,
+        sql: `UPDATE users SET name = ?, username = ?, role = ?, rut = ?,
                 has_labor_profile = ?, labor_position = ?, labor_branch = ?, labor_start_date = ?, labor_status = ?, labor_pin = ?,
+                labor_weekly_hours = ?, labor_exempt_art22 = ?,
                 pay_type = ?, pay_method = ?, pay_day = ?, pay_base_amount = ?, pay_fixed_bonus = ?, pay_fixed_discount = ?,
                 pay_bank_name = ?, pay_bank_account = ?, pay_bank_account_type = ?, pay_bank_owner = ?
               WHERE id = ? AND company_id = ?`,
         args: [
-            nn(user.name), user.username, nn(user.role),
+            nn(user.name), user.username, nn(user.role), rutCheck.value,
             user.has_labor_profile ? 1 : 0, nn(user.labor_position), nn(user.labor_branch), nn(user.labor_start_date), nn(user.labor_status), nn(user.labor_pin),
+            user.labor_weekly_hours == null ? 42 : Number(user.labor_weekly_hours), user.labor_exempt_art22 ? 1 : 0,
             nn(user.pay_type), nn(user.pay_method), nn(user.pay_day), nn(user.pay_base_amount), nn(user.pay_fixed_bonus), nn(user.pay_fixed_discount),
             nn(user.pay_bank_name), nn(user.pay_bank_account), nn(user.pay_bank_account_type), nn(user.pay_bank_owner),
             id, companyId,

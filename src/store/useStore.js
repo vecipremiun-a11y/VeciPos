@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { getDeviceId } from '../utils/deviceId';
 import { persist } from 'zustand/middleware';
 import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFromDateString, getEndFromDateString, formatInCompanyTime } from '../lib/dateHelpers';
 import { localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
@@ -6799,9 +6800,11 @@ export const useStore = create(persist((set, get) => ({
             const r = await userApiCall('personal.attendanceToday', { companyId: activeCompanyId, today });
             if (!r?.success) throw new Error(r?.error || 'Error');
 
-            // Group by user_id and pair entry/exit
+            // Group by user_id and pair entry/exit.
+            // Las marcas anuladas por una corrección aprobada quedan fuera: si
+            // siguieran contando, el panel mostraría la hora que se corrigió.
             const grouped = {};
-            for (const row of r.rows) {
+            for (const row of r.rows.filter(x => !Number(x.is_corrected))) {
                 const key = row.user_id;
                 if (!grouped[key]) {
                     grouped[key] = {
@@ -6840,9 +6843,10 @@ export const useStore = create(persist((set, get) => ({
             if (!r?.success) throw new Error(r?.error || 'Error');
             const rows = r.rows;
 
-            // Group by user_id + date and pair entry/exit into single records
+            // Group by user_id + date and pair entry/exit into single records.
+            // Se ignoran las marcas anuladas, igual que en el panel del día.
             const grouped = {};
-            for (const row of rows) {
+            for (const row of rows.filter(x => !Number(x.is_corrected))) {
                 const key = `${row.user_id}_${row.date}`;
                 if (!grouped[key]) {
                     grouped[key] = {
@@ -6894,16 +6898,45 @@ export const useStore = create(persist((set, get) => ({
         const date = formatInCompanyTime(new Date(), currentCompanyTimezone, 'yyyy-MM-dd');
 
         try {
-            const r = await userApiCall('personal.attendanceMark', { companyId: activeCompanyId, userId, type, deviceLabel, branch, date });
+            const r = await userApiCall('personal.attendanceMark', {
+                companyId: activeCompanyId, userId, type, deviceLabel, branch, date,
+                deviceId: getDeviceId(),
+            });
             if (!r?.success) return r || { success: false, error: 'Error' };
 
             // Actualizar vista local si es hoy
             get().fetchAttendanceToday();
 
-            return { success: true, type: r.type, recordedAt: r.recordedAt };
+            // `receipt` trae folio y hash: es el comprobante que se le entrega al trabajador.
+            return { success: true, type: r.type, recordedAt: r.recordedAt, receipt: r.receipt || null };
         } catch (e) {
             console.error("Error marking attendance:", e);
             return { success: false, error: e.message };
+        }
+    },
+
+    // Comprobante de una marca ya guardada (el trabajador perdió el papel y lo pide de nuevo).
+    fetchAttendanceReceipt: async ({ folio, recordId }) => {
+        const { activeCompanyId } = get();
+        try {
+            const r = await userApiCall('personal.attendanceReceipt', { companyId: activeCompanyId, folio, recordId });
+            return r?.success ? r.record : null;
+        } catch (e) {
+            console.error("Error fetching attendance receipt:", e);
+            return null;
+        }
+    },
+
+    // Verificación de la cadena de integridad: lo que se le muestra a un
+    // fiscalizador para probar que las marcas no se tocaron después de guardarse.
+    verifyAttendanceChain: async ({ fromSeq = 1, limit = 5000 } = {}) => {
+        const { activeCompanyId } = get();
+        try {
+            const r = await userApiCall('personal.attendanceVerify', { companyId: activeCompanyId, fromSeq, limit });
+            return r?.success ? r : { success: false, error: r?.error || 'Error', problems: [] };
+        } catch (e) {
+            console.error("Error verifying attendance chain:", e);
+            return { success: false, error: e.message, problems: [] };
         }
     },
 

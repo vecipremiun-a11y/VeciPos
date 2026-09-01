@@ -1,17 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
-import { Clock, UserCheck, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Clock, UserCheck, AlertTriangle, CheckCircle, Receipt } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import AttendanceReceipt from './AttendanceReceipt';
 
 const KioskView = () => {
-    const { getLaborProfileByPin, markAttendance, activeCompanyId } = useStore();
+    const { getLaborProfileByPin, markAttendance, activeCompanyId, availableCompanies } = useStore();
     const [pin, setPin] = useState('');
     const [status, setStatus] = useState('idle'); // idle, processing, success, error
     const [message, setMessage] = useState('');
     const [userData, setUserData] = useState(null);
     const [currentTime, setCurrentTime] = useState(new Date());
+    // Comprobante de la última marca: folio + hash con que el trabajador se queda.
+    const [receipt, setReceipt] = useState(null);
+    const [showReceipt, setShowReceipt] = useState(false);
+
+    const companyName = (availableCompanies || []).find(c => c.id === activeCompanyId)?.name || '';
 
     // Clock
     useEffect(() => {
@@ -25,6 +31,8 @@ const KioskView = () => {
         }
     };
 
+    // El comprobante se conserva al limpiar la pantalla: el trabajador puede
+    // haberse ido y volver a pedirlo antes de que marque el siguiente.
     const handleClear = () => {
         setPin('');
         setStatus('idle');
@@ -51,27 +59,22 @@ const KioskView = () => {
                 return;
             }
 
-            // 2. Mark Attendance
-            // Detect type automatically based on previous state or time? 
-            // The store's markAttendance handles type='auto' logic if implemented, 
-            // but checked logic: markAttendance(userId, type, deviceLabel, branch)
-            // It uses "auto" by default inside useStore if we pass 'auto' as type?
-            // Let's check useStore implementation or just pass 'auto' if logic exists, 
-            // or we might need to ask the user "Entry" or "Exit".
-            // The brief said: "Resultado: ENTRADA REGISTRADA o SALIDA REGISTRADA".
-            // So imply automatic detection. Passing 'auto' as type.
-
+            // 2. Marcar. El servidor decide si toca entrada o salida ('auto')
+            // mirando la última marca vigente del día.
             const result = await markAttendance(user.id, 'auto', 'Kiosco', user.labor_branch || 'Principal');
 
             if (result.success) {
                 setStatus('success');
                 setUserData(user);
-                setMessage(result.message || (result.type === 'check_in' ? 'ENTRADA REGISTRADA' : 'SALIDA REGISTRADA'));
+                setReceipt(result.receipt || null);
+                // El servidor devuelve 'entry'/'exit'. Antes se comparaba contra
+                // 'check_in', que nunca era cierto: toda marca decía SALIDA.
+                setMessage(result.type === 'entry' ? 'ENTRADA REGISTRADA' : 'SALIDA REGISTRADA');
 
                 setTimeout(() => {
                     handleClear();
                     setUserData(null);
-                }, 4000);
+                }, 8000);
             } else {
                 setStatus('error');
                 setMessage(result.error);
@@ -110,8 +113,24 @@ const KioskView = () => {
                         <div>
                             <p className="text-green-400 font-bold text-xl">{message}</p>
                             <p className="text-[var(--color-text)] text-lg">{userData?.name}</p>
-                            <p className="text-sm text-[var(--color-text-muted)]">{format(new Date(), 'HH:mm')}</p>
+                            <p className="text-sm text-[var(--color-text-muted)]">
+                                {receipt?.recordedAt ? format(new Date(receipt.recordedAt), 'HH:mm:ss') : format(new Date(), 'HH:mm')}
+                            </p>
+                            {receipt?.folio != null && (
+                                <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                                    Folio N° {String(receipt.folio).padStart(6, '0')}
+                                </p>
+                            )}
                         </div>
+                        {receipt && (
+                            <button
+                                onClick={() => setShowReceipt(true)}
+                                className="btn-secondary flex items-center gap-2 text-sm"
+                            >
+                                <Receipt size={16} />
+                                Ver / imprimir comprobante
+                            </button>
+                        )}
                     </div>
                 ) : status === 'error' ? (
                     <div className="flex flex-col items-center gap-2 animate-in shake">
@@ -183,6 +202,14 @@ const KioskView = () => {
             >
                 {status === 'processing' ? 'Procesando...' : 'MARCAR ASISTENCIA'}
             </button>
+
+            {showReceipt && receipt && (
+                <AttendanceReceipt
+                    receipt={receipt}
+                    companyName={companyName}
+                    onClose={() => setShowReceipt(false)}
+                />
+            )}
         </div>
     );
 };
