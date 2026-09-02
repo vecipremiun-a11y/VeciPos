@@ -19,6 +19,32 @@ import { PRODUCTION_SOUNDS, getProductionSound, setProductionSound, playProducti
 import { cn } from '../lib/utils';
 import ThermalPrinterSettings from '../components/settings/ThermalPrinterSettings';
 
+// Qué versión y en qué forma está corriendo esto.
+//
+// La versión sale de package.json inyectada por Vite (ver vite.config.js), así
+// que sube sola con cada release. Antes acá había un "1.2.1" escrito a mano que
+// nunca cambiaba: la pantalla mentía y no había forma de saber qué tenía puesto
+// un cliente. Ver CLAUDE.md.
+//
+// El destino se decide en este orden: el APK se marca en compilación; la PWA se
+// reconoce porque el navegador la abre en modo standalone; lo demás es la web.
+function versionMostrada() {
+    const v = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '?';
+    let destino = 'Web';
+    if (typeof __APP_ES_NATIVA__ !== 'undefined' && __APP_ES_NATIVA__) {
+        destino = 'App';
+    } else {
+        try {
+            if (window.matchMedia('(display-mode: standalone)').matches) destino = 'PWA';
+        } catch {
+            // matchMedia puede no existir; en ese caso queda como Web.
+        }
+    }
+    return `${v} · ${destino}`;
+}
+
+const VERSION_MOSTRADA = versionMostrada();
+
 const Settings = () => {
     const { darkMode, toggleDarkMode, inventoryAdjustmentMode, toggleInventoryAdjustmentMode, activeCompanyId, currentCompanyTimezone, fetchInitialData, updateCurrency, checkSubscriptionStatus, currentUser, currentUserCompanyRole, hasModule } = useStore();
     const canPreorders = hasModule('preorders');
@@ -245,7 +271,7 @@ const Settings = () => {
                                 <div className="space-y-4">
                                     <div className="flex justify-between border-b border-[var(--glass-border)] pb-2">
                                         <span className="text-[var(--color-text-muted)]">Versión</span>
-                                        <span className="text-[var(--color-text)] font-mono">1.2.1 (Futuristic Build)</span>
+                                        <span className="text-[var(--color-text)] font-mono">{VERSION_MOSTRADA}</span>
                                     </div>
                                     <div className="flex justify-between border-b border-[var(--glass-border)] pb-2">
                                         <span className="text-[var(--color-text-muted)]">Desarrollador</span>

@@ -2,9 +2,24 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { readFileSync } from 'node:fs'
+
+// La versión sale de package.json y se inyecta en el bundle. Es la ÚNICA fuente:
+// la pantalla de Ajustes la muestra desde acá en vez de tenerla escrita a mano.
+// Durante meses esa pantalla decía "1.2.1" pasara lo que pasara, así que no
+// había forma de saber qué versión estaba corriendo un cliente.
+// Ver CLAUDE.md, sección "Versiones: una sola, continua, para los tres destinos".
+const APP_VERSION = JSON.parse(readFileSync('./package.json', 'utf8')).version
+
+// El build nativo se distingue por VITE_API_BASE_URL (lo inyecta scripts/build-app.mjs).
+const ES_APP_NATIVA = !!process.env.VITE_API_BASE_URL
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+    __APP_ES_NATIVA__: JSON.stringify(ES_APP_NATIVA),
+  },
   plugins: [
     react(),
     tailwindcss(),
