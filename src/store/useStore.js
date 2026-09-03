@@ -3467,10 +3467,24 @@ export const useStore = create(persist((set, get) => ({
             // transacción con guardas de concurrencia corren en el servidor
             // (api/_lib/salesActions.js — lógica portada tal cual). El servidor
             // devuelve los pre-cálculos para el estado local y el sync tienda.
+            // Cada ítem del carrito arrastra `image` (la foto del producto en
+            // base64, puesta en addToCart para que el POS la muestre en pantalla).
+            // El servidor NUNCA la lee — arma la venta con PRODUCT_COLS_SIN_IMAGEN
+            // (ver salesActions.js) — así que viajaba de ida y vuelta para nada.
+            //
+            // Medido en producción el 3-sep-2026: 46% de los productos tienen
+            // foto (86 KB en promedio, hasta 266 KB), y son justo los más
+            // vendidos (pan, tomate, palta, limón...). Una venta de 2 ítems subía
+            // ~140 KB; una de carro grande (29 ítems), más de 2 MB — por la subida
+            // del local, que es el tramo más lento. Sacarla de acá no cambia nada
+            // de lo que el servidor procesa: solo dejan de subirse bytes que
+            // nadie iba a leer del otro lado.
+            const itemsSinFoto = sale.items.map(({ image: _image, ...item }) => item);
+
             const r = await userApiCall('saleCommit', {
                 companyId: activeCompanyId,
                 sale: {
-                    items: sale.items,
+                    items: itemsSinFoto,
                     total: saleTotal,
                     summary: sale.summary,
                     paymentMethod: sale.paymentMethod,
