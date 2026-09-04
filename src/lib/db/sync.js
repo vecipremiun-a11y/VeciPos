@@ -288,6 +288,72 @@ export async function syncCatalogIncremental(companyId) {
   }
 }
 
+/** Tipos de DTE que sí llevan documento electrónico ante el SII. */
+const DTE_CON_DOCUMENTO = new Set([33, 34, 39]);
+
+/**
+ * Deja emitido el documento de una venta que acaba de subir.
+ *
+ * Devuelve `{ pendiente: false }` cuando la venta ya quedó con su documento
+ * —o cuando no lleva ninguno, como la Nota de Venta, que es interna y no va al
+ * SII—, y `{ pendiente: true, motivo }` cuando falta y hay que reintentar.
+ *
+ * La emisión es idempotente del lado del servidor: /api/sii/emit busca primero
+ * un DTE ya emitido para esa venta y ese tipo, y lo devuelve en vez de sacar
+ * otro folio. Por eso se puede reintentar sin miedo a duplicar documentos.
+ */
+async function emitirDocumento(companyId, op, saleId) {
+  const p = op.payload || {};
+  const tipoDte = Number(p._offlineFolioTipoDte ?? p.tipoDte ?? 0);
+
+  // Nota de Venta (0) o venta sin tipo: no hay nada que emitir.
+  if (!DTE_CON_DOCUMENTO.has(tipoDte)) return { pendiente: false };
+  if (!saleId) return { pendiente: true, motivo: 'La venta subió sin número; no se puede emitir el documento.' };
+
+  const cuerpo = { sale_id: saleId, tipo_dte: tipoDte };
+  // Folio pre-reservado, si esta venta alcanzó a tomar uno antes de quedarse
+  // sin conexión. Si no hay, el servidor toma el siguiente del CAF activo —que
+  // es lo que antes no pasaba y dejaba la venta sin boleta.
+  if (p._offlineFolio) cuerpo.folio = p._offlineFolio;
+
+  // Factura: los datos del receptor viajan en el payload, igual que en la venta
+  // online. Sin esto, una factura hecha offline no se podía emitir nunca.
+  if (tipoDte === 33 || tipoDte === 34) {
+    const inv = p.invoiceData || {};
+    cuerpo.rut_receptor = inv.rut_receptor ?? p.client?.rut ?? null;
+    cuerpo.razon_social_receptor = inv.razon_social_receptor ?? p.client?.name ?? 'Sin Razón Social';
+    cuerpo.giro_receptor = inv.giro_receptor ?? null;
+    cuerpo.dir_receptor = inv.dir_receptor ?? null;
+    cuerpo.comuna_receptor = inv.comuna_receptor ?? null;
+    cuerpo.ciudad_receptor = inv.ciudad_receptor ?? null;
+    if (inv.formaPago) {
+      cuerpo.forma_pago = inv.formaPago;
+      if (inv.diasCredito) cuerpo.dias_credito = inv.diasCredito;
+    }
+    if (!cuerpo.rut_receptor) {
+      return { pendiente: true, motivo: 'Factura sin RUT del receptor: falta completar los datos del cliente.' };
+    }
+  }
+
+  try {
+    const res = await fetch('/api/sii/emit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-company-id': companyId },
+      body: JSON.stringify(cuerpo),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.error) {
+      return { pendiente: true, motivo: `No se pudo emitir el documento: ${data?.error || `error ${res.status}`}` };
+    }
+    console.log(`[sii] Documento emitido (tipo ${tipoDte}, folio ${data.folio}) para la venta #${saleId}`);
+    // El folio reservado ya cumplió: se saca del almacén local.
+    if (p._offlineFolioId) await siiFoliosApi.removeUsed(p._offlineFolioId).catch(() => {});
+    return { pendiente: false };
+  } catch (e) {
+    return { pendiente: true, motivo: `No se pudo emitir el documento: ${e?.message || e}` };
+  }
+}
+
 /**
  * Procesa la cola de operaciones offline pendientes.
  * Por ahora solo soporta 'sale' (delegando al store.addSale).
@@ -320,7 +386,10 @@ export async function syncPendingOpsToServer(companyId, storeApi) {
   const candidates = pending.filter((o) => {
     if (isForeign(o)) return false;
     if (o.status === 'queued') return true;
-    if (o.status === 'error' && (o.attempts || 0) < 10) {
+    // Un rechazo del servidor (stock, crédito) no gasta intentos: se vuelve a
+    // probar cada vez que vence su espera, por si llegó mercadería o se prendió
+    // el modo ajuste. Un fallo de envío sí los gasta y se rinde a los 10.
+    if (o.status === 'error' && (o.bloqueo || (o.attempts || 0) < 10)) {
       if (!o.nextAttemptAt) return true;
       return new Date(o.nextAttemptAt).getTime() <= now;
     }
@@ -336,7 +405,7 @@ export async function syncPendingOpsToServer(companyId, storeApi) {
   let errors = 0;
 
   for (const op of candidates) {
-    if (op.attempts >= 10) {
+    if (op.attempts >= 10 && !op.bloqueo) {
       await pendingOpsApi.markError(op.tempId, 'Máximo de reintentos alcanzado (10)');
       errors++;
       continue;
@@ -347,44 +416,47 @@ export async function syncPendingOpsToServer(companyId, storeApi) {
       if (op.type === 'sale' && storeApi?.addSale) {
         // Marcar payload como reintento offline para que addSale no entre de nuevo
         // a la rama _addSaleOffline aunque navigator esté momentáneamente offline.
-        const result = await storeApi.addSale({ ...op.payload, _fromOfflineQueue: true });
+        //
+        // `ventaOffline` se fuerza acá y no solo en el payload: estar en esta cola
+        // YA es la prueba de que la venta se cobró y el cliente se llevó la
+        // mercadería. Vale también para las que quedaron encoladas antes de este
+        // cambio, que no traen la marca adentro y si no se trabarían por un stock
+        // que cambió mientras no había internet.
+        const result = await storeApi.addSale({ ...op.payload, _fromOfflineQueue: true, ventaOffline: true });
         if (result?.success && !result.queued) {
-          // Si la venta tenía folio offline reservado, emitir el DTE real ahora.
-          const offlineFolio = op.payload?._offlineFolio;
-          const offlineFolioId = op.payload?._offlineFolioId;
-          const tipoDte = op.payload?._offlineFolioTipoDte || op.payload?.tipoDte;
-          if (offlineFolio && tipoDte && result.saleId) {
-            try {
-              const emitRes = await fetch('/api/sii/emit', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-company-id': companyId },
-                body: JSON.stringify({
-                  sale_id: result.saleId,
-                  tipo_dte: tipoDte,
-                  folio: offlineFolio,
-                }),
-              });
-              const emitData = await emitRes.json().catch(() => ({}));
-              if (emitRes.ok) {
-                console.log(`[sii] DTE emitido para venta offline: folio ${emitData.folio} track ${emitData.track_id}`);
-                // Limpiar el folio usado de Dexie (ya no se necesita)
-                if (offlineFolioId) {
-                  await siiFoliosApi.removeUsed(offlineFolioId).catch(() => {});
-                }
-              } else {
-                console.warn(`[sii] Emisión DTE falló para venta ${result.saleId}:`, emitData);
-                // Dejar el folio marcado como 'used' en Dexie para no reusarlo.
-                // Se puede reintentar manualmente desde la UI de DTEs pendientes.
-              }
-            } catch (emitErr) {
-              console.warn('[sii] Error emitiendo DTE post-sync:', emitErr);
-            }
+          // ── La venta no está lista hasta que tenga su documento ────
+          //
+          // Antes esto solo emitía el DTE si la venta traía un folio offline
+          // reservado. Cuando los folios se agotaban —que es justo lo que pasa
+          // en una caída larga— la venta subía SIN boleta y nadie se enteraba:
+          // el DTE se emitía a ciegas desde addSale, sin mirar el resultado.
+          //
+          // Ahora la operación NO se saca de la cola hasta que su documento
+          // esté hecho. Si falla la emisión, la venta queda a la vista con el
+          // motivo, y el reintento solo repite el documento (guardar la venta
+          // de nuevo es inofensivo: el servidor la reconoce por su código).
+          const doc = await emitirDocumento(companyId, op, result.saleId);
+          if (doc.pendiente) {
+            await pendingOpsApi.markDocPendiente(op.tempId, result.saleId, doc.motivo);
+            errors++;
+          } else {
+            await pendingOpsApi.markSynced(op.tempId, result.saleId);
+            processed++;
           }
-          await pendingOpsApi.markSynced(op.tempId, result.saleId);
-          processed++;
         } else if (result?.queued) {
           // Sigue offline: retornar a queued sin contar como error
           await pendingOpsApi.retry(op.tempId);
+        } else if (result?._status === 200) {
+          // El servidor contestó bien y dijo que NO: stock insuficiente, cliente
+          // bloqueado, límite de crédito. Reintentar no lo arregla, así que no
+          // gasta intentos y queda a la vista con el motivo.
+          //
+          // Es el comportamiento pedido: con "Modo Ajuste de Inventario"
+          // apagado, una venta offline de un producto que quedó en cero NO
+          // entra por más que vuelva internet — el sistema respeta el stock.
+          // Con el modo prendido, entra sin problema.
+          await pendingOpsApi.markBlocked(op.tempId, result?.message || result?.error || 'El servidor rechazó la venta');
+          errors++;
         } else {
           throw new Error(result?.error || 'addSale falló sin mensaje');
         }

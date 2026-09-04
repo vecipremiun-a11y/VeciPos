@@ -116,6 +116,20 @@ export async function getLocalCatalogStats(companyId) {
 /**
  * Helpers de pendingOps (cola de operaciones offline).
  */
+// Cuánto se espera antes de volver a intentar una venta que falló.
+//
+// Antes era una escalera: 30 s, 1 min, 2 min, 4 min… hasta 1 hora. La escalera
+// tiene sentido contra un servidor que se cae un segundo, pero no contra lo que
+// pasa de verdad acá: cuando la base deja de aceptar escrituras, el problema
+// dura minutos u horas. Reintentar a los 30 segundos no arregla nada y encima
+// suma carga al servidor que ya está mal — el 3-sep-2026 fue justamente el
+// exceso de intentos lo que agravó el bloqueo.
+//
+// Diez minutos parejo: diez intentos cubren casi dos horas, sin machacar. Y si
+// la conexión vuelve antes, `despertarTodas` cancela la espera y sube todo en
+// el momento: la espera protege al servidor caído, no al que ya se recuperó.
+const ESPERA_REINTENTO_MS = 10 * 60_000;
+
 export const pendingOpsApi = {
   async list(companyId, status = null) {
     let q = localDb.pendingOps.where('companyId').equals(companyId);
@@ -151,11 +165,52 @@ export const pendingOpsApi = {
     await localDb.pendingOps.update(tempId, { status: 'syncing' });
   },
 
+  // Una vez arriba, la operación se BORRA de la cola.
+  //
+  // La cola es una bandeja de salida: lo que ya salió no tiene por qué seguir
+  // ahí. Antes quedaba como "sincronizada" para siempre y la lista crecía sin
+  // techo —419 filas en un equipo, la mayoría reenvíos de ventas que ya
+  // estaban—, tapando lo único que importa mirar: lo que TODAVÍA no subió.
+  //
+  // El registro de la venta no se pierde: vive en el servidor y se ve en
+  // Historial de Ventas, que es donde hay que buscarla.
   async markSynced(tempId, serverId = null) {
+    console.log(`[cola] Venta sincronizada (${tempId} → venta #${serverId ?? '?'}). Se saca de la cola.`);
+    await localDb.pendingOps.delete(tempId);
+  },
+
+  // La venta subió pero le falta el documento (boleta o factura).
+  //
+  // No se saca de la cola: una venta sin su documento no está terminada. Queda
+  // a la vista con el motivo y se reintenta —solo el documento, porque la venta
+  // ya está guardada y el servidor la reconoce por su código—. No gasta
+  // intentos: quedarse sin folios o sin CAF no se arregla reintentando rápido.
+  async markDocPendiente(tempId, serverId, motivo) {
     await localDb.pendingOps.update(tempId, {
-      status: 'synced',
-      syncedAt: new Date().toISOString(),
-      serverId,
+      status: 'error',
+      bloqueo: true,
+      docPendiente: true,
+      serverId: serverId ?? null,
+      lastError: String(motivo || 'Falta emitir el documento de esta venta'),
+      nextAttemptAt: new Date(Date.now() + 2 * 60_000).toISOString(),
+    });
+  },
+
+  // Rechazo de negocio: el servidor contestó bien y dijo que NO.
+  //
+  // Es distinto de un fallo de envío y hay que tratarlo distinto. "Stock
+  // insuficiente para: Ajo" no se arregla reintentando más rápido: se arregla
+  // cuando llega mercadería o cuando se prende "Modo Ajuste de Inventario". Por
+  // eso NO gasta intentos —si no, la venta llegaría a los 10 y quedaría
+  // congelada sin que nadie hiciera nada mal— y reintenta cada 10 minutos por
+  // si la situación cambió.
+  async markBlocked(tempId, motivo) {
+    await localDb.pendingOps.update(tempId, {
+      status: 'error',
+      bloqueo: true,
+      docPendiente: false,
+      lastError: String(motivo?.message || motivo || 'El servidor rechazó la venta'),
+      nextAttemptAt: new Date(Date.now() + 10 * 60_000).toISOString(),
     });
   },
 
@@ -163,22 +218,52 @@ export const pendingOpsApi = {
     const op = await localDb.pendingOps.get(tempId);
     if (!op) return;
     const attempts = (op.attempts || 0) + 1;
-    // Backoff exponencial: 30s, 1min, 2min, 4min, ... cap 1h
-    const backoffMs = Math.min(30_000 * Math.pow(2, attempts - 1), 60 * 60_000);
     await localDb.pendingOps.update(tempId, {
       status: 'error',
+      docPendiente: false,
+      bloqueo: false, // fallo de envío, no rechazo del servidor
       lastError: String(error?.message || error || 'Error desconocido'),
       attempts,
-      nextAttemptAt: new Date(Date.now() + backoffMs).toISOString(),
+      nextAttemptAt: new Date(Date.now() + ESPERA_REINTENTO_MS).toISOString(),
     });
   },
 
+  // Vuelve a poner en carrera todo lo que estaba esperando su turno.
+  //
+  // Se llama cuando VUELVE la conexión. La espera de 10 minutos existe para no
+  // machacar un servidor que está mal; que vuelva el internet es información
+  // nueva y la espera deja de tener sentido: hay que intentar ya, no dentro de
+  // ocho minutos. No toca los intentos ni los motivos, solo la espera.
+  async despertarTodas(companyId) {
+    const todas = await localDb.pendingOps.where('companyId').equals(companyId).toArray();
+    const dormidas = todas.filter((o) => o.status === 'error' && o.nextAttemptAt);
+    await Promise.all(dormidas.map((o) => localDb.pendingOps.update(o.tempId, { nextAttemptAt: null })));
+    return dormidas.length;
+  },
+
   async retry(tempId) {
-    // Reintento manual: limpia error y backoff
+    // Reintento: limpia error, backoff Y el contador de intentos.
+    //
+    // El contador es lo que importa. syncPendingOpsToServer descarta las
+    // operaciones con 10 intentos o más, así que una venta que llegó al tope
+    // quedaba congelada para siempre: la sincronización automática la salteaba
+    // y el botón "Reintentar" tampoco servía —la devolvía a la cola con los 10
+    // intentos intactos y el siguiente barrido la mandaba de vuelta al rojo con
+    // "Máximo de reintentos alcanzado".
+    //
+    // Pasó de verdad el 3-sep-2026: 29 ventas de la caída de Turso quedaron
+    // trabadas sin manera de subirlas desde la interfaz.
+    //
+    // Volver a cero es seguro: cada venta lleva su clave anti-duplicado
+    // (clientSaleId) y el servidor la rechaza si ya está guardada, así que
+    // reintentar no puede cobrar dos veces.
     await localDb.pendingOps.update(tempId, {
       status: 'queued',
       lastError: null,
       nextAttemptAt: null,
+      attempts: 0,
+      bloqueo: false,
+      docPendiente: false,
     });
   },
 
