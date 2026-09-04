@@ -14,6 +14,31 @@
 import { mirrorSaleItems } from '../../src/lib/itemNormalization.js';
 import { PRODUCT_COLS_SIN_IMAGEN } from './reportActions.js';
 
+/** Margen que se le perdona al reloj del equipo por adelantado (5 min). */
+const DESFASE_FUTURO_MS = 5 * 60 * 1000;
+/** Una venta encolada más de 30 días es un reloj roto, no una venta vieja. */
+const ANTIGUEDAD_MAX_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Devuelve la fecha del cobro en ISO, o la del servidor si la que manda el
+ * navegador no es creíble. NUNCA lanza: ante cualquier duda, la del servidor.
+ *
+ * Se le cree al cliente a propósito —es el único que sabe a qué hora se cobró
+ * de verdad— pero acotado: un reloj mal puesto no puede mandar una venta al
+ * futuro ni al año pasado, porque eso ensucia cierres de caja y reportes ya
+ * cerrados.
+ */
+export function fechaDelCobro(valor, ahora = Date.now()) {
+    if (typeof valor !== 'string' || valor.length < 10 || valor.length > 40) {
+        return new Date(ahora).toISOString();
+    }
+    const t = Date.parse(valor);
+    if (!Number.isFinite(t)) return new Date(ahora).toISOString();
+    if (t > ahora + DESFASE_FUTURO_MS) return new Date(ahora).toISOString();
+    if (t < ahora - ANTIGUEDAD_MAX_MS) return new Date(ahora).toISOString();
+    return new Date(t).toISOString();
+}
+
 export async function saleCommit(turso, companyId, session, body) {
     const { sale } = body;
 
@@ -63,6 +88,24 @@ export async function saleCommit(turso, companyId, session, body) {
     const co = coRes.rows[0] || {};
     const inventoryAdjustmentMode = Number(co.inventory_adjustment_mode) === 1;
     const creditBlockMode = co.credit_block_mode || 'warn';
+
+    // ── Una venta que se cobró sin conexión NO se rechaza por stock ──
+    //
+    // Cuando la venta llega desde la cola offline, el stock que se mira acá es
+    // de AHORA y la venta fue hace horas: en el medio pudo entrar mercadería,
+    // pudo vender otra caja, pudo hacerse un ajuste. Rechazarla por ese número
+    // no deshace nada — el cliente ya se llevó el producto y ya pagó. Lo único
+    // que se pierde es el registro de la venta.
+    //
+    // Así que entra igual y el producto queda marcado `pending_adjustment`, que
+    // es exactamente para lo que existe esa marca: "acá el número no cuadra,
+    // hay que contarlo". El stock puede quedar negativo, y eso es más honesto
+    // que un cero con la venta perdida.
+    //
+    // Ojo: esto vale SOLO para ventas ya cobradas que vienen de la cola. Una
+    // venta online sigue respetando el stock como siempre.
+    const ventaYaCobradaOffline = sale.ventaOffline === true;
+    const permitirSinStock = inventoryAdjustmentMode || ventaYaCobradaOffline;
 
     // ── Validación de crédito (contra la BD, no el estado del navegador) ──
     let creditWarning = null;
@@ -222,7 +265,7 @@ export async function saleCommit(turso, companyId, session, body) {
             .reduce((sum, l) => sum + l.quantity, 0);
         const totalSellable = legacyStock + validLotStock;
 
-        if (!inventoryAdjustmentMode && quantity > totalSellable) {
+        if (!permitirSinStock && quantity > totalSellable) {
             return { success: false, error: `Stock insuficiente para: ${product.name}` };
         }
         if (quantity > totalSellable) productsToMarkPending.push(item.id);
@@ -253,79 +296,127 @@ export async function saleCommit(turso, companyId, session, body) {
     }
 
     // ── FASE 3: Transacción con guardas de concurrencia ──────────
-    const tx = await turso.transaction();
+    // La transacción se abre DENTRO del try: abrirla también puede fallar
+    // (`SQLITE_BUSY` con la base ocupada), y ese error tiene que pasar por la
+    // misma recuperación que el resto — si no, sale un 500 y la venta se queda
+    // dando vueltas en la cola del POS.
+    let tx = null;
     let saleId;
-    const now = new Date().toISOString();
+    // ── La hora de la venta es la del COBRO, no la de la subida ──────
+    //
+    // Antes se guardaba `new Date()` del servidor, o sea el momento en que la
+    // venta llegaba. Para una venta online da lo mismo —son milisegundos—, pero
+    // para una que estuvo horas en la cola offline es otra cosa: el 3-sep-2026
+    // se cayó la base, la cola se vació de golpe a las 16:28 y 41 ventas de toda
+    // la mañana quedaron todas estampadas dentro del mismo minuto. El historial
+    // dejó de servir para revisar el día: no había orden, no se sabía qué se
+    // vendió a qué hora, y el gráfico por horas mostraba un pico falso.
+    //
+    // Ahora el navegador manda la hora del cobro y esa es la que se guarda.
+    // Se valida antes de creerle, porque el reloj del equipo puede estar mal:
+    // se acepta solo una fecha entendible, no futura (más allá de 5 minutos de
+    // desfase) y de menos de 30 días. Fuera de ese rango se usa la del servidor.
+    const now = fechaDelCobro(sale.offlineCreatedAt);
 
     try {
+        tx = await turso.transaction();
         const itemsJson = JSON.stringify(itemsToProcess);
         const detailsJson = JSON.stringify(sale.paymentDetails);
 
         let paymentDueDate = null;
         if (sale.paymentMethod === 'Crédito' && clientRow) {
             const periodDays = clientRow.credit_period_days || 30;
-            const dueDate = new Date();
+            // El plazo del crédito corre desde que se fió, no desde que la venta
+            // logró subir: si estuvo tres días en la cola, el cliente no gana
+            // tres días de plazo.
+            const dueDate = new Date(now);
             dueDate.setDate(dueDate.getDate() + periodDays);
             paymentDueDate = dueDate.toISOString();
         }
 
-        const saleResult = await tx.execute({
-            sql: `INSERT INTO sales
-                  (company_id, user_id, date, items, total, summary, payment_method, payment_details, status, client_id, client_name, payment_due_date, register_id, client_sale_id)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?)`,
-            args: [
-                companyId, session?.uid ?? null, now, itemsJson, saleTotal,
-                sale.summary ?? null, sale.paymentMethod ?? null, detailsJson,
-                sale.client?.id || null, sale.client?.name || null, paymentDueDate,
-                registerId, clientSaleId,
-            ],
-        });
-        const rawSaleId = saleResult.lastInsertRowid || Date.now();
-        saleId = typeof rawSaleId === 'bigint' ? Number(rawSaleId) : rawSaleId;
+        // TODAS las sentencias en UN solo viaje (tx.batch), no una por una.
+        //
+        // Por qué importa: `turso.transaction()` abre con BEGIN IMMEDIATE, que
+        // toma el candado de escritura de TODA la base en el primer instante y no
+        // lo suelta hasta el commit. Mandando las sentencias de a una, ese candado
+        // quedaba tomado durante ~10 idas y vueltas de red: con una sola caja y
+        // red rápida son milisegundos, pero con varias cajas vendiendo a la vez
+        // cada venta esperaba a que terminaran todas las anteriores.
+        //
+        // El 3-sep-2026 eso dejó la base sin aceptar escrituras: las lecturas
+        // andaban en 140 ms y cualquier escritura se colgaba más de 2 minutos.
+        // Lo detectó el soporte de Turso al ver la cantidad de BEGIN IMMEDIATE.
+        //
+        // Con el batch, el candado se toma y se suelta en un viaje. Las guardas
+        // de concurrencia se mantienen igual: siguen siendo UPDATE con
+        // `WHERE stock >= ?` y se sigue mirando `rowsAffected` de cada uno.
+        const stmts = [
+            {
+                sql: `INSERT INTO sales
+                      (company_id, user_id, date, items, total, summary, payment_method, payment_details, status, client_id, client_name, payment_due_date, register_id, client_sale_id)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?)`,
+                args: [
+                    companyId, session?.uid ?? null, now, itemsJson, saleTotal,
+                    sale.summary ?? null, sale.paymentMethod ?? null, detailsJson,
+                    sale.client?.id || null, sale.client?.name || null, paymentDueDate,
+                    registerId, clientSaleId,
+                ],
+            },
+        ];
 
-        const productUpdatePromises = productsToUpdate.map(p => {
-            if (inventoryAdjustmentMode) {
-                return tx.execute({
+        // Se anota a qué corresponde cada posición del batch para poder mapear
+        // después el `rowsAffected` de vuelta al producto o lote que falló.
+        const guardas = [];
+
+        for (const p of productsToUpdate) {
+            guardas.push({ indice: stmts.length, kind: 'product', p });
+            stmts.push(permitirSinStock
+                ? {
                     sql: `UPDATE products
                           SET stock = ROUND(stock - ?, 3),
                               pending_adjustment = CASE WHEN ? THEN 1 ELSE pending_adjustment END
                           WHERE id = ? AND company_id = ?`,
                     args: [p.quantityToDeduct, p.markPending ? 1 : 0, p.id, companyId],
-                }).then(r => ({ kind: 'product', p, res: r }));
-            }
-            return tx.execute({
-                sql: `UPDATE products
-                      SET stock = ROUND(stock - ?, 3),
-                          pending_adjustment = CASE WHEN ? THEN 1 ELSE pending_adjustment END
-                      WHERE id = ? AND company_id = ? AND stock >= ?`,
-                args: [p.quantityToDeduct, p.markPending ? 1 : 0, p.id, companyId, p.quantityToDeduct],
-            }).then(r => ({ kind: 'product', p, res: r }));
-        });
+                }
+                : {
+                    sql: `UPDATE products
+                          SET stock = ROUND(stock - ?, 3),
+                              pending_adjustment = CASE WHEN ? THEN 1 ELSE pending_adjustment END
+                          WHERE id = ? AND company_id = ? AND stock >= ?`,
+                    args: [p.quantityToDeduct, p.markPending ? 1 : 0, p.id, companyId, p.quantityToDeduct],
+                });
+        }
 
-        const lotUpdatePromises = lotsToUpdate.map(l => {
-            if (inventoryAdjustmentMode) {
-                return tx.execute({
+        for (const l of lotsToUpdate) {
+            guardas.push({ indice: stmts.length, kind: 'lot', l });
+            stmts.push(permitirSinStock
+                ? {
                     sql: 'UPDATE product_lots SET quantity = ROUND(quantity - ?, 3) WHERE id = ?',
                     args: [l.deduct, l.id],
-                }).then(r => ({ kind: 'lot', l, res: r }));
-            }
-            return tx.execute({
-                sql: 'UPDATE product_lots SET quantity = ROUND(quantity - ?, 3) WHERE id = ? AND quantity >= ?',
-                args: [l.deduct, l.id, l.deduct],
-            }).then(r => ({ kind: 'lot', l, res: r }));
-        });
+                }
+                : {
+                    sql: 'UPDATE product_lots SET quantity = ROUND(quantity - ?, 3) WHERE id = ? AND quantity >= ?',
+                    args: [l.deduct, l.id, l.deduct],
+                });
+        }
 
-        const auditPromise = tx.execute({
+        stmts.push({
             sql: `INSERT INTO audit_logs
                   (company_id, user_id, action, entity, details, created_at)
                   VALUES (?, ?, 'CREATE', 'SALE', ?, ?)`,
             args: [companyId, session?.uid ?? null, JSON.stringify({ total: saleTotal, itemsCount: itemsToProcess.length }), now],
         });
 
-        const updateResults = await Promise.all([...productUpdatePromises, ...lotUpdatePromises]);
-        await auditPromise;
+        const batchRes = await tx.batch(stmts);
 
-        if (!inventoryAdjustmentMode) {
+        const rawSaleId = batchRes[0]?.lastInsertRowid || Date.now();
+        saleId = typeof rawSaleId === 'bigint' ? Number(rawSaleId) : rawSaleId;
+
+        const updateResults = guardas.map(g => ({ ...g, res: batchRes[g.indice] }));
+
+        // La guarda de "otra caja vendió primero" tampoco aplica a una venta ya
+        // cobrada offline: no hay carrera que perder, la venta pasó hace horas.
+        if (!permitirSinStock) {
             const failed = updateResults.filter(r => Number(r.res?.rowsAffected ?? 0) === 0);
             if (failed.length > 0) {
                 const failedProducts = failed
@@ -344,7 +435,55 @@ export async function saleCommit(turso, companyId, session, body) {
 
         await tx.commit();
     } catch (error) {
-        try { await tx.rollback(); } catch { /* tx ya pudo cerrarse */ }
+        try { if (tx) await tx.rollback(); } catch { /* tx ya pudo cerrarse */ }
+
+        // La venta ya estaba guardada: es un reintento que llegó antes de que la
+        // original terminara de escribirse.
+        //
+        // El control anti-duplicado de arriba mira si la venta ya existe, pero
+        // entre ese SELECT y este INSERT hay una ventana: si el reintento entra
+        // ahí, los dos pasan el control y el segundo choca contra el índice único.
+        //
+        // Devolver un 500 acá era el peor final posible: el POS lo toma como
+        // "no se guardó" y la deja en la cola, que vuelve a reintentar, que
+        // vuelve a chocar. Así se quedan ventas dando vueltas para siempre
+        // ESTANDO YA COBRADAS — visto en producción el 3-sep-2026, con 120
+        // ventas encoladas y 3-5 intentos cada una.
+        //
+        // El choque contra el índice único ES la confirmación de que la venta
+        // existe. Se busca y se devuelve como éxito, igual que el control de
+        // arriba, para que el POS la saque de la cola.
+        // No se mira QUÉ error fue, sino si la venta quedó guardada.
+        //
+        // La carrera se manifiesta de varias formas según cómo caiga: choque
+        // contra el índice único, `SQLITE_BUSY: database is locked`, o un corte
+        // de red justo después del commit. En los tres casos la pregunta útil es
+        // la misma —¿la venta está en la base?— y la respuesta se busca igual.
+        if (clientSaleId) {
+            try {
+                const previa = await turso.execute({
+                    sql: 'SELECT id, total, status FROM sales WHERE company_id = ? AND client_sale_id = ? LIMIT 1',
+                    args: [companyId, clientSaleId],
+                });
+                const fila = previa.rows[0];
+                if (fila) {
+                    console.warn(`↩️ saleCommit: reintento de una venta ya registrada (id ${fila.id}); se devuelve la existente.`);
+                    return {
+                        success: true,
+                        duplicated: true,
+                        saleId: Number(fila.id),
+                        date: now,
+                        itemsToProcess,
+                        productsToUpdate: [],
+                        lotsToUpdate: [],
+                        productsInfo: [],
+                    };
+                }
+            } catch (e2) {
+                console.error('saleCommit: no se pudo recuperar la venta duplicada:', e2?.message || e2);
+            }
+        }
+
         console.error('❌ saleCommit failed, rolled back:', error);
         // 500 → el cliente encola la venta en su cola failsafe (mismo comportamiento de antes)
         throw error;
