@@ -9,10 +9,12 @@ import { es } from 'date-fns/locale';
 import { cn } from '../lib/utils';
 import CashClosingModal from './CashClosingModal';
 import CashCloseSuccessModal from './CashCloseSuccessModal';
+import CierreAutorizadoModal from './CierreAutorizadoModal';
 import { formatCurrency } from '../utils/formatCurrency';
 
 import { usePermissions } from '../hooks/usePermissions';
 import { createSmartInterval } from '../lib/smartPolling';
+import { pendingOpsApi } from '../lib/db/localdb';
 
 // A partir de aquí se considera que la caja quedó abierta de un turno anterior.
 // 18 h cubre un turno largo sin molestar, y detecta la caja olvidada de días.
@@ -67,7 +69,7 @@ function TxRow({ tx, currency }) {
 
 const CashStatusWidget = () => {
     // FASE 10 · useShallow para aislar re-renders.
-    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency, getRegisterMethodTransactions } = useStore(
+    const { cashRegister, registerStats, refreshRegisterStats, addCashMovement, closeRegister, currentUser, currentCurrency, getRegisterMethodTransactions, activeCompanyId } = useStore(
         useShallow(s => ({
             cashRegister: s.cashRegister,
             registerStats: s.registerStats,
@@ -77,6 +79,7 @@ const CashStatusWidget = () => {
             currentUser: s.currentUser,
             currentCurrency: s.currentCurrency,
             getRegisterMethodTransactions: s.getRegisterMethodTransactions,
+            activeCompanyId: s.activeCompanyId,
         }))
     );
     const { can } = usePermissions();
@@ -86,6 +89,8 @@ const CashStatusWidget = () => {
     const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
     const [showStaleNotice, setShowStaleNotice] = useState(false);
     const [successModalData, setSuccessModalData] = useState(null);
+    // Datos del cierre que quedó esperando la clave del supervisor.
+    const [autorizacion, setAutorizacion] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
     // Pestaña activa del desglose de movimientos. Tarjeta/Transferencia se
     // cargan LAZY al abrir su pestaña → cero impacto en el load inicial.
@@ -135,6 +140,43 @@ const CashStatusWidget = () => {
             return stop;
         }
     }, [cashRegister, refreshRegisterStats]);
+
+    // ── Ventas offline propias sin subir ────────────────────────────
+    //
+    // Una caja no se puede cerrar con ventas del cajero todavía en el equipo:
+    // esas ventas son suyas y tienen que entrar en su cierre. Si cierra antes,
+    // el cuadre le da mal —le sobra plata en el cajón contra lo que el sistema
+    // registró— y cuando esas ventas suban van a caer fuera de una caja ya
+    // cerrada.
+    //
+    // Se cuentan solo las del usuario que tiene la sesión: cada cajero cierra
+    // la suya, y la cola de otro no le corresponde ni la puede resolver.
+    const [ventasSinSubir, setVentasSinSubir] = useState(0);
+    useEffect(() => {
+        if (!activeCompanyId || !cashRegister) { setVentasSinSubir(0); return; }
+        let vivo = true;
+        const contar = async () => {
+            try {
+                const todas = await pendingOpsApi.list(activeCompanyId);
+                const mias = todas.filter(o =>
+                    o.status !== 'synced' &&
+                    (o.userId == null || Number(o.userId) === Number(currentUser?.id))
+                );
+                if (vivo) setVentasSinSubir(mias.length);
+            } catch { /* Dexie no disponible: no bloquear el cierre por eso */ }
+        };
+        contar();
+        const stop = createSmartInterval(contar, {
+            label: 'caja-ventas-offline',
+            activeMs: 10_000,
+            idleMs: 30_000,
+            pauseWhenHidden: true,
+            pauseWhenOffline: false, // justamente hay que contarlas sin conexión
+            runOnVisible: true,
+            runOnActivity: true,
+        });
+        return () => { vivo = false; stop(); };
+    }, [activeCompanyId, cashRegister, currentUser?.id]);
 
     // Caja olvidada abierta de días anteriores: avisar al entrar al POS. Una vez por
     // caja y por sesión del navegador, para avisar sin volverse molesto.
@@ -192,9 +234,44 @@ const CashStatusWidget = () => {
         setIsOpen(false);
     };
 
-    const handleConfirmClose = async (registerId, finalAmount, observations, difference) => {
-        const success = await closeRegister(registerId, finalAmount, observations, difference);
-        if (success) {
+    // Cuenta las ventas propias que siguen en el equipo. Se relee siempre desde
+    // Dexie —nunca del estado— porque puede entrar una venta mientras el modal
+    // de cierre está abierto.
+    const contarMisPendientes = async () => {
+        try {
+            const todas = await pendingOpsApi.list(activeCompanyId);
+            return todas.filter(o =>
+                o.status !== 'synced' &&
+                (o.userId == null || Number(o.userId) === Number(currentUser?.id))
+            ).length;
+        } catch {
+            return 0; // Dexie no disponible: no bloquear el cierre por eso
+        }
+    };
+
+    const handleConfirmClose = async (registerId, finalAmount, observations, difference, override = null) => {
+        // Candado real, no solo el botón deshabilitado.
+        const pendientes = await contarMisPendientes();
+        if (pendientes > 0) {
+            setVentasSinSubir(pendientes);
+            if (!override) {
+                // Sin autorización: se ofrece la llave del supervisor en vez de
+                // dejar al cajero sin salida.
+                setIsClosingModalOpen(false);
+                setAutorizacion({ registerId, finalAmount, observations, difference, pendientes });
+                return;
+            }
+            override.pendientes = pendientes;
+        }
+
+        const res = await closeRegister(registerId, finalAmount, observations, difference, override);
+        if (res !== true) {
+            // Se devuelve el error para que el diálogo de autorización lo muestre
+            // y no se cierre: la clave mal escrita no debe perder el cierre.
+            return res || { success: false, error: 'No se pudo cerrar la caja.' };
+        }
+        setAutorizacion(null);
+        {
             // Prepare data for Success Modal
             setSuccessModalData({
                 registerId,
@@ -212,6 +289,7 @@ const CashStatusWidget = () => {
             });
             setIsClosingModalOpen(false);
         }
+        return true;
     };
 
     const handleSuccessModalClose = () => {
@@ -477,13 +555,55 @@ const CashStatusWidget = () => {
                                 {/* Footer */}
                                 <div className="p-3 border-t border-[var(--glass-border)] bg-[var(--glass-bg)] shrink-0">
                                     {can('pos.close_register') && (
-                                        <button
-                                            onClick={handleInitialCloseClick}
-                                            className="w-full py-2.5 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 hover:border-red-500/50 font-bold text-sm transition-all flex items-center justify-center gap-2"
-                                        >
-                                            <LogOut size={16} />
-                                            Cerrar Caja
-                                        </button>
+                                        ventasSinSubir > 0 ? (
+                                            <>
+                                                {/* La caja no se cierra con ventas propias sin subir:
+                                                    son plata que ya está en el cajón pero que el
+                                                    sistema todavía no registró. Cerrar ahora daría
+                                                    un cuadre falso y esas ventas caerían fuera de
+                                                    una caja ya cerrada. */}
+                                                <div className="w-full rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+                                                    <div className="flex items-center gap-2 font-bold text-amber-400">
+                                                        <AlertTriangle size={14} />
+                                                        No podés cerrar la caja todavía
+                                                    </div>
+                                                    <p className="mt-1 text-[var(--color-text-muted)]">
+                                                        Te {ventasSinSubir === 1 ? 'queda' : 'quedan'}{' '}
+                                                        <span className="font-bold text-[var(--color-text)]">
+                                                            {ventasSinSubir} venta{ventasSinSubir === 1 ? '' : 's'}
+                                                        </span>{' '}
+                                                        sin subir al servidor. Esa plata ya está en el
+                                                        cajón, así que tiene que entrar en tu cierre.
+                                                    </p>
+                                                    <button
+                                                        onClick={() => { setIsOpen(false); navigate('/offline-sales'); }}
+                                                        className="mt-2 w-full py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition-colors"
+                                                    >
+                                                        Ver y subir mis ventas pendientes
+                                                    </button>
+                                                </div>
+                                                {/* Sigue habilitado, pero avisando: el cajero cuenta
+                                                    la plata igual y al confirmar se le pide la clave
+                                                    del supervisor. Deshabilitarlo del todo dejaba el
+                                                    turno sin salida cuando la venta no entraba por
+                                                    algo ajeno al cajero (sin stock, sin folios). */}
+                                                <button
+                                                    onClick={handleInitialCloseClick}
+                                                    className="mt-2 w-full py-2.5 rounded-lg border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/50 font-bold text-sm transition-all flex items-center justify-center gap-2"
+                                                >
+                                                    <LogOut size={16} />
+                                                    Cerrar con clave de supervisor
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button
+                                                onClick={handleInitialCloseClick}
+                                                className="w-full py-2.5 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 hover:border-red-500/50 font-bold text-sm transition-all flex items-center justify-center gap-2"
+                                            >
+                                                <LogOut size={16} />
+                                                Cerrar Caja
+                                            </button>
+                                        )
                                     )}
                                 </div>
                             </div>
@@ -548,6 +668,20 @@ const CashStatusWidget = () => {
                     onConfirm={handleConfirmClose}
                 />
             )}
+
+            {/* Llave de supervisor: aparece cuando el cierre se frenó porque
+                quedaban ventas del cajero sin subir. */}
+            <CierreAutorizadoModal
+                datos={autorizacion}
+                onCancel={() => setAutorizacion(null)}
+                onConfirm={({ username, password, reason }) => handleConfirmClose(
+                    autorizacion.registerId,
+                    autorizacion.finalAmount,
+                    autorizacion.observations,
+                    autorizacion.difference,
+                    { username, password, reason },
+                )}
+            />
 
             <CashCloseSuccessModal
                 isOpen={!!successModalData}

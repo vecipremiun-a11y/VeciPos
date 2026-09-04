@@ -3,6 +3,8 @@
 // de useStore (dup-check de caja abierta incluido). Las horas llegan del
 // cliente ya calculadas en la zona horaria de la empresa.
 
+import { verifyPassword } from './auth.js';
+
 async function registerCheck(turso, companyId, session, { userId }) {
     const r = await turso.execute({
         sql: "SELECT * FROM cash_registers WHERE user_id = ? AND company_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1",
@@ -38,14 +40,106 @@ async function registerOpen(turso, companyId, session, { userId, amount }) {
     return { success: true, register: result.rows[0] };
 }
 
-async function registerClose(turso, companyId, session, { registerId, finalAmount, observations, difference }) {
+/** Roles que pueden autorizar un cierre con ventas offline sin subir. */
+const ROLES_QUE_AUTORIZAN = new Set(['owner', 'super_admin', 'admin', 'Administrador', 'Supervisor', 'supervisor']);
+
+/**
+ * Verifica la clave del supervisor que autoriza un cierre forzado.
+ *
+ * Se hace ACÁ y no en el navegador por dos razones: el hash de la contraseña no
+ * sale del servidor (no está en el listado de usuarios desde el paso de
+ * seguridad), y una comprobación en el cliente la saltea cualquiera con la
+ * consola abierta. Acá no hay forma de esquivarla.
+ *
+ * Solo se aceptan usuarios de ESTA empresa: el supervisor de otro local no
+ * autoriza cierres ajenos.
+ */
+async function verificarSupervisor(turso, companyId, { username, password }) {
+    const u = String(username || '').trim();
+    const p = String(password || '');
+    if (!u || !p) return { ok: false, error: 'Falta el usuario o la contraseña del supervisor.' };
+
+    const r = await turso.execute({
+        sql: `SELECT u.id, u.name, u.username, u.password, u.role, uc.role AS company_role
+              FROM users u
+              LEFT JOIN user_companies uc ON uc.user_id = u.id AND uc.company_id = ?
+              WHERE u.username = ? AND (u.company_id = ? OR uc.company_id = ?)`,
+        args: [companyId, u, companyId, companyId],
+    });
+
+    // Igual que el login: el username es único por empresa, no global, así que
+    // se desambigua por contraseña.
+    let usuario = null;
+    for (const cand of r.rows) {
+        if (await verifyPassword(p, cand.password)) { usuario = cand; break; }
+    }
+    // Mensaje genérico a propósito: no se revela si el usuario existe.
+    if (!usuario) return { ok: false, error: 'Usuario o contraseña incorrectos.' };
+
+    const rol = usuario.company_role || usuario.role;
+    if (!ROLES_QUE_AUTORIZAN.has(rol)) {
+        return { ok: false, error: `${usuario.name || usuario.username} no tiene permiso para autorizar un cierre forzado.` };
+    }
+    return { ok: true, usuario: { id: usuario.id, name: usuario.name || usuario.username, rol } };
+}
+
+async function registerClose(turso, companyId, session, { registerId, finalAmount, observations, difference, override }) {
     if (!registerId) return { success: false, error: 'Falta registerId' };
+
+    // ── Cierre forzado con ventas offline sin subir ──────────────────
+    //
+    // Normalmente el POS no deja cerrar con ventas del cajero todavía en el
+    // equipo: esa plata está en el cajón pero el sistema no la registró, así que
+    // el cuadre saldría mal. Pero puede haber ventas que no entran por causas
+    // ajenas al cajero —sin stock con el modo ajuste apagado, sin folios CAF— y
+    // el turno igual tiene que terminar. Para eso está esta llave.
+    //
+    // Queda constancia de quién autorizó, cuántas ventas quedaban afuera y por
+    // qué, tanto en el cierre como en la auditoría. Una caja forzada tiene que
+    // poder explicarse después.
+    let notaAutorizacion = null;
+    if (override) {
+        const v = await verificarSupervisor(turso, companyId, override);
+        if (!v.ok) return { success: false, error: v.error, _authFailed: true };
+
+        const pendientes = Number(override.pendientes) || 0;
+        const motivo = String(override.reason || '').trim().slice(0, 300);
+        notaAutorizacion = `[CIERRE AUTORIZADO por ${v.usuario.name} (${v.usuario.rol}) con ${pendientes} venta(s) sin subir` +
+            `${motivo ? `. Motivo: ${motivo}` : ''}]`;
+
+        try {
+            await turso.execute({
+                sql: 'INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                args: [
+                    companyId, session?.uid ?? null, 'FORCED_CLOSE', 'CASH_REGISTER',
+                    JSON.stringify({
+                        registerId,
+                        cerradaPor: session?.uid ?? null,
+                        autorizadaPor: v.usuario.id,
+                        autorizadaPorNombre: v.usuario.name,
+                        rol: v.usuario.rol,
+                        ventasSinSubir: pendientes,
+                        motivo: motivo || null,
+                        finalAmount, difference,
+                    }),
+                    new Date().toISOString(),
+                ],
+            });
+        } catch (e) {
+            // La auditoría no puede impedir que el cajero termine su turno,
+            // pero sí tiene que dejar rastro de que falló.
+            console.error('[caja] No se pudo auditar el cierre forzado:', e?.message || e);
+        }
+    }
+
+    const obsFinal = [observations, notaAutorizacion].filter(Boolean).join(' ') || null;
+
     // Igual que la apertura: la hora la pone el servidor, no el reloj del dispositivo.
     await turso.execute({
         sql: "UPDATE cash_registers SET status = 'closed', closing_time = ?, final_amount = ?, observations = ?, difference = ? WHERE id = ? AND company_id = ?",
-        args: [new Date().toISOString(), finalAmount, observations ?? null, difference ?? null, registerId, companyId],
+        args: [new Date().toISOString(), finalAmount, obsFinal, difference ?? null, registerId, companyId],
     });
-    return { success: true };
+    return { success: true, forzado: !!override };
 }
 
 async function cashMovementAdd(turso, companyId, session, { registerId, type, amount, reason, date }) {
