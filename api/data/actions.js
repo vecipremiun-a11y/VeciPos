@@ -425,14 +425,24 @@ async function dashboard(turso, companyId, { todayStr, monthStartStr }) {
             args: [companyId],
         }),
         turso.execute({
-            // Sin la foto: 20 filas con `image` eran ~780 KB para un aviso que solo
-            // muestra nombre y cantidad.
-            sql: `SELECT ${PRODUCT_COLS_SIN_IMAGEN} FROM products WHERE company_id = ? AND stock <= 0 LIMIT 20`,
+            // El widget "Sin Stock" solo pinta name y sku (ver Dashboard.jsx) — antes
+            // se traía PRODUCT_COLS_SIN_IMAGEN entero (14 columnas) para usar 2.
+            //
+            // Angosto además de sin-foto: aunque no se pida `image`, ir a buscar
+            // CUALQUIER columna de un producto obliga a SQLite a traer su fila
+            // completa (no guarda por columnas), y esa fila tiene la foto adentro.
+            // Con la página en caché no se nota; en frío, cada producto puede costar
+            // cientos de ms — medido en producción el 3-sep-2026: 635 ms para 20
+            // filas en la empresa "veci-2". El índice de cobertura
+            // idx_products_stock_covering (migración 0026) hace que esta consulta
+            // conteste desde el índice y nunca toque la tabla.
+            sql: `SELECT id, name, sku FROM products WHERE company_id = ? AND stock <= 0 LIMIT 20`,
             args: [companyId],
         }),
         turso.execute({
             sql: `SELECT p.id, p.name, p.category, p.unit, pdp.total_quantity, pdp.total_revenue
-                  FROM product_daily_profit pdp JOIN products p ON pdp.product_id = p.id
+                  FROM product_daily_profit pdp
+                  JOIN products p ON pdp.product_id = p.id
                   WHERE pdp.company_id = ? AND pdp.day = ?
                   ORDER BY pdp.total_quantity DESC LIMIT 10`,
             args: [companyId, todayStr],
@@ -546,6 +556,15 @@ export async function syncCatalog(turso, companyId, { since, cursor, limit, pagi
 
     if (seguirProductos) {
         indices.products = queries.length;
+        // El índice de cobertura idx_products_company_sync_covering (migración 0026)
+        // hace que esto conteste enteramente desde el índice, sin tocar la fila del
+        // producto —que lleva la foto en base64 adentro—. Sin él, un recorrido
+        // secuencial como este igual paga el costo de esa foto por cada producto,
+        // aunque la columna no esté en el SELECT: SQLite no guarda por columnas.
+        // Medido en frío contra una empresa real el 3-sep-2026: 9,4 s para apenas
+        // 202 productos. Este catálogo se descarga COMPLETO en cada login (ver el
+        // porqué en App.jsx: detecta productos borrados en el servidor), así que
+        // el costo lo paga cada inicio de sesión, no solo quien mira reportes.
         queries.push(since
             ? { sql: `SELECT ${PRODUCT_COLS} FROM products WHERE company_id = ? AND updated_at > ? AND id > ? ORDER BY id LIMIT ?`, args: [companyId, since, desdeProducto, lim] }
             : { sql: `SELECT ${PRODUCT_COLS} FROM products WHERE company_id = ? AND id > ? ORDER BY id LIMIT ?`, args: [companyId, desdeProducto, lim] });
