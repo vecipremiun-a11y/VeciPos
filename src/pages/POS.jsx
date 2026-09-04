@@ -580,6 +580,21 @@ const POS = () => {
 
             setLastSaleDetails({ ...saleData, id: result.saleId || null, _queued: !!result.queued });
             setIsSuccessModalOpen(true);
+
+            // El carrito se vacía ACÁ, apenas la venta quedó registrada —online o
+            // encolada—, y ya no al cerrar el modal.
+            //
+            // Cerrar con la X o tocando afuera ya llamaba a `handleNewSale`, que
+            // limpia; pero eso deja el vaciado colgando de que el modal se cierre
+            // bien. Si la pantalla se recarga entremedio (el script de
+            // auto-recuperación de index.html lo hace ante cualquier archivo que
+            // falle), el carrito vuelve desde localStorage con los productos
+            // dentro y la cajera no sabe si cobró o no.
+            //
+            // Cobrada la venta, el carrito no tiene nada más que hacer. Si la
+            // venta NO se registró, este punto no se alcanza: más arriba se
+            // muestra el error y se conserva el carrito para reintentar.
+            clearCart();
             setPosSelectedClient(null);
             setPendingInvoiceData(null);
             if (preventaCode) {

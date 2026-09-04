@@ -580,7 +580,26 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                     </svg>
                 </div>
 
-                <h2 className="text-2xl font-bold text-white mb-2">¡Venta completada!</h2>
+                <h2 className="text-2xl font-bold text-white mb-2">
+                    {saleDetails._queued ? '¡Venta guardada!' : '¡Venta completada!'}
+                </h2>
+
+                {/* Sin esto la pantalla era IDÉNTICA saliera la venta al servidor o
+                    quedara guardada en el aparato esperando: la cajera no tenía
+                    forma de saber cuál de las dos había pasado. La venta no se
+                    pierde, pero hay que poder verlo. */}
+                {saleDetails._queued && (
+                    <div className="w-full mb-3 px-4 py-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-left">
+                        <p className="text-amber-300 font-bold text-sm mb-1">
+                            Guardada en este equipo (sin conexión)
+                        </p>
+                        <p className="text-amber-200/80 text-xs leading-relaxed">
+                            La venta está a salvo y se enviará sola cuando vuelva la conexión.
+                            Podés seguir vendiendo normal. No borres la app ni la lista de
+                            Ventas Offline.
+                        </p>
+                    </div>
+                )}
 
                 {/* DTE Badge */}
                 {saleDetails.tipoDte && (

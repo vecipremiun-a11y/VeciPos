@@ -10,7 +10,7 @@ import { markActivity } from '../lib/smartPolling';
 import { setTabUserId, getTabUserId, broadcastLogin, broadcastLogout } from '../lib/sessionGuard';
 import { alExpirarSesion, esSesionExpirada, sesionExpirada, reiniciarAvisoSesion } from '../lib/sesion';
 import { sinDobleEnvio } from '../lib/inFlight';
-import { hayConexion, reportarResultadoRed, fetchConLimite } from '../lib/conectividad';
+import { hayConexion, reportarResultadoRed, fetchConLimite, ponerOfflineManual } from '../lib/conectividad';
 import { getModuleByKey } from '../constants/modules';
 import { getPlanLevel } from '../config/mercadopago';
 import bcrypt from 'bcryptjs';
@@ -56,7 +56,31 @@ function userApiCall(action, payload = {}) {
 // respuesta más lenta que eso ya está muerta de todos modos.
 const API_TIMEOUT_MS = 12000;
 
+/** ¿El POS se da por sin conexión ahora mismo? Mira el monitor real (latido a
+ * /api/ping), no solo `navigator.onLine`, que con WiFi sin internet miente. */
+const sinInternet = () => (typeof navigator !== 'undefined' && !navigator.onLine) || !hayConexion();
+
+// Acciones que SÍ pueden salir a la red aunque el sistema se dé por offline.
+//
+// Son las que forman parte del camino de vuelta: si se cortaran, el POS no
+// tendría cómo darse cuenta de que la conexión volvió.
+const ACCIONES_QUE_SIEMPRE_INTENTAN = new Set(['saleCommit', 'saleAggregations']);
+
 async function _userApiCall(action, payload = {}) {
+    // ── Sin conexión, no se sale a la red: se contesta al instante ────
+    //
+    // Sin esto, cada pantalla que no sea el POS —reportes, compras, inventario—
+    // disparaba su llamada igual y esperaba los 12 segundos del corte antes de
+    // fallar. Con el modo offline prendido a propósito eso es absurdo: el cajero
+    // ya SABE que no hay servidor, y encima cada pantalla se sentía "colgada".
+    //
+    // Las partes que funcionan sin conexión —vender, buscar productos, buscar
+    // clientes, ver la cola— no pasan por acá: leen de Dexie. Las demás avisan
+    // en el acto que necesitan internet, que es la verdad, en vez de hacer
+    // esperar para decir lo mismo.
+    if (sinInternet() && !ACCIONES_QUE_SIEMPRE_INTENTAN.has(action)) {
+        return { success: false, error: 'Sin conexión', sinConexion: true, _status: 0 };
+    }
     try {
         const r = await fetchConLimite('/api/data/actions', {
             method: 'POST',
@@ -132,7 +156,7 @@ let fetchInProgress = false;
 // Las ventas ya preguntaban así —por eso seguían funcionando sin internet—;
 // el catálogo no, y por eso el buscador quedaba esperando 12 segundos y volvía
 // vacío con el catálogo entero guardado en IndexedDB.
-const sinInternet = () => (typeof navigator !== 'undefined' && !navigator.onLine) || !hayConexion();
+// (la definición vive arriba, junto a _userApiCall, que también la usa)
 
 // Turno de la última lectura de catálogo pedida.
 //
@@ -1874,6 +1898,19 @@ export const useStore = create(persist((set, get) => ({
         setTabUserId(null);
         broadcastLogout();
 
+        // El modo offline manual muere con la sesión.
+        //
+        // Lo prende una persona que está mirando su caja, para su turno. No es
+        // una configuración del equipo: si Chelo lo prende y después entra
+        // Isaura, Isaura hereda un modo que no eligió —y hasta lo veía en la
+        // pantalla de ingreso, antes de saber quién es—. Al entrar de nuevo se
+        // comprueba la conexión de cero y, si el problema sigue, se vuelve a
+        // prender con un toque.
+        //
+        // Sigue aguantando una RECARGA de pantalla, que es para lo que se
+        // guardaba en el equipo: recargar no es cerrar sesión.
+        try { ponerOfflineManual(false); } catch { /* no bloquear el cierre por esto */ }
+
         // Limpiar localStorage
         if (currentUser) {
             localStorage.removeItem(`activeCompanyId:${currentUser.id}`);
@@ -3498,6 +3535,21 @@ export const useStore = create(persist((set, get) => ({
                     // Diez horas de ventas duplicadas después del despliegue con
                     // client_sale_id en NULL en las 167 ventas.
                     clientSaleId: sale.clientSaleId,
+                    // La hora del cobro. Es la MISMA trampa de arriba: acá el
+                    // payload se arma campo por campo, así que lo que no se
+                    // nombre no llega. Sin esto el servidor estampa la hora en
+                    // que la venta subió, y una cola que se vacía de golpe deja
+                    // toda la mañana registrada en el mismo minuto.
+                    offlineCreatedAt: sale._offlineCreatedAt || null,
+                    // "Esta venta YA se cobró, no la rechaces por stock."
+                    //
+                    // Solo la traen las ventas que salen de una cola: cuando se
+                    // cobraron, el equipo no podía consultar el stock real, y a
+                    // esta altura el cliente ya se llevó el producto. Rechazarla
+                    // ahora no devuelve la mercadería, solo pierde el registro.
+                    // Una venta online normal llega sin esto y respeta el stock
+                    // como siempre.
+                    ventaOffline: sale.ventaOffline === true,
                 },
             });
 
@@ -3824,7 +3876,10 @@ export const useStore = create(persist((set, get) => ({
      */
     _addSaleOffline: async (sale) => {
         const startTime = performance.now();
-        const { activeCompanyId, currentUser, products, productLots, clients, inventoryAdjustmentMode } = get();
+        // `inventoryAdjustmentMode` ya no se lee acá: sin conexión NO se rechaza
+        // por stock, esté el modo prendido o apagado. Ver el comentario largo
+        // más abajo, en la sección de stock.
+        const { activeCompanyId, currentUser, products, productLots, clients } = get();
 
         // Validación básica
         if (!sale?.items?.length || !sale.total || sale.total < 0) {
@@ -3848,29 +3903,36 @@ export const useStore = create(persist((set, get) => ({
             }
         }
 
-        // Validación de stock contra catálogo en memoria
-        const stockErrors = [];
+        // ── Sin conexión NO se rechaza una venta por stock ───────────
+        //
+        // El stock que hay acá es una FOTO VIEJA: la del último momento en que
+        // el equipo pudo hablar con el servidor. Desde entonces pudo entrar
+        // mercadería, pudo vender otra caja, pudo hacerse un ajuste — y no hay
+        // forma de saberlo hasta que vuelva el internet.
+        //
+        // Negarle la venta al cliente por un número que quizá ya no es cierto
+        // es lo peor de los dos mundos: se pierde la venta Y el número sigue
+        // sin ser cierto. Así que se vende, el producto queda marcado para
+        // recuento (`pending_adjustment`) al sincronizar, y el stock real se
+        // resuelve contra el servidor, que es el único que sabe.
+        //
+        // El "Modo Ajuste de Inventario" sigue mandando cuando HAY conexión:
+        // esto es solo para lo que se cobró a ciegas.
+        const sinStockLocal = [];
         for (const item of sale.items) {
             if (item.is_combo) continue;
             const product = products.find(p => p.id === item.id);
-            if (!product) {
-                stockErrors.push(`Producto no encontrado en catálogo local: ${item.name || item.id}`);
-                continue;
-            }
+            if (!product) continue; // se resuelve contra el servidor al subir
             const lots = productLots.filter(l => (l.product_id === item.id || l.productId === item.id));
             const lotStock = lots.reduce((sum, l) => sum + parseFloat(l.quantity || 0), 0);
             const totalStock = parseFloat(product.stock || 0) + lotStock;
-            const qty = parseFloat(item.quantity || 0);
-            if (qty > totalStock && !inventoryAdjustmentMode) {
-                stockErrors.push(`Stock insuficiente para ${item.name || product.name}: pedido ${qty}, disponible ${totalStock}`);
+            if (parseFloat(item.quantity || 0) > totalStock) {
+                sinStockLocal.push(item.name || product.name);
             }
         }
-        if (stockErrors.length > 0 && !inventoryAdjustmentMode) {
-            return {
-                success: false,
-                error: 'STOCK_INSUFFICIENT_OFFLINE',
-                message: stockErrors.join(' · ')
-            };
+        if (sinStockLocal.length > 0) {
+            console.warn(`📴 Venta offline con stock local en cero: ${sinStockLocal.join(', ')}. ` +
+                'Se registra igual; queda para recuento al sincronizar.');
         }
 
         // Encolar en Dexie
@@ -3916,6 +3978,11 @@ export const useStore = create(persist((set, get) => ({
                     // llegaría al servidor con una clave nueva, o sea como una
                     // venta distinta.
                     clientSaleId: sale.clientSaleId,
+                    // La marca que le dice al servidor "esta ya se cobró, no la
+                    // rechaces por stock". Sin ella, una venta hecha sin
+                    // conexión podría quedarse trabada para siempre en la cola
+                    // por un stock que cambió mientras no había internet.
+                    ventaOffline: true,
                     _offlineCreatedAt: new Date().toISOString(),
                     _offlineUserId: currentUser.id,
                     _offlineUserName: currentUser.name || currentUser.username,
@@ -4014,6 +4081,15 @@ export const useStore = create(persist((set, get) => ({
                     // encola justamente cuando la respuesta no llegó — el caso en
                     // que es más probable que la venta SÍ se haya registrado.
                     clientSaleId: sale.clientSaleId,
+                    // Esta cola también guarda ventas YA COBRADAS: el cajero
+                    // cobró, el envío falló y se reintenta después. Mismo caso
+                    // que la cola offline, así que tampoco se rechaza por stock.
+                    ventaOffline: true,
+                    // La hora del cobro, para que la venta se guarde con la hora
+                    // en que se cobró y no con la que logre subir. Si la venta ya
+                    // venía de la cola, conserva la suya: reencolar no la
+                    // "rejuvenece".
+                    _offlineCreatedAt: sale._offlineCreatedAt || new Date().toISOString(),
                 },
             };
             queue.push(entry);
@@ -4431,7 +4507,22 @@ export const useStore = create(persist((set, get) => ({
         try {
             const { activeCompanyId } = get();
             const r = await userApiCall('registerCheck', { companyId: activeCompanyId, userId });
-            set({ cashRegister: r?.success ? (r.register || null) : null });
+
+            // Si el servidor no contestó, se CONSERVA la caja que ya se tenía.
+            //
+            // Antes, cualquier respuesta que no fuera exitosa dejaba la caja en
+            // null. Sin conexión eso era grave: el POS pide abrir caja para
+            // vender, así que salir a otra pantalla y volver dejaba a la cajera
+            // sin poder vender —justo en la situación para la que existe el modo
+            // offline—. La caja está abierta en el servidor y en el cajón; que no
+            // podamos preguntarlo ahora no la cierra.
+            //
+            // Solo un "no tenés caja abierta" dicho POR EL SERVIDOR la borra.
+            if (!r?.success) {
+                if (!r?.sinConexion) console.warn('[caja] registerCheck falló, se conserva la caja conocida:', r?.error);
+                return;
+            }
+            set({ cashRegister: r.register || null });
         } catch (e) {
             console.error("Check register error", e);
         }
@@ -4468,18 +4559,25 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    closeRegister: async (registerId, finalAmount, observations, difference) => {
+    // `override` = { username, password, reason, pendientes } cuando un
+    // supervisor autoriza cerrar con ventas offline sin subir. La clave se
+    // verifica en el servidor (api/_lib/registerActions.js): acá solo viaja.
+    //
+    // Devuelve `true` si cerró; si no, un objeto con el error para poder
+    // distinguir "clave mal" de "falló el cierre" y no cerrar el diálogo.
+    closeRegister: async (registerId, finalAmount, observations, difference, override = null) => {
         try {
             const r = await userApiCall('registerClose', {
                 companyId: get().activeCompanyId,
                 registerId, finalAmount, observations, difference,
+                ...(override ? { override } : {}),
             });
-            if (!r?.success) return false;
+            if (!r?.success) return { success: false, error: r?.error || 'No se pudo cerrar la caja.', authFailed: !!r?._authFailed };
             set({ cashRegister: null });
             return true;
         } catch (e) {
             console.error("Close register error", e);
-            return false;
+            return { success: false, error: e?.message || 'No se pudo cerrar la caja.' };
         }
     },
 
@@ -7997,6 +8095,16 @@ export const useStore = create(persist((set, get) => ({
         currentCompanyTimezone: state.currentCompanyTimezone,
         currentCurrency: state.currentCurrency,
         currentUserCompanyRole: state.currentUserCompanyRole,
+        // Igual que los permisos de acá abajo: sin guardarlo, un arranque OFFLINE
+        // lo deja en `false` aunque la empresa lo tenga prendido, porque el camino
+        // offline carga el catálogo desde IndexedDB y nunca pasa por la config de
+        // la empresa. Resultado: el "Modo Ajuste de Inventario" se apaga solo y el
+        // POS deja de dejar vender productos en cero — con el interruptor prendido
+        // en Configuración. Reportado en producción el 3-sep-2026.
+        inventoryAdjustmentMode: state.inventoryAdjustmentMode,
+        // Mismo motivo: sin esto, offline no sabe si la empresa bloquea o solo
+        // avisa al pasarse del crédito.
+        creditBlockMode: state.creditBlockMode,
         // Los permisos del rol se guardan junto con la sesión, y no es un detalle:
         // sin esto, cualquier arranque que no logre hablar con el servidor deja
         // `rolePermissions` en [] y `hasPermission` niega TODO. Al dueño y a los
@@ -8011,6 +8119,12 @@ export const useStore = create(persist((set, get) => ({
         // Guardarlos convierte eso en lo que corresponde para un POS offline: los
         // permisos son los últimos conocidos hasta que el servidor diga otra cosa.
         rolePermissions: state.rolePermissions,
+        // La caja abierta, por el mismo motivo que todo lo de arriba: el POS no
+        // deja vender sin caja abierta, y sin guardarla una recarga sin conexión
+        // dejaba a la cajera mirando "Apertura de Caja" con la caja abierta de
+        // verdad, en el servidor y en el cajón. La abierta en el equipo es la
+        // última conocida; el servidor la corrige apenas se lo pueda preguntar.
+        cashRegister: state.cashRegister,
         darkMode: state.darkMode
     }),
     onRehydrateStorage: () => (state) => {
