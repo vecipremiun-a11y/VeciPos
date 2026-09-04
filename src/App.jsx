@@ -78,6 +78,7 @@ const SalesAnalytics = lazy(() => import('./pages/reports/SalesAnalytics'));
 const Sorteos = lazy(() => import('./pages/Sorteos'));
 import { useStore } from './store/useStore';
 import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncCatalogIncremental, syncPendingOpsToServer } from './lib/db/sync';
+import { pendingOpsApi } from './lib/db/localdb';
 import { createSmartInterval } from './lib/smartPolling';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 import SessionTakeoverModal from './components/SessionTakeoverModal';
@@ -283,8 +284,17 @@ function App() {
     // Apenas el monitor confirma que volvió el internet, se manda lo que quedó
     // pendiente. No alcanza con el evento 'online' del navegador: ese se dispara
     // al reconectar el WiFi, aunque el internet siga caído.
-    const dejarDeEscuchar = alCambiarConexion((online) => {
+    const dejarDeEscuchar = alCambiarConexion(async (online) => {
       if (!online) return;
+      // La espera de 10 minutos entre reintentos protege a un servidor que está
+      // mal. Que vuelva la conexión es información nueva: se cancela la espera y
+      // se sube todo ya, en vez de dejar ventas durmiendo ocho minutos más con
+      // el internet andando.
+      const cid = useStore.getState().activeCompanyId;
+      if (cid) {
+        const despertadas = await pendingOpsApi.despertarTodas(cid).catch(() => 0);
+        if (despertadas > 0) console.log(`[sync] Volvió la conexión: ${despertadas} venta(s) vuelven a intentar ya`);
+      }
       processPendingSalesQueue();
       syncAll({ incremental: true });
     });

@@ -6,6 +6,8 @@ import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
 import CompanySwitcher from '../components/CompanySwitcher';
+import BotonModoOffline from '../components/BotonModoOffline';
+import { pendingOpsApi } from '../lib/db/localdb';
 import NotificationBell from '../components/NotificationBell';
 import SupportWidget from '../components/SupportWidget';
 import WebOrderToast from '../components/WebOrderToast';
@@ -129,13 +131,14 @@ const MainLayout = () => {
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
     const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile); // Closed by default on mobile, open on desktop
     // FASE 10 · re-render solo cuando estas claves cambian, no con todo el store.
-    const { currentUser, currentUserCompanyRole, logout, inventoryAdjustmentMode, fetchRolePermissions } = useStore(
+    const { currentUser, currentUserCompanyRole, logout, inventoryAdjustmentMode, fetchRolePermissions, activeCompanyId } = useStore(
         useShallow(s => ({
             currentUser: s.currentUser,
             currentUserCompanyRole: s.currentUserCompanyRole,
             logout: s.logout,
             inventoryAdjustmentMode: s.inventoryAdjustmentMode,
             fetchRolePermissions: s.fetchRolePermissions,
+            activeCompanyId: s.activeCompanyId,
         }))
     );
 
@@ -341,7 +344,30 @@ const MainLayout = () => {
         setOpenSubmenu(prev => prev === label ? null : label);
     };
 
-    const handleLogout = () => {
+    // Cerrar sesión con ventas sin subir tiene una trampa: para volver a entrar
+    // hace falta internet. Si el corte sigue, quien se va no puede volver, y sus
+    // ventas quedan guardadas en ESTE equipo esperándolo —nadie más las puede
+    // subir, porque una venta se registra a nombre de quien la hizo—.
+    //
+    // No se prohíbe: el turno termina cuando termina. Pero hay que decirlo antes,
+    // no después.
+    const handleLogout = async () => {
+        try {
+            const todas = await pendingOpsApi.list(activeCompanyId);
+            const mias = todas.filter(o =>
+                o.status !== 'synced' &&
+                (o.userId == null || Number(o.userId) === Number(currentUser?.id))
+            );
+            if (mias.length > 0) {
+                const ok = window.confirm(
+                    `Te ${mias.length === 1 ? 'queda' : 'quedan'} ${mias.length} venta${mias.length === 1 ? '' : 's'} sin subir al servidor.\n\n` +
+                    'Quedan guardadas en este equipo y suben solas cuando vuelvas a entrar con tu usuario. ' +
+                    'Nadie más puede subirlas.\n\n' +
+                    'Ojo: para volver a entrar hace falta internet.\n\n¿Cerrar sesión igual?'
+                );
+                if (!ok) return;
+            }
+        } catch { /* Dexie no disponible: no bloquear el cierre de sesión */ }
         logout();
         navigate('/login');
     };
@@ -611,6 +637,15 @@ const MainLayout = () => {
                     </div>
 
                     <div className="flex items-center gap-2 md:gap-4 shrink-0">
+                        {/* Modo offline manual.
+                            Vive en la barra de arriba, junto al selector de empresa,
+                            y no dentro del POS: cuando las ventas se traban hay que
+                            poder apagarlo desde donde uno esté —revisando la cola,
+                            en el dashboard— sin volver primero a la pantalla de
+                            ventas. Y estando siempre visible se ve de un vistazo si
+                            el equipo está trabajando sin conexión. */}
+                        <BotonModoOffline />
+
                         {/* Company Switcher */}
                         <CompanySwitcher />
 

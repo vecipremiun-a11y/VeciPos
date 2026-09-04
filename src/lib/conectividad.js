@@ -35,6 +35,56 @@ const INTERVALO_OFFLINE = 4000;
 // debería sacar al POS de línea y disparar la sincronización de ida y vuelta.
 const FALLOS_PARA_CAER = 2;
 
+// ── Modo offline puesto A MANO por el cajero ─────────────────────────────
+//
+// El monitor automático comprueba con `SELECT 1`, que es una LECTURA. El
+// 3-sep-2026 la base servía lecturas en 140 ms con las ESCRITURAS colgadas: el
+// latido decía "hay internet", cada venta salía a intentar y esperaba los 12 s
+// del corte antes de guardarse. Con la caja llena, 12 segundos por venta.
+//
+// Ninguna comprobación automática va a cubrir todos los casos raros. Por eso el
+// cajero puede forzarlo él: ve que las ventas se traban, aprieta el botón y
+// trabaja offline de una, sin esperar a que el sistema se dé cuenta.
+//
+// Dura lo que dura la emergencia: aguanta recargar, muere con la pestaña y con
+// la sesión. Por eso `sessionStorage` y no `localStorage`.
+//
+// El modo manual no es un ajuste de un momento, es un MODO DE TRABAJO: la base
+// está lenta o caída, se prende, y la caja sigue vendiendo con el catálogo y los
+// clientes que ya tiene guardados, sin descuadrar nada, hasta que el problema se
+// resuelva. Puede durar horas.
+//
+// Que una recarga lo apagara era un agujero: la app es una PWA y recarga entera
+// desde su propia caché, sin pedirle nada al servidor —los 97 archivos están
+// guardados en el equipo—. O sea que recargar NO prueba que haya internet, y
+// apagar el modo por una recarga devolvía al cajero a las ventas de 12 segundos
+// en medio de la emergencia. Peor todavía: el auto-recupero de index.html
+// recarga la pantalla solo cuando falla un archivo, que es más probable
+// justamente cuando la conexión anda mal.
+//
+//   · RECARGAR (F5, o el auto-recupero)  → se mantiene.
+//   · CERRAR la pestaña o la app         → se apaga.
+//   · CERRAR SESIÓN                      → se apaga (lo limpia `logout`).
+const CLAVE_MANUAL = 'posveci_offline_manual';
+/** Canal para que las demás pestañas del mismo navegador se enteren. */
+const CANAL_MANUAL = 'posveci_offline_manual_v1';
+
+function leerModoManual() {
+    try {
+        if (sessionStorage.getItem(CLAVE_MANUAL) === '1') return true;
+        // Migración de la versión que lo guardaba en localStorage: se respeta
+        // una vez y se saca de ahí, para que no quede pegado en el equipo.
+        if (localStorage.getItem(CLAVE_MANUAL) === '1') {
+            localStorage.removeItem(CLAVE_MANUAL);
+            sessionStorage.setItem(CLAVE_MANUAL, '1');
+            return true;
+        }
+    } catch { /* modo privado */ }
+    return false;
+}
+
+let offlineManual = leerModoManual();
+
 let hayInternet = true;
 let fallosSeguidos = 0;
 let timer = null;
@@ -45,6 +95,24 @@ let ultimoOk = 0;
 const oyentes = new Set();
 
 const avisar = () => oyentes.forEach(fn => { try { fn(hayInternet); } catch { /* noop */ } });
+
+// ── Aviso entre pestañas del mismo navegador ─────────────────────────────
+let canal = null;
+function abrirCanal() {
+    if (canal !== null || typeof BroadcastChannel === 'undefined') return canal;
+    try {
+        canal = new BroadcastChannel(CANAL_MANUAL);
+        canal.onmessage = (e) => {
+            if (typeof e?.data?.manual !== 'boolean') return;
+            // `avisarAOtrasPestanas: false` corta el rebote infinito entre pestañas.
+            ponerOfflineManual(e.data.manual, { avisarAOtrasPestanas: false });
+        };
+    } catch { canal = null; }
+    return canal;
+}
+function avisarPestanas(manual) {
+    try { abrirCanal()?.postMessage({ manual }); } catch { /* sin canal: cada pestaña se maneja sola */ }
+}
 
 /**
  * fetch con tiempo límite que funciona en TODOS los entornos.
@@ -74,6 +142,10 @@ export function fetchConLimite(url, opciones = {}, ms = 12000) {
 }
 
 function fijar(nuevo) {
+    // Con el modo manual puesto, ninguna comprobación automática puede devolver
+    // el POS a "online". Lo decidió una persona mirando la caja; el latido no
+    // tiene forma de saber más que ella.
+    if (nuevo === true && offlineManual) return;
     if (nuevo === hayInternet) return;
     hayInternet = nuevo;
     console.log(nuevo ? '🌐 Conexión recuperada' : '📴 Sin conexión (o base sin responder): el POS pasa a modo offline');
@@ -135,6 +207,7 @@ function programar() {
 export function iniciarMonitorConexion() {
     if (arrancado || typeof window === 'undefined') return;
     arrancado = true;
+    abrirCanal();
 
     window.addEventListener('offline', () => {
         fallosSeguidos = FALLOS_PARA_CAER;
@@ -153,6 +226,59 @@ export function iniciarMonitorConexion() {
 
 /** ¿Hay internet hasta el servidor AHORA? */
 export function hayConexion() {
+    return offlineManual ? false : hayInternet;
+}
+
+/** ¿El cajero puso el modo offline a mano? */
+export function esOfflineManual() {
+    return offlineManual;
+}
+
+/**
+ * Prende o apaga el modo offline manual.
+ *
+ * Prendido: todas las ventas se guardan en el dispositivo al instante, sin
+ * intentar contra el servidor y sin esperar ningún corte de tiempo.
+ * Apagado: vuelve a mandar el monitor automático, y se comprueba enseguida
+ * si de verdad hay conexión antes de dar por buena la vuelta.
+ */
+export async function ponerOfflineManual(activar, { avisarAOtrasPestanas = true } = {}) {
+    offlineManual = !!activar;
+    try {
+        if (offlineManual) sessionStorage.setItem(CLAVE_MANUAL, '1');
+        else sessionStorage.removeItem(CLAVE_MANUAL);
+    } catch { /* modo privado: igual funciona mientras la pestaña siga abierta */ }
+
+    // Las demás pestañas del mismo navegador tienen que enterarse.
+    //
+    // Este módulo vive DENTRO de cada pestaña: sin este aviso, prenderlo en la
+    // pestaña del POS no hacía nada en otra pestaña abierta, que seguía saliendo
+    // a buscar el servidor y colgándose 12 segundos por venta. El cajero creía
+    // haberlo apagado para todo el equipo.
+    if (avisarAOtrasPestanas) avisarPestanas(offlineManual);
+
+    if (offlineManual) {
+        fallosSeguidos = FALLOS_PARA_CAER;
+        fijar(false);
+        avisar();
+        programar();
+        return false;
+    }
+
+    // Volver a online: no se asume, se comprueba, y se ESPERA el resultado.
+    //
+    // Antes esto disparaba el latido sin esperarlo y no devolvía nada: la
+    // pantalla ponía el botón en gris al instante, como si ya estuviera
+    // conectado, aunque el latido después descubriera que no había internet.
+    // Las ventas seguían yendo bien a la cola —eso nunca estuvo en riesgo—,
+    // pero el cajero quedaba creyendo que estaba online cuando no lo estaba.
+    //
+    // Devuelve si de verdad volvió la conexión, para que quien apretó el botón
+    // se entere en vez de suponer.
+    fallosSeguidos = 0;
+    avisar();
+    await latir();
+    programar();
     return hayInternet;
 }
 
