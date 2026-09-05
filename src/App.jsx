@@ -77,7 +77,7 @@ const ProfitReport = lazy(() => import('./pages/admin/ProfitReport'));
 const SalesAnalytics = lazy(() => import('./pages/reports/SalesAnalytics'));
 const Sorteos = lazy(() => import('./pages/Sorteos'));
 import { useStore } from './store/useStore';
-import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncCatalogIncremental, syncPendingOpsToServer } from './lib/db/sync';
+import { migrateLegacyQueueToDexie, syncCatalogFromServer, syncCatalogIncremental, syncPendingOpsToServer, purgarBorrados } from './lib/db/sync';
 import { pendingOpsApi } from './lib/db/localdb';
 import { createSmartInterval } from './lib/smartPolling';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
@@ -251,14 +251,18 @@ function App() {
     // updated_at > lastSync de products y tax_rates). El startup y los
     // refresh manuales siguen siendo full sync. Si no hay lastSync,
     // syncCatalogIncremental cae automáticamente a full.
-    const syncAll = async ({ incremental = false } = {}) => {
+    // `soloCola`: subir lo pendiente sin tocar el catálogo. Es lo que corre al
+    // entrar, para que el arranque no cargue nada pesado.
+    const syncAll = async ({ incremental = false, soloCola = false } = {}) => {
       if (!navigator.onLine) return;
       const state = useStore.getState();
       const cid = state.activeCompanyId;
       if (!cid) return;
       // Sync catálogo en background (no bloquear)
-      const catalogFn = incremental ? syncCatalogIncremental : syncCatalogFromServer;
-      catalogFn(cid).catch((e) => console.warn('[sync] catálogo:', e));
+      if (!soloCola) {
+        const catalogFn = incremental ? syncCatalogIncremental : syncCatalogFromServer;
+        catalogFn(cid).catch((e) => console.warn('[sync] catálogo:', e));
+      }
       // NOTA: pre-reserva automática de folios DESACTIVADA.
       // Consumía CAFs completos al iniciar sesión y los marcaba como exhausted
       // sin emitir DTEs reales. Para offline, usar manualmente desde Configuración → Sincronización Offline.
@@ -278,8 +282,31 @@ function App() {
       }
     };
 
-    // Startup: full sync (limpia stale y purga rows borradas server-side).
-    syncAll({ incremental: false });
+    // ── El arranque tiene que ser liviano ────────────────────────────
+    //
+    // Antes acá corría el sync COMPLETO del catálogo: borraba la copia local y
+    // bajaba los productos de nuevo, todos. Medido contra producción el
+    // 4-sep-2026: 54 segundos y 2,52 MB para 4.419 productos, en CADA inicio de
+    // sesión. Alguien que entra a mirar el dashboard esperaba todo eso por algo
+    // que no iba a usar.
+    //
+    // Ahora al entrar solo se sube lo que la caja tenga pendiente, que es chico
+    // y urgente. El catálogo se pone al día SOLO, en segundo plano, unos
+    // minutos después — para entonces la persona ya se acomodó y no se siente.
+    //
+    // La excepción es un equipo sin catálogo guardado: ahí hay que bajarlo ya,
+    // porque sin él no hay venta offline. `syncCatalogIncremental` se da cuenta
+    // sola (si no hay checkpoint, cae al completo).
+    syncAll({ incremental: true, soloCola: true });
+
+    // A los 3 minutos: lo que cambió desde la última vez, y una vez al día,
+    // qué se borró en el servidor. Las dos cosas en segundo plano.
+    const primerSync = setTimeout(() => {
+      const cid = useStore.getState().activeCompanyId;
+      if (!cid || !navigator.onLine) return;
+      syncCatalogIncremental(cid).catch((e) => console.warn('[sync] catálogo:', e));
+      purgarBorrados(cid).catch((e) => console.warn('[sync] borrados:', e));
+    }, 3 * 60_000);
 
     // Apenas el monitor confirma que volvió el internet, se manda lo que quedó
     // pendiente. No alcanza con el evento 'online' del navegador: ese se dispara
@@ -329,6 +356,7 @@ function App() {
     return () => {
       stop();
       dejarDeEscuchar();
+      clearTimeout(primerSync);
     };
   }, [currentUser]);
 

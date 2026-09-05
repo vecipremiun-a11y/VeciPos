@@ -2,7 +2,7 @@ import { createClient } from '@libsql/client';
 import { getSession, isCompanyMember } from '../_lib/guard.js';
 import { renovarSesionSiHaceFalta } from '../_lib/auth.js';
 import { personalActions } from '../_lib/personalActions.js';
-import { saleCommit, saleAggregations, saleAggregationsReverse, saleCancel, saleDetails } from '../_lib/salesActions.js';
+import { saleCommit, saleAggregations, saleAggregationsReverse, saleCancel, saleDetails, calentarEscritura } from '../_lib/salesActions.js';
 import { registerActions } from '../_lib/registerActions.js';
 import { purchaseActions } from '../_lib/purchaseActions.js';
 import { preorderActions } from '../_lib/preorderActions.js';
@@ -119,6 +119,8 @@ export default async function handler(req, res) {
                 return res.status(200).json({ success: true, data: await fetchSales(turso, companyId, body) });
             case 'syncCatalog':
                 return res.status(200).json({ success: true, data: await syncCatalog(turso, companyId, body) });
+            case 'catalogoIds':
+                return res.status(200).json({ success: true, data: await catalogoIds(turso, companyId) });
             // Carga inicial de la app (Fase 1 · Paso 35)
             case 'bootstrap':
                 return res.status(200).json(await bootstrapActions.bootstrap(turso, companyId));
@@ -168,6 +170,9 @@ export default async function handler(req, res) {
             // Venta (Fase 1 · Paso 10 — corazón del POS, lógica portada tal cual)
             case 'saleCommit':
                 return res.status(200).json(await saleCommit(turso, companyId, session, body));
+            // Prepara el camino de escritura para que no lo pague la primera venta.
+            case 'calentarEscritura':
+                return res.status(200).json(await calentarEscritura(turso));
             case 'saleAggregations':
                 return res.status(200).json(await saleAggregations(turso, companyId, session, body));
             case 'saleAggregationsReverse':
@@ -540,6 +545,38 @@ const PAGINA_SYNC = 1500;
  * Al revés también funciona: el cliente nuevo contra un servidor viejo recibe
  * todo de una y sin `cursor`, así que su bucle termina en la primera vuelta.
  */
+/**
+ * Solo los NÚMEROS de lo que existe hoy en el servidor, para que el equipo sepa
+ * qué borrar de su copia local.
+ *
+ * Existe para no bajar el catálogo entero por esto. La descarga liviana
+ * (`updated_at > ?`) sabe agregar y actualizar pero no sabe borrar, así que
+ * hasta ahora la única forma de sacar un producto borrado era tirar el catálogo
+ * local y bajar los 4.419 de nuevo: medido contra producción el 4-sep-2026,
+ * 54 segundos y 2,52 MB, en CADA inicio de sesión.
+ *
+ * Pedir solo los id se contesta desde un índice y ni toca la fila del producto
+ * —que lleva la foto en base64 adentro, 36 KB de promedio—. Misma tarea:
+ * 157 ms y 22 KB. Trescientas cuarenta veces más rápido.
+ */
+export async function catalogoIds(turso, companyId) {
+    const [prod, lotes, cli, cat, iva] = await turso.batch([
+        { sql: 'SELECT id FROM products WHERE company_id = ?', args: [companyId] },
+        { sql: 'SELECT id FROM product_lots WHERE company_id = ?', args: [companyId] },
+        { sql: 'SELECT id FROM clients WHERE company_id = ?', args: [companyId] },
+        { sql: 'SELECT id FROM categories WHERE company_id = ?', args: [companyId] },
+        { sql: 'SELECT id FROM tax_rates WHERE company_id = ?', args: [companyId] },
+    ], 'read');
+    const ids = (r) => r.rows.map((f) => Number(f.id));
+    return {
+        products: ids(prod),
+        productLots: ids(lotes),
+        clients: ids(cli),
+        categories: ids(cat),
+        taxRates: ids(iva),
+    };
+}
+
 export async function syncCatalog(turso, companyId, { since, cursor, limit, paginado }) {
     // Sin paginar: un tope enorme que en la práctica trae todo, y nunca hay cursor.
     const lim = paginado

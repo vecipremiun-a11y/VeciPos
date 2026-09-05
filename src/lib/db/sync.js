@@ -198,6 +198,70 @@ export async function syncCatalogFromServer(companyId) {
  * @param {string} companyId
  * @returns {Promise<{ok: boolean, counts?: object, mode?: 'incremental'|'full', lastSync?: string, error?: string}>}
  */
+/** Cada cuánto se revisa qué se borró en el servidor. Una vez al día alcanza. */
+const CADA_CUANTO_PURGAR_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Saca de la copia local lo que ya no existe en el servidor.
+ *
+ * Por qué existe: la descarga liviana (`updated_at > ?`) sabe agregar y
+ * actualizar, pero no sabe borrar. Hasta ahora la única forma de sacar un
+ * producto borrado era tirar el catálogo local entero y bajarlo de nuevo, y eso
+ * corría en CADA inicio de sesión: medido contra producción el 4-sep-2026, 54
+ * segundos y 2,52 MB para 4.419 productos. Un cajero que entra a mirar el
+ * dashboard esperaba todo eso por algo que no iba a usar.
+ *
+ * Ahora se le piden al servidor solo los NÚMEROS de lo que existe —157 ms y
+ * 22 KB, porque se contesta desde un índice sin tocar la fila del producto, que
+ * lleva la foto adentro— y se borra localmente lo que sobra.
+ *
+ * Se ejecuta una vez al día. Un producto borrado que sobreviva unas horas en la
+ * copia local no rompe nada: al venderlo, el servidor lo rechaza.
+ */
+export async function purgarBorrados(companyId, { forzar = false } = {}) {
+  if (!companyId) return { ok: false, error: 'companyId requerido' };
+  if (sinInternet()) return { ok: false, error: 'offline' };
+
+  const clave = `ultimaPurga:${companyId}`;
+  if (!forzar) {
+    const previa = await localDb.meta.get(clave);
+    if (previa?.value && Date.now() - new Date(previa.value).getTime() < CADA_CUANTO_PURGAR_MS) {
+      return { ok: true, salteada: true };
+    }
+  }
+
+  try {
+    const vivos = await dataApi('catalogoIds', { companyId });
+    const tablas = [
+      ['products', localDb.products, vivos.products],
+      ['productLots', localDb.productLots, vivos.productLots],
+      ['clients', localDb.clients, vivos.clients],
+      ['categories', localDb.categories, vivos.categories],
+      ['taxRates', localDb.taxRates, vivos.taxRates],
+    ];
+
+    const borrados = {};
+    for (const [nombre, tabla, ids] of tablas) {
+      // Si el servidor no mandó esa lista, no se borra nada: mejor quedarse con
+      // filas de más que vaciar el catálogo por una respuesta incompleta.
+      if (!Array.isArray(ids)) continue;
+      const vivosSet = new Set(ids.map(Number));
+      const locales = await tabla.where('companyId').equals(companyId).primaryKeys();
+      const sobran = locales.filter((id) => !vivosSet.has(Number(id)));
+      if (sobran.length) await tabla.bulkDelete(sobran);
+      borrados[nombre] = sobran.length;
+    }
+
+    await localDb.meta.put({ key: clave, value: new Date().toISOString() });
+    const total = Object.values(borrados).reduce((a, b) => a + b, 0);
+    if (total > 0) console.log('[sync] Purga de borrados:', borrados);
+    return { ok: true, borrados };
+  } catch (e) {
+    console.warn('[sync] No se pudo revisar los borrados:', e?.message || e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 export async function syncCatalogIncremental(companyId) {
   if (!companyId) return { ok: false, error: 'companyId requerido' };
   if (sinInternet()) return { ok: false, error: 'offline' };
