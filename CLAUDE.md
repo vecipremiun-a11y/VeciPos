@@ -36,11 +36,12 @@ chequeo previo:
 - El nombre del archivo del APK: `POSVECI-vNN…apk` en el Escritorio de Kevin
 - `src/pages/Settings.jsx` → lo que la pantalla le muestra al usuario
 
-> **Defecto conocido, sin arreglar:** en `src/pages/Settings.jsx` la versión
-> está escrita a mano (`1.2.1 (Futuristic Build)`). No sale del `package.json`
-> ni de ningún lado, así que la pantalla muestra siempre lo mismo por más que se
-> despliegue. Mientras siga así, esa pantalla **no** sirve para saber qué
-> versión está corriendo.
+> **Ya arreglado:** `src/pages/Settings.jsx` toma la versión del `package.json`
+> (inyectada por Vite como `__APP_VERSION__`) y muestra además el destino —
+> `1.9 · App`, `1.9 · PWA`, `1.9 · Web`. Sube sola con cada release, así que
+> alcanza con cambiar el `package.json`. Antes había un `1.2.1` escrito a mano
+> que nunca cambiaba: la pantalla mentía y no había forma de saber qué tenía
+> puesto un cliente.
 
 ### Verificar qué versión hay puesta de verdad
 
