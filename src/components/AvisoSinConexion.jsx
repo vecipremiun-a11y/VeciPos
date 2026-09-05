@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CloudOff, AlertTriangle } from 'lucide-react';
-import { hayConexion, alCambiarConexion } from '../lib/conectividad';
+import { hayConexion, alCambiarConexion, esOfflineManual } from '../lib/conectividad';
 import { estadoCatalogoLocal } from '../lib/db/catalogoLocal';
 import { useStore } from '../store/useStore';
 
@@ -30,10 +30,13 @@ function hace(iso) {
 
 const AvisoSinConexion = () => {
     const [online, setOnline] = useState(hayConexion);
+    // Distinto cartel según QUIÉN decidió: no es lo mismo 'se cayó el internet'
+    // que 'lo puse yo porque el sistema andaba lento'.
+    const [porDecision, setPorDecision] = useState(esOfflineManual);
     const [catalogo, setCatalogo] = useState(null);
     const activeCompanyId = useStore((s) => s.activeCompanyId);
 
-    useEffect(() => alCambiarConexion(setOnline), []);
+    useEffect(() => alCambiarConexion((hay) => { setOnline(hay); setPorDecision(esOfflineManual()); }), []);
 
     // Se consulta al caer la conexión, no todo el tiempo: mientras hay internet
     // este cartel no se muestra y el dato no le sirve a nadie.
@@ -59,6 +62,18 @@ const AvisoSinConexion = () => {
             <span className="text-center">
                 {sinCatalogo ? (
                     <>Sin conexión y sin catálogo guardado · No vas a poder buscar productos hasta que vuelva el internet. Las ventas que alcances a hacer igual se guardan.</>
+                ) : porDecision ? (
+                    <>
+                        {/* Lo prendió una persona. Decir "sin conexión" acá sería
+                            mentir: puede haber internet de sobra y el modo estar
+                            puesto porque el sistema andaba lento. */}
+                        Modo offline puesto por vos · Las ventas se guardan en este equipo y se envían cuando lo apagues.
+                        {catalogo && (
+                            <span className="font-medium opacity-80">
+                                {' '}({catalogo.productos.toLocaleString('es-CL')} productos guardados{edad ? `, actualizados ${edad}` : ''})
+                            </span>
+                        )}
+                    </>
                 ) : (
                     <>
                         Sin conexión · Podés seguir vendiendo: las ventas se guardan y se envían solas al volver el internet.

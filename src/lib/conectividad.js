@@ -19,15 +19,24 @@
 // Además escucha los eventos del navegador: si avisa que se cayó la red, no hay
 // nada que comprobar y se pasa a offline en el acto.
 
-// `?db=1`: el latido comprueba también que la base conteste. Sin esto, el
-// 23-ago-2026 hubo internet y servidor vivos con Turso tardando 9-24 s por
-// consulta: el POS se creyó online todo el día, se colgaba en cada operación y
-// NUNCA entró en modo offline — porque para él no había ninguna caída.
-const PING_URL = '/api/ping?db=1';
-// Ahora el latido espera a que la base conteste, y el servidor le da hasta 3 s a
-// esa comprobación. 6 s deja margen para la red sin dejar de ser "si tarda más
-// que esto, en una caja es lo mismo que no tener conexión".
-const TIMEOUT_MS = 6000;
+// El latido responde UNA sola pregunta: ¿se llega al servidor?
+//
+// Nada más. Sin internet es sin internet: no es "el servidor está lento", ni "la
+// base tarda", ni "el sistema se colgó". Confundirlos hace que el POS se declare
+// sin conexión con el internet andando perfecto, mande ventas a la cola sin
+// motivo y muestre un cartel que miente.
+//
+// Entre el 23-ago y el 4-sep-2026 el latido pedía `?db=1` y también comprobaba
+// que la base contestara en 3 segundos. Se puso por una caída real —Turso
+// tardando 9-24 s por consulta, con las cajeras sin poder vender ni pasar a
+// offline— pero metía a la base dentro de la definición de "hay internet", que
+// son cosas distintas. Ya no hace falta: para eso está el botón de modo offline,
+// donde decide la persona que está mirando la caja, que es la única que puede
+// distinguir "va lento" de "no funciona".
+const PING_URL = '/api/ping';
+// Generoso a propósito: un servidor lento NO es un servidor caído. Solo cuenta
+// como caída si no contesta en absoluto.
+const TIMEOUT_MS = 8000;
 const INTERVALO_ONLINE = 15000;
 const INTERVALO_OFFLINE = 4000;
 
@@ -177,16 +186,9 @@ async function latir() {
         }, TIMEOUT_MS);
         if (!r.ok) throw new Error('HTTP ' + r.status);
 
-        // El servidor puede estar perfecto y la base caída. Para una caja es lo
-        // mismo: no se puede trabajar. Si el endpoint contesta `db: false`, el POS
-        // pasa a offline igual que si no hubiera internet.
-        const datos = await r.json().catch(() => ({}));
-        if (datos && datos.db === false) {
-            fallosSeguidos++;
-            if (fallosSeguidos >= FALLOS_PARA_CAER) fijar(false);
-            return; // el finally reprograma el próximo latido
-        }
-
+        // Contestó: hay internet. No se mira nada más —ni si la base anda, ni si
+        // anda rápido—. Eso es otra pregunta y la contesta la persona en la caja
+        // con el botón de modo offline.
         ultimoOk = Date.now();
         fallosSeguidos = 0;
         fijar(true);
