@@ -23,12 +23,9 @@ const check = (l, ok, extra = '') => {
 // Se lee del archivo real para que la prueba se rompa si alguien cambia la
 // lista de excepciones y se olvida de mirar esto.
 const fuente = readFileSync('src/store/useStore.js', 'utf8');
-const bloque = fuente.slice(
-    fuente.indexOf('const ACCIONES_QUE_SIEMPRE_INTENTAN'),
-    fuente.indexOf('async function _userApiCall')
-);
-const nombres = [...bloque.matchAll(/'([a-zA-Z]+)'/g)].map(m => m[1]);
-const SIEMPRE = new Set(nombres);
+const linea = fuente.split('\n').find((l) => l.startsWith('const ACCIONES_DE_VENTA'));
+if (!linea) throw new Error('No se encontró ACCIONES_DE_VENTA en useStore.js');
+const SIEMPRE = new Set([...linea.matchAll(/'([a-zA-Z]+)'/g)].map((m) => m[1]));
 
 console.log('1. La lista de excepciones es la esperada');
 check('saleCommit puede salir aunque el POS se dé por offline', SIEMPRE.has('saleCommit'));

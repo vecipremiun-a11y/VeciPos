@@ -39,6 +39,38 @@ export function fechaDelCobro(valor, ahora = Date.now()) {
     return new Date(t).toISOString();
 }
 
+/**
+ * Despierta el camino de escritura de la base, para que no lo pague una venta.
+ *
+ * Qué se midió contra producción el 4-sep-2026: las LECTURAS contestan en
+ * ~130 ms siempre. Las ESCRITURAS, en cambio, cuestan ~260 ms cuando el nodo
+ * primario está despierto, pero la PRIMERA después de un rato sin escribir
+ * costó 10.582 ms. Diez segundos y medio. Una venta que caiga justo ahí se pasa
+ * del límite de 12 s del navegador y termina en la cola offline —no se pierde,
+ * pero la cajera espera y la venta no queda registrada al toque.
+ *
+ * Verificado que es de la BASE y no de la conexión: apenas despierta, una
+ * conexión recién creada escribe en 258 ms.
+ *
+ * Esto abre una transacción, no hace nada y la deshace. Toma el candado de
+ * escritura un viaje y lo suelta —lo mismo que cuesta una venta normal—, así
+ * que el primero en esperar es el sistema y no la persona en la caja.
+ */
+export async function calentarEscritura(turso) {
+    const desde = Date.now();
+    let tx = null;
+    try {
+        tx = await turso.transaction();
+        await tx.execute('SELECT 1');
+        await tx.rollback();
+        return { success: true, ms: Date.now() - desde };
+    } catch (e) {
+        try { if (tx) await tx.rollback(); } catch { /* ya cerrada */ }
+        // Nunca hace fallar nada: es una preparación, no una operación.
+        return { success: false, ms: Date.now() - desde, error: e?.message || String(e) };
+    }
+}
+
 export async function saleCommit(turso, companyId, session, body) {
     const { sale } = body;
 
@@ -61,11 +93,22 @@ export async function saleCommit(turso, companyId, session, body) {
         ? sale.clientSaleId
         : null;
 
+    // El control anti-duplicado y los flags de la empresa van en UN viaje.
+    //
+    // Antes eran dos consultas seguidas, una esperando a la otra, y cada viaje
+    // a la base cuesta ~130 ms desde una función de Vercel. Con la cajera
+    // esperando, ese cuarto de segundo se nota. No dependen entre sí.
+    const [yaEsta, coRes] = await turso.batch([
+        {
+            sql: clientSaleId
+                ? 'SELECT id, total, status FROM sales WHERE company_id = ? AND client_sale_id = ? LIMIT 1'
+                : 'SELECT id, total, status FROM sales WHERE 0',
+            args: clientSaleId ? [companyId, clientSaleId] : [],
+        },
+        { sql: 'SELECT inventory_adjustment_mode, credit_block_mode FROM companies WHERE id = ?', args: [companyId] },
+    ], 'read');
+
     if (clientSaleId) {
-        const yaEsta = await turso.execute({
-            sql: 'SELECT id, total, status FROM sales WHERE company_id = ? AND client_sale_id = ? LIMIT 1',
-            args: [companyId, clientSaleId],
-        });
         const previa = yaEsta.rows[0];
         if (previa) {
             // Se responde como éxito a propósito: para quien vendió, la venta SÍ
@@ -80,11 +123,8 @@ export async function saleCommit(turso, companyId, session, body) {
         }
     }
 
-    // Flags de la empresa leídos de la BD (fuente de verdad, no del cliente)
-    const coRes = await turso.execute({
-        sql: 'SELECT inventory_adjustment_mode, credit_block_mode FROM companies WHERE id = ?',
-        args: [companyId],
-    });
+    // Flags de la empresa leídos de la BD (fuente de verdad, no del cliente).
+    // Vinieron en el mismo viaje que el control anti-duplicado, más arriba.
     const co = coRes.rows[0] || {};
     const inventoryAdjustmentMode = Number(co.inventory_adjustment_mode) === 1;
     const creditBlockMode = co.credit_block_mode || 'warn';
@@ -489,28 +529,29 @@ export async function saleCommit(turso, companyId, session, body) {
         throw error;
     }
 
-    // Espejo sale_items (post-commit; nunca hace fallar la venta)
-    try {
-        await mirrorSaleItems(turso, {
+    // Espejo de sale_items y flags del SII, en PARALELO.
+    //
+    // Las dos corren después del commit y ninguna depende de la otra, pero iban
+    // una atrás de la otra: dos viajes a la base que la caja esperaba de más.
+    // Juntas cuestan lo que la más lenta. Ninguna puede hacer fallar la venta:
+    // la venta ya está guardada.
+    let sii = null;
+    const [, resSii] = await Promise.all([
+        mirrorSaleItems(turso, {
             saleId,
             companyId,
             saleDate: now,
             items: itemsToProcess,
             source: 'live',
-        });
-    } catch (err) {
-        console.error('[fase4] mirrorSaleItems:', err?.message || err);
-    }
-
-    // Flags SII para que el cliente decida la auto-emisión sin tocar la BD
-    let sii = null;
-    try {
-        const siiRes = await turso.execute({
+        }).catch(err => { console.error('[fase4] mirrorSaleItems:', err?.message || err); }),
+        turso.execute({
             sql: 'SELECT auto_emit, is_active FROM sii_config WHERE company_id = ?',
             args: [companyId],
-        });
-        if (siiRes.rows[0]) {
-            sii = { auto_emit: Number(siiRes.rows[0].auto_emit), is_active: Number(siiRes.rows[0].is_active) };
+        }).catch(() => null),
+    ]);
+    try {
+        if (resSii?.rows?.[0]) {
+            sii = { auto_emit: Number(resSii.rows[0].auto_emit), is_active: Number(resSii.rows[0].is_active) };
         }
     } catch { /* sin config SII */ }
 

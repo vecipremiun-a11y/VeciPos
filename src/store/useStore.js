@@ -10,7 +10,7 @@ import { markActivity } from '../lib/smartPolling';
 import { setTabUserId, getTabUserId, broadcastLogin, broadcastLogout } from '../lib/sessionGuard';
 import { alExpirarSesion, esSesionExpirada, sesionExpirada, reiniciarAvisoSesion } from '../lib/sesion';
 import { sinDobleEnvio } from '../lib/inFlight';
-import { hayConexion, reportarResultadoRed, fetchConLimite, ponerOfflineManual } from '../lib/conectividad';
+import { hayConexion, reportarResultadoRed, fetchConLimite, ponerOfflineManual, esOfflineManual } from '../lib/conectividad';
 import { getModuleByKey } from '../constants/modules';
 import { getPlanLevel } from '../config/mercadopago';
 import bcrypt from 'bcryptjs';
@@ -43,28 +43,37 @@ function userApiCall(action, payload = {}) {
     return sinDobleEnvio(action, payload, () => _userApiCall(action, payload));
 }
 
-// Tiempo máximo de espera de una llamada al servidor.
+// Cuánto se espera al servidor antes de darlo por perdido.
 //
-// Sin esto, con el WiFi del local encendido pero SIN internet, `fetch` no
-// fallaba: se quedaba colgado. El cajero veía la venta "procesando" y el modo
-// offline nunca se activaba, porque el camino que encola la venta recién corre
-// cuando la llamada falla. Medido en Node contra una IP muerta: 10,7 s; en el
-// navegador puede ser mucho más, y si la conexión TCP se abre y el servidor no
-// responde, no termina nunca.
+// Existe porque `fetch` sin tope no falla: con el WiFi del local encendido pero
+// sin internet se queda colgado para siempre. Medido en Node contra una IP
+// muerta: 10,7 s; en el navegador puede ser mucho más, y si la conexión TCP se
+// abre y el servidor no responde, no termina nunca. Sin este tope, la venta se
+// quedaría en el aire: ni registrada ni guardada en el equipo.
 //
-// 12 s es holgado: las funciones de Vercel cortan a los 10, así que una
-// respuesta más lenta que eso ya está muerta de todos modos.
-const API_TIMEOUT_MS = 12000;
+// 12 s para las pantallas: las funciones de Vercel cortan a los 10, así que una
+// respuesta más lenta ya está muerta.
+const ESPERA_NORMAL_MS = 12000;
+
+// A LA VENTA se le da un minuto, y no para "detectar" nada.
+//
+// Desde el 4-sep-2026 la venta corre en segundo plano: la caja ya vio su
+// comprobante y siguió vendiendo, así que nadie está esperando esta respuesta.
+// El tope acá solo evita que una venta quede colgada sin registrarse ni
+// guardarse — pasado el minuto se guarda en el equipo y sube después.
+//
+// Antes eran 12 s también para la venta, y ahí sí molestaba: medido ese mismo
+// día, la primera escritura tras un rato tranquilo costó 10,5 s con internet
+// estable y la base sana. Rozar el tope mandaba a la cola ventas que iban a
+// entrar perfecto, y la cajera veía "guardada sin conexión" con conexión de
+// sobra.
+const ESPERA_VENTA_MS = 60000;
+const ACCIONES_DE_VENTA = new Set(['saleCommit', 'saleAggregations']);
+const ESPERA_DE = (accion) => (ACCIONES_DE_VENTA.has(accion) ? ESPERA_VENTA_MS : ESPERA_NORMAL_MS);
 
 /** ¿El POS se da por sin conexión ahora mismo? Mira el monitor real (latido a
  * /api/ping), no solo `navigator.onLine`, que con WiFi sin internet miente. */
 const sinInternet = () => (typeof navigator !== 'undefined' && !navigator.onLine) || !hayConexion();
-
-// Acciones que SÍ pueden salir a la red aunque el sistema se dé por offline.
-//
-// Son las que forman parte del camino de vuelta: si se cortaran, el POS no
-// tendría cómo darse cuenta de que la conexión volvió.
-const ACCIONES_QUE_SIEMPRE_INTENTAN = new Set(['saleCommit', 'saleAggregations']);
 
 async function _userApiCall(action, payload = {}) {
     // ── Sin conexión, no se sale a la red: se contesta al instante ────
@@ -78,7 +87,7 @@ async function _userApiCall(action, payload = {}) {
     // clientes, ver la cola— no pasan por acá: leen de Dexie. Las demás avisan
     // en el acto que necesitan internet, que es la verdad, en vez de hacer
     // esperar para decir lo mismo.
-    if (sinInternet() && !ACCIONES_QUE_SIEMPRE_INTENTAN.has(action)) {
+    if (sinInternet() && !ACCIONES_DE_VENTA.has(action)) {
         return { success: false, error: 'Sin conexión', sinConexion: true, _status: 0 };
     }
     try {
@@ -86,6 +95,7 @@ async function _userApiCall(action, payload = {}) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
+            // (el tope de espera va como tercer argumento, más abajo)
             // expectedUserId va al final: identifica a nombre de quién cree actuar ESTA
             // pestaña. El servidor lo compara con la cookie y corta si no coinciden.
             //
@@ -98,7 +108,7 @@ async function _userApiCall(action, payload = {}) {
                 ...payload,
                 expectedUserId: useStore.getState().currentUser?.id ?? getTabUserId(),
             }),
-        });
+        }, ESPERA_DE(action));
         const data = await r.json().catch(() => ({ success: false, error: 'Respuesta inválida del servidor' }));
         if (data && typeof data === 'object') data._status = r.status;
         // El servidor contestó: hay internet. Confirma el estado sin gastar un
@@ -3457,19 +3467,32 @@ export const useStore = create(persist((set, get) => ({
         }
 
         // ============================================
-        // FASE 0: DETECCIÓN OFFLINE
+        // FASE 0: ¿ESTA VENTA VA DIRECTO A LA COLA?
         // ============================================
-        // Si NO hay conexión, derivar a la ruta offline (Dexie + cola).
-        // Esto permite seguir vendiendo aunque la conexión esté caída por
-        // horas. La sincronización al servidor se hace automáticamente al
-        // volver online (App.jsx + OfflineSync page).
-        // Excepción: si la venta viene desde la cola de sincronización
-        // (`_fromOfflineQueue`), NO re-encolar — debe procesarse online sí o sí.
-        // `hayConexion()` es el monitor real (latido a /api/ping). Antes solo se
-        // miraba navigator.onLine, que con WiFi sin internet dice "sí hay" — y la
-        // venta salía a buscar el servidor en vez de guardarse offline.
-        const sinConexion = sinInternet();
-        if (sinConexion && !sale?._fromOfflineQueue) {
+        // Solo si el cajero PUSO el modo offline a mano. En cualquier otro caso
+        // la venta sale a buscar el servidor, como toda la vida.
+        //
+        // Antes acá se le preguntaba al monitor de conectividad (el latido a
+        // /api/ping). Esa consulta le agregó a cada venta una decisión que puede
+        // salir mal: el latido tarda unos segundos en enterarse de un cambio, y
+        // mientras tanto manda ventas a la cola con el internet andando perfecto
+        // —el 4-sep-2026 pasó con la conexión estable y la base sana—. Para quien
+        // está en la caja eso es peor que esperar: la venta "se guardó sin
+        // conexión" cuando había conexión de sobra.
+        //
+        // Quien decide trabajar sin conexión es la persona que mira la caja, con
+        // el botón de arriba. Si no lo tocó, se vende como siempre: se intenta
+        // contra el servidor y, si no contesta, ahí sí la venta se guarda en el
+        // equipo. Nunca se pierde.
+        //
+        // Excepción: si la venta viene de la cola (`_fromOfflineQueue`), no se
+        // vuelve a encolar — tiene que procesarse online sí o sí.
+        // Dos motivos, y ninguno consulta a la base:
+        //   · el cajero prendió el modo offline, o
+        //   · el equipo se quedó sin red (lo dice el navegador, no un latido).
+        const irDirectoALaCola = esOfflineManual()
+            || (typeof navigator !== 'undefined' && navigator.onLine === false);
+        if (irDirectoALaCola && !sale?._fromOfflineQueue) {
             try {
                 return await get()._addSaleOffline(sale);
             } catch (offlineErr) {
@@ -3753,14 +3776,23 @@ export const useStore = create(persist((set, get) => ({
                     get().checkInventoryAlerts(productIds);
                 }, 100);
 
-                // Sync client debt columns if credit sale (await: el saldo del cliente DEBE
-                // quedar coherente antes de retornar para que la siguiente venta lo lea bien)
+                // Recalcular la deuda del cliente ya NO hace esperar a la caja.
+                //
+                // Antes iba con `await`, con el argumento de que el saldo tenía
+                // que quedar coherente antes de devolver. Pero eso le sumaba un
+                // viaje entero al servidor a cada venta fiada, con la cajera y el
+                // cliente esperando — y el saldo se puede recalcular igual de
+                // bien un segundo después: sale de las ventas, no de un contador
+                // que haya que mantener a mano.
+                //
+                // El único riesgo sería fiarle de nuevo al mismo cliente en ese
+                // segundo, y el límite igual lo revisa el servidor en la venta
+                // siguiente, contra la base y no contra lo que tenga el navegador.
                 if (sale.paymentMethod === 'Crédito' && sale.client?.id) {
-                    try {
-                        await get()._syncClientDebt(sale.client.id);
-                    } catch (debtErr) {
-                        console.warn('⚠️ _syncClientDebt failed post-sale:', debtErr);
-                    }
+                    setTimeout(() => {
+                        get()._syncClientDebt(sale.client.id)
+                            .catch(debtErr => console.warn('⚠️ _syncClientDebt failed post-sale:', debtErr));
+                    }, 0);
                 }
 
                 // ============================================
@@ -4501,6 +4533,18 @@ export const useStore = create(persist((set, get) => ({
             console.error("❌ Fetch active registers error", e);
             console.timeEnd('⏱️ fetchActiveRegisters');
         }
+    },
+
+    // Prepara el camino de escritura de la base para que no lo pague una venta.
+    // Ver el porqué y los números en calentarEscritura (api/_lib/salesActions.js)
+    // y en el efecto que la llama (src/pages/POS.jsx).
+    //
+    // Nunca hace ruido: si falla, no pasa nada — era una preparación.
+    calentarEscrituraServidor: async (companyId) => {
+        try {
+            const r = await userApiCall('calentarEscritura', { companyId });
+            if (r?.ms > 2000) console.warn(`[base] La primera escritura costó ${r.ms} ms (nodo de escritura dormido)`);
+        } catch { /* preparación: nunca molesta */ }
     },
 
     checkRegisterStatus: async (userId) => {

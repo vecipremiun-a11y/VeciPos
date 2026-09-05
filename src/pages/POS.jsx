@@ -18,6 +18,8 @@ import DispatchModal from '../components/DispatchModal';
 import InvoiceDataModal from '../components/InvoiceDataModal';
 import PreventaSuccessModal from '../components/PreventaSuccessModal';
 import PreventasListModal from '../components/PreventasListModal';
+import { createSmartInterval } from '../lib/smartPolling';
+import { hayConexion } from '../lib/conectividad';
 import ScaleReadButton from '../components/ScaleReadButton';
 import { usePermissions } from '../hooks/usePermissions';
 import { useBarcodeScanner } from '../hooks/useBarcodeScanner';
@@ -88,6 +90,7 @@ const POS = () => {
         currentUser,
         cashRegister,
         checkRegisterStatus,
+        calentarEscrituraServidor,
         inventoryAdjustmentMode,
         setPosSelectedClient,
         setCartTipoDte,
@@ -123,6 +126,7 @@ const POS = () => {
             currentUser: s.currentUser,
             cashRegister: s.cashRegister,
             checkRegisterStatus: s.checkRegisterStatus,
+            calentarEscrituraServidor: s.calentarEscrituraServidor,
             inventoryAdjustmentMode: s.inventoryAdjustmentMode,
             setPosSelectedClient: s.setPosSelectedClient,
             setCartTipoDte: s.setCartTipoDte,
@@ -234,8 +238,10 @@ const POS = () => {
     const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
     const [pendingInvoiceData, setPendingInvoiceData] = useState(null);
     const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
+    // Mientras se espera la confirmación de la venta. Es lo único que se
+    // espera: el resto sale por atrás con la venta ya guardada.
+    const [guardandoVenta, setGuardandoVenta] = useState(false);
     const [lastSaleDetails, setLastSaleDetails] = useState(null);
-    const [isProcessingSale, setIsProcessingSale] = useState(false);
     // Ver handlePaymentConfirm: candado sincrónico contra el doble cobro y clave
     // única del cobro en curso. Van en referencias y no en estado a propósito —
     // el estado llega tarde y de eso vivían las ventas duplicadas.
@@ -537,87 +543,100 @@ const POS = () => {
         // Capturar el código de preventa antes de limpiarlo
         const preventaCode = activePreventaCode;
 
-        // Mostrar overlay breve de "procesando" (no bloquea, dura ~100-300ms típicamente).
-        // Solo abrimos el modal de éxito DESPUÉS de que la transacción haya hecho commit
-        // (o se haya encolado para reintento offline). Así no se pierde nunca una venta.
-        setIsProcessingSale(true);
+        // ── Se espera SOLO la confirmación de la venta ───────────────
+        //
+        // Nada más. Que la venta quedó guardada y con qué número: eso es lo que
+        // la caja necesita saber antes de dar por cerrado el cobro, y es lo que
+        // hace que el ticket salga con su T-<id> (verificable, por ejemplo, en
+        // los sorteos).
+        //
+        // Todo lo demás —los contadores del día, la deuda del cliente, el aviso
+        // a la tienda, la emisión del documento, el envío del despacho— sale por
+        // atrás cuando la venta ya está confirmada. Antes se esperaba también
+        // parte de eso, y cada pieza le sumaba su tiempo a la persona que estaba
+        // en la caja con gente adelante.
+        setGuardandoVenta(true);
 
+        let result;
         try {
-            const result = await addSale(saleData);
-
-            if (!result?.success) {
-                // Falla real (ej: stock insuficiente, cliente bloqueado, límite de crédito).
-                // No se encoló — mostrar error al cajero, mantener el carrito.
-                setIsProcessingSale(false);
-                alert(`Error al procesar la venta: ${result?.error || 'desconocido'}`);
-                return;
-            }
-
-            // ✅ Venta confirmada (commit en BD) o encolada (offline failsafe)
-            // Incluir el id real de la venta → el ticket imprime T-<id> y ese
-            // número es verificable (ej: sorteos). Offline encolado: aún sin id.
-            // Despacho: la venta ya existe, ahora se crea el envío que la lleva.
-            // Lo que el repartidor debe cobrar es el saldo real: 0 si se pagó aquí.
-            if (dispatch && result.saleId && !result.queued) {
-                const aCobrar = dispatch.payMode === 'on_delivery'
-                    ? finalTotal + (dispatch.deliveryFee || 0)
-                    : 0;
-                const dr = await createDelivery({
-                    sourceType: 'sale', sourceId: result.saleId,
-                    clientName: posSelectedClient?.name, clientPhone: dispatch.clientPhone,
-                    address: dispatch.address, addressNotes: dispatch.addressNotes,
-                    amountToCollect: aCobrar, deliveryFee: dispatch.deliveryFee || 0,
-                });
-                if (!dr?.success) alert('La venta se guardó, pero no se pudo crear el envío: ' + (dr?.error || ''));
-            } else if (dispatch && result.queued) {
-                alert('Venta encolada sin conexión: crea el envío manualmente desde Delivery → Envíos.');
-            }
-            setPendingDispatch(null);
-
-            // La venta quedó registrada (o encolada con su clave adentro): el
-            // próximo cobro es otra venta y le toca clave nueva.
-            claveCobroRef.current = null;
-
-            setLastSaleDetails({ ...saleData, id: result.saleId || null, _queued: !!result.queued });
-            setIsSuccessModalOpen(true);
-
-            // El carrito se vacía ACÁ, apenas la venta quedó registrada —online o
-            // encolada—, y ya no al cerrar el modal.
-            //
-            // Cerrar con la X o tocando afuera ya llamaba a `handleNewSale`, que
-            // limpia; pero eso deja el vaciado colgando de que el modal se cierre
-            // bien. Si la pantalla se recarga entremedio (el script de
-            // auto-recuperación de index.html lo hace ante cualquier archivo que
-            // falle), el carrito vuelve desde localStorage con los productos
-            // dentro y la cajera no sabe si cobró o no.
-            //
-            // Cobrada la venta, el carrito no tiene nada más que hacer. Si la
-            // venta NO se registró, este punto no se alcanza: más arriba se
-            // muestra el error y se conserva el carrito para reintentar.
-            clearCart();
-            setPosSelectedClient(null);
-            setPendingInvoiceData(null);
-            if (preventaCode) {
-                setActivePreventaCode(null);
-                if (!result.queued) {
-                    completePreventa(preventaCode, result.saleId);
-                }
-            }
-
-            if (result.queued) {
-                // Aviso suave: la venta se sincronizará apenas vuelva la conexión
-                console.warn('🛟 Venta encolada (offline). Se sincronizará automáticamente.');
-            }
+            result = await addSale(saleData);
         } catch (e) {
             console.error('Error inesperado en venta:', e);
-            alert(`Error inesperado: ${e?.message || e}`);
-        } finally {
-            setIsProcessingSale(false);
-            // Se libera el candado pero NO la clave: si esto terminó en error, el
-            // carrito sigue ahí y el cajero va a reintentar el mismo cobro. Con la
-            // misma clave, si la primera sí había entrado, el servidor devuelve
-            // esa y no cobra dos veces.
+            setGuardandoVenta(false);
             cobrandoRef.current = false;
+            alert(`Error inesperado: ${e?.message || e}`);
+            return;
+        }
+        setGuardandoVenta(false);
+
+        if (!result?.success) {
+            // Rechazo real (stock, cliente bloqueado, límite de crédito). No se
+            // encoló: la venta NO quedó registrada y el carrito se conserva para
+            // reintentar. La clave NO se suelta: si la primera sí había entrado,
+            // el reintento llega con la misma y el servidor devuelve esa.
+            cobrandoRef.current = false;
+            alert(`Error al procesar la venta: ${result?.error || 'desconocido'}`);
+            return;
+        }
+
+        // ✅ Confirmada. Con su número si el servidor contestó; sin él si quedó
+        // guardada en el equipo (ahí el modal lo avisa en ámbar).
+        setLastSaleDetails({ ...saleData, id: result.saleId || null, _queued: !!result.queued });
+        setIsSuccessModalOpen(true);
+
+        // El carrito se vacía ACÁ, con la venta ya confirmada, y no al cerrar el
+        // modal. Colgarlo del cierre dejaba el vaciado a merced de que la
+        // pantalla no se recargara entremedio: el auto-recupero de index.html
+        // recarga ante cualquier archivo que falle, y el carrito volvía desde el
+        // disco con los productos dentro, sin que la cajera supiera si cobró.
+        clearCart();
+        setPosSelectedClient(null);
+        setPendingInvoiceData(null);
+        setActivePreventaCode(null);
+        setPendingDispatch(null);
+
+        // El candado y la clave se sueltan en el TICK SIGUIENTE, no acá.
+        //
+        // `clearCart()` no vacía el carrito para esta función: `cart` quedó
+        // capturado cuando se dibujó la pantalla y sigue teniendo los productos
+        // hasta el próximo render. Si en ese instante entrara un segundo cobro
+        // —un clic sensible, el flujo de despacho que no pasa por el modal—
+        // armaría la MISMA venta con una clave NUEVA, y para el servidor serían
+        // dos ventas distintas. Es exactamente cómo se triplicaron las ventas
+        // del 14-ago-2026 (commit b167103).
+        setTimeout(() => {
+            claveCobroRef.current = null;
+            cobrandoRef.current = false;
+        }, 0);
+
+        // ── De acá para abajo, nada hace esperar a la caja ───────────
+        (async () => {
+            try {
+                if (preventaCode && !result.queued) completePreventa(preventaCode, result.saleId);
+
+                // Despacho: la venta ya existe, ahora se crea el envío que la lleva.
+                // Lo que el repartidor debe cobrar es el saldo real: 0 si se pagó aquí.
+                if (dispatch && result.saleId && !result.queued) {
+                    const aCobrar = dispatch.payMode === 'on_delivery'
+                        ? finalTotal + (dispatch.deliveryFee || 0)
+                        : 0;
+                    const dr = await createDelivery({
+                        sourceType: 'sale', sourceId: result.saleId,
+                        clientName: saleData.client?.name, clientPhone: dispatch.clientPhone,
+                        address: dispatch.address, addressNotes: dispatch.addressNotes,
+                        amountToCollect: aCobrar, deliveryFee: dispatch.deliveryFee || 0,
+                    });
+                    if (!dr?.success) alert('La venta se guardó, pero no se pudo crear el envío: ' + (dr?.error || ''));
+                } else if (dispatch && result.queued) {
+                    alert('Venta encolada sin conexión: crea el envío manualmente desde Delivery → Envíos.');
+                }
+            } catch (e) {
+                console.warn('Tarea posterior a la venta falló (la venta está guardada):', e);
+            }
+        })();
+
+        if (result.queued) {
+            console.warn('🛟 Venta guardada en el equipo. Se sube sola cuando el servidor conteste.');
         }
     };
 
@@ -714,6 +733,38 @@ const POS = () => {
         }
     }, [currentUser, checkRegisterStatus]);
 
+    // ── Que la primera venta no pague el despertar de la base ────────
+    //
+    // Medido contra producción el 4-sep-2026: una escritura cuesta ~260 ms con
+    // el nodo primario despierto, pero la PRIMERA después de un rato sin
+    // escribir costó 10.582 ms. Diez segundos y medio. La venta que caiga justo
+    // ahí se pasa del límite de 12 s y termina en la cola offline: no se pierde,
+    // pero la cajera espera de más y la venta no queda registrada al toque.
+    //
+    // Esto abre y deshace una transacción vacía al entrar al POS y cada 4
+    // minutos mientras esté abierto, para que ese costo lo pague el sistema en
+    // segundo plano y no la persona con gente en la caja.
+    //
+    // Es barato y no compite con las ventas: toma el candado un viaje y lo
+    // suelta, lo mismo que una venta normal, y solo mientras el POS está a la
+    // vista (`pauseWhenHidden`).
+    React.useEffect(() => {
+        if (!activeCompanyId) return;
+        const calentar = () => {
+            if (!hayConexion()) return;
+            calentarEscrituraServidor(activeCompanyId);
+        };
+        calentar();
+        return createSmartInterval(calentar, {
+            label: 'calentar-escritura',
+            activeMs: 4 * 60_000,
+            idleMs: 4 * 60_000,
+            pauseWhenHidden: true,
+            pauseWhenOffline: true,
+            runOnVisible: true,
+        });
+    }, [activeCompanyId, calentarEscrituraServidor]);
+
     // Pagination State
     const [offset, setOffset] = React.useState(0);
     const [hasMore, setHasMore] = React.useState(true);
@@ -801,12 +852,17 @@ const POS = () => {
 
             {/* El aviso de "sin conexión" es global: ver <AvisoSinConexion /> en App.jsx */}
 
-            {/* Overlay breve de "procesando venta" — bloquea doble click pero dura solo el commit */}
-            {isProcessingSale && (
-                <div className="fixed inset-0 z-[10000] bg-black/40 backdrop-blur-sm flex items-center justify-center pointer-events-auto">
+            {/* Aviso mientras se confirma la venta.
+                Dura lo que tarda el servidor en decir "guardada, número tal" —
+                nada más: los contadores, la deuda del cliente, el documento y el
+                despacho salen después, con la venta ya confirmada.
+                Bloquea la pantalla a propósito: es la garantía de que nadie
+                cobra dos veces mientras esta venta se está guardando. */}
+            {guardandoVenta && (
+                <div className="fixed inset-0 z-[10000] bg-black/40 backdrop-blur-sm flex items-center justify-center">
                     <div className="bg-[var(--color-surface)] rounded-2xl px-8 py-6 flex items-center gap-4 border border-[var(--glass-border)] shadow-2xl">
                         <div className="w-6 h-6 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
-                        <span className="text-[var(--color-text)] font-semibold">Procesando venta…</span>
+                        <span className="text-[var(--color-text)] font-semibold">Guardando venta…</span>
                     </div>
                 </div>
             )}

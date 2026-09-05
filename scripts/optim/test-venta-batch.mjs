@@ -126,6 +126,23 @@ try {
     check('sigue habiendo UNA sola venta', Number(cuantas.rows[0].n) === 1, cuantas.rows[0].n + ' filas');
     check('no descontó stock de nuevo', (await stockDe(1)) === stockPrevio, `${await stockDe(1)} vs ${stockPrevio}`);
 
+    console.log('\n8. Una venta SIN clave anti-duplicado también entra');
+    // El control anti-duplicado ahora viaja en el mismo lote que los flags de la
+    // empresa, para ahorrarle un viaje a la caja. Cuando la venta no trae clave,
+    // esa consulta tiene que devolver cero filas sin romper el lote — si no,
+    // ninguna venta sin clave se podría registrar.
+    const stockAntes = await stockDe(1);
+    const rSinClave = await saleCommit(db, CO, session, {
+        sale: {
+            items: [item(1, 'Ajo', 1, 1000)], total: 1000, summary: 'sin clave',
+            paymentMethod: 'Efectivo', paymentDetails: {}, client: null,
+        },
+    });
+    check('se registra igual', rSinClave.success === true, rSinClave.error || '');
+    check('descuenta el stock', (await stockDe(1)) === stockAntes - 1, (await stockDe(1)) + ' vs ' + (stockAntes - 1));
+    const filaSinClave = await db.execute({ sql: 'SELECT client_sale_id FROM sales WHERE id = ?', args: [rSinClave.saleId] });
+    check('queda sin clave en la base', filaSinClave.rows[0].client_sale_id === null, String(filaSinClave.rows[0].client_sale_id));
+
 } finally {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* Windows */ }
 }
