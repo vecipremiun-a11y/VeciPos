@@ -845,24 +845,28 @@ export const useStore = create(persist((set, get) => ({
         const miTurno = ++secuenciaCatalogo;
         const vigente = () => secuenciaCatalogo === miTurno;
 
-        // 1) Lo guardado, ya. Si no hay nada guardado NO se pinta vacío: se espera
-        //    al servidor, para no mostrar "sin resultados" en un equipo recién
-        //    instalado que todavía no alcanzó a sincronizar.
-        let hayLocal = false;
-        try {
-            const locales = await buscarProductosLocal(activeCompanyId, term);
-            if (!vigente()) return;
-            if (locales.length > 0) {
-                hayLocal = true;
-                set({ products: locales });
+        // Lo guardado en el equipo: la red de seguridad, no el primer paso.
+        const desdeLoGuardado = async () => {
+            try {
+                const locales = await buscarProductosLocal(activeCompanyId, term);
+                if (!vigente()) return false;
+                // Si no hay nada guardado NO se pinta vacío: en un equipo recién
+                // instalado sería un "sin resultados" mentiroso.
+                if (locales.length > 0) { set({ products: locales }); return true; }
+            } catch (e) {
+                console.error('Búsqueda local falló', e);
             }
-        } catch (e) {
-            console.error('Búsqueda local falló', e);
-        }
+            return false;
+        };
 
-        if (sinInternet()) return;
+        // ── Una sola carga, no dos ───────────────────────────────────
+        //
+        // Mismo motivo que en la grilla por categoría: pintar primero lo
+        // guardado y después repintar con lo del servidor hacía que la lista se
+        // sacudiera y las fotos se recargaran. Con conexión se va derecho al
+        // servidor, que además trae el stock y los precios de verdad.
+        if (sinInternet()) { await desdeLoGuardado(); return; }
 
-        // 2) El servidor manda cuando contesta.
         try {
             const rows = await reportRows(activeCompanyId, 'productsSearch', { term, limit: 50 });
             if (!vigente()) return;
@@ -879,10 +883,11 @@ export const useStore = create(persist((set, get) => ({
             if (imgIds.length) get().loadProductImages(imgIds);
         } catch (e) {
             console.error("Search failed", e);
-            // El servidor no contestó: se queda lo guardado. Si tampoco había nada
-            // guardado, la lista queda vacía —que es la verdad— y el aviso de "sin
-            // conexión" ya está en pantalla.
-            if (!hayLocal && vigente()) set({ products: [] });
+            // El servidor no contestó: recién ahí se busca en lo guardado. Si
+            // tampoco hay nada, la lista queda vacía —que es la verdad— y el
+            // aviso de "sin conexión" ya está en pantalla.
+            const hubo = await desdeLoGuardado();
+            if (!hubo && vigente()) set({ products: [] });
         }
     },
 
@@ -956,35 +961,38 @@ export const useStore = create(persist((set, get) => ({
             else set({ products: [...get().products, ...filas] });
         };
 
-        // 1) Lo guardado.
-        //    La primera página se pinta al instante, para que la grilla nunca
-        //    aparezca vacía mientras se espera al servidor. Las páginas del scroll
-        //    NO se pintan si hay internet: sumarían filas que el servidor va a
-        //    volver a sumar (quedarían duplicadas).
-        let hayMasLocal = false;
-        let pinteLocal = false;
-        let sinRed = sinInternet();
-        try {
-            const locales = await productosPorCategoriaLocal(activeCompanyId, category, offset, limit);
-            if (!vigente()) return false;
-            sinRed = sinInternet();
-            hayMasLocal = locales.length === limit;
-            if (locales.length > 0 && (primeraPagina || sinRed)) {
-                pintar(locales);
-                pinteLocal = true;
+        // Lo guardado en el equipo: la red de seguridad, no el primer paso.
+        const desdeLoGuardado = async () => {
+            try {
+                const locales = await productosPorCategoriaLocal(activeCompanyId, category, offset, limit);
+                if (!vigente()) return false;
+                if (locales.length > 0) pintar(locales);
+                return locales.length === limit;
+            } catch (e) {
+                console.error('Catálogo local falló', e);
+                return false;
             }
-        } catch (e) {
-            console.error('Catálogo local falló', e);
-        }
+        };
 
-        if (sinRed) return hayMasLocal;
+        // ── Una sola carga, no dos ───────────────────────────────────
+        //
+        // Antes esto pintaba PRIMERO lo guardado y después volvía a pintar con
+        // lo del servidor. La idea era que la grilla no apareciera vacía, pero
+        // el efecto era el contrario: al entrar se veían los productos, la
+        // pantalla se sacudía entera y las fotos se recargaban. Dos cargas para
+        // mostrar lo mismo.
+        //
+        // Con conexión se va derecho al servidor —que además trae lo más
+        // actualizado, que es lo que importa para vender—. Lo guardado se usa
+        // cuando de verdad hace falta: sin conexión, o si el servidor no
+        // contesta. Ahí una carga tampoco molesta, porque es la única.
+        if (sinInternet()) return desdeLoGuardado();
 
-        // 2) El servidor manda cuando contesta.
         try {
             // Query server-side SIN 'image' (base64 pesado): la grilla aparece al
             // instante y las imágenes se cargan después en 1 consulta (loadProductImages).
             const rows = await reportRows(activeCompanyId, 'categoryProducts', { category, offset, limit });
-            if (!vigente()) return hayMasLocal;
+            if (!vigente()) return false;
 
             const products = rows.map(p => ({
                 ...p,
@@ -1002,8 +1010,8 @@ export const useStore = create(persist((set, get) => ({
             return rows.length === limit; // true si hay más
         } catch (e) {
             console.error("❌ Load category products failed", e);
-            // El servidor no contestó: vale lo que ya se pintó desde lo guardado.
-            return pinteLocal ? hayMasLocal : false;
+            // El servidor no contestó: recién ahí vale lo guardado.
+            return desdeLoGuardado();
         }
     },
 
