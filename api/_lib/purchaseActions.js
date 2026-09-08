@@ -181,6 +181,42 @@ async function supplierOrderDelete(turso, companyId, session, { id }) {
 async function purchaseCreate(turso, companyId, session, { purchase }) {
     if (!purchase?.items?.length) return { success: false, error: 'Compra sin items' };
 
+    // ── Antes de tocar nada: ¿qué productos de la factura existen? ───
+    //
+    // El `UPDATE products … WHERE id = ? AND company_id = ?` no afecta ninguna
+    // fila si ese producto no existe, y nadie miraba el resultado. La compra
+    // contestaba "listo", creaba un lote colgado de un producto inexistente, y
+    // esa mercadería no llegaba a ningún inventario. Sin un solo aviso.
+    //
+    // Es por donde se pierde mercadería en silencio: alcanza con que el
+    // emparejamiento de un renglón de la factura falle.
+    //
+    // Se comprueba ANTES para no dejar el lote huérfano —después del batch ya
+    // estaría creado— y para poder decir exactamente qué renglón quedó afuera.
+    const idsPedidos = [...new Set(
+        purchase.items.map(i => i?.id).filter(v => v !== undefined && v !== null && v !== '')
+    )];
+    const existentes = new Set();
+    if (idsPedidos.length) {
+        const q = await turso.execute({
+            sql: `SELECT id FROM products WHERE company_id = ? AND id IN (${idsPedidos.map(() => '?').join(',')})`,
+            args: [companyId, ...idsPedidos],
+        });
+        for (const f of q.rows) existentes.add(String(f.id));
+    }
+    const seAplican = purchase.items.filter(i => existentes.has(String(i?.id)));
+    const sinAplicar = purchase.items
+        .filter(i => !existentes.has(String(i?.id)))
+        .map(i => ({
+            id: i?.id ?? null,
+            name: i?.name || i?.description || 'Producto sin nombre',
+            sku: i?.sku || null,
+            quantity: i?.quantity ?? null,
+            motivo: (i?.id === undefined || i?.id === null || i?.id === '')
+                ? 'El renglón no quedó asociado a ningún producto'
+                : 'Ese producto ya no existe en el inventario',
+        }));
+
     // 1. Insert compra (primero, para enlazar lotes por purchase_id)
     const purchaseResult = await turso.execute({
         sql: `INSERT INTO purchases (supplier_id, supplier_name, invoice_number, date, total, items, status, user_id,
@@ -197,9 +233,11 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
     const rawId = purchaseResult.rows[0]?.id || purchaseResult.lastInsertRowid;
     const purchaseId = typeof rawId === 'bigint' ? Number(rawId) : rawId;
 
-    // 2. Batch: stock/costo/precio + lote por item + audit
+    // 2. Batch: stock/costo/precio + lote por item + audit.
+    //    Solo los renglones que sí tienen su producto: los otros ya se
+    //    apartaron arriba y viajan de vuelta al navegador para que avise.
     const queries = [];
-    purchase.items.forEach(item => {
+    seAplican.forEach(item => {
         queries.push({
             sql: 'UPDATE products SET stock = ROUND(stock + ?, 3), cost = ?, price = ?, sku = ?, tax_rate = ?, supplier = ? WHERE id = ? AND company_id = ?',
             args: [item.quantity, item.cost, item.price, item.sku, item.tax || 0, purchase.supplierName, item.id, companyId],
@@ -218,7 +256,11 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
     });
     await turso.batch(queries);
 
-    // 3. Espejo purchase_items (post-commit; nunca hace fallar la compra)
+    // 3. Espejo purchase_items (post-commit; nunca hace fallar la compra).
+    //    Va con TODOS los renglones a propósito, incluidos los que no llegaron
+    //    al inventario: esto es el espejo de la FACTURA, no del efecto en el
+    //    stock. La factura dice lo que dice, y el aviso de lo que no se aplicó
+    //    viaja aparte en `itemsSinAplicar`.
     try {
         await mirrorPurchaseItems(turso, {
             purchaseId, companyId, purchaseDate: purchase.date, items: purchase.items, source: 'live',
@@ -261,7 +303,14 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
         console.error('Error updating supplier summary:', e);
     }
 
-    return { success: true, purchaseId };
+    if (sinAplicar.length) {
+        console.warn(`[compras] Compra #${purchaseId}: ${sinAplicar.length} renglón(es) no llegaron al inventario:`,
+            sinAplicar.map(i => `${i.name} (${i.motivo})`).join(' · '));
+    }
+
+    // `itemsSinAplicar` viaja siempre, aunque venga vacío: así la pantalla
+    // puede confiar en el campo en vez de adivinar.
+    return { success: true, purchaseId, itemsSinAplicar: sinAplicar };
 }
 
 async function purchasesFetch(turso, companyId, session, { offset = 0, limit = 50 }) {
@@ -372,8 +421,26 @@ const compacto = (s) => String(s || '')
 // alcanzó para que "SOPA BOWL POLLO" terminara emparejado con el producto de
 // CARNE. Se normaliza la columna en la consulta, porque SQLite compara LIKE sin
 // distinguir mayúsculas pero sí distinguiendo tildes.
-const SIN_TILDES = (col) =>
-    `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(${col}),'á','a'),'é','e'),'í','i'),'ó','o'),'ú','u')`;
+//
+// Van las MAYÚSCULAS acentuadas y la ñ/ü, y hace falta: `LOWER()` de SQLite
+// solo baja el alfabeto inglés. Comprobado contra la base real el 8-sep-2026,
+// `lower('PIÑA')` devuelve `'piÑa'`. Y una factura viene JUSTAMENTE EN
+// MAYÚSCULAS, que es el caso peor: "PIÑA EN CONSERVA" no emparejaba con "Piña
+// en Conserva" del catálogo.
+const SIN_TILDES = (col) => {
+    let e = `LOWER(${col})`;
+    const pares = [
+        ['á', 'a'], ['Á', 'a'], ['à', 'a'], ['À', 'a'],
+        ['é', 'e'], ['É', 'e'], ['è', 'e'], ['È', 'e'],
+        ['í', 'i'], ['Í', 'i'], ['ì', 'i'], ['Ì', 'i'],
+        ['ó', 'o'], ['Ó', 'o'], ['ò', 'o'], ['Ò', 'o'],
+        ['ú', 'u'], ['Ú', 'u'], ['ù', 'u'], ['Ù', 'u'],
+        ['ü', 'u'], ['Ü', 'u'],
+        ['ñ', 'n'], ['Ñ', 'n'],
+    ];
+    for (const [de, a] of pares) e = `REPLACE(${e},'${de}','${a}')`;
+    return e;
+};
 
 const quitarTildes = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 

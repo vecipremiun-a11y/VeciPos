@@ -77,6 +77,10 @@ const Purchases = () => {
     // productos, cantidades y costos ya cargados: al recibir la mercadería solo
     // hay que revisar precios y guardar, en vez de tipear la factura entera.
     const [desdePedido, setDesdePedido] = useState(null);
+    // Renglones de la factura que no llegaron al inventario. Se muestran en un
+    // cuadro que hay que cerrar a mano: es mercadería pagada que el sistema no
+    // contó, y antes eso pasaba sin un solo aviso.
+    const [avisoSinAplicar, setAvisoSinAplicar] = useState(null);
     useEffect(() => {
         let raw;
         try { raw = sessionStorage.getItem('compraDesdePedido'); } catch { return; }
@@ -406,8 +410,17 @@ const Purchases = () => {
             document: documentBase64
         };
 
-        const success = await addPurchase(purchase);
-        if (success) {
+        // `addPurchase` devuelve un OBJETO, siempre. Acá se leía como si fuera
+        // un booleano —`if (success)`— así que una compra fallida entraba por la
+        // rama del éxito y la pantalla decía "Compra guardada correctamente" con
+        // la compra sin guardar. Hay que mirar el campo, no el objeto.
+        const res = await addPurchase(purchase);
+        if (res?.success) {
+            // Renglones que no llegaron a ningún inventario: el producto ya no
+            // existe, o el renglón nunca quedó emparejado. Se avisa fuerte, no
+            // con un mensajito que se va solo: es mercadería que se pagó y que
+            // el sistema no va a contar.
+            if (res.itemsSinAplicar?.length) setAvisoSinAplicar(res.itemsSinAplicar);
             // Si la compra vino de un pedido, ese pedido ya está recibido: se
             // marca para que no siga figurando como pendiente ni se pueda pasar
             // a compra por segunda vez.
@@ -425,7 +438,7 @@ const Purchases = () => {
             setInvoiceItems([]);
             setInvoiceData({ ...invoiceData, invoiceNumber: '', observation: '', document: null });
         } else {
-            toast('No se pudo guardar la compra', 'error');
+            toast(res?.error ? `No se pudo guardar la compra: ${res.error}` : 'No se pudo guardar la compra', 'error');
         }
     };
 
@@ -1250,6 +1263,52 @@ const Purchases = () => {
                             </button>
                         </div>
                         <div id={scannerContainerId} className="w-full" />
+                    </div>
+                </div>
+            )}
+
+            {/* Renglones que NO llegaron al inventario.
+                Va como cuadro que hay que cerrar a mano y no como mensajito que
+                se desvanece: es mercadería que se pagó y que el sistema no
+                contó. Antes esto pasaba en silencio — la compra decía "listo",
+                se creaba un lote colgado de un producto inexistente y el stock
+                no llegaba a ningún lado. */}
+            {avisoSinAplicar?.length > 0 && (
+                <div className="fixed inset-0 bg-black/70 z-[210] flex items-center justify-center p-4">
+                    <div className="bg-[var(--color-surface)] border border-amber-500/50 rounded-2xl w-full max-w-lg overflow-hidden">
+                        <div className="p-4 border-b border-[var(--glass-border)]">
+                            <h3 className="font-bold text-amber-400 text-lg">
+                                La compra se guardó, pero {avisoSinAplicar.length}{' '}
+                                {avisoSinAplicar.length === 1 ? 'producto no entró' : 'productos no entraron'} al inventario
+                            </h3>
+                            <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                                Esa mercadería está pagada pero el sistema no la va a contar. Revisá
+                                estos renglones y cargalos a mano, o corregí el producto y volvé a
+                                cargar la factura.
+                            </p>
+                        </div>
+                        <div className="max-h-72 overflow-y-auto divide-y divide-[var(--glass-border)]">
+                            {avisoSinAplicar.map((i, n) => (
+                                <div key={`${i.id}-${n}`} className="p-3">
+                                    <div className="font-semibold text-[var(--color-text)] text-sm">
+                                        {i.name}
+                                        {i.quantity != null && (
+                                            <span className="text-[var(--color-text-muted)] font-normal"> · {i.quantity} unidades</span>
+                                        )}
+                                    </div>
+                                    <div className="text-xs text-amber-400 mt-0.5">{i.motivo}</div>
+                                    {i.sku && <div className="text-[10px] text-[var(--color-text-muted)] font-mono mt-0.5">SKU {i.sku}</div>}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="p-4 border-t border-[var(--glass-border)]">
+                            <button
+                                onClick={() => setAvisoSinAplicar(null)}
+                                className="w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm"
+                            >
+                                Entendido
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
