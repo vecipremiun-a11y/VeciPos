@@ -6,6 +6,8 @@
 import { hashPassword } from './auth.js';
 import { rutIsValid, normalizeRut } from './rut.js';
 
+const nowIso = () => new Date().toISOString();
+
 // libSQL no acepta `undefined` como valor de bind → coercionar a null.
 const nn = (v) => (v === undefined ? null : v);
 
@@ -217,9 +219,26 @@ async function userRevokeAccess(turso, companyId, session, { id }) {
         sql: 'SELECT role FROM user_companies WHERE user_id = ? AND company_id = ?',
         args: [id, companyId],
     });
-    if (!tgt.rows[0]) return { success: false, error: 'El usuario no pertenece a esta empresa.' };
+
+    // Sin membresía = ya no tiene acceso. Eso NO es un error.
+    //
+    // Antes devolvía "El usuario no pertenece a esta empresa", que además de
+    // inútil sonaba a que el problema era de quien apretaba el botón. Y era
+    // justo lo que pasaba con quienes ya se les había quitado el acceso antes:
+    // el dueño intentaba asegurarse de que no pudieran entrar, y el sistema le
+    // contestaba con un error en vez de confirmarle que ya estaban afuera.
+    if (!tgt.rows[0]) {
+        return { success: true, yaEstaba: true, mensaje: 'Este usuario ya no tenía acceso al sistema.' };
+    }
     if (tgt.rows[0].role === 'owner') return { success: false, error: 'Al dueño del sistema no se le puede quitar el acceso.' };
 
+    // Se borra SOLO la membresía. El usuario, sus ventas, sus cierres de caja,
+    // su asistencia y sus pagos quedan intactos: es sacarle la llave, no
+    // borrarle la historia.
+    //
+    // Con esto no entra desde ningún lado: el login exige una fila acá (ver
+    // api/auth/login.js, "Este usuario no tiene empresas asignadas") y las
+    // llamadas de una sesión ya abierta las corta el guard de la API.
     await turso.execute({
         sql: 'DELETE FROM user_companies WHERE user_id = ? AND company_id = ?',
         args: [id, companyId],
@@ -227,4 +246,135 @@ async function userRevokeAccess(turso, companyId, session, { id }) {
     return { success: true };
 }
 
-export const userActions = { userCreate, userUpdate, userDelete, userRevokeAccess };
+/**
+ * Da de baja a alguien que dejó de trabajar.
+ *
+ * Es lo que hay que usar cuando una persona se va: le quita el acceso, registra
+ * cuándo terminó y por qué, y la saca de la lista de Usuarios. Su ficha se
+ * queda en la base —es de donde el historial saca el nombre del vendedor en
+ * ventas, cajas y asistencia— pero deja de ser un usuario: pasa a ser un legajo,
+ * que se consulta en "Ex personal".
+ *
+ * Lo que NO hay que hacer nunca: renombrar el usuario de quien se fue para
+ * reusarlo con la persona nueva. Pasó con "Katy" → "Chelo": las mismas 115
+ * ventas del 1-ago-2026 figuran hoy con un nombre en el reporte por vendedor y
+ * con otro en el historial, y las marcas de asistencia de una quedaron a nombre
+ * de la otra —que es un registro del Art. 33—.
+ */
+async function userTerminate(turso, companyId, session, { id, endDate, reason }) {
+    const { isOwner } = await actorRoles(turso, companyId, session);
+    if (!isOwner) return { success: false, error: 'Solo el dueño del sistema puede dar de baja a alguien.' };
+    if (!id) return { success: false, error: 'Falta id' };
+    if (Number(id) === Number(session?.uid)) return { success: false, error: 'No podés darte de baja a vos mismo.' };
+
+    const u = await turso.execute({
+        sql: 'SELECT u.id, u.name, uc.role AS company_role FROM users u LEFT JOIN user_companies uc ON uc.user_id = u.id AND uc.company_id = ? WHERE u.id = ? AND u.company_id = ?',
+        args: [companyId, id, companyId],
+    });
+    const usuario = u.rows[0];
+    if (!usuario) return { success: false, error: 'Ese usuario no existe en esta empresa.' };
+    if (usuario.company_role === 'owner') return { success: false, error: 'Al dueño del sistema no se le puede dar de baja.' };
+
+    // La fecha de salida la pone quien da de baja; si no viene, es hoy. Se
+    // valida: una salida en el futuro o en 1970 ensucia el legajo y los
+    // reportes de personal.
+    const hoy = nowIso();
+    let salida = typeof endDate === 'string' && /^\d{4}-\d{2}-\d{2}/.test(endDate) ? endDate.slice(0, 10) : hoy.slice(0, 10);
+    if (salida > hoy.slice(0, 10)) salida = hoy.slice(0, 10);
+
+    await turso.batch([
+        // 1. Se le quita el acceso: no entra desde ningún equipo.
+        { sql: 'DELETE FROM user_companies WHERE user_id = ? AND company_id = ?', args: [id, companyId] },
+        // 2. Queda el legajo: cuándo terminó, por qué, quién lo registró.
+        {
+            sql: `UPDATE users SET labor_status = 'terminated', labor_end_date = ?, labor_end_reason = ?,
+                    labor_end_by = ?, labor_end_at = ? WHERE id = ? AND company_id = ?`,
+            args: [salida, String(reason || '').trim().slice(0, 300) || null, session?.uid ?? null, hoy, id, companyId],
+        },
+        {
+            sql: 'INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+            args: [companyId, session?.uid ?? null, 'TERMINATE', 'USER',
+                JSON.stringify({ id, nombre: usuario.name, salida, motivo: reason || null }), hoy],
+        },
+    ]);
+
+    return { success: true, nombre: usuario.name, salida };
+}
+
+/** Vuelve a dar de alta a alguien: le devuelve el acceso y limpia la baja. */
+async function userReinstate(turso, companyId, session, { id, role }) {
+    const { isOwner } = await actorRoles(turso, companyId, session);
+    if (!isOwner) return { success: false, error: 'Solo el dueño del sistema puede reincorporar a alguien.' };
+    if (!id) return { success: false, error: 'Falta id' };
+
+    const u = await turso.execute({
+        sql: 'SELECT id, name, role FROM users WHERE id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    const usuario = u.rows[0];
+    if (!usuario) return { success: false, error: 'Ese usuario no existe en esta empresa.' };
+
+    const rol = String(role || usuario.role || 'Caja');
+    await turso.batch([
+        // El rol vuelve a existir; `INSERT OR REPLACE` para que reincorporar dos
+        // veces no reviente por la clave repetida.
+        { sql: 'INSERT OR REPLACE INTO user_companies (user_id, company_id, role) VALUES (?, ?, ?)', args: [id, companyId, rol] },
+        {
+            sql: `UPDATE users SET labor_status = 'active', labor_end_date = NULL, labor_end_reason = NULL,
+                    labor_end_by = NULL, labor_end_at = NULL WHERE id = ? AND company_id = ?`,
+            args: [id, companyId],
+        },
+        {
+            sql: 'INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+            args: [companyId, session?.uid ?? null, 'REINSTATE', 'USER',
+                JSON.stringify({ id, nombre: usuario.name, rol }), nowIso()],
+        },
+    ]);
+    return { success: true, nombre: usuario.name };
+}
+
+/**
+ * El ex personal, con lo que dejó cada uno.
+ *
+ * Las fechas trabajadas no hacen falta pedirlas: salen de sus movimientos. Se
+ * usa la más temprana entre el alta laboral, su primera venta y su primera
+ * caja; y la más tardía entre su última venta y su última caja. Así el legajo
+ * queda completo aunque a la ficha nunca se le haya cargado la fecha de inicio.
+ */
+async function personalDadoDeBaja(turso, companyId) {
+    const r = await turso.execute({
+        sql: `SELECT u.id, u.name, u.username, u.role, u.rut,
+                     u.labor_start_date, u.labor_end_date, u.labor_end_reason, u.labor_end_at,
+                     b.name AS dado_de_baja_por,
+                     (SELECT COUNT(*) FROM sales s WHERE s.user_id = u.id AND s.company_id = u.company_id) AS ventas,
+                     (SELECT MIN(s.date) FROM sales s WHERE s.user_id = u.id AND s.company_id = u.company_id) AS primera_venta,
+                     (SELECT MAX(s.date) FROM sales s WHERE s.user_id = u.id AND s.company_id = u.company_id) AS ultima_venta,
+                     (SELECT COUNT(*) FROM cash_registers c WHERE c.user_id = u.id AND c.company_id = u.company_id) AS cajas,
+                     (SELECT MIN(c.opening_time) FROM cash_registers c WHERE c.user_id = u.id AND c.company_id = u.company_id) AS primera_caja,
+                     (SELECT MAX(c.opening_time) FROM cash_registers c WHERE c.user_id = u.id AND c.company_id = u.company_id) AS ultima_caja,
+                     (SELECT COUNT(*) FROM attendance_records a WHERE a.user_id = u.id AND a.company_id = u.company_id) AS marcas
+              FROM users u
+              LEFT JOIN users b ON b.id = u.labor_end_by
+              LEFT JOIN user_companies uc ON uc.user_id = u.id AND uc.company_id = ?
+              WHERE u.company_id = ? AND uc.user_id IS NULL
+              ORDER BY COALESCE(u.labor_end_date, '9999') DESC, u.name`,
+        args: [companyId, companyId],
+    });
+
+    const menor = (...v) => v.filter(Boolean).sort()[0] || null;
+    const mayor = (...v) => v.filter(Boolean).sort().pop() || null;
+
+    return {
+        success: true,
+        personal: r.rows.map(u => ({
+            ...u,
+            desde: menor(u.labor_start_date, u.primera_venta, u.primera_caja),
+            hasta: u.labor_end_date || mayor(u.ultima_venta, u.ultima_caja),
+        })),
+    };
+}
+
+export const userActions = {
+    userCreate, userUpdate, userDelete, userRevokeAccess,
+    userTerminate, userReinstate, personalDadoDeBaja,
+};

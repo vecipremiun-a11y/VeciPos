@@ -2023,11 +2023,68 @@ export const useStore = create(persist((set, get) => ({
         try {
             const r = await userApiCall('userRevokeAccess', { companyId: get().activeCompanyId, id });
             if (!r?.success) return r || { success: false, error: 'Error quitando el acceso' };
-            set((state) => ({ users: state.users.filter(u => u.id !== id) }));
-            return { success: true };
+            // Se le saca la membresía, NO se lo saca de la lista en memoria.
+            //
+            // Antes se lo quitaba del arreglo entero y desaparecía hasta recargar
+            // la página: el interruptor "Ver los que no tienen acceso" no tenía
+            // a quién mostrar, y devolverle el acceso a alguien obligaba a
+            // recargar para encontrarlo.
+            set((state) => ({
+                users: state.users.map(u => (u.id === id ? { ...u, company_role: null } : u)),
+            }));
+            return { success: true, yaEstaba: !!r.yaEstaba };
         } catch (e) {
             console.error('Revoke user access error', e);
             return { success: false, error: e.message };
+        }
+    },
+
+    // Baja de personal: la persona deja de ser usuario y pasa a ser un legajo.
+    // Ver el porqué en api/_lib/userActions.js (userTerminate).
+    darDeBajaUsuario: async (id, { endDate, reason } = {}) => {
+        try {
+            const r = await userApiCall('userTerminate', {
+                companyId: get().activeCompanyId, id, endDate, reason,
+            });
+            if (!r?.success) return r || { success: false, error: 'No se pudo dar de baja.' };
+            set((state) => ({
+                users: state.users.map(u => (u.id === id
+                    ? { ...u, company_role: null, labor_status: 'terminated', labor_end_date: r.salida, labor_end_reason: reason || null }
+                    : u)),
+            }));
+            return r;
+        } catch (e) {
+            console.error('Dar de baja error', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    reincorporarUsuario: async (id, role) => {
+        try {
+            const r = await userApiCall('userReinstate', { companyId: get().activeCompanyId, id, role });
+            if (!r?.success) return r || { success: false, error: 'No se pudo reincorporar.' };
+            set((state) => ({
+                users: state.users.map(u => (u.id === id
+                    ? { ...u, company_role: role || u.role, labor_status: 'active', labor_end_date: null, labor_end_reason: null }
+                    : u)),
+            }));
+            return r;
+        } catch (e) {
+            console.error('Reincorporar error', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    // El ex personal, con sus fechas y lo que dejó. Las fechas trabajadas las
+    // calcula el servidor a partir de los movimientos: no hace falta que nadie
+    // las haya cargado a mano.
+    fetchPersonalDadoDeBaja: async () => {
+        try {
+            const r = await userApiCall('personalDadoDeBaja', { companyId: get().activeCompanyId });
+            return r?.success ? (r.personal || []) : [];
+        } catch (e) {
+            console.error('Personal dado de baja error', e);
+            return [];
         }
     },
 
@@ -2960,12 +3017,20 @@ export const useStore = create(persist((set, get) => ({
             if (!r?.success) return r || { success: false, error: 'Error registrando la compra' };
             const purchaseId = r.purchaseId;
 
+            // Los renglones que el servidor NO pudo aplicar (producto borrado, o
+            // que nunca quedó emparejado). Se apartan para que el estado local no
+            // muestre un stock que en la base no existe, y para poder avisarle a
+            // quien cargó la factura: por acá se perdía mercadería en silencio.
+            const sinAplicar = Array.isArray(r.itemsSinAplicar) ? r.itemsSinAplicar : [];
+            const idsSinAplicar = new Set(sinAplicar.map((i) => String(i.id)));
+            const itemsAplicados = purchase.items.filter((i) => !idsSinAplicar.has(String(i?.id)));
+
             // Refetch lots or simulate (Optimistic). Usamos UUID o id+random para evitar
             // colisiones si addPurchase se invoca varias veces en el mismo tick.
             const tempBase = (typeof crypto !== 'undefined' && crypto.randomUUID)
                 ? crypto.randomUUID()
                 : `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
-            const newLots = purchase.items.map((item, idx) => ({
+            const newLots = itemsAplicados.map((item, idx) => ({
                 id: `temp-${tempBase}-${item.id}-${idx}`, // Temp ID único
                 product_id: item.id,
                 batch_number: item.batchNumber || '',
@@ -2993,7 +3058,7 @@ export const useStore = create(persist((set, get) => ({
                 purchases: [newPurchase, ...state.purchases],
                 productLots: [...state.productLots, ...newLots],
                 products: state.products.map(p => {
-                    const purchasedItem = purchase.items.find(i => i.id === p.id);
+                    const purchasedItem = itemsAplicados.find(i => i.id === p.id);
                     if (purchasedItem) {
                         return {
                             ...p,
@@ -3014,7 +3079,7 @@ export const useStore = create(persist((set, get) => ({
             // POS → Tienda. Va DESPUÉS del set() a propósito: así se manda lo que
             // el POS ya está mostrando (stock sumado, costo y precio nuevos), y no
             // lo que venía en la factura antes de aplicarse.
-            const idsComprados = purchase.items.map((i) => i.id).filter(Boolean);
+            const idsComprados = itemsAplicados.map((i) => i.id).filter(Boolean);
             get().sincronizarCompraConTienda(idsComprados).catch((e) =>
                 console.warn('No se pudo avisar a la tienda de la compra:', e)
             );
@@ -3025,7 +3090,7 @@ export const useStore = create(persist((set, get) => ({
                 get().checkInventoryAlerts(productIds);
             }, 100);
 
-            return { success: true };
+            return { success: true, purchaseId, itemsSinAplicar: sinAplicar };
         } catch (e) {
             console.error("Add purchase error", e);
             return { success: false, error: e.message };

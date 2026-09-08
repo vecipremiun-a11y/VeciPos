@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Trash2, User, Pencil, Search, Users as UsersIcon, ShoppingCart, Package, ClipboardList, ChevronLeft, ChevronRight, X, Briefcase, CreditCard, Calendar } from 'lucide-react';
+import { Plus, Trash2, User, UserMinus, RotateCcw, CalendarDays, Pencil, Search, Users as UsersIcon, ShoppingCart, Package, ClipboardList, ChevronLeft, ChevronRight, X, Briefcase, CreditCard, Calendar } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { usePermissions } from '../hooks/usePermissions';
 import { toast } from '../lib/toast';
 import { validateRut, formatRutInput, formatRut } from '../utils/rutValidation';
+import BajaPersonalModal from '../components/BajaPersonalModal';
 
 const Users = () => {
-    const { users, currentUser, currentUserCompanyRole, addUser, deleteUser, revokeUserAccess, updateUser, activeCompanyId, fetchCompanyRoles } = useStore();
+    const { users, currentUser, currentUserCompanyRole, addUser, deleteUser, updateUser, activeCompanyId, fetchCompanyRoles, darDeBajaUsuario, reincorporarUsuario, fetchPersonalDadoDeBaja } = useStore();
     const { can } = usePermissions();
 
     // Solo el dueño (o super admin) puede eliminar usuarios; y el dueño no se puede eliminar.
@@ -44,6 +45,13 @@ const Users = () => {
 
     // Search and pagination
     const [searchTerm, setSearchTerm] = useState('');
+    // Qué lista se está mirando: los activos o los eliminados.
+    const [listaVisible, setListaVisible] = useState('activos');
+    // A quién se está dando de baja (abre el modal con fecha y motivo).
+    const [bajaDe, setBajaDe] = useState(null);
+    // Legajos del ex personal, con sus fechas. Los trae el servidor calculados
+    // de los movimientos: no dependen de que alguien los haya cargado a mano.
+    const [exPersonal, setExPersonal] = useState([]);
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(10);
 
@@ -60,6 +68,22 @@ const Users = () => {
         }
     }, [activeCompanyId, fetchCompanyRoles]);
 
+    // Las fechas del ex personal se piden solo cuando se los muestra: mientras
+    // estén ocultos, ese dato no le sirve a nadie.
+    React.useEffect(() => {
+        if (listaVisible !== 'eliminados' || !activeCompanyId || !fetchPersonalDadoDeBaja) return;
+        let vigente = true;
+        fetchPersonalDadoDeBaja().then(filas => { if (vigente) setExPersonal(filas); });
+        return () => { vigente = false; };
+    }, [listaVisible, activeCompanyId, fetchPersonalDadoDeBaja]);
+
+    // Legajo de un ex empleado, por id, para pintar sus fechas en la fila.
+    const legajoDe = useMemo(() => {
+        const m = new Map();
+        for (const p of exPersonal) m.set(Number(p.id), p);
+        return m;
+    }, [exPersonal]);
+
     // DEBUG (Removed - Moved down)
 
 
@@ -74,8 +98,27 @@ const Users = () => {
     }, [users]);
 
     // Filtered and sorted users
+    // Quien ya no tiene acceso SALE de la lista.
+    //
+    // Kevin lo pidió así y tiene razón: si cada persona que deja de trabajar
+    // queda a la vista para siempre, la pantalla de usuarios termina siendo un
+    // cementerio y cuesta encontrar a los que sí trabajan hoy.
+    //
+    // Pero la fila del usuario NO se borra de la base, y no es un detalle
+    // técnico: el historial saca el nombre del vendedor de ahí
+    // (`LEFT JOIN users` en ventas, cierres de caja y asistencia). Borrarla
+    // dejaría 20.033 ventas de Kenia sin nombre, para siempre. Se esconde, que
+    // es lo que hace falta, y el historial sigue diciendo quién vendió.
+    //
+    // Por eso hay DOS listas: Activos y Eliminados. En la de eliminados se ve
+    // desde y hasta cuándo trabajó cada uno, y se los puede restaurar.
+    const activos = useMemo(() => users.filter(u => u.company_role), [users]);
+    const sinAcceso = useMemo(() => users.filter(u => !u.company_role), [users]);
+
     const filteredUsers = useMemo(() => {
         let result = users.filter(user => {
+            const esActivo = !!user.company_role;
+            if (esActivo !== (listaVisible === 'activos')) return false;
             const search = searchTerm.toLowerCase();
             return (
                 user.name?.toLowerCase().includes(search) ||
@@ -98,7 +141,7 @@ const Users = () => {
         });
 
         return result;
-    }, [users, searchTerm, sortField, sortDirection]);
+    }, [users, searchTerm, sortField, sortDirection, listaVisible]);
 
     // Permission check
     if (!can('users.view')) {
@@ -208,12 +251,51 @@ const Users = () => {
         }
     };
 
+    // Quién puede entrar de verdad, y quién no.
+    //
+    // Esta columna decía "Activo" para todos, siempre — estaba escrita fija, con
+    // un comentario que decía "por ahora". O sea que un usuario al que ya se le
+    // había quitado el acceso seguía figurando igual que uno que entra todos los
+    // días, y no había forma de saberlo desde acá.
+    //
+    // Lo que decide es la membresía a la empresa (`company_role`): el login la
+    // exige, así que sin ella no se entra desde ningún lado.
     const getStatusBadge = (user) => {
-        // For now, all users are "active" - you can add status field later
+        if (user.company_role) {
+            return (
+                <span className="px-3 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/30 text-xs font-medium">
+                    Activo
+                </span>
+            );
+        }
+        // Dado de baja: se muestra desde y hasta cuándo trabajó. Las fechas las
+        // calcula el servidor de sus movimientos, así que salen aunque a la
+        // ficha nunca se le haya cargado la fecha de inicio.
+        const legajo = legajoDe.get(Number(user.id));
+        const dia = (v) => (v ? String(v).slice(0, 10).split('-').reverse().join('/') : null);
         return (
-            <span className="px-3 py-1 rounded-full bg-green-500/20 text-green-400 border border-green-500/30 text-xs font-medium">
-                Activo
-            </span>
+            <div className="flex flex-col gap-1">
+                <span
+                    className="px-3 py-1 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-medium w-fit"
+                    title="No puede iniciar sesión. Su historial de ventas, caja y asistencia sigue intacto."
+                >
+                    Eliminado
+                </span>
+                {legajo && (
+                    <span className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1">
+                        <CalendarDays size={11} className="shrink-0" />
+                        {dia(legajo.desde) || '?'} → {dia(legajo.hasta) || '?'}
+                    </span>
+                )}
+                {legajo?.labor_end_reason && (
+                    <span className="text-[10px] text-[var(--color-text-muted)] italic">{legajo.labor_end_reason}</span>
+                )}
+                {legajo && (
+                    <span className="text-[10px] text-[var(--color-text-muted)]">
+                        {Number(legajo.ventas).toLocaleString('es-CL')} ventas · {legajo.cajas} cajas
+                    </span>
+                )}
+            </div>
         );
     };
 
@@ -302,23 +384,45 @@ const Users = () => {
                 )}
             </div>
 
+            {/* Dos listas separadas, no una mezclada.
+                Los activos por un lado y los eliminados por otro: es como se
+                piensa el personal, y evita que la lista de todos los días se
+                llene de gente que ya no trabaja. */}
+            <div className="flex gap-1 border-b border-[var(--glass-border)]">
+                {[
+                    ['activos', 'Activos', activos.length],
+                    ['eliminados', 'Eliminados', sinAcceso.length],
+                ].map(([clave, texto, n]) => (
+                    <button
+                        key={clave}
+                        onClick={() => { setListaVisible(clave); setCurrentPage(1); }}
+                        className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${
+                            listaVisible === clave
+                                ? (clave === 'activos'
+                                    ? 'border-green-400 text-green-400'
+                                    : 'border-red-400 text-red-400')
+                                : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                        }`}
+                    >
+                        {texto}
+                        {n > 0 && (
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white ${
+                                clave === 'activos' ? 'bg-green-500' : 'bg-red-500'
+                            }`}>
+                                {n}
+                            </span>
+                        )}
+                    </button>
+                ))}
+            </div>
+
             {/* Users Table */}
             <div className="glass-card p-0 overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
                         <thead className="bg-[var(--glass-bg)] border-b border-[var(--glass-border)]">
                             <tr className="text-[var(--color-text-muted)] text-xs uppercase tracking-wider">
-                                <th
-                                    className="px-6 py-4 cursor-pointer hover:text-[var(--color-text)] transition-colors"
-                                    onClick={() => handleSort('id')}
-                                >
-                                    <div className="flex items-center gap-1">
-                                        ID
-                                        {sortField === 'id' && (
-                                            <span className="text-[var(--color-primary)]">{sortDirection === 'asc' ? '↑' : '↓'}</span>
-                                        )}
-                                    </div>
-                                </th>
+                                <th className="px-6 py-4">#</th>
                                 <th
                                     className="px-6 py-4 cursor-pointer hover:text-[var(--color-text)] transition-colors"
                                     onClick={() => handleSort('name')}
@@ -355,10 +459,19 @@ const Users = () => {
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedUsers.map(user => (
+                                paginatedUsers.map((user, i) => (
                                     <tr key={user.id} className="hover:bg-[var(--glass-bg)] transition-colors group">
-                                        <td className="px-6 py-4 text-[var(--color-text-muted)] text-sm">
-                                            #{String(user.id).slice(-4)}
+                                        {/* Número de fila, no el id de la base.
+                                            El id trae los huecos de todo lo que se
+                                            borró alguna vez —1, 2, 4, 5, 7, 10…— y
+                                            eso no le dice nada a nadie: se ve como
+                                            si faltaran usuarios. El id real queda
+                                            en el título, que es donde sirve. */}
+                                        <td
+                                            className="px-6 py-4 text-[var(--color-text-muted)] text-sm"
+                                            title={`ID interno: ${user.id}`}
+                                        >
+                                            {(currentPage - 1) * itemsPerPage + i + 1}
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
@@ -406,38 +519,76 @@ const Users = () => {
                                                         <Pencil size={18} />
                                                     </button>
                                                 )}
-                                                {isOwner && user.company_role !== 'owner' && user.username !== 'admin' && (
+                                                {/* Quitar el acceso: lo que hace falta el 99% de las veces.
+                                                    Alguien deja de trabajar y no tiene que poder entrar
+                                                    nunca más, desde ningún equipo — pero sus ventas, sus
+                                                    cierres de caja y su asistencia se quedan donde están.
+                                                    Antes esto solo aparecía como consuelo después de que
+                                                    fallara el borrado. */}
+                                                {/* Dar de baja: lo que corresponde cuando alguien deja de
+                                                    trabajar. Cierra el legajo con fecha y motivo, le quita
+                                                    el acceso y lo saca de esta lista. Su historial queda
+                                                    entero y a su nombre, en "Ex personal". */}
+                                                {isOwner && user.company_role !== 'owner' && user.username !== 'admin' && user.company_role && (
                                                     <button
-                                                        onClick={async () => {
-                                                            if (!window.confirm(`¿Eliminar usuario ${user.name}?`)) return;
-                                                            const result = await deleteUser(user.id);
-                                                            if (result?.success) return;
-
-                                                            // Si lo bloquean sus registros laborales, se ofrece la
-                                                            // salida correcta: quitarle el acceso conservando el
-                                                            // historial. Antes acá llegaba el error crudo de SQLite.
-                                                            if (result?.tieneRegistrosLaborales) {
-                                                                const quitar = window.confirm(
-                                                                    `${result.error}\n\n¿Querés quitarle el acceso ahora?`
-                                                                );
-                                                                if (!quitar) return;
-                                                                const r2 = await revokeUserAccess(user.id);
-                                                                toast(
-                                                                    r2?.success
-                                                                        ? `${user.name} ya no puede entrar al sistema. Su historial laboral se conservó.`
-                                                                        : (r2?.error || 'No se pudo quitar el acceso.'),
-                                                                    r2?.success ? 'success' : 'error'
-                                                                );
-                                                                return;
-                                                            }
-                                                            toast(result?.error || 'No se pudo eliminar el usuario.', 'error');
-                                                        }}
-                                                        className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-all"
-                                                        title="Eliminar"
+                                                        onClick={() => setBajaDe(user)}
+                                                        className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-amber-400 hover:bg-amber-500/10 transition-all"
+                                                        title="Eliminar usuario (sale de la lista; conserva todo su historial)"
                                                     >
-                                                        <Trash2 size={18} />
+                                                        <UserMinus size={18} />
                                                     </button>
                                                 )}
+                                                {/* Reincorporar: si volvió, o si fue un error. */}
+                                                {isOwner && !user.company_role && (
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (!window.confirm(
+                                                                `¿Restaurar a ${user.name}?\n\nVuelve a la lista de activos y puede entrar de nuevo con el rol "${user.role}".`
+                                                            )) return;
+                                                            const r = await reincorporarUsuario(user.id, user.role);
+                                                            toast(
+                                                                r?.success
+                                                                    ? `${user.name} vuelve a tener acceso.`
+                                                                    : (r?.error || 'No se pudo reincorporar.'),
+                                                                r?.success ? 'success' : 'error'
+                                                            );
+                                                        }}
+                                                        className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-green-400 hover:bg-green-500/10 transition-all"
+                                                        title="Restaurar (vuelve a la lista de activos)"
+                                                    >
+                                                        <RotateCcw size={18} />
+                                                    </button>
+                                                )}
+                                                {/* Borrado definitivo: SOLO para quien no dejó nada.
+                                                    Un usuario con ventas, cajas o asistencia no se borra —su
+                                                    nombre en el historial sale de esta fila— y para eso está
+                                                    Eliminar, que cierra el legajo. Acá se limpian los que se
+                                                    crearon por error y nunca trabajaron. */}
+                                                {isOwner && !user.company_role && (() => {
+                                                    const lg = legajoDe.get(Number(user.id));
+                                                    const dejoAlgo = !lg || Number(lg.ventas) > 0 || Number(lg.cajas) > 0 || Number(lg.marcas) > 0;
+                                                    if (dejoAlgo) return null;
+                                                    return (
+                                                        <button
+                                                            onClick={async () => {
+                                                                if (!window.confirm(
+                                                                    `¿Borrar a ${user.name} definitivamente?\n\n` +
+                                                                    'No tiene ventas, ni cierres de caja, ni asistencia: no se pierde nada.\n\n' +
+                                                                    'Esto no se puede deshacer.'
+                                                                )) return;
+                                                                const r = await deleteUser(user.id);
+                                                                toast(
+                                                                    r?.success ? `${user.name} se borró del sistema.` : (r?.error || 'No se pudo borrar.'),
+                                                                    r?.success ? 'success' : 'error'
+                                                                );
+                                                            }}
+                                                            className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-all"
+                                                            title="Borrar definitivamente (no dejó historial)"
+                                                        >
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                    );
+                                                })()}
                                             </div>
                                         </td>
                                     </tr>
@@ -870,6 +1021,24 @@ const Users = () => {
                     </div>
                 </div>
             )}
+
+            {/* Baja de personal: fecha de salida y motivo. */}
+            <BajaPersonalModal
+                usuario={bajaDe}
+                onCancel={() => setBajaDe(null)}
+                onConfirm={async ({ endDate, reason }) => {
+                    const r = await darDeBajaUsuario(bajaDe.id, { endDate, reason });
+                    if (!r?.success) return r;
+                    setBajaDe(null);
+                    setExPersonal([]); // se vuelve a pedir cuando se abra la vista
+                    toast(
+                        `${r.nombre} quedó dado de baja el ${String(r.salida).split('-').reverse().join('/')}. ` +
+                        'Ya no puede entrar, y todo su historial se conservó.',
+                        'success'
+                    );
+                    return true;
+                }}
+            />
         </div>
     );
 };
