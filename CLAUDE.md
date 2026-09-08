@@ -21,9 +21,17 @@ desalineadas.
 no se reinicia, y no se le pone una versión distinta a cada destino. Si la app
 va en `v47`, la siguiente es `v48` — y esa misma es la de la web y la de la PWA.
 
-**Nunca subir ni cambiar un número de versión sin que Kevin diga el número
-exacto.** Un APK se instala en teléfonos de clientes: qué versión lleva es
-decisión suya, no de Claude. Ante la duda, preguntar antes de compilar.
+**El número lo avanza Claude solo, al que sigue** (1.9 → 2.0 → 2.1), y se avisa
+cuál quedó. Kevin lo decidió el 8-sep-2026: la regla anterior era preguntarle el
+número exacto antes de compilar, y eso obligaba a frenar en cada entrega —justo
+lo que quería evitar al pedir que el APK saliera siempre junto con el push.
+
+Sigue valiendo lo de arriba: **una sola versión para los tres destinos** y
+siempre la que sigue. Si Kevin dice un número, manda el suyo.
+
+El `versionCode` de Android es aparte: un entero que solo sube, uno por entrega
+(Play Store rechaza uno repetido). No tiene que coincidir con el nombre de la
+versión.
 
 ### "Subí esto" significa los tres destinos
 
