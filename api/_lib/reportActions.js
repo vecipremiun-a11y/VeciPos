@@ -167,9 +167,35 @@ export const PRODUCT_COLS_SIN_IMAGEN =
 // SQLite no trae una función para sacar tildes, así que se arma con REPLACE.
 // Parece caro y no lo es: la consulta ya recorría toda la tabla (un LIKE que
 // empieza con % no puede usar índice). Medido: 133 ms antes, 139 ms después.
+// Van las MAYÚSCULAS acentuadas también, y no es por las dudas.
+//
+// `lower()` de SQLite solo baja el alfabeto inglés: no toca Á É Í Ó Ú Ü Ñ.
+// Comprobado contra la base real el 8-sep-2026:
+//
+//     lower('PIÑA')    → 'piÑa'
+//     lower('CAFÉ')    → 'cafÉ'
+//     lower('MARAÑÓN') → 'maraÑÓn'
+//
+// Como los REPLACE de abajo solo buscaban la versión minúscula, esas letras
+// pasaban de largo. Efecto en el catálogo de producción: "Carozzi Cabello
+// Ángel Corto 400g" NO aparecía al escribir "angel" — el buscador comparaba
+// "cabello Ángel" contra "angel" y no coincidía por esa sola letra.
+//
+// Del lado del término escrito nunca hubo problema: JavaScript sí sabe bajar
+// letras acentuadas, y además se le quitan las tildes antes de comparar. El
+// desnivel estaba solo en la columna.
 const SIN_TILDES = (col) => {
     let e = `lower(${col})`;
-    for (const [de, a] of [['á','a'],['é','e'],['í','i'],['ó','o'],['ú','u'],['ü','u'],['ñ','n']]) {
+    const pares = [
+        ['á', 'a'], ['Á', 'a'], ['à', 'a'], ['À', 'a'],
+        ['é', 'e'], ['É', 'e'], ['è', 'e'], ['È', 'e'],
+        ['í', 'i'], ['Í', 'i'], ['ì', 'i'], ['Ì', 'i'],
+        ['ó', 'o'], ['Ó', 'o'], ['ò', 'o'], ['Ò', 'o'],
+        ['ú', 'u'], ['Ú', 'u'], ['ù', 'u'], ['Ù', 'u'],
+        ['ü', 'u'], ['Ü', 'u'],
+        ['ñ', 'n'], ['Ñ', 'n'],
+    ];
+    for (const [de, a] of pares) {
         e = `REPLACE(${e},'${de}','${a}')`;
     }
     return e;
@@ -818,7 +844,11 @@ const REPORTS = {
             .normalize('NFD').replace(/[̀-ͯ]/g, '')
             .toLowerCase().split(/\s+/).filter(p => p.length >= 3).slice(0, 6);
         if (!palabras.length) palabras.push(String(buscar || '').toLowerCase());
-        const campo = `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(name),'á','a'),'é','e'),'í','i'),'ó','o'),'ú','u')`;
+        // Se usa el mismo SIN_TILDES que el buscador del POS. Acá había una
+        // cadena de REPLACE escrita a mano que además de no bajar las mayúsculas
+        // acentuadas se olvidaba de la ñ y la ü: "Piña" y "Pingüino" no se
+        // encontraban escritos sin tilde.
+        const campo = SIN_TILDES('name');
         const puntaje = palabras.map(() => `(CASE WHEN ${campo} LIKE ? THEN 1 ELSE 0 END)`).join(' + ');
         const alguna = palabras.map(() => `${campo} LIKE ?`).join(' OR ');
         const comodines = palabras.map(p => `%${p}%`);
