@@ -107,7 +107,7 @@ const BotonModoOffline = () => {
 
             {confirmando && createPortal(
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
-                    <div className="glass-card modal-solido w-full max-w-sm relative p-5">
+                    <div className="glass-card modal-solido w-full max-w-sm relative p-5 max-h-[90vh] overflow-y-auto">
                         <button
                             onClick={() => setConfirmando(false)}
                             className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"

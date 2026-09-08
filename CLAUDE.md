@@ -25,6 +25,34 @@ va en `v47`, la siguiente es `v48` — y esa misma es la de la web y la de la PW
 exacto.** Un APK se instala en teléfonos de clientes: qué versión lleva es
 decisión suya, no de Claude. Ante la duda, preguntar antes de compilar.
 
+### "Subí esto" significa los tres destinos
+
+Cuando Kevin pide subir algo, el trabajo NO termina en el `git push`. Un push
+despliega web y PWA, pero **el APK no se entera de nada**: sigue con el código
+del día en que se compiló. Eso ya lo confundió — el 8-sep-2026 preguntó por qué
+la app no tenía el arreglo del buscador de tildes, y la respuesta era que el APK
+era anterior.
+
+Así que cada vez que Kevin diga commit/push, hay que hacer **las cuatro cosas**:
+
+1. `git commit` (una fase lógica por commit)
+2. `git push origin main` → despliega web y PWA
+3. `npm run migrate-all -- --apply` + `npm run verify-all` si hay migraciones
+   pendientes; si no hay, decirlo igual
+4. **Generar el APK nuevo**, con la versión subida en los cuatro lugares
+
+Pedirle el número de versión y seguir con el resto: no dejar el APK para después.
+
+### Lo que se construye tiene que servir en el celular
+
+El APK y la PWA corren **el mismo código** que la web. Así que cualquier pantalla
+nueva —una tabla, un formulario, un panel— tiene que estar pensada también para
+un teléfono desde el momento en que se escribe, no adaptada después: tablas que
+puedan desplazarse a lo ancho, botones que se toquen con el dedo, modales que
+entren en una pantalla chica.
+
+No hace falta que Kevin aclare "esto también para la app": se da por hecho.
+
 ### Dónde vive la versión hoy
 
 Estos son los lugares que tienen que coincidir. Revisarlos **todos** en el

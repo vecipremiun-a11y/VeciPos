@@ -46,7 +46,10 @@ export default function BajaPersonalModal({ usuario, onCancel, onConfirm }) {
 
     return createPortal(
         <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/70 p-4">
-            <div className="glass-card modal-solido w-full max-w-md relative p-5">
+            {/* `max-h-[90vh]` + scroll: en un teléfono, sobre todo acostado, el
+                formulario no entra y sin esto los botones quedaban fuera de la
+                pantalla, sin forma de llegar a ellos. */}
+            <div className="glass-card modal-solido w-full max-w-md relative p-5 max-h-[90vh] overflow-y-auto">
                 <button
                     onClick={onCancel}
                     className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
