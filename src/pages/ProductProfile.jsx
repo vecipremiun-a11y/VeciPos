@@ -6,6 +6,7 @@ import { dataApiCall, reportCall } from '../lib/dataApi';
 import { formatCurrency } from '../utils/formatCurrency';
 import { cn } from '../lib/utils';
 import OptimizedImage from '../components/OptimizedImage';
+import { traerFotos } from '../lib/fotosProductos';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import { format, subDays, startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -55,6 +56,18 @@ const ProductProfile = () => {
         try {
             const results = await searchProductsForDropdown(searchValue);
             setSearchResults(results || []);
+
+            // Las miniaturas del desplegable estaban SIEMPRE vacías: la búsqueda
+            // no trae la foto (son megas) y nadie la pedía después, así que cada
+            // fila mostraba "Sin imagen". Se usan solo las que el equipo ya tiene
+            // guardadas — gratis, sin red: un desplegable que se cierra en dos
+            // segundos no justifica bajar decenas de fotos.
+            const conFoto = (results || []).filter(p => p.has_image && !p.image).map(p => p.id);
+            if (conFoto.length) {
+                traerFotos(activeCompanyId, conFoto, (mapa) => {
+                    setSearchResults(prev => prev.map(p => (mapa[p.id] ? { ...p, image: mapa[p.id] } : p)));
+                }, { soloGuardadas: true });
+            }
         } catch (error) {
             console.error('Error searching products:', error);
             setSearchResults([]);
