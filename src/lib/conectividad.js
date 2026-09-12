@@ -34,6 +34,20 @@
 // donde decide la persona que está mirando la caja, que es la única que puede
 // distinguir "va lento" de "no funciona".
 const PING_URL = '/api/ping';
+
+// El `t=` que rompe la caché se pega con `?` o con `&` según lo que ya traiga la
+// URL. Parece un detalle y no lo es: cuando el latido dejó de pedir `?db=1`
+// (commit fa47a9c) quedó pegando `&t=...` a una URL sin `?`, o sea pidiendo la
+// ruta literal `/api/ping&t=1788914912062`.
+//
+// En Vercel eso igual llega: el rewrite `/api/(.*)` la resuelve y contesta 200.
+// En desarrollo NO: Express compara la ruta exacta y devuelve 404. Resultado —
+// medido el 10-sep-2026 contra los dos— el latido fallaba SIEMPRE en local, y
+// cada vez que el POS quedaba quieto 15 segundos se declaraba sin conexión solo.
+// Había que recargar para que las llamadas reales lo devolvieran a online, y a
+// los 15 segundos otra vez. En producción nunca se notó, por el rewrite.
+// Se exporta solo para poder probarlo: es la parte que estuvo mal y no se vio.
+export const conCorta = (url) => `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
 // Generoso a propósito: un servidor lento NO es un servidor caído. Solo cuenta
 // como caída si no contesta en absoluto.
 const TIMEOUT_MS = 8000;
@@ -180,7 +194,7 @@ async function latir() {
     }
 
     try {
-        const r = await fetchConLimite(`${PING_URL}&t=${Date.now()}`, {
+        const r = await fetchConLimite(conCorta(PING_URL), {
             method: 'GET',
             cache: 'no-store',
         }, TIMEOUT_MS);
