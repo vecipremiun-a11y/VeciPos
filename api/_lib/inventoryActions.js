@@ -2,6 +2,8 @@
 // Lógica portada tal cual de useStore; company_id forzado en toda query.
 // Los audit_logs y stock_adjustments se firman con el usuario de la sesión.
 
+import { filtroBusquedaProducto } from './busquedaProductos.js';
+
 const nowIso = () => new Date().toISOString();
 const userName = (session) => session?.username || 'Desconocido';
 
@@ -9,14 +11,18 @@ const userName = (session) => session?.username || 'Desconocido';
 
 async function lotsReport(turso, companyId, session, { productLimit = 20, productOffset = 0, searchTerm = '' }) {
     let prodSql, prodArgs;
-    if (String(searchTerm).trim()) {
-        const like = `%${String(searchTerm).trim()}%`;
+    // FEFO: misma regla de búsqueda que el resto del sistema — sin mayúsculas,
+    // sin tildes y sin importar el orden (ver ./busquedaProductos.js). Acá había
+    // un LIKE crudo, así que un lote de "Piña en Conserva" no aparecía si se
+    // escribía "pina".
+    const fefo = filtroBusquedaProducto(searchTerm, ['p.name', 'p.sku']);
+    if (fefo) {
         prodSql = `SELECT pl.product_id, MIN(pl.expiry_date) as min_expiry
                    FROM product_lots pl JOIN products p ON pl.product_id = p.id
                    WHERE pl.company_id = ? AND pl.quantity > 0 AND pl.expiry_date IS NOT NULL
-                   AND (p.name LIKE ? OR p.sku LIKE ?)
+                   AND (${fefo.sql})
                    GROUP BY pl.product_id ORDER BY min_expiry ASC LIMIT ? OFFSET ?`;
-        prodArgs = [companyId, like, like, productLimit, productOffset];
+        prodArgs = [companyId, ...fefo.args, productLimit, productOffset];
     } else {
         prodSql = `SELECT product_id, MIN(expiry_date) as min_expiry
                    FROM product_lots WHERE company_id = ? AND quantity > 0 AND expiry_date IS NOT NULL
@@ -186,7 +192,8 @@ async function controlProducts(turso, companyId, session, { controlId, limit = 5
     const args = [companyId];
     if (type === 'category' && category) { where += ' AND p.category = ?'; args.push(category); }
     if (type === 'supplier' && category) { where += ' AND p.supplier = ?'; args.push(category); }
-    if (search) { where += ' AND (p.name LIKE ? OR p.sku LIKE ?)'; args.push(`%${search}%`, `%${search}%`); }
+    const fb = filtroBusquedaProducto(search, ['p.name', 'p.sku']);
+    if (fb) { where += ` AND (${fb.sql})`; args.push(...fb.args); }
     let having = '';
     if (filter === 'pending') having = 'HAVING ci.id IS NULL';
     else if (filter === 'counted') having = 'HAVING ci.id IS NOT NULL';
@@ -325,8 +332,9 @@ async function controlHistory(turso, companyId, session, { limit = 20, offset = 
 // ── Reconciliación stock vs lotes ────────────────────────────────
 
 async function reconciliationData(turso, companyId, session, { limit = 30, offset = 0, search = '' }) {
-    const baseWhere = search ? 'WHERE p.company_id = ? AND (p.name LIKE ? OR p.sku LIKE ?)' : 'WHERE p.company_id = ?';
-    const baseArgs = search ? [companyId, `%${search}%`, `%${search}%`] : [companyId];
+    const fr = filtroBusquedaProducto(search, ['p.name', 'p.sku']);
+    const baseWhere = fr ? `WHERE p.company_id = ? AND (${fr.sql})` : 'WHERE p.company_id = ?';
+    const baseArgs = fr ? [companyId, ...fr.args] : [companyId];
 
     let stats = null;
     if (offset === 0 && !search) {

@@ -1,12 +1,17 @@
 // Combos / packs server-side (Fase 1 · Paso 25). Todas las queries con
 // company_id forzado; los items del combo van en batch.
 
+import { filtroBusquedaProducto } from './busquedaProductos.js';
+
 const nowIso = () => new Date().toISOString();
 
 async function combosFetch(turso, companyId, session, { search }) {
     let sql = 'SELECT * FROM product_combos WHERE company_id = ?';
     const args = [companyId];
-    if (search) { sql += ' AND (name LIKE ? OR sku LIKE ?)'; args.push(`%${search}%`, `%${search}%`); }
+    // Misma regla que el resto del sistema: sin mayúsculas, sin tildes y sin
+    // importar el orden de las palabras (ver ./busquedaProductos.js).
+    const f = filtroBusquedaProducto(search);
+    if (f) { sql += ` AND (${f.sql})`; args.push(...f.args); }
     sql += ' ORDER BY created_at DESC';
     const result = await turso.execute({ sql, args });
 

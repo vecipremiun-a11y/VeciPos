@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore';
 import { formatInCompanyTime } from '../lib/dateHelpers';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { filtroDe } from '../lib/busquedaProductos';
 import {
     AlertTriangle,
     CheckCircle,
@@ -165,10 +166,11 @@ const ExpiringProductsReport = () => {
         });
 
         // Then: filter products — show product if it has AT LEAST one lot within the date range
+        // Misma regla que el resto de los buscadores: sin mayúsculas, sin tildes
+        // y sin importar el orden de las palabras (ver lib/busquedaProductos).
+        const pasa = filtroDe(searchTerm);
         const products = Object.values(productMap).filter(p => {
-            const matchesSearch = p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                p.sku?.toLowerCase().includes(searchTerm.toLowerCase());
-            if (!matchesSearch) return false;
+            if (!pasa(p.name, p.sku)) return false;
 
             // Hide products where stock is 0 and ALL lots are expired
             const allExpired = p.lots.length > 0 && p.lots.every(l => l.status === 'expired');

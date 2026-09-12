@@ -19,14 +19,12 @@
 
 import { localDb } from './localdb';
 import { imagenesGuardadas } from './imagenesLocal';
+import { normalizar } from '../busquedaProductos';
 
-/** Sin tildes y en minúsculas: "Ñoquis" y "noquis" tienen que encontrar lo mismo. */
-export function normalizar(txt) {
-    return String(txt ?? '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase();
-}
+// La normalización ("Ñoquis" y "noquis" son lo mismo) vive en
+// ../busquedaProductos.js, que es la que usan TODAS las pantallas que filtran
+// productos. Se re-exporta porque este módulo ya la exportaba.
+export { normalizar };
 
 // Campos que se calculan UNA vez al cargar la copia en memoria, en vez de
 // recalcularlos en cada tecla. Van con guión bajo porque no vienen del servidor:
