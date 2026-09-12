@@ -6,6 +6,8 @@ import { localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
 import { syncCatalogIncremental } from '../lib/db/sync';
 import { buscarProductosLocal, productosPorCategoriaLocal, productoPorCodigoLocal } from '../lib/db/catalogoLocal';
 import { guardarImagenes, imagenesGuardadas } from '../lib/db/imagenesLocal';
+import { traerFotos } from '../lib/fotosProductos';
+import { mapaDeConteos } from '../lib/arbolCategorias';
 import { markActivity } from '../lib/smartPolling';
 import { setTabUserId, getTabUserId, broadcastLogin, broadcastLogout } from '../lib/sessionGuard';
 import { alExpirarSesion, esSesionExpirada, sesionExpirada, reiniciarAvisoSesion } from '../lib/sesion';
@@ -1080,6 +1082,16 @@ export const useStore = create(persist((set, get) => ({
     fetchProductImage: async (id) => {
         const { activeCompanyId } = get();
         if (!id || !activeCompanyId) return null;
+
+        // Primero la que ya está en el equipo. Esta pantalla era la única que
+        // iba siempre a la red: si la consulta fallaba —sin internet, o lenta
+        // en el teléfono— devolvía null y el recuadro quedaba vacío, aunque la
+        // foto estuviera guardada acá al lado.
+        try {
+            const guardadas = await imagenesGuardadas([id]);
+            if (guardadas?.[id]) return guardadas[id];
+        } catch { /* sin caché: se pide a la red, como antes */ }
+
         try {
             const rows = await reportRows(activeCompanyId, 'productImages', { ids: [id] });
             const foto = rows[0]?.image || null;
@@ -1096,21 +1108,41 @@ export const useStore = create(persist((set, get) => ({
     loadProductImages: async (ids) => {
         if (!ids || ids.length === 0) return;
         const { activeCompanyId } = get();
-        try {
-            const rows = await reportRows(activeCompanyId, 'productImages', { ids });
-            const imgMap = {};
-            for (const r of rows) imgMap[r.id] = r.image || null;
+        // Por lotes y mirando primero lo guardado: pedir 50 fotos de una son
+        // varios MB en una sola respuesta, y en un teléfono eso se pasa del
+        // corte de 12 segundos y no llega NINGUNA (ver lib/fotosProductos).
+        // `traerFotos` también las va guardando para la próxima.
+        await traerFotos(activeCompanyId, ids, (mapa) => {
             set(state => ({
-                products: state.products.map(p => (imgMap[p.id] !== undefined ? { ...p, image: imgMap[p.id] } : p)),
+                products: state.products.map(p => (mapa[p.id] ? { ...p, image: mapa[p.id] } : p)),
             }));
+        });
+    },
 
-            // Las fotos que ya bajamos quedan guardadas para verlas sin internet.
-            // No se espera: la grilla ya las está mostrando (ver imagenesLocal.js).
-            guardarImagenes(activeCompanyId, imgMap).catch((e) =>
-                console.warn('No se pudieron guardar las fotos para offline:', e)
-            );
+    // Cuántos productos tiene cada categoría, para el desplegable del inventario.
+    //
+    // Se pide SOLO cuando alguien abre el desplegable, no al entrar. Medido el
+    // 11-sep-2026 contra la base real: 133 ms y 1,2 KB. Sumarlo al arranque no
+    // se notaba (la diferencia quedó dentro del ruido), pero pedirlo al abrir
+    // tiene una ventaja que el arranque no puede dar: el número está al día. Los
+    // datos del arranque son de cuando se entró, y los productos se crean y se
+    // borran durante el turno.
+    conteoCategorias: null,
+    fetchConteoCategorias: async () => {
+        const { activeCompanyId, conteoCategorias } = get();
+        if (!activeCompanyId) return null;
+        // Ya se pidió en esta pantalla: no se repite por cada clic.
+        if (conteoCategorias) return conteoCategorias;
+        try {
+            const rows = await reportRows(activeCompanyId, 'categoryCountsByName', {});
+            const mapa = mapaDeConteos(rows);
+            set({ conteoCategorias: mapa });
+            return mapa;
         } catch (e) {
-            console.warn('No se pudieron cargar imágenes de productos:', e);
+            // Sin los números el desplegable igual sirve: se ven las categorías
+            // y la jerarquía, nada más que sin el conteo al lado.
+            console.warn('No se pudo contar los productos por categoría:', e);
+            return null;
         }
     },
 
@@ -6343,10 +6375,14 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
-    updatePreorderStatus: async (preorderId, newStatus, reason = null, refetchFilters = undefined) => {
+    // `source` dice desde qué pantalla se hizo el cambio ('encargos',
+    // 'produccion', 'tienda'). Va al historial: un pedido cancelado en la caja
+    // no es lo mismo que uno cancelado en producción, y hasta la migración 0028
+    // no había forma de distinguirlos —ni de saber quién lo hizo.
+    updatePreorderStatus: async (preorderId, newStatus, reason = null, refetchFilters = undefined, source = 'encargos') => {
         try {
             // Server-side (con guard de empresa): update + cálculo de efectivo a devolver
-            const r = await userApiCall('preorderStatusUpdate', { companyId: get().activeCompanyId, preorderId, newStatus, reason });
+            const r = await userApiCall('preorderStatusUpdate', { companyId: get().activeCompanyId, preorderId, newStatus, reason, source });
             if (!r?.success) return r || { success: false, error: 'Error' };
 
             // Si se canceló: devolver el efectivo desde la caja abierta del cajero
