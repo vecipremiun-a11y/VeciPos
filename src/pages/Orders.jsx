@@ -4,21 +4,15 @@ import { Search, Package, Truck, Box, AlertTriangle, TrendingDown, DollarSign, B
 import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
 import { dataApiCall, reportCall } from '../lib/dataApi';
+import { traerFotos } from '../lib/fotosProductos';
 import { toast } from '../lib/toast';
+import { esFraccionable, etiquetaUnidad, aCantidad, cantidadValida, CANTIDAD_TECLEABLE } from '../lib/unidades';
+import { resolverLinea, dosDecimales, MODO_UNIDAD, MODO_TOTAL, MODO_CANTIDAD } from '../lib/calculoPedido';
 
-// Productos que se compran por peso o volumen. En estos la "cantidad" admite
+// Productos que se compran por peso o volumen: en estos la "cantidad" admite
 // decimales (10,417 kg es una compra normal) y el total se puede escribir para
-// deducirla: al proveedor se le compra "a $2.000 el kilo" y se paga un total.
-// La unidad sale de la ficha del producto (products.unit).
-const esFraccionable = (unit) => /^(kg|kgs|kilo|kilos|gr|grs|gramo|gramos|g|lt|lts|litro|litros|l|ml)$/i
-    .test(String(unit || '').trim());
-
-// "Costo por kg" / "Costo por unidad" — mostrar la unidad evita el malentendido
-// de leer "Costo Unitario" en un producto que se vende por kilo.
-const etiquetaUnidad = (unit) => {
-    const u = String(unit || 'Und').trim();
-    return /^und$/i.test(u) ? 'unidad' : u.toLowerCase();
-};
+// deducirla. La definición vive en lib/unidades para que el formulario de
+// arriba y la lista del pedido no puedan volver a contradecirse.
 
 const Orders = () => {
     const {
@@ -87,39 +81,48 @@ const Orders = () => {
     // resolvía con una regla implícita ("se recalcula el que hace más rato que no
     // tocás") que obligaba a adivinar cuál campo se iba a mover.
     //
-    //   POR UNIDAD → escribís costo y cantidad; sale el TOTAL (no editable).
-    //                "el limón va a $2.000 el kilo y llevo 12" → $24.000
-    //   POR TOTAL  → escribís total y cantidad; sale el COSTO (no editable).
-    //                "pagué $25.000 y me pesaron 12 kg" → $2.083 el kilo
+    //   POR UNIDAD   → escribís costo y cantidad; sale el TOTAL (no editable).
+    //                  "el limón va a $2.000 el kilo y llevo 12" → $24.000
+    //   POR TOTAL    → escribís total y cantidad; sale el COSTO (no editable).
+    //                  "pagué $25.000 y me pesaron 12 kg" → $2.083 el kilo
+    //   POR CANTIDAD → escribís costo y total; sale la CANTIDAD (no editable).
+    //                  "el limón va a $2.000 el kilo y pagué $25.000" → 12,5 kg
     //
-    // El impuesto y el margen se aplican igual en los dos: siempre se muestran
+    // El tercero lo pidió Kevin el 11-sep-2026: "cuando compro un producto y
+    // solo tengo el precio, y luego me dicen el total, quiero que se calcule la
+    // cantidad comprada". Es el caso de la feria, donde el proveedor cobra por
+    // kilo y al final dice el monto, sin decir cuánto pesó.
+    //
+    // Son las tres formas de despejar la misma cuenta —costo × cantidad = total—
+    // y entre las tres queda cubierta: cualquiera sea el dato que falta, se
+    // escriben los otros dos y el sistema lo saca.
+    //
+    // El impuesto y el margen se aplican igual en los tres: siempre se muestran
     // costo+IVA y el precio de venta sugerido.
-    const MODO_UNIDAD = 'unidad';
-    const MODO_TOTAL = 'total';
     const [modoPedido, setModoPedido] = useState(MODO_UNIDAD);
     const porTotal = modoPedido === MODO_TOTAL;
+    const porCantidad = modoPedido === MODO_CANTIDAD;
 
     const unidadProducto = selectedProduct?.unit || 'Und';
     const productoPorPeso = esFraccionable(unidadProducto);
     const unidadTexto = etiquetaUnidad(unidadProducto);
 
-    const dosDecimales = (n) => Math.round(n * 100) / 100;
-
-    // Recalcula el campo que el modo deja en manos del sistema.
+    // Recalcula el campo que el modo deja en manos del sistema. La cuenta en sí
+    // vive en lib/calculoPedido (se puede probar sin levantar la pantalla: es
+    // plata, y una división mal redondeada termina en el precio de venta); acá
+    // queda solo llevar el resultado a los campos.
     const recalcular = ({ bruto, cantidad, total, tasa = orderTaxRate, modo = modoPedido }) => {
-        const iva = 1 + (Number(tasa) || 0) / 100;
-        const b = parseFloat(bruto), q = parseFloat(cantidad), t = parseFloat(total);
-
-        if (modo === MODO_TOTAL) {
-            // El total y la cantidad son datos; el costo se deduce.
-            if (isNaN(t) || isNaN(q) || q <= 0) { setOrderCostGross(''); setOrderCost(''); return; }
-            const brutoCalc = dosDecimales(t / q);
-            setOrderCostGross(String(brutoCalc));
-            setOrderCost(String(dosDecimales(brutoCalc / iva)));
-            return;
+        const r = resolverLinea({
+            modo, bruto, cantidad, total, tasa, porPeso: productoPorPeso,
+        });
+        if (r.campo === 'costo') {
+            setOrderCostGross(r.bruto === '' ? '' : String(r.bruto));
+            setOrderCost(r.neto === '' ? '' : String(r.neto));
+        } else if (r.campo === 'cantidad') {
+            setOrderQuantity(r.cantidad === '' ? '' : String(r.cantidad));
+        } else {
+            setLineaTotal(r.total === '' ? '' : String(r.total));
         }
-        // MODO_UNIDAD: el costo y la cantidad son datos; el total se deduce.
-        setLineaTotal(!isNaN(b) && !isNaN(q) ? String(dosDecimales(b * q)) : '');
     };
 
     const cambiarModo = (modo) => {
@@ -202,7 +205,7 @@ const Orders = () => {
 
     // Cartelito sobre el campo que calcula el sistema en el modo actual.
     const ChipCalculado = ({ campo }) => {
-        const calculado = porTotal ? 'costo' : 'total';
+        const calculado = porTotal ? 'costo' : porCantidad ? 'cantidad' : 'total';
         return calculado === campo ? (
             <span className="ml-1 px-1 py-px rounded bg-[var(--color-primary)]/20 text-[var(--color-primary)] text-[9px] font-bold align-middle">
                 se calcula
@@ -240,6 +243,11 @@ const Orders = () => {
             id: selectedProduct.id,
             name: selectedProduct.name,
             sku: selectedProduct.sku,
+            // La unidad viaja con el renglón: sin esto, la lista del pedido no
+            // tenía forma de saber que un producto se compra por kilo, y su
+            // campo de cantidad quedaba en enteros aunque acá se hubieran
+            // cargado 5,6 kg.
+            unit: selectedProduct.unit || 'Und',
             cost: Number(orderCost),
             costWithTax,
             quantity: Number(orderQuantity),
@@ -255,6 +263,9 @@ const Orders = () => {
             const totalQty = updated[existingIndex].quantity + newItem.quantity;
             updated[existingIndex] = {
                 ...updated[existingIndex],
+                // También acá, para los renglones que venían de un borrador
+                // guardado antes de que la unidad viajara con el item.
+                unit: newItem.unit,
                 cost: newItem.cost,
                 costWithTax: newItem.costWithTax,
                 quantity: totalQty,
@@ -299,26 +310,45 @@ const Orders = () => {
         setOrderItems(orderItems.filter(item => item.id !== productId));
     };
 
+    // Editar la cantidad de un renglón del pedido: los kilos también.
+    //
+    // Antes esto era `/^\d+$/` + `Math.floor()`, o sea SOLO enteros. Al cargar
+    // el producto se podían poner 5,6 kg —ese formulario siempre aceptó
+    // decimales— pero una vez en la lista ya no se podía corregir: escribir
+    // "5." no pasaba el filtro y el campo se quedaba trabado ahí. Para un
+    // producto que se compra por peso eso obliga a borrar el renglón y cargarlo
+    // de nuevo.
+    //
+    // Se acepta la coma además del punto: el teclado numérico del teléfono en
+    // Chile ofrece las dos, y escribir "5,6" es lo natural acá.
+    // Los renglones de un borrador guardado antes de este cambio no traen la
+    // unidad: se busca en la lista de productos y, si tampoco está, se asume
+    // que va por unidad, que es como se comportaba hasta ahora.
+    const unidadDelItem = (item) => item?.unit
+        || supplierProducts.find(p => p.id === item?.id)?.unit
+        || 'Und';
+
     const updateOrderItemQuantity = (productId, quantityValue) => {
         if (quantityValue === '') {
             setOrderItemQuantityDrafts(prev => ({ ...prev, [productId]: '' }));
             return;
         }
 
-        if (!/^\d+$/.test(quantityValue)) return;
+        // Se deja escribir el paso intermedio ("5." o "5,") para que no se
+        // trabe al tipear; lo que no sirva se descarta al salir del campo.
+        if (!CANTIDAD_TECLEABLE.test(quantityValue)) return;
 
         setOrderItemQuantityDrafts(prev => ({ ...prev, [productId]: quantityValue }));
 
-        const parsedQuantity = Number(quantityValue);
-        if (!Number.isFinite(parsedQuantity) || parsedQuantity < 1) return;
+        const parsedQuantity = aCantidad(quantityValue);
+        if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) return;
 
-        const safeQuantity = Math.floor(parsedQuantity);
         setOrderItems(prevItems => prevItems.map(item =>
             item.id === productId
                 ? {
                     ...item,
-                    quantity: safeQuantity,
-                    total: item.costWithTax * safeQuantity
+                    quantity: parsedQuantity,
+                    total: item.costWithTax * parsedQuantity
                 }
                 : item
         ));
@@ -328,15 +358,19 @@ const Orders = () => {
         const draftValue = orderItemQuantityDrafts[productId];
         if (draftValue === undefined) return;
 
-        if (draftValue === '' || Number(draftValue) < 1) {
+        // Al salir del campo: lo que no sirva se descarta y el renglón vuelve a
+        // mostrar la cantidad que tenía. `cantidadValida` deja pasar 0,5 kg —
+        // antes el piso era 1 y no se podía pedir medio kilo— y redondea a
+        // entero lo que va por unidad, porque 2,5 paquetes no significa nada.
+        const item = orderItems.find(i => i.id === productId);
+        const safeQuantity = cantidadValida(draftValue, unidadDelItem(item));
+        if (safeQuantity === null) {
             setOrderItemQuantityDrafts(prev => {
                 const { [productId]: _, ...rest } = prev;
                 return rest;
             });
             return;
         }
-
-        const safeQuantity = Math.floor(Number(draftValue));
         setOrderItems(prevItems => prevItems.map(item =>
             item.id === productId
                 ? {
@@ -553,20 +587,23 @@ const Orders = () => {
                     if (rows.length) supplierCacheRef.current[cacheKey] = rows;
                     setSupplierProducts(rows);
 
-                    // Las fotos ya no vienen en la lista (eran hasta 4 MB por carga):
-                    // se piden en una consulta aparte y se mezclan sobre la lista ya
-                    // dibujada, así la pantalla aparece de inmediato.
+                    // Las fotos no vienen en la lista (eran hasta 4 MB por carga):
+                    // se piden aparte y se mezclan sobre la lista ya dibujada.
+                    //
+                    // Y se piden POR LOTES, no todas juntas. Medido el 11-sep-2026:
+                    // las 98 fotos del proveedor más grande son 9,93 MB en una sola
+                    // respuesta — unos 40 segundos en un teléfono, contra un corte
+                    // de 12. Se iba entera al catch y la pantalla quedaba sin
+                    // NINGUNA foto: por eso en la web se veían y en la app no.
+                    // Ahora cada tanda se dibuja apenas llega (ver lib/fotosProductos).
                     const conFoto = rows.filter(p => p.has_image).map(p => p.id);
                     if (conFoto.length) {
-                        reportCall(activeCompanyId, 'productImages', { ids: conFoto })
-                            .then(imgs => {
-                                if (cancelled || !Array.isArray(imgs)) return;
-                                const mapa = Object.fromEntries(imgs.map(i => [i.id, i.image]));
-                                const conImagenes = rows.map(p => (mapa[p.id] ? { ...p, image: mapa[p.id] } : p));
-                                if (conImagenes.length) supplierCacheRef.current[cacheKey] = conImagenes;
-                                setSupplierProducts(conImagenes);
-                            })
-                            .catch(() => { /* la lista ya se ve, sin fotos */ });
+                        let acumulado = rows;
+                        traerFotos(activeCompanyId, conFoto, (mapa) => {
+                            acumulado = acumulado.map(p => (mapa[p.id] ? { ...p, image: mapa[p.id] } : p));
+                            supplierCacheRef.current[cacheKey] = acumulado;
+                            setSupplierProducts(acumulado);
+                        }, { seguirVivo: () => !cancelled });
                     }
                 }
             } catch (e) {
@@ -600,15 +637,26 @@ const Orders = () => {
     // Get selected supplier info
     const selectedSupplier = suppliers.find(s => s.id === Number(selectedSupplierId));
 
-    const getCategoryName = (categoryId) => {
-        const category = categories.find(c => c.id === categoryId);
-        return category?.name || 'Sin categoría';
-    };
+    // El producto YA trae el nombre de su categoría y de su proveedor: la
+    // consulta `productsForOrder` selecciona `category` y `supplier`, que son
+    // textos, y NO devuelve `category_id` ni `supplier_id`.
+    //
+    // Buscarlos por id no podía funcionar: el lookup recibía `undefined` y
+    // contestaba "Sin categoría" / "Sin proveedor" SIEMPRE. Comprobado contra la
+    // base el 11-sep-2026 con los dos productos de las capturas de Kevin:
+    //
+    //     Ajo (107102)  → proveedor "Terminal Agropecuario", categoría "Verduras y Frutas"
+    //     Peregil       → proveedor "Terminal Agropecuario", categoría "Verdura Fresca"
+    //
+    // y la pantalla mostraba "Sin proveedor" y "Sin categoría" para los dos.
+    //
+    // Se deja la búsqueda por id como respaldo, para las pantallas que sí pasan
+    // un producto con ids.
+    const nombreCategoria = (p) =>
+        p?.category || categories.find(c => c.id === p?.category_id)?.name || 'Sin categoría';
 
-    const getSupplierName = (supplierId) => {
-        const supplier = suppliers.find(s => s.id === supplierId);
-        return supplier?.name || 'Sin proveedor';
-    };
+    const nombreProveedor = (p) =>
+        p?.supplier || suppliers.find(s => s.id === p?.supplier_id)?.name || 'Sin proveedor';
 
 
 
@@ -846,7 +894,7 @@ const Orders = () => {
                                             <span>•</span>
                                             <span className="flex items-center gap-1">
                                                 <Tag size={14} />
-                                                {getCategoryName(selectedProduct.category_id)}
+                                                {nombreCategoria(selectedProduct)}
                                             </span>
                                         </div>
                                     </div>
@@ -1097,7 +1145,7 @@ const Orders = () => {
                                             )}
                                             <div className="flex justify-between">
                                                 <span className="text-sm text-[var(--color-text-muted)]">Categoría</span>
-                                                <span className="text-sm text-[var(--color-text)]">{getCategoryName(selectedProduct.category_id)}</span>
+                                                <span className="text-sm text-[var(--color-text)]">{nombreCategoria(selectedProduct)}</span>
                                             </div>
                                             <div className="flex justify-between">
                                                 <span className="text-sm text-[var(--color-text-muted)]">Valor en Inventario</span>
@@ -1118,10 +1166,11 @@ const Orders = () => {
 
                                     {/* Cómo se carga la compra. Define qué se escribe y qué calcula
                                         el sistema, en vez de que haya que adivinarlo. */}
-                                    <div className="flex gap-1 p-1 mb-4 bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
+                                    <div className="grid grid-cols-3 gap-1 p-1 mb-4 bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
                                         {[
                                             { key: MODO_UNIDAD, label: `Por ${unidadTexto}`, hint: 'escribís costo y cantidad' },
                                             { key: MODO_TOTAL, label: 'Por caja / total', hint: 'escribís total y cantidad' },
+                                            { key: MODO_CANTIDAD, label: 'Por lo pagado', hint: 'escribís costo y total' },
                                         ].map(m => (
                                             <button
                                                 key={m.key}
@@ -1231,11 +1280,19 @@ const Orders = () => {
                                             </label>
                                             <input
                                                 type="number"
+                                                inputMode="decimal"
                                                 value={orderQuantity}
                                                 onChange={(e) => cambiarCantidad(e.target.value)}
                                                 min={productoPorPeso ? '0' : '1'}
                                                 step={productoPorPeso ? '0.001' : '1'}
-                                                className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-3 py-2 text-[var(--color-text)] text-sm focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+                                                readOnly={porCantidad}
+                                                tabIndex={porCantidad ? -1 : undefined}
+                                                className={cn(
+                                                    'w-full border rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors',
+                                                    porCantidad
+                                                        ? CLASE_CALCULADO
+                                                        : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text)] focus:border-[var(--color-primary)]'
+                                                )}
                                                 placeholder="1"
                                             />
                                         </div>
@@ -1247,7 +1304,9 @@ const Orders = () => {
                                         <span className="text-sm text-[var(--color-text-muted)]">
                                             Total del Pedido:<ChipCalculado campo="total" />
                                             <span className="block text-[10px] text-[var(--color-text-muted)]">
-                                                {porTotal ? 'escribí lo que pagaste' : `costo × cantidad, con ${orderTaxRate}% de impuesto`}
+                                                {porTotal || porCantidad
+                                                    ? 'escribí lo que pagaste'
+                                                    : `costo × cantidad, con ${orderTaxRate}% de impuesto`}
                                             </span>
                                         </span>
                                         <div className="relative w-44">
@@ -1258,11 +1317,11 @@ const Orders = () => {
                                                 onChange={(e) => cambiarTotal(e.target.value)}
                                                 min="0"
                                                 step="1"
-                                                readOnly={!porTotal}
-                                                tabIndex={!porTotal ? -1 : undefined}
+                                                readOnly={!porTotal && !porCantidad}
+                                                tabIndex={!porTotal && !porCantidad ? -1 : undefined}
                                                 className={cn(
                                                     'w-full border rounded-lg px-3 py-2 pl-7 text-right text-xl font-bold text-[var(--color-primary)] focus:outline-none',
-                                                    porTotal
+                                                    porTotal || porCantidad
                                                         ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]'
                                                         : 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/40 cursor-not-allowed'
                                                 )}
@@ -1307,7 +1366,7 @@ const Orders = () => {
                             <div className="flex gap-2 text-xs text-[var(--color-text-muted)] mt-1">
                                 <span>{selectedProduct.sku || 'Sin SKU'}</span>
                                 <span>•</span>
-                                <span>{getSupplierName(selectedProduct.supplier_id)}</span>
+                                <span>{nombreProveedor(selectedProduct)}</span>
                             </div>
                         </div>
                         <div className="text-right">
@@ -1327,9 +1386,20 @@ const Orders = () => {
                         {/* Top Grid: Image & Stats */}
                         <div className="grid grid-cols-2 gap-3">
                             {/* Image Card */}
+                            {/* El campo es `image`, no `image_url`.
+                                `image_url` no existe en un producto: la columna de
+                                la base se llama `image` y es la foto en base64. En
+                                todo el sistema el único `image_url` es el de la API
+                                de OpenAI y el del payload que se le manda a miniveci
+                                —nada que ver con esto—. Así que esta tarjeta caía
+                                SIEMPRE al ícono gris, hubiera foto o no, y sin
+                                importar la conexión.
+                                Solo pasaba en el teléfono: es la versión móvil del
+                                modal, y la de escritorio (más arriba) siempre usó
+                                `image`. Por eso en la web se veía y en la app no. */}
                             <div className="glass-card p-4 flex items-center justify-center bg-white aspect-square rounded-xl">
-                                {selectedProduct.image_url ? (
-                                    <img src={selectedProduct.image_url} alt={selectedProduct.name} className="max-w-full max-h-full object-contain" />
+                                {selectedProduct.image ? (
+                                    <img src={selectedProduct.image} alt={selectedProduct.name} className="max-w-full max-h-full object-contain" />
                                 ) : (
                                     <Package size={48} className="text-gray-300" />
                                 )}
@@ -1361,7 +1431,7 @@ const Orders = () => {
                                     <Truck size={12} className="text-blue-400" />
                                     <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase">Proveedor</span>
                                 </div>
-                                <p className="font-bold text-sm text-[var(--color-text)] truncate">{getSupplierName(selectedProduct.supplier_id)}</p>
+                                <p className="font-bold text-sm text-[var(--color-text)] truncate">{nombreProveedor(selectedProduct)}</p>
                             </div>
 
                             <div className="glass-card p-3 relative overflow-hidden">
@@ -1426,7 +1496,7 @@ const Orders = () => {
                                 <div className="space-y-2 text-xs">
                                     <div>
                                         <div className="text-[var(--color-text-muted)] text-[10px]">Categoría</div>
-                                        <div className="font-medium text-[var(--color-text)] truncate">{getCategoryName(selectedProduct.category_id)}</div>
+                                        <div className="font-medium text-[var(--color-text)] truncate">{nombreCategoria(selectedProduct)}</div>
                                     </div>
                                     <div>
                                         <div className="text-[var(--color-text-muted)] text-[10px]">Valor Inventario</div>
@@ -1444,17 +1514,21 @@ const Orders = () => {
                             </div>
 
                             {/* Pestañas: definen qué se escribe y qué calcula el sistema */}
-                            <div className="flex gap-1 p-1 mb-3 bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
+                            {/* Tres pestañas en una pantalla angosta: `grid` en vez de
+                                `flex` para que queden los tres iguales y el texto no
+                                empuje a los demás fuera del borde. */}
+                            <div className="grid grid-cols-3 gap-1 p-1 mb-3 bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
                                 {[
                                     { key: MODO_UNIDAD, label: `Por ${unidadTexto}` },
-                                    { key: MODO_TOTAL, label: 'Por caja / total' },
+                                    { key: MODO_TOTAL, label: 'Por caja' },
+                                    { key: MODO_CANTIDAD, label: 'Por pagado' },
                                 ].map(m => (
                                     <button
                                         key={m.key}
                                         type="button"
                                         onClick={() => cambiarModo(m.key)}
                                         className={cn(
-                                            'flex-1 py-2 rounded-lg text-xs font-bold transition-all',
+                                            'py-2 px-1 rounded-lg text-[11px] font-bold transition-all leading-tight',
                                             modoPedido === m.key
                                                 ? 'bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/50 text-[var(--color-primary)]'
                                                 : 'border border-transparent text-[var(--color-text-muted)]'
@@ -1559,14 +1633,21 @@ const Orders = () => {
                                     onChange={(e) => cambiarCantidad(e.target.value)}
                                     min={productoPorPeso ? '0' : '1'}
                                     step={productoPorPeso ? '0.001' : '1'}
-                                    className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-2 px-3 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                    readOnly={porCantidad}
+                                    tabIndex={porCantidad ? -1 : undefined}
+                                    className={cn(
+                                        'w-full border rounded-lg py-2 px-3 text-sm focus:outline-none',
+                                        porCantidad
+                                            ? CLASE_CALCULADO
+                                            : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text)] focus:border-[var(--color-primary)]'
+                                    )}
                                     placeholder="1"
                                 />
                             </div>
 
                             <div className="mb-3">
                                 <label className="text-[10px] text-[var(--color-primary)] block mb-1 font-bold">
-                                    {porTotal ? 'Total pagado' : 'Total del Pedido'}<ChipCalculado campo="total" />
+                                    {porTotal || porCantidad ? 'Total pagado' : 'Total del Pedido'}<ChipCalculado campo="total" />
                                 </label>
                                 <div className="relative">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-primary)] font-bold">$</span>
@@ -1576,10 +1657,12 @@ const Orders = () => {
                                         value={lineaTotal}
                                         onChange={(e) => cambiarTotal(e.target.value)}
                                         min="0"
-                                        readOnly={!porTotal}
+                                        readOnly={!porTotal && !porCantidad}
+                                        tabIndex={!porTotal && !porCantidad ? -1 : undefined}
                                         className={cn(
                                             'w-full border rounded-lg py-2.5 pl-7 pr-3 text-right text-lg font-bold text-[var(--color-primary)] focus:outline-none',
-                                            porTotal ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]'
+                                            porTotal || porCantidad
+                                                ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]'
                                                 : 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/40 cursor-not-allowed'
                                         )}
                                         placeholder="0"
@@ -1703,17 +1786,25 @@ const Orders = () => {
                                                     {item.taxRate > 0 && <p>+IVA: {formatCurrency(item.costWithTax, currentCurrency)}</p>}
                                                 </div>
                                                 <div className="flex items-end gap-3 shrink-0">
-                                                    <div className="w-[72px] text-center">
+                                                    {/* `step` y `min` según la unidad del producto, igual
+                                                        que el formulario de arriba. Estaban fijos en "1",
+                                                        así que un producto por kilo no se podía corregir
+                                                        a 5,6 una vez agregado. Y el cartelito decía
+                                                        siempre "uds", aun para algo que se compra en kg. */}
+                                                    <div className="w-[84px] text-center">
                                                         <input
                                                             type="number"
-                                                            min="1"
-                                                            step="1"
+                                                            inputMode="decimal"
+                                                            min={esFraccionable(unidadDelItem(item)) ? '0' : '1'}
+                                                            step={esFraccionable(unidadDelItem(item)) ? '0.001' : '1'}
                                                             value={orderItemQuantityDrafts[item.id] ?? String(item.quantity)}
                                                             onChange={(e) => updateOrderItemQuantity(item.id, e.target.value)}
                                                             onBlur={() => commitOrderItemQuantity(item.id)}
                                                             className="w-full min-w-0 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg py-1 px-2 text-center text-lg font-bold text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
                                                         />
-                                                        <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">uds</p>
+                                                        <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5">
+                                                            {etiquetaUnidad(unidadDelItem(item))}
+                                                        </p>
                                                     </div>
                                                     <p className="text-lg font-bold text-[var(--color-primary)] whitespace-nowrap pb-1">{formatCurrency(item.total, currentCurrency)}</p>
                                                 </div>
