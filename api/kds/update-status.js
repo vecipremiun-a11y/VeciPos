@@ -146,6 +146,21 @@ export default async function handler(req, res) {
             args: [trans.to, preorderId]
         });
 
+        // Historial (migración 0028). El KDS entra por token de panadería, no
+        // con la sesión de una persona: no hay usuario que anotar, pero sí
+        // importa que la línea de tiempo diga que el cambio vino de ahí y no
+        // de la caja. Best-effort: si falla, el pedido igual avanzó.
+        try {
+            await turso.execute({
+                sql: `INSERT INTO preorder_status_history
+                        (company_id, preorder_id, from_status, to_status, reason, user_id, user_name, source, created_at)
+                      VALUES (?, ?, ?, ?, NULL, NULL, ?, 'kds', ?)`,
+                args: [companyId, preorderId, trans.from, trans.to, 'Pantalla de panadería', new Date().toISOString()]
+            });
+        } catch (e) {
+            console.error('preorder_status_history (kds):', e?.message || e);
+        }
+
         // Si está sincronizado con la web (tiene public_code), notificar a
         // miniveci el cambio de estado. Best-effort: no bloquea la respuesta.
         const publicCode = pr.rows[0].external_public_code;

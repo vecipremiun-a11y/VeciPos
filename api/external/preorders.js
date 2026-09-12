@@ -284,6 +284,26 @@ async function cancelPreorder(req, res, companyId) {
         args: [payload.reason || '', row.id],
     });
 
+    // Historial (migración 0028): que la línea de tiempo distinga una
+    // cancelación hecha por el cliente en la tienda web de una hecha en la
+    // caja. Sin esto las dos se ven igual, que es justo lo que hizo imposible
+    // saber quién canceló el encargo #690. Best-effort.
+    try {
+        await turso.execute({
+            sql: `INSERT INTO preorder_status_history
+                    (company_id, preorder_id, from_status, to_status, reason, user_id, user_name, source, created_at)
+                  VALUES (?, ?, ?, 'canceled', ?, NULL, ?, 'tienda', ?)`,
+            args: [
+                companyId, row.id, row.status,
+                payload.reason || null,
+                'Tienda web (cliente)',
+                new Date().toISOString(),
+            ],
+        });
+    } catch (e) {
+        console.error('preorder_status_history (tienda):', e?.message || e);
+    }
+
     broadcastPreorderEvent('order.updated', {
         id: row.id,
         external_order_id: payload.external_order_id,

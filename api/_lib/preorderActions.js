@@ -37,6 +37,58 @@ async function ensureOrderKindColumn(turso) {
 // Filtro para que los reportes/listados de ENCARGOS excluyan pedidos de tienda.
 const ONLY_ENCARGO = (alias = '') => ` AND COALESCE(${alias}order_kind, 'encargo') = 'encargo'`;
 
+// ===== Historial de estados =====
+//
+// Cada cambio de estado deja una fila con quién, cuándo, por qué y desde dónde.
+// Antes no quedaba nada: el 8-sep-2026 hubo que reconstruir la cancelación del
+// encargo #690 desde los logs de integración, y aun así el usuario quedó sin
+// identificar. Ver migrations/0028.
+//
+// Es best-effort a propósito: si el INSERT falla, el cambio de estado sigue su
+// curso. Perder una línea del historial es malo; frenar un encargo en el
+// mostrador porque no se pudo escribir esa línea es peor.
+const FUENTES = new Set(['encargos', 'produccion', 'kds', 'tienda', 'sistema']);
+
+// El nombre se guarda como foto del momento (ver 0028). La sesión trae `uid` y
+// `username`, no el nombre visible, así que se busca en `users`.
+async function nombreDeUsuario(turso, session) {
+    if (!session?.uid) return null;
+    try {
+        const r = await turso.execute({
+            sql: 'SELECT name, username FROM users WHERE id = ? LIMIT 1',
+            args: [session.uid],
+        });
+        return r.rows[0]?.name || r.rows[0]?.username || session.username || null;
+    } catch {
+        return session.username || null;
+    }
+}
+
+async function registrarCambioDeEstado(turso, { companyId, preorderId, from, to, reason, userId, userName, source }) {
+    try {
+        await turso.execute({
+            sql: `INSERT INTO preorder_status_history
+                    (company_id, preorder_id, from_status, to_status, reason, user_id, user_name, source, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [
+                companyId,
+                preorderId,
+                from || null,
+                to,
+                (reason && String(reason).trim()) ? String(reason).trim().slice(0, 300) : null,
+                userId ?? null,
+                userName || null,
+                FUENTES.has(source) ? source : 'encargos',
+                nowIso(),
+            ],
+        });
+    } catch (e) {
+        // La tabla puede no existir todavía en una base sin migrar. No se
+        // interrumpe el flujo por eso.
+        console.error('preorder_status_history:', e?.message || e);
+    }
+}
+
 // Guard: el encargo debe ser de la empresa. Devuelve la fila o null.
 async function ownPreorder(turso, companyId, preorderId, cols = '*') {
     const r = await turso.execute({
@@ -91,6 +143,19 @@ async function preorderCreate(turso, companyId, session, { preorderData, registe
             args: [preorderId, preorderData.deposit_amount, depositMethod, registerId || null, tId, baId, authCode],
         });
     }
+
+    // Primera línea del historial: sin ella la línea de tiempo del encargo
+    // empezaría por el segundo movimiento y no se vería quién lo tomó.
+    await registrarCambioDeEstado(turso, {
+        companyId,
+        preorderId,
+        from: null,
+        to: 'pending',
+        reason: null,
+        userId: session?.uid ?? null,
+        userName: await nombreDeUsuario(turso, session),
+        source: 'encargos',
+    });
 
     // Señal en vivo (Pusher) para que los badges se actualicen en todos los
     // dispositivos sin recargar. Usamos 'order.updated' (refresca contadores,
@@ -171,12 +236,27 @@ async function preorderActiveCounts(turso, companyId, session, { today = null } 
 
 async function preorderDetails(turso, companyId, session, { preorderId }) {
     const preorder = await ownPreorder(turso, companyId, preorderId);
-    if (!preorder) return { success: true, preorder: null, items: [], payments: [] };
+    if (!preorder) return { success: true, preorder: null, items: [], payments: [], history: [] };
     const [itemsRes, paymentsRes] = await turso.batch([
         { sql: 'SELECT * FROM preorder_items WHERE preorder_id = ?', args: [preorderId] },
         { sql: 'SELECT * FROM preorder_payments WHERE preorder_id = ? ORDER BY created_at ASC', args: [preorderId] },
     ], 'read');
-    return { success: true, preorder, items: itemsRes.rows, payments: paymentsRes.rows };
+
+    // Aparte del batch: en una base sin la migración 0028 esta tabla no existe,
+    // y ahí el batch entero se caería llevándose los items y los abonos con él.
+    let history = [];
+    try {
+        const h = await turso.execute({
+            sql: `SELECT id, from_status, to_status, reason, user_id, user_name, source, created_at
+                  FROM preorder_status_history
+                  WHERE preorder_id = ? AND company_id = ?
+                  ORDER BY created_at ASC, id ASC`,
+            args: [preorderId, companyId],
+        });
+        history = h.rows;
+    } catch { /* base sin migrar: el encargo se muestra igual, sin la línea de tiempo */ }
+
+    return { success: true, preorder, items: itemsRes.rows, payments: paymentsRes.rows, history };
 }
 
 // Edita los productos de un pedido (pestaña Tienda): reemplaza los items y
@@ -245,15 +325,28 @@ async function preorderItemsEdit(turso, companyId, session, { preorderId, items 
     return { success: true, total, remaining, deposit };
 }
 
-async function preorderStatusUpdate(turso, companyId, session, { preorderId, newStatus, reason = null }) {
+async function preorderStatusUpdate(turso, companyId, session, { preorderId, newStatus, reason = null, source = 'encargos' }) {
     const info = await ownPreorder(turso, companyId, preorderId, 'external_source, external_public_code, status, client_name');
     if (!info) return { success: false, error: 'Encargo no encontrado' };
     const prevStatus = info.status;
 
-    if (reason && reason.trim()) {
+    const motivo = (reason && String(reason).trim()) ? String(reason).trim().slice(0, 300) : '';
+
+    // Cancelar SIEMPRE pide motivo, y se valida acá y no solo en la pantalla:
+    // una cancelación es lo único que borra un pedido de la vista de producción,
+    // y sin motivo no hay forma de saber después si fue un error de carga, una
+    // falta de stock o un cliente que se arrepintió.
+    if (newStatus === 'canceled' && prevStatus !== 'canceled' && !motivo) {
+        return { success: false, error: 'Hay que escribir el motivo de la cancelación.' };
+    }
+
+    if (motivo) {
+        // "Cancelado" cuando se cancela; "Rechazo" queda para el resto (es el
+        // texto que ya tienen las notas de pedidos web rechazados).
+        const etiqueta = newStatus === 'canceled' ? 'Cancelado' : 'Rechazo';
         await turso.execute({
-            sql: `UPDATE preorders SET status = ?, notes = TRIM(COALESCE(notes,'') || ' · Rechazo: ' || ?), updated_at = datetime('now') WHERE id = ? AND company_id = ?`,
-            args: [newStatus, reason.trim(), preorderId, companyId],
+            sql: `UPDATE preorders SET status = ?, notes = TRIM(COALESCE(notes,'') || ' · ' || ? || ': ' || ?), updated_at = datetime('now') WHERE id = ? AND company_id = ?`,
+            args: [newStatus, etiqueta, motivo, preorderId, companyId],
         });
     } else {
         await turso.execute({
@@ -261,6 +354,19 @@ async function preorderStatusUpdate(turso, companyId, session, { preorderId, new
             args: [newStatus, preorderId, companyId],
         });
     }
+
+    // Quién lo movió, cuándo y por qué. Va después del UPDATE para no dejar
+    // historial de un cambio que no ocurrió.
+    await registrarCambioDeEstado(turso, {
+        companyId,
+        preorderId,
+        from: prevStatus,
+        to: newStatus,
+        reason: motivo,
+        userId: session?.uid ?? null,
+        userName: await nombreDeUsuario(turso, session),
+        source,
+    });
 
     // Si se cancela (y no estaba cancelado), calcular efectivo a devolver.
     // El movimiento de caja OUT lo registra el cliente (caja abierta del cajero).

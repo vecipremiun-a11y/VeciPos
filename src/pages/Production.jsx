@@ -10,6 +10,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
 import { playProductionSound } from '../utils/productionSounds';
 import { createSmartInterval } from '../lib/smartPolling';
+import HistorialEncargo from '../components/HistorialEncargo';
 import Pusher from 'pusher-js';
 
 // ========== HELPERS ==========
@@ -142,13 +143,31 @@ const ProductionActions = ({ order, canManage, onAction, onReject, layout = 'blo
 };
 
 // ========== REJECT REASON MODAL ==========
+// Motivos frecuentes, para no tener que tipear con harina en las manos.
+const MOTIVOS_RAPIDOS = [
+    'No alcanzamos a tenerlo listo',
+    'No hay ingredientes',
+    'El cliente se arrepintió',
+    'Error al cargar el pedido',
+];
+
 const RejectReasonModal = ({ order, onClose, onConfirm }) => {
     const [reason, setReason] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState(null);
 
+    // El motivo pasó a ser obligatorio (y el servidor lo exige igual). Era
+    // "opcional pero recomendado", y en la práctica quedaba vacío: cuando hubo
+    // que averiguar por qué se canceló el encargo #690 no había nada escrito.
     const handleConfirm = async () => {
+        const texto = reason.trim();
+        if (!texto) {
+            setError('Escribí el motivo: sin eso nadie puede saber después por qué se canceló.');
+            return;
+        }
         setSubmitting(true);
-        await onConfirm(order.id, reason.trim());
+        setError(null);
+        await onConfirm(order.id, texto);
         setSubmitting(false);
         onClose();
     };
@@ -169,18 +188,39 @@ const RejectReasonModal = ({ order, onClose, onConfirm }) => {
                 </div>
 
                 <label className="block text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">
-                    Motivo del rechazo
+                    Motivo del rechazo <span className="text-red-400 normal-case">(obligatorio)</span>
                 </label>
+
+                {/* En un teléfono escribir es lento: los motivos de siempre a un toque. */}
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                    {MOTIVOS_RAPIDOS.map(m => (
+                        <button
+                            type="button"
+                            key={m}
+                            onClick={() => { setReason(m); setError(null); }}
+                            className="px-2.5 py-2 rounded-lg border border-[var(--glass-border)] text-xs font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-white/5 transition-colors"
+                        >
+                            {m}
+                        </button>
+                    ))}
+                </div>
+
                 <textarea
                     autoFocus
                     value={reason}
-                    onChange={e => setReason(e.target.value)}
+                    onChange={e => { setReason(e.target.value); if (error) setError(null); }}
                     placeholder="Ej: no alcanzamos a tener listo para esa hora"
                     rows={3}
                     className="glass-input w-full text-sm rounded-xl p-3 resize-none"
                 />
+                {error && (
+                    <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded p-2 mt-1.5">
+                        {error}
+                    </p>
+                )}
                 <p className="text-[11px] text-[var(--color-text-muted)] mt-1.5">
-                    El cliente verá este motivo en miniveci. Opcional pero recomendado.
+                    El cliente lo verá en miniveci, y queda guardado con tu usuario
+                    y la hora en el historial del encargo.
                 </p>
 
                 <div className="flex gap-2 pt-4">
@@ -285,9 +325,12 @@ const ProductionDetailModal = ({ preorder, onClose, onStatusChange, onReject, ca
                         {details.preorder.notes && (
                             <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3.5 text-sm flex items-start gap-2.5">
                                 <AlertTriangle size={16} className="text-amber-400 mt-0.5 shrink-0" />
-                                <span className="text-amber-300">{details.preorder.notes}</span>
+                                <span className="text-amber-300 break-words">{details.preorder.notes}</span>
                             </div>
                         )}
+
+                        {/* Quién lo movió y por qué (migración 0028). */}
+                        <HistorialEncargo historial={details.history} />
 
                         {/* Actions */}
                         {preorder.status !== 'delivered' && preorder.status !== 'canceled' && (
@@ -446,12 +489,13 @@ const Production = () => {
     }, [preorders]);
 
     const handleStatusChange = async (preorderId, newStatus) => {
-        await updatePreorderStatus(preorderId, newStatus);
+        await updatePreorderStatus(preorderId, newStatus, null, getFilters(), 'produccion');
         fetchPreorders(getFilters());
     };
 
     const handleReject = async (preorderId, reason) => {
-        await updatePreorderStatus(preorderId, 'canceled', reason);
+        const r = await updatePreorderStatus(preorderId, 'canceled', reason, getFilters(), 'produccion');
+        if (!r?.success) alert('No se pudo cancelar: ' + (r?.error || ''));
         fetchPreorders(getFilters());
     };
 
@@ -460,6 +504,7 @@ const Production = () => {
         pending: preorders.filter(p => p.status === 'pending' || p.status === 'confirmed').length,
         preparing: preorders.filter(p => p.status === 'preparing').length,
         completed: preorders.filter(p => p.status === 'ready' || p.status === 'out_for_delivery' || p.status === 'delivered').length,
+        canceled: preorders.filter(p => p.status === 'canceled').length,
     }), [preorders]);
 
     // Filtered preorders for table
@@ -468,6 +513,12 @@ const Production = () => {
             if (statusFilter === 'pending') return p.status === 'pending' || p.status === 'confirmed';
             if (statusFilter === 'preparing') return p.status === 'preparing';
             if (statusFilter === 'ready') return p.status === 'ready' || p.status === 'out_for_delivery' || p.status === 'delivered';
+            // Los cancelados solo aparecen si se piden: fuera de esa pestaña,
+            // esta pantalla es lo que hay que producir, y un pedido cancelado
+            // no lo es. Pero antes no se veían NUNCA, ni siquiera en "Todos":
+            // por eso, cuando el #690 se canceló, desapareció de acá sin dejar
+            // forma de mirarlo desde esta pantalla.
+            if (statusFilter === 'canceled') return p.status === 'canceled';
             return p.status !== 'canceled';
         });
     }, [preorders, statusFilter]);
@@ -535,6 +586,18 @@ const Production = () => {
             iconBg: 'bg-emerald-100 dark:bg-emerald-500/20',
             ringColor: 'ring-emerald-500'
         },
+        {
+            icon: Ban,
+            label: 'Cancelados',
+            count: counts.canceled,
+            filterKey: 'canceled',
+            borderColor: 'border-l-red-500',
+            textColor: 'text-red-600 dark:text-red-400',
+            bg: 'bg-red-50 dark:bg-red-500/10',
+            iconColor: 'text-red-600 dark:text-red-400',
+            iconBg: 'bg-red-100 dark:bg-red-500/20',
+            ringColor: 'ring-red-500'
+        },
     ];
 
     return (
@@ -575,7 +638,7 @@ const Production = () => {
             </div>
 
             {/* ===== SUMMARY CARDS — also work as status filters ===== */}
-            <div className="grid grid-cols-3 gap-3 sm:gap-4 shrink-0">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 shrink-0">
                 {summaryCards.map((card, i) => {
                     const Icon = card.icon;
                     const isActive = statusFilter === card.filterKey;

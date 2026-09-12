@@ -18,6 +18,9 @@ import AsyncButton from '../components/AsyncButton';
 import NuevoClienteModal from '../components/NuevoClienteModal';
 import { printPreorder } from '../utils/printPreorder';
 import OrderTabBadge from '../components/OrderTabBadge';
+import CancelarEncargoModal from '../components/CancelarEncargoModal';
+import HistorialEncargo from '../components/HistorialEncargo';
+import { filtroDe } from '../lib/busquedaProductos';
 
 const STATUS_CONFIG = {
     pending: { label: 'Pendiente', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30', icon: Clock, next: 'preparing' },
@@ -434,14 +437,22 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
     const [payBankAccountId, setPayBankAccountId] = useState(null);
     const { getPreorderDetails, addPreorderPayment } = useStore();
 
-    useEffect(() => {
-        const load = async () => {
-            const result = await getPreorderDetails(preorder.id);
-            if (result.success) setDetails(result);
-            setIsLoading(false);
-        };
-        load();
-    }, [preorder.id]);
+    // "No se encontró el encargo" se mostraba también cuando la consulta
+    // fallaba, que es otra cosa: el encargo existe y lo que falló fue la
+    // conexión. Pasó con el #690, que está en la base y aun así decía eso.
+    // Ahora se distingue, y un fallo se puede reintentar sin cerrar la ventana.
+    const [errorCarga, setErrorCarga] = useState(null);
+    const cargar = React.useCallback(async () => {
+        setIsLoading(true);
+        setErrorCarga(null);
+        const result = await getPreorderDetails(preorder.id);
+        if (result?.success && result.preorder) setDetails(result);
+        else if (result?.success) setErrorCarga('NO_EXISTE');
+        else setErrorCarga(result?.error || 'No se pudo cargar el encargo. Revisá la conexión.');
+        setIsLoading(false);
+    }, [preorder.id, getPreorderDetails]);
+
+    useEffect(() => { cargar(); }, [cargar]);
 
     const handlePayBalance = async () => {
         const amount = parseFloat(payAmount);
@@ -670,14 +681,32 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
                             </div>
                         )}
                         {details.preorder.notes && (
-                            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-2 text-xs flex items-center gap-2">
-                                <FileText size={14} className="text-yellow-400" />
-                                <span className="text-yellow-300">{details.preorder.notes}</span>
+                            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-2 text-xs flex items-start gap-2">
+                                <FileText size={14} className="text-yellow-400 shrink-0 mt-0.5" />
+                                <span className="text-yellow-300 break-words">{details.preorder.notes}</span>
                             </div>
                         )}
+
+                        {/* Quién movió el encargo y por qué. Es lo que faltaba
+                            el 8-sep-2026 cuando hubo que averiguar quién había
+                            cancelado el #690. */}
+                        <HistorialEncargo historial={details.history} />
                     </div>
+                ) : errorCarga === 'NO_EXISTE' ? (
+                    <p className="text-center text-[var(--color-text-muted)] py-8">
+                        El encargo #{preorder.id} no existe en esta empresa.
+                    </p>
                 ) : (
-                    <p className="text-center text-[var(--color-text-muted)] py-8">No se encontró el encargo</p>
+                    <div className="py-8 text-center space-y-3">
+                        <p className="text-sm text-red-400">No se pudo abrir el encargo #{preorder.id}.</p>
+                        <p className="text-xs text-[var(--color-text-muted)] px-4 break-words">{errorCarga}</p>
+                        <button
+                            onClick={cargar}
+                            className="px-4 py-2 rounded-lg btn-primary text-sm font-bold"
+                        >
+                            Reintentar
+                        </button>
+                    </div>
                 )}
             </div>
         </div>
@@ -705,6 +734,8 @@ const Preorders = () => {
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [selectedPreorder, setSelectedPreorder] = useState(null);
     const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+    // Encargo esperando que se escriba el motivo de la cancelación.
+    const [cancelandoEncargo, setCancelandoEncargo] = useState(null);
 
     const [deliveryPreorder, setDeliveryPreorder] = useState(null);
     const [showQuickProductModal, setShowQuickProductModal] = useState(false);
@@ -737,16 +768,15 @@ const Preorders = () => {
     //   2) Si no hay nada en memoria, intentar Dexie
     //   3) Refrescar contra Turso en background (silencioso, con timeout)
     const loadProducts = async (search = '', cat = 'Todos') => {
-        const term = String(search || '').toLowerCase();
+        // Misma regla que el resto de los buscadores: sin mayúsculas, sin tildes
+        // y sin importar el orden de las palabras (ver lib/busquedaProductos).
+        const pasa = filtroDe(search);
         const filterList = (list) => {
             let out = (list || []).filter(p =>
                 p && (p.sale_mode === 'preorder_only' || p.sale_mode === 'both')
             );
             if (cat && cat !== 'Todos') out = out.filter(p => p.category === cat);
-            if (term) out = out.filter(p =>
-                (p.name && String(p.name).toLowerCase().includes(term)) ||
-                (p.sku && String(p.sku).toLowerCase().includes(term))
-            );
+            out = out.filter(p => pasa(p.name, p.sku));
             out.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
             return out.slice(0, 50).map(p => ({
                 ...p,
@@ -890,6 +920,15 @@ const Preorders = () => {
     };
 
     const handleStatusChange = async (preorderId, newStatus) => {
+        // Cancelar pide motivo, siempre. Antes era una X que actuaba al toque:
+        // el encargo #690 murió así, sin confirmación y sin dejar quién fue.
+        // Se intercepta acá y no en el botón para que valga para todos los
+        // caminos que llegan a cancelar.
+        if (newStatus === 'canceled') {
+            const encargo = preorders.find(p => p.id === preorderId) || { id: preorderId };
+            setCancelandoEncargo(encargo);
+            return;
+        }
         if (newStatus === 'delivered') {
             // Intercept delivery to show checkout modal
             setIsLoading(true);
@@ -1359,6 +1398,24 @@ const Preorders = () => {
                     onClose={() => setSelectedPreorder(null)}
                     onStatusChange={handleStatusChange}
                     currentCurrency={currentCurrency}
+                />
+            )}
+
+            {cancelandoEncargo && (
+                <CancelarEncargoModal
+                    encargo={cancelandoEncargo}
+                    onCancel={() => setCancelandoEncargo(null)}
+                    onConfirm={async (motivo) => {
+                        const r = await updatePreorderStatus(
+                            cancelandoEncargo.id, 'canceled', motivo, getListFilters(), 'encargos'
+                        );
+                        if (!r?.success) return r || { error: 'No se pudo cancelar.' };
+                        if (r.cashWarning) alert('⚠️ ' + r.cashWarning);
+                        setCancelandoEncargo(null);
+                        setSelectedPreorder(null);
+                        fetchPreorders(getListFilters());
+                        return true;
+                    }}
                 />
             )}
 

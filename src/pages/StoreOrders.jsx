@@ -11,6 +11,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { toast } from '../lib/toast';
 import PaymentDetailPicker from '../components/PaymentDetailPicker';
 import OrderTabBadge from '../components/OrderTabBadge';
+import CancelarEncargoModal from '../components/CancelarEncargoModal';
 
 // Flujo de pedidos de la tienda web (pagados online): incluye el paso
 // "Confirmado" (aceptar el pedido) y entrega SIN checkout — solo estado.
@@ -488,6 +489,8 @@ export default function StoreOrders() {
     const [selectedId, setSelectedId] = useState(null);
     const [codOrder, setCodOrder] = useState(null);
     const [refundOrder, setRefundOrder] = useState(null);
+    // Pedido de tienda esperando el motivo de la cancelación.
+    const [cancelandoOrden, setCancelandoOrden] = useState(null);
 
     const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches);
     useEffect(() => {
@@ -513,17 +516,19 @@ export default function StoreOrders() {
 
     const selectedOrder = useMemo(() => preorders.find(p => p.id === selectedId) || null, [preorders, selectedId]);
 
-    const handleStatusChange = async (orderId, newStatus) => {
-        let reason = null;
-        if (newStatus === 'canceled') {
-            reason = window.prompt('Motivo de la cancelación (se informa al cliente):');
-            if (reason === null) return;
+    const handleStatusChange = async (orderId, newStatus, reason = null) => {
+        // Cancelar abre la misma ventana que en Encargos y Producción: motivo
+        // obligatorio y queda con usuario y hora. Antes era un window.prompt,
+        // que además se podía aceptar vacío.
+        if (newStatus === 'canceled' && !reason) {
+            setCancelandoOrden(preorders.find(p => p.id === orderId) || { id: orderId });
+            return;
         }
         const order = preorders.find(p => p.id === orderId);
         const remaining = Number(order?.remaining_amount) || 0;
         if (newStatus === 'delivered' && remaining > 0) { setRefundOrder(null); setCodOrder(order); return; }
         if (newStatus === 'delivered' && remaining < 0) { setCodOrder(null); setRefundOrder(order); return; }
-        const result = await updatePreorderStatus(orderId, newStatus, reason, getListFilters());
+        const result = await updatePreorderStatus(orderId, newStatus, reason, getListFilters(), 'tienda');
         // Efectivo que no llegó a ninguna caja: aviso que hay que cerrar, para que
         // no se descubra recién al cuadrar el turno.
         if (result.cashWarning) alert('⚠️ ' + result.cashWarning);
@@ -684,6 +689,19 @@ export default function StoreOrders() {
                         />
                     </div>
                 </div>
+            )}
+
+            {cancelandoOrden && (
+                <CancelarEncargoModal
+                    encargo={cancelandoOrden}
+                    onCancel={() => setCancelandoOrden(null)}
+                    onConfirm={async (motivo) => {
+                        const id = cancelandoOrden.id;
+                        setCancelandoOrden(null);
+                        await handleStatusChange(id, 'canceled', motivo);
+                        return true;
+                    }}
+                />
             )}
 
             {codOrder && (
