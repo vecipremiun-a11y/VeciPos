@@ -1,4 +1,4 @@
-import { getTiendaConfig, logSync } from './_db.js';
+import { getTiendaConfig, logSync, turso } from './_db.js';
 
 function sanitizeBaseUrl(url) {
     if (!url) return null;
@@ -50,6 +50,40 @@ function normalizePriceTiers(priceRanges) {
         maxQty: tier.max === '' || tier.max === null || tier.max === undefined ? null : Number(tier.max),
         price: Number(tier.price || 0),
     }));
+}
+
+/**
+ * Id de la categoría del producto en POSVECI, para que la tienda lo cuelgue de
+ * la rama correcta del árbol que manda syncCategoriesToStore.
+ *
+ * Sale del NOMBRE que tiene el producto, que es lo que el inventario muestra y
+ * filtra. `products.category_id` se usa solo si coincide con ese nombre: medido
+ * el 12-sep-2026 en `default`, 23 productos tienen el id en NULL y 1 tiene el id
+ * de "Snack" con el nombre "Dulces". Mandar el id a ciegas los dejaría en la
+ * tienda en otra categoría que la que se ve en el POS.
+ *
+ * Si falla la consulta se sigue sin el id: la tienda cae al nombre, como antes.
+ */
+async function resolverCategoriaPos(companyId, product) {
+    const nombre = product.category ? String(product.category) : '';
+    if (!nombre) return null;
+    const productId = product.id ?? null;
+    try {
+        const r = await turso.execute({
+            sql: `SELECT COALESCE(
+                    (SELECT c.id FROM products p
+                       JOIN categories c ON c.id = p.category_id AND c.company_id = p.company_id
+                      WHERE p.id = ? AND p.company_id = ? AND c.name = ?),
+                    (SELECT id FROM categories WHERE company_id = ? AND name = ? ORDER BY id LIMIT 1)
+                  ) AS id`,
+            args: [productId, companyId, nombre, companyId, nombre],
+        });
+        const id = r.rows?.[0]?.id;
+        return id === null || id === undefined ? null : Number(id);
+    } catch (error) {
+        console.warn('No se pudo resolver la categoría del producto para la tienda:', error.message);
+        return null;
+    }
 }
 
 export async function syncPriceToStore({ companyId, product }) {
@@ -139,7 +173,13 @@ export async function syncProductToStore({ companyId, product }) {
     }
 
     if (product.name) payload.name = product.name;
-    if (product.category) payload.category = product.category;
+    if (product.category) {
+        payload.category = product.category;
+        // El nombre sigue viajando (respaldo para una tienda que no conozca el id).
+        // Una tienda vieja ignora el campo: su schema descarta lo que no conoce.
+        const posCategoryId = await resolverCategoriaPos(companyId, product);
+        if (posCategoryId !== null) payload.posCategoryId = posCategoryId;
+    }
     if (product.stock !== undefined) payload.stock = normalizeStockForStore(product.stock, product.unit);
     if (product.price) payload.price = Number(product.price);
     if (product.unit) payload.unit = product.unit;
@@ -222,6 +262,105 @@ export async function syncProductToStore({ companyId, product }) {
             status: 'error',
             message: 'Error de red al sincronizar producto',
             payload: { ...payload, image_base64: payload.image_base64 ? '(omitted)' : undefined },
+            error: error.message,
+        });
+
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Manda a la tienda el árbol COMPLETO de categorías (categoría → subcategoría →
+ * sub-subcategoría), para que las muestre y ordene igual que el POS.
+ *
+ * Antes la tienda solo recibía el nombre de la categoría de cada producto, y con
+ * un nombre no hay forma de saber de quién cuelga: por eso las mostraba planas.
+ *
+ * Contrato: POSVECI-CATEGORIAS.md del repo de miniveci. La llave es el id de
+ * POSVECI, así un renombre no duplica nada. Va siempre el árbol entero —la tienda
+ * ata los padres en una segunda pasada y necesita tenerlos en el mismo envío—, y
+ * por eso `deactivateMissing: true`: una categoría borrada acá se apaga allá.
+ * Solo toca categorías que la tienda ya tiene atadas a un id de POSVECI.
+ *
+ * No manda orden: la tienda ordena por sortOrder y después por nombre, y como
+ * el POS ordena por nombre, mandar nada deja el mismo orden sin pisar uno que se
+ * haya puesto a mano en la tienda.
+ */
+export async function syncCategoriesToStore({ companyId }) {
+    const config = await getTiendaConfig(companyId);
+
+    // Sin tienda configurada no es un error: la mayoría de las empresas no tiene.
+    if (!config || config.is_active === 0) {
+        return { success: false, skipped: true, error: 'Integración no configurada o inactiva' };
+    }
+
+    const baseUrl = sanitizeBaseUrl(config.tienda_url);
+    if (!baseUrl) {
+        return { success: false, skipped: true, error: 'tienda_url no configurada' };
+    }
+
+    const rows = (await turso.execute({
+        sql: 'SELECT id, name, parent_id, status FROM categories WHERE company_id = ? ORDER BY id',
+        args: [companyId],
+    })).rows || [];
+
+    const categories = rows
+        .filter(c => String(c.name || '').trim())
+        .map(c => ({
+            posCategoryId: Number(c.id),
+            name: String(c.name).trim(),
+            parentPosCategoryId: c.parent_id === null || c.parent_id === undefined ? null : Number(c.parent_id),
+            active: c.status !== 'inactive',
+        }));
+
+    // Un envío vacío con deactivateMissing apagaría todo lo de la tienda.
+    if (categories.length === 0) {
+        return { success: true, skipped: true, message: 'La empresa no tiene categorías' };
+    }
+
+    const endpoint = `${baseUrl}/api/pos/categories/sync`;
+    const payload = { categories, deactivateMissing: true };
+
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: buildAuthHeaders(config),
+            body: JSON.stringify(payload),
+        });
+
+        const text = await response.text();
+        let body = null;
+        try { body = JSON.parse(text); } catch { /* respuesta no JSON */ }
+
+        const result = {
+            success: response.ok,
+            status: response.status,
+            sent: categories.length,
+            // created / updated / adopted / parentsLinked / deactivated
+            ...(body && typeof body === 'object' ? { store: body } : { body: text.slice(0, 1000) }),
+        };
+
+        await logSync({
+            company_id: companyId,
+            direction: 'pos_to_store',
+            event: 'categories.synced',
+            status: response.ok ? 'ok' : 'error',
+            message: response.ok
+                ? `Árbol de categorías sincronizado (${categories.length})`
+                : 'Falló sincronización del árbol de categorías',
+            payload,
+            response: result,
+        });
+
+        return result;
+    } catch (error) {
+        await logSync({
+            company_id: companyId,
+            direction: 'pos_to_store',
+            event: 'categories.synced',
+            status: 'error',
+            message: 'Error de red al sincronizar el árbol de categorías',
+            payload,
             error: error.message,
         });
 

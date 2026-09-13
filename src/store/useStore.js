@@ -2531,6 +2531,15 @@ export const useStore = create(persist((set, get) => ({
                 return { success: false, error: 'Empresa activa no disponible' };
             }
 
+            // El árbol de categorías va antes que los productos: la tienda ata cada
+            // producto a su rama por el id de categoría, y esa categoría tiene que
+            // existir allá primero. Si falla se sigue igual (el nombre de la
+            // categoría sigue viajando con cada producto, como antes).
+            if (typeof onProgress === 'function') {
+                onProgress({ processed: 0, total: 0, message: 'Enviando categorías...' });
+            }
+            const categorias = await get().sincronizarCategoriasConTienda();
+
             // Lectura de productos server-side y PAGINADA (Paso 37): trae 25 por
             // página (con image base64) para no pasar el límite de la respuesta.
             // El envío a WooCommerce (loop de abajo) queda EXACTAMENTE igual.
@@ -2631,7 +2640,7 @@ export const useStore = create(persist((set, get) => ({
             }
 
             if (total === 0) {
-                return { success: true, total: 0, updated: 0, failed: 0, failures: [] };
+                return { success: true, total: 0, updated: 0, failed: 0, failures: [], categorias };
             }
 
             return {
@@ -2640,6 +2649,7 @@ export const useStore = create(persist((set, get) => ({
                 updated,
                 failed,
                 failures,
+                categorias,
             };
         } catch (error) {
             console.error('syncAllStockWithStore error:', error);
@@ -2700,6 +2710,37 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    /**
+     * Manda a la tienda el árbol completo de categorías (el servidor lo lee de la
+     * base). Sin esto la tienda las mostraba planas: solo recibía el nombre de la
+     * categoría de cada producto, y con un nombre no se sabe de quién cuelga.
+     *
+     * Se llama después de crear, editar o borrar una categoría, en segundo plano:
+     * si la tienda está caída la categoría ya quedó guardada en el POS, y el
+     * próximo cambio (o "Sincronizar todo") vuelve a mandar el árbol entero.
+     */
+    sincronizarCategoriasConTienda: async () => {
+        const { activeCompanyId } = get();
+        if (!activeCompanyId) return { success: false, error: 'Empresa activa no disponible' };
+        try {
+            const res = await fetch(
+                `/api/integration/sync-categories?company_id=${encodeURIComponent(activeCompanyId)}`,
+                { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+            );
+            const data = await res.json().catch(() => null);
+            if (data?.skipped) return data;
+            if (!res.ok || !data?.success) {
+                console.warn('Sync de categorías con la tienda falló:', { status: res.status, data });
+                return data || { success: false, status: res.status };
+            }
+            console.log('✅ Árbol de categorías sincronizado con la tienda:', data.store || data);
+            return data;
+        } catch (e) {
+            console.warn('Sync de categorías con la tienda error:', e?.message);
+            return { success: false, error: e?.message };
+        }
+    },
+
     // Categories
     addCategory: async (category) => {
         try {
@@ -2712,6 +2753,7 @@ export const useStore = create(persist((set, get) => ({
             const newCategory = r.category;
 
             set((state) => ({ categories: [...state.categories, newCategory] }));
+            get().sincronizarCategoriasConTienda();
             return { success: true, category: newCategory };
         } catch (e) {
             console.error("Add category error", e);
@@ -2741,6 +2783,7 @@ export const useStore = create(persist((set, get) => ({
                     ? state.products.map(p => p.category === r.oldName ? { ...p, category: updatedCategory.name } : p)
                     : state.products
             }));
+            get().sincronizarCategoriasConTienda();
             return { success: true };
         } catch (e) {
             console.error("Update category error", e);
@@ -2760,6 +2803,7 @@ export const useStore = create(persist((set, get) => ({
             set((state) => ({
                 categories: state.categories.filter((c) => c.id !== id)
             }));
+            get().sincronizarCategoriasConTienda();
             return { success: true };
         } catch (e) {
             console.error("Delete category error", e);

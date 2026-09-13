@@ -8,6 +8,7 @@ import integrationSyncPriceHandler from './api/integration/sync-price.js';
 import integrationSyncStockHandler from './api/integration/sync-stock.js';
 import integrationRetryStockHandler from './api/integration/retry-stock.js';
 import integrationSyncProductHandler from './api/integration/sync-product.js';
+import integrationSyncCategoriesHandler from './api/integration/sync-categories.js';
 import notifyMiniveciStatusHandler from './api/integration/notify-miniveci-status.js';
 import pushPreorderHandler from './api/integration/push-preorder.js';
 import pushSorteoHandler from './api/integration/push-sorteo.js';
@@ -151,6 +152,19 @@ app.all('/api/integration/sync-product', async (req, res) => {
         return await integrationSyncProductHandler(req, res);
     } catch (error) {
         console.error('❌ /api/integration/sync-product fatal error:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            message: error.message,
+        });
+    }
+});
+
+app.all('/api/integration/sync-categories', async (req, res) => {
+    try {
+        return await integrationSyncCategoriesHandler(req, res);
+    } catch (error) {
+        console.error('❌ /api/integration/sync-categories fatal error:', error);
         return res.status(500).json({
             success: false,
             error: 'Internal server error',

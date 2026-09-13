@@ -2,8 +2,21 @@ import React, { useEffect, useState } from 'react';
 import { RefreshCw, Save, Webhook, Store } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 
+/** Una línea legible con lo que respondió la tienda al recibir el árbol. */
+function describirSyncCategorias(r) {
+    if (!r) return '';
+    if (r.skipped) return r.error || r.message || 'No se envió';
+    if (!r.success) {
+        // 404: la tienda todavía no tiene el endpoint del árbol desplegado.
+        if (r.status === 404) return 'La tienda todavía no acepta el árbol de categorías (404)';
+        return `No se pudo enviar${r.status ? ` (${r.status})` : ''}${r.error ? `: ${r.error}` : ''}`;
+    }
+    const s = r.store || {};
+    return `${r.sent} enviadas · ${s.created ?? 0} nuevas, ${s.updated ?? 0} actualizadas, ${s.parentsLinked ?? 0} con categoría madre`;
+}
+
 const StoreIntegrationSettings = () => {
-    const { activeCompanyId, syncAllStockWithStore } = useStore();
+    const { activeCompanyId, syncAllStockWithStore, sincronizarCategoriasConTienda } = useStore();
 
     const [form, setForm] = useState({
         tienda_url: '',
@@ -18,6 +31,8 @@ const StoreIntegrationSettings = () => {
     const [isSyncingAllStock, setIsSyncingAllStock] = useState(false);
     const [syncProgress, setSyncProgress] = useState({ processed: 0, total: 0, message: '' });
     const [syncSummary, setSyncSummary] = useState(null);
+    const [isSyncingCategorias, setIsSyncingCategorias] = useState(false);
+    const [resultadoCategorias, setResultadoCategorias] = useState(null);
 
     const safeReadJson = async (response) => {
         const raw = await response.text();
@@ -128,6 +143,16 @@ const StoreIntegrationSettings = () => {
             alert(`❌ ${error.message}`);
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const handleSyncCategorias = async () => {
+        setResultadoCategorias(null);
+        setIsSyncingCategorias(true);
+        try {
+            setResultadoCategorias(await sincronizarCategoriasConTienda());
+        } finally {
+            setIsSyncingCategorias(false);
         }
     };
 
@@ -280,6 +305,32 @@ const StoreIntegrationSettings = () => {
                         {syncSummary && !isSyncingAllStock && (
                             <p className="text-xs text-[var(--color-text-muted)]">
                                 Resultado: {syncSummary.updated || 0} exitosos / {syncSummary.failed || 0} fallidos (Total: {syncSummary.total || 0})
+                                {syncSummary.categorias && ` · Categorías: ${describirSyncCategorias(syncSummary.categorias)}`}
+                            </p>
+                        )}
+                    </div>
+
+                    <div className="pt-3 border-t border-[var(--glass-border)] space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <span className="block text-sm text-[var(--color-text)] font-medium">Árbol de categorías</span>
+                                <span className="block text-xs text-[var(--color-text-muted)]">
+                                    Categorías y subcategorías, para que la tienda las ordene igual que el POS. Se envía automáticamente al crear, editar o borrar una categoría.
+                                </span>
+                            </div>
+                            <button
+                                onClick={handleSyncCategorias}
+                                disabled={isSyncingCategorias || isSyncingAllStock || !isConfigured}
+                                className="btn-primary flex items-center gap-2 disabled:opacity-50"
+                            >
+                                <RefreshCw size={16} className={isSyncingCategorias ? 'animate-spin' : ''} />
+                                {isSyncingCategorias ? 'Enviando...' : 'Enviar categorías'}
+                            </button>
+                        </div>
+
+                        {resultadoCategorias && !isSyncingCategorias && (
+                            <p className="text-xs text-[var(--color-text-muted)]">
+                                {describirSyncCategorias(resultadoCategorias)}
                             </p>
                         )}
                     </div>
