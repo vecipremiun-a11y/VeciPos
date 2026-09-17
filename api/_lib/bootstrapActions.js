@@ -60,6 +60,22 @@ async function bootstrap(turso, companyId) {
 
     const [productLotsRes, categoriesRes, suppliersRes, usersRes, clientsRes, permissionsRes, taxesRes, modulesRes, appsRes, payConfigRes, payTerminalsRes, bankAccountsRes, companyConfigRes] = results;
 
+    // La libreta de direcciones (espejo de miniveci.cl), que usa el despacho a
+    // domicilio. Va FUERA del batch a propósito: un batch falla entero, y si el
+    // código llegara a producción antes que la migración, la tabla no existiría y
+    // el arranque de la app se caería para todos. Acá, si falla, se arranca sin
+    // libreta y cada cliente muestra la dirección de su ficha, como hasta hoy.
+    let clientAddresses = [];
+    try {
+        const r = await turso.execute({
+            sql: 'SELECT * FROM client_addresses WHERE company_id = ? ORDER BY is_default DESC, id ASC',
+            args: [companyId],
+        });
+        clientAddresses = r.rows;
+    } catch (error) {
+        console.warn('⚠️  bootstrap: no se pudo leer client_addresses:', error.message);
+    }
+
     // Asegurar config de medios de pago (default si no existe) — idempotente.
     let paymentMethodsConfig = payConfigRes.rows[0];
     if (!paymentMethodsConfig) {
@@ -77,6 +93,7 @@ async function bootstrap(turso, companyId) {
         suppliers: suppliersRes.rows,
         users,
         clients: clientsRes.rows,
+        clientAddresses,
         rolePermissions: permissionsRes.rows,
         taxRates: taxesRes.rows,
         companyModules: modulesRes.rows,

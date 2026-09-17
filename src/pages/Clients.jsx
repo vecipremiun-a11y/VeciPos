@@ -6,6 +6,11 @@ import { usePermissions } from '../hooks/usePermissions';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
+    // Libreta de miniveci.cl: las direcciones que el propio cliente cargó en la
+    // tienda. Acá se ven, no se editan — se cambian allá y vuelven por el sync.
+    const direccionesTienda = useStore(s => s.clientAddresses)
+        .filter(d => client?.id && d.client_id === client.id);
+
     const [formData, setFormData] = useState({
         name: client?.name || '',
         rut: client?.rut || '',
@@ -159,6 +164,29 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
                             />
                         </div>
                     </div>
+
+                    {direccionesTienda.length > 0 && (
+                        <div className="rounded-xl border border-[var(--glass-border)] p-3 space-y-2">
+                            <p className="text-xs font-bold text-[var(--color-text)] flex items-center gap-1.5">
+                                <MapPin size={13} className="text-blue-400" />
+                                Sus direcciones en miniveci.cl
+                            </p>
+                            {direccionesTienda.map(d => (
+                                <div key={d.id} className="text-sm">
+                                    <span className="font-medium text-[var(--color-text)]">{d.label || 'Dirección'}</span>
+                                    {Boolean(d.is_default) && (
+                                        <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-[var(--color-primary)]">Principal</span>
+                                    )}
+                                    <span className="block text-xs text-[var(--color-text-muted)] break-words">
+                                        {[d.address, d.comuna, d.ciudad].filter(Boolean).join(', ')}
+                                    </span>
+                                </div>
+                            ))}
+                            <p className="text-[11px] text-[var(--color-text-muted)]">
+                                Las carga el cliente desde la tienda. Acá se ven, no se editan: si cambian allá, llegan solas.
+                            </p>
+                        </div>
+                    )}
 
                     {/* Datos de Facturación SII: solo si el cliente pide factura */}
                     <div className="border-t border-[var(--glass-border)] pt-4 mt-4">

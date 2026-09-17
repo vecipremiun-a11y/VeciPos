@@ -24,6 +24,119 @@ import {
     turso,
 } from './_common.js';
 
+/** "Videla 1430, La Cisterna" — lo que se ve en el despacho y en la impresión. */
+function lineaDireccion(fila) {
+    return [fila.address, fila.comuna].map(v => (v || '').trim()).filter(Boolean).join(', ');
+}
+
+/**
+ * Espeja en POSVECI la libreta de direcciones que manda la tienda.
+ *
+ * La tienda manda SIEMPRE la libreta completa del cliente, y la llave es el id
+ * que la dirección tiene allá (`external_address_id`): con eso, corregir el
+ * texto de una dirección la actualiza en vez de duplicarla.
+ *
+ * Solo toca las filas de origen 'miniveci'. Las cargadas en el POS (clientes sin
+ * cuenta en la tienda) no se tocan nunca: nadie más puede mantenerlas.
+ *
+ * Campo ausente = "no toques la libreta". Lista vacía = "no tiene ninguna": se
+ * vacía la libreta, pero `clients.address` conserva la última conocida para no
+ * dejar el despacho en blanco. Es idempotente: mandar dos veces lo mismo no
+ * cambia nada.
+ */
+async function syncAddressBook(companyId, clientId, addresses) {
+    const entrantes = addresses
+        .map(a => ({
+            externalId: (a.external_address_id ?? a.externalAddressId ?? a.id ?? '').toString().trim(),
+            label: (a.label ?? '').toString().trim() || null,
+            address: (a.address ?? '').toString().trim(),
+            comuna: (a.comuna ?? '').toString().trim() || null,
+            ciudad: (a.ciudad ?? a.city ?? '').toString().trim() || null,
+            notes: (a.notes ?? a.address_notes ?? a.addressNotes ?? '').toString().trim() || null,
+            isDefault: a.is_default === true || a.isDefault === true,
+        }))
+        // Sin id de la tienda no hay forma de emparejarla en el próximo envío, y
+        // sin dirección no hay nada que mostrar.
+        .filter(a => a.externalId && a.address);
+
+    const previas = await turso.execute({
+        sql: `SELECT id, external_id FROM client_addresses
+               WHERE company_id = ? AND client_id = ? AND origin = 'miniveci'`,
+        args: [companyId, clientId],
+    });
+
+    const idsQueVienen = new Set(entrantes.map(a => a.externalId));
+    for (const fila of previas.rows || []) {
+        if (!idsQueVienen.has(String(fila.external_id))) {
+            await turso.execute({
+                sql: 'DELETE FROM client_addresses WHERE id = ? AND company_id = ?',
+                args: [fila.id, companyId],
+            });
+        }
+    }
+
+    for (const a of entrantes) {
+        const existente = (previas.rows || []).find(f => String(f.external_id) === a.externalId);
+        if (existente) {
+            await turso.execute({
+                sql: `UPDATE client_addresses
+                         SET label = ?, address = ?, comuna = ?, ciudad = ?, notes = ?,
+                             is_default = ?, client_id = ?, updated_at = datetime('now')
+                       WHERE id = ? AND company_id = ?`,
+                args: [a.label, a.address, a.comuna, a.ciudad, a.notes, a.isDefault ? 1 : 0, clientId, existente.id, companyId],
+            });
+        } else {
+            await turso.execute({
+                sql: `INSERT INTO client_addresses
+                        (company_id, client_id, external_id, origin, label, address, comuna, ciudad, notes, is_default)
+                      VALUES (?, ?, ?, 'miniveci', ?, ?, ?, ?, ?, ?)`,
+                args: [companyId, clientId, a.externalId, a.label, a.address, a.comuna, a.ciudad, a.notes, a.isDefault ? 1 : 0],
+            });
+        }
+    }
+
+    // La principal es UNA. Si la tienda marcó una, las demás del cliente dejan de
+    // serlo —incluidas las cargadas en el POS—, y esa pasa al campo `address` de
+    // la ficha, que es de donde leen el despacho, los encargos y la impresión.
+    const principal = entrantes.find(a => a.isDefault) || entrantes[0];
+    if (principal) {
+        await turso.execute({
+            sql: `UPDATE client_addresses SET is_default = 0
+                   WHERE company_id = ? AND client_id = ? AND external_id IS NOT ?`,
+            args: [companyId, clientId, principal.externalId],
+        });
+        await turso.execute({
+            sql: `UPDATE client_addresses SET is_default = 1, updated_at = datetime('now')
+                   WHERE company_id = ? AND client_id = ? AND external_id = ?`,
+            args: [companyId, clientId, principal.externalId],
+        });
+        await turso.execute({
+            sql: 'UPDATE clients SET address = ? WHERE id = ? AND company_id = ?',
+            args: [lineaDireccion(principal), clientId, companyId],
+        });
+    }
+
+    return { recibidas: entrantes.length, principal: principal ? lineaDireccion(principal) : null };
+}
+
+/**
+ * Aplica la libreta si vino, sin poner en riesgo el alta del cliente: que falle
+ * el espejo de direcciones no puede hacer que la tienda reintente el registro
+ * entero. Si la tabla todavía no existe (código desplegado antes que la
+ * migración), se avisa y se sigue.
+ */
+async function aplicarLibreta(companyId, clientId, body) {
+    if (!Array.isArray(body.addresses)) return {};
+    try {
+        const r = await syncAddressBook(companyId, clientId, body.addresses);
+        console.log(`📍 [clients] Cliente #${clientId}: ${r.recibidas} dirección(es) de la tienda`);
+        return { addresses_synced: r.recibidas };
+    } catch (error) {
+        console.error(`⚠️  [clients] No se pudo espejar la libreta de #${clientId}:`, error.message);
+        return { addresses_synced: 0, addresses_error: error.message };
+    }
+}
+
 async function upsertClient(req, res) {
     const companyId = parseCompanyId();
     const body = parseJsonBody(req);
@@ -108,12 +221,14 @@ async function upsertClient(req, res) {
             args: [name, rut, phone, email, address, externalId, 'miniveci', existingId, companyId],
         });
         console.log(`🔗 [clients] Cliente #${existingId} sincronizado desde miniveci (match por ${linkedBy})`);
+        const libreta = await aplicarLibreta(companyId, existingId, body);
         return res.status(200).json({
             success: true,
             client_id: existingId,
             external_id: externalId,
             created: false,
             linked_by: linkedBy,
+            ...libreta,
         });
     }
 
@@ -127,12 +242,14 @@ async function upsertClient(req, res) {
     });
     const newId = insertRes.rows?.[0]?.id;
     console.log(`✅ [clients] Cliente nuevo #${newId} creado desde miniveci (${name})`);
+    const libreta = await aplicarLibreta(companyId, newId, body);
     return res.status(201).json({
         success: true,
         client_id: newId,
         external_id: externalId,
         created: true,
         linked_by: null,
+        ...libreta,
     });
 }
 

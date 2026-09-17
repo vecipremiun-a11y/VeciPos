@@ -477,6 +477,10 @@ export const useStore = create(persist((set, get) => ({
 
     // Clients State & Actions
     clients: [],
+    // Libreta de direcciones: espejo de la de miniveci.cl (una fila por dirección,
+    // con la principal marcada). Las de origen 'miniveci' las maneja el cliente
+    // desde la tienda y acá son de solo lectura. Ver migración 0029.
+    clientAddresses: [],
     // setPosSelectedClient is defined below in the multi-cart section (L3641+)
 
     addClient: async (client) => {
@@ -596,6 +600,7 @@ export const useStore = create(persist((set, get) => ({
             companyModules: [], // 🏷️ Clear feature flags
             companyApps: [], // 🧩 Clear apps
             clients: [],
+            clientAddresses: [],
             purchases: [],
             sales: [],
             // Clear Dashboard/POS specific state
@@ -806,6 +811,7 @@ export const useStore = create(persist((set, get) => ({
 
             set({
                 productLots, categories, suppliers, users, clients,
+                clientAddresses: boot.clientAddresses || [],
                 rolePermissions: boot.rolePermissions,
                 taxRates: boot.taxRates,
                 companyModules: boot.companyModules,
