@@ -421,7 +421,7 @@ const CashMovementsReport = () => {
 
             <div className="space-y-4">
                 {groupedMovements.length === 0 && !isLoading && (
-                    <div className="text-center py-12 text-gray-500">No se encontraron registros.</div>
+                    <div className="text-center py-12 text-[var(--color-text-muted)]">No se encontraron registros.</div>
                 )}
 
                 {groupedMovements.map((group, index) => {
@@ -443,8 +443,8 @@ const CashMovementsReport = () => {
                                         <User size={20} />
                                     </div>
                                     <div>
-                                        <h3 className="font-bold text-white text-lg">{group.user_name || 'Desconocido'}</h3>
-                                        <p className="text-sm text-gray-400">
+                                        <h3 className="font-bold text-[var(--color-text)] text-lg">{group.user_name || 'Desconocido'}</h3>
+                                        <p className="text-sm text-[var(--color-text-muted)]">
                                             Turno #{group.register_id} • Iniciado: {safeFormat(group.opening_time, "dd/MM/yy HH:mm", currentCompanyTimezone)}
                                         </p>
                                     </div>
@@ -466,7 +466,7 @@ const CashMovementsReport = () => {
 
 
                                     <div className={cn("transition-transform duration-300", expandedGroups[group.register_id] ? "rotate-180" : "")}>
-                                        <ChevronDown size={20} className="text-gray-400" />
+                                        <ChevronDown size={20} className="text-[var(--color-text-muted)]" />
                                     </div>
                                 </div>
                             </div>
@@ -486,7 +486,7 @@ const CashMovementsReport = () => {
                                         <tbody className="divide-y divide-white/5">
                                             {group.items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).map(item => (
                                                 <tr key={item.id} className="hover:bg-white/5 transition-colors">
-                                                    <td className="px-6 py-3 text-gray-300 font-mono">
+                                                    <td className="px-6 py-3 text-[var(--color-text-muted)] font-mono">
                                                         {safeFormat(item.created_at, "HH:mm", currentCompanyTimezone)}
                                                     </td>
                                                     <td className="px-6 py-3">
@@ -499,7 +499,7 @@ const CashMovementsReport = () => {
                                                             {item.type === 'in' ? 'INGRESO' : 'RETIRO'}
                                                         </span>
                                                     </td>
-                                                    <td className="px-6 py-3 text-gray-300">
+                                                    <td className="px-6 py-3 text-[var(--color-text-muted)]">
                                                         {item.reason}
                                                     </td>
                                                     <td className={cn(

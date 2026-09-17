@@ -347,7 +347,7 @@ const ClientAccountDetails = ({ client, onBack }) => {
                 <div className="glass-card p-3 lg:p-6 bg-red-500/10 border-red-500/20 relative overflow-hidden group">
                     <div className="relative z-10">
                         <p className="text-red-400 text-xs lg:text-sm font-bold uppercase tracking-wider mb-2">Deuda Total</p>
-                        <p className="text-xl lg:text-4xl font-black text-white tracking-tight break-words">{formatCurrency(totalDebt, currentCurrency)}</p>
+                        <p className="text-xl lg:text-4xl font-black text-[var(--color-text)] tracking-tight break-words">{formatCurrency(totalDebt, currentCurrency)}</p>
                     </div>
                     <div className="absolute right-[-20px] top-[-20px] opacity-10 group-hover:opacity-20 transition-opacity">
                         <DollarSignIcon size={120} />

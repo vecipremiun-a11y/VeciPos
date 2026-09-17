@@ -48,7 +48,7 @@ const CompanySwitcher = () => {
     if (availableCompanies.length <= 1 && currentUser?.role !== 'super_admin') {
         // Just show the name if there's nothing to switch to (and not admin)
         return (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 rounded-full border border-white/10 text-sm text-gray-300">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 rounded-full border border-white/10 text-sm text-[var(--color-text-muted)]">
                 <Building2 size={14} className="shrink-0" />
                 <span className="font-medium truncate max-w-[100px] sm:max-w-[150px]">{currentCompany.name}</span>
             </div>
@@ -64,14 +64,14 @@ const CompanySwitcher = () => {
                 <div className="p-1 bg-indigo-500/20 rounded-full text-indigo-400 shrink-0">
                     <Building2 size={14} />
                 </div>
-                <span className="font-medium text-white truncate max-w-[100px] sm:max-w-[150px]">
+                <span className="font-medium text-[var(--color-text)] truncate max-w-[100px] sm:max-w-[150px]">
                     {currentCompany.name}
                 </span>
-                <ChevronDown size={14} className={`text-gray-400 transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown size={14} className={`text-[var(--color-text-muted)] transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {isOpen && (
-                <div className="absolute top-full right-0 mt-2 w-64 bg-[#18181b] border border-white/10 rounded-xl shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
+                <div className="panel-oscuro absolute top-full right-0 mt-2 w-64 bg-[#18181b] border border-white/10 rounded-xl shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
                     <div className="p-2 border-b border-white/5">
                         <span className="text-xs text-gray-500 font-medium px-2">Cambiar Empresa</span>
                     </div>

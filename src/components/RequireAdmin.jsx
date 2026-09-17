@@ -6,7 +6,7 @@ const RequireAdmin = ({ children }) => {
     const { currentUser, isLoading } = useStore();
 
     if (isLoading && !currentUser) {
-        return <div className="p-10 text-center text-white">Verificando permisos...</div>;
+        return <div className="p-10 text-center text-[var(--color-text)]">Verificando permisos...</div>;
     }
 
     if (!currentUser || currentUser.role !== 'super_admin') {

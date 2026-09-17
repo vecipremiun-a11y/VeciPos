@@ -187,7 +187,7 @@ const ConfirmPreorderModal = ({ isOpen, onClose, onConfirm, cart, total, current
                                     <UserPlus size={16} /> Nuevo
                                 </button>
                                 {showClientDropdown && filteredClients.length > 0 && (
-                                    <div className="absolute top-full left-0 right-0 mt-1 bg-[#18181b] border border-[var(--glass-border)] shadow-xl z-50 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                                    <div className="panel-oscuro absolute top-full left-0 right-0 mt-1 bg-[#18181b] border border-[var(--glass-border)] shadow-xl z-50 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
                                         {filteredClients.map(c => (
                                             <button key={c.id} onClick={() => {
                                                 setSelectedClient(c); setClientSearch(c.name); setClientName(c.name);

@@ -560,7 +560,7 @@ const CreateBranchModal = ({ defaultName, currency, onClose, onConfirm }) => {
 
     return createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
-            <div className="glass-card w-full max-w-md max-h-[90vh] overflow-y-auto border border-white/10 shadow-2xl !bg-[#18181b] !backdrop-blur-none" onClick={(e) => e.stopPropagation()}>
+            <div className="panel-oscuro glass-card w-full max-w-md max-h-[90vh] overflow-y-auto border border-white/10 shadow-2xl !bg-[#18181b] !backdrop-blur-none" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-start justify-between mb-1">
                     <h3 className="text-lg font-bold text-[var(--color-text)]">Agregar sucursal</h3>
                     <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] p-1"><X size={20} /></button>

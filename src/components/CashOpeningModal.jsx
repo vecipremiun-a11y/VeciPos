@@ -22,8 +22,8 @@ const CashOpeningModal = ({ isOpen, canOpen = true }) => {
                     <div className="w-16 h-16 mx-auto mb-4 bg-amber-500/15 rounded-full flex items-center justify-center text-amber-400">
                         <Lock size={32} />
                     </div>
-                    <h2 className="text-2xl font-bold text-white mb-2">Caja no abierta</h2>
-                    <p className="text-gray-400 text-sm leading-relaxed">
+                    <h2 className="text-2xl font-bold text-[var(--color-text)] mb-2">Caja no abierta</h2>
+                    <p className="text-[var(--color-text-muted)] text-sm leading-relaxed">
                         Para usar el punto de venta necesitas una caja abierta con un monto inicial,
                         y tu rol no tiene permiso para abrir caja.
                     </p>
@@ -86,8 +86,8 @@ const CashOpeningModal = ({ isOpen, canOpen = true }) => {
                     <div className="w-16 h-16 mx-auto mb-4 bg-[var(--color-primary)]/20 rounded-full flex items-center justify-center text-[var(--color-primary)] shadow-[0_0_20px_rgba(0,240,255,0.2)]">
                         <Wallet size={32} />
                     </div>
-                    <h2 className="text-2xl font-bold text-white mb-2">Apertura de Caja</h2>
-                    <p className="text-gray-400 text-sm">
+                    <h2 className="text-2xl font-bold text-[var(--color-text)] mb-2">Apertura de Caja</h2>
+                    <p className="text-[var(--color-text-muted)] text-sm">
                         Debes abrir la caja antes de comenzar las ventas.
                         Ingresa el monto inicial con el que comenzarás el turno.
                     </p>
@@ -109,12 +109,12 @@ const CashOpeningModal = ({ isOpen, canOpen = true }) => {
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                     <div className="space-y-2">
-                        <label className="text-sm font-bold text-white ml-1">Monto de Apertura</label>
+                        <label className="text-sm font-bold text-[var(--color-text)] ml-1">Monto de Apertura</label>
                         <div className="relative">
-                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg">{currentCurrency}</span>
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] text-lg">{currentCurrency}</span>
                             <input
                                 type="number"
-                                className="glass-input w-full !pl-16 h-14 text-2xl font-bold text-white placeholder-gray-600 focus:border-[var(--color-primary)] transition-all"
+                                className="glass-input w-full !pl-16 h-14 text-2xl font-bold text-[var(--color-text)] placeholder-gray-600 focus:border-[var(--color-primary)] transition-all"
                                 placeholder="0"
                                 value={amount}
                                 onChange={(e) => setAmount(e.target.value)}

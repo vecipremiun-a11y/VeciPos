@@ -36,7 +36,7 @@ const SesionExpiradaModal = () => {
 
     return createPortal(
         <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
-            <div className="glass-card w-full max-w-sm p-6 !bg-[#0f0f2d]/98 border border-[var(--glass-border)] shadow-2xl rounded-2xl text-center">
+            <div className="panel-oscuro glass-card w-full max-w-sm p-6 !bg-[#0f0f2d]/98 border border-[var(--glass-border)] shadow-2xl rounded-2xl text-center">
                 <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400 mb-4">
                     <LogIn size={22} />
                 </div>

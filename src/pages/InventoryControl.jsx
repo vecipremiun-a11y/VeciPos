@@ -58,8 +58,8 @@ const StatCard = ({ icon: Icon, label, value, sub, color = 'blue' }) => {
                     <Icon size={22} />
                 </div>
                 <div className="min-w-0">
-                    <p className="text-lg font-bold text-white truncate">{value}</p>
-                    <p className="text-xs text-zinc-400 truncate">{label}</p>
+                    <p className="text-lg font-bold text-[var(--color-text)] truncate">{value}</p>
+                    <p className="text-xs text-[var(--color-text-muted)] truncate">{label}</p>
                     {sub && <p className={`text-xs ${iconColors[color]} truncate`}>{sub}</p>}
                 </div>
             </div>
@@ -72,7 +72,7 @@ const ProgressBar = ({ current, total }) => {
     const pct = total > 0 ? Math.min((current / total) * 100, 100) : 0;
     return (
         <div className="w-full">
-            <div className="flex justify-between text-xs text-zinc-400 mb-1">
+            <div className="flex justify-between text-xs text-[var(--color-text-muted)] mb-1">
                 <span>{current} de {total} productos</span>
                 <span>{Math.round(pct)}%</span>
             </div>
@@ -551,8 +551,8 @@ const InventoryControl = () => {
                     <ClipboardCheck size={26} className="text-blue-400" />
                 </div>
                 <div>
-                    <h1 className="text-2xl font-bold text-white">Control de Inventario</h1>
-                    <p className="text-sm text-zinc-400">Conteo físico y ajuste de stock en tiempo real</p>
+                    <h1 className="text-2xl font-bold text-[var(--color-text)]">Control de Inventario</h1>
+                    <p className="text-sm text-[var(--color-text-muted)]">Conteo físico y ajuste de stock en tiempo real</p>
                 </div>
             </div>
 
@@ -572,7 +572,7 @@ const InventoryControl = () => {
                 <GlassCard gradient="from-blue-500/10 to-purple-500/5">
                     <div className="p-6 space-y-4">
                         <div className="flex items-center justify-between">
-                            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                            <h2 className="text-lg font-semibold text-[var(--color-text)] flex items-center gap-2">
                                 <Plus size={20} className="text-blue-400" />
                                 Nuevo Control
                             </h2>
@@ -583,7 +583,7 @@ const InventoryControl = () => {
 
                         {/* Name */}
                         <div>
-                            <label className="text-sm text-zinc-400 mb-1 block">Nombre del control</label>
+                            <label className="text-sm text-[var(--color-text-muted)] mb-1 block">Nombre del control</label>
                             <input
                                 type="text"
                                 value={formName}
@@ -596,7 +596,7 @@ const InventoryControl = () => {
 
                         {/* Type */}
                         <div>
-                            <label className="text-sm text-zinc-400 mb-2 block">Tipo de control</label>
+                            <label className="text-sm text-[var(--color-text-muted)] mb-2 block">Tipo de control</label>
                             <div className="grid grid-cols-4 gap-2">
                                 {[
                                     { key: 'complete', label: 'Completo', icon: Package, desc: 'Todos los productos' },
@@ -612,9 +612,9 @@ const InventoryControl = () => {
                                             : 'bg-white/3 border-white/8 hover:bg-white/5'
                                         }`}
                                     >
-                                        <opt.icon size={20} className={`mx-auto mb-1 ${formType === opt.key ? 'text-blue-400' : 'text-zinc-500'}`} />
-                                        <p className={`text-sm font-medium ${formType === opt.key ? 'text-white' : 'text-zinc-400'}`}>{opt.label}</p>
-                                        <p className="text-[10px] text-zinc-500 mt-0.5">{opt.desc}</p>
+                                        <opt.icon size={20} className={`mx-auto mb-1 ${formType === opt.key ? 'text-blue-400' : 'text-[var(--color-text-muted)]'}`} />
+                                        <p className={`text-sm font-medium ${formType === opt.key ? 'text-[var(--color-text)]' : 'text-[var(--color-text-muted)]'}`}>{opt.label}</p>
+                                        <p className="text-[10px] text-[var(--color-text-muted)] mt-0.5">{opt.desc}</p>
                                     </button>
                                 ))}
                             </div>
@@ -623,7 +623,7 @@ const InventoryControl = () => {
                         {/* Category selector */}
                         {formType === 'category' && (
                             <div>
-                                <label className="text-sm text-zinc-400 mb-1 block">Categoría</label>
+                                <label className="text-sm text-[var(--color-text-muted)] mb-1 block">Categoría</label>
                                 <select
                                     value={formCategory}
                                     onChange={e => setFormCategory(e.target.value)}
@@ -640,7 +640,7 @@ const InventoryControl = () => {
                         {/* Supplier selector */}
                         {formType === 'supplier' && (
                             <div>
-                                <label className="text-sm text-zinc-400 mb-1 block">Proveedor</label>
+                                <label className="text-sm text-[var(--color-text-muted)] mb-1 block">Proveedor</label>
                                 <select
                                     value={formSupplier}
                                     onChange={e => setFormSupplier(e.target.value)}
@@ -672,7 +672,7 @@ const InventoryControl = () => {
             {/* History */}
             {history.length > 0 && (
                 <div className="space-y-3">
-                    <h3 className="text-sm font-semibold text-zinc-400 flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-[var(--color-text-muted)] flex items-center gap-2">
                         <History size={16} /> Historial de controles
                     </h3>
                     {history.map(h => (
@@ -680,12 +680,12 @@ const InventoryControl = () => {
                             <div className="p-4 flex items-center justify-between">
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-center gap-2">
-                                        <p className="font-medium text-white truncate">{h.name}</p>
+                                        <p className="font-medium text-[var(--color-text)] truncate">{h.name}</p>
                                         <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${h.status === 'completed' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}>
                                             {h.status === 'completed' ? 'Completado' : 'Cancelado'}
                                         </span>
                                     </div>
-                                    <div className="flex items-center gap-3 text-xs text-zinc-500 mt-1">
+                                    <div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)] mt-1">
                                         <span>{typeLabel(h.type, h.category)}</span>
                                         <span>•</span>
                                         <span>{h.user_name}</span>
@@ -694,8 +694,8 @@ const InventoryControl = () => {
                                     </div>
                                 </div>
                                 <div className="text-right">
-                                    <p className="text-sm font-semibold text-white">{h.counted_products}</p>
-                                    <p className="text-[10px] text-zinc-500">contados</p>
+                                    <p className="text-sm font-semibold text-[var(--color-text)]">{h.counted_products}</p>
+                                    <p className="text-[10px] text-[var(--color-text-muted)]">contados</p>
                                 </div>
                             </div>
                         </GlassCard>
@@ -719,8 +719,8 @@ const InventoryControl = () => {
                                 <ClipboardCheck size={20} className="text-blue-400" />
                             </div>
                             <div className="min-w-0">
-                                <h1 className="font-bold text-white truncate">{control.name}</h1>
-                                <p className="text-xs text-zinc-500">
+                                <h1 className="font-bold text-[var(--color-text)] truncate">{control.name}</h1>
+                                <p className="text-xs text-[var(--color-text-muted)]">
                                     {typeLabel(control.type, control.category)} • {control.user_name}
                                 </p>
                             </div>
@@ -735,15 +735,15 @@ const InventoryControl = () => {
                     <div className="grid grid-cols-3 gap-2 text-center">
                         <div className="py-2 px-3 bg-white/5 rounded-xl">
                             <p className="text-lg font-bold text-emerald-400">{control.counted_products || 0}</p>
-                            <p className="text-[10px] text-zinc-500">Contados</p>
+                            <p className="text-[10px] text-[var(--color-text-muted)]">Contados</p>
                         </div>
                         <div className="py-2 px-3 bg-white/5 rounded-xl">
                             <p className="text-lg font-bold text-amber-400">{control.type !== 'free' ? Math.max((control.total_products || 0) - (control.counted_products || 0), 0) : '∞'}</p>
-                            <p className="text-[10px] text-zinc-500">Pendientes</p>
+                            <p className="text-[10px] text-[var(--color-text-muted)]">Pendientes</p>
                         </div>
                         <div className="py-2 px-3 bg-white/5 rounded-xl">
-                            <p className="text-lg font-bold text-white">{control.total_products || (control.type === 'free' ? '—' : 0)}</p>
-                            <p className="text-[10px] text-zinc-500">Total</p>
+                            <p className="text-lg font-bold text-[var(--color-text)]">{control.total_products || (control.type === 'free' ? '—' : 0)}</p>
+                            <p className="text-[10px] text-[var(--color-text-muted)]">Total</p>
                         </div>
                     </div>
 
@@ -757,7 +757,7 @@ const InventoryControl = () => {
             {/* Scan input */}
             <div className="relative flex gap-2">
                 <div className="relative flex-1">
-                    <ScanBarcode size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
+                    <ScanBarcode size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
                     <input
                         ref={searchInputRef}
                         type="text"
@@ -777,7 +777,7 @@ const InventoryControl = () => {
                 </div>
                 <button
                     onClick={startCameraScanner}
-                    className="shrink-0 p-3.5 bg-white/5 border border-white/10 rounded-2xl text-zinc-400 hover:text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/30 transition-all"
+                    className="shrink-0 p-3.5 bg-white/5 border border-white/10 rounded-2xl text-[var(--color-text-muted)] hover:text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/30 transition-all"
                     title="Escanear con cámara"
                 >
                     <Camera size={20} />
@@ -787,7 +787,7 @@ const InventoryControl = () => {
             {/* Camera scanner modal */}
             {cameraOpen && (
                 <div className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center p-4" onClick={stopCameraScanner}>
-                    <div className="bg-[#0f0f2d] border border-white/10 rounded-2xl overflow-hidden w-full max-w-md" onClick={e => e.stopPropagation()}>
+                    <div className="panel-oscuro bg-[#0f0f2d] border border-white/10 rounded-2xl overflow-hidden w-full max-w-md" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-between p-4 border-b border-white/10">
                             <div className="flex items-center gap-2 text-white font-medium">
                                 <Camera size={18} className="text-blue-400" />
@@ -835,9 +835,9 @@ const InventoryControl = () => {
                                 </div>
                             )}
                             <div className="flex-1 min-w-0">
-                                <p className="font-semibold text-white truncate">{scannedProduct.name}</p>
+                                <p className="font-semibold text-[var(--color-text)] truncate">{scannedProduct.name}</p>
                                 {scannedProduct.sku && (
-                                    <p className="text-xs text-zinc-500 flex items-center gap-1 mt-0.5">
+                                    <p className="text-xs text-[var(--color-text-muted)] flex items-center gap-1 mt-0.5">
                                         <Hash size={12} /> {scannedProduct.sku}
                                     </p>
                                 )}
@@ -846,7 +846,7 @@ const InventoryControl = () => {
                                         Stock sistema: <strong>{fmtNum(scannedProduct.stock)}</strong>
                                     </span>
                                     {scannedProduct.cost > 0 && (
-                                        <span className="text-xs px-2.5 py-1 rounded-lg bg-white/5 text-zinc-400 border border-white/8">
+                                        <span className="text-xs px-2.5 py-1 rounded-lg bg-white/5 text-[var(--color-text-muted)] border border-white/8">
                                             Costo: {fmt(scannedProduct.cost)}
                                         </span>
                                     )}
@@ -859,7 +859,7 @@ const InventoryControl = () => {
 
                         {/* Count input */}
                         <div className="space-y-2">
-                            <label className="text-sm text-zinc-400 font-medium">Stock real</label>
+                            <label className="text-sm text-[var(--color-text-muted)] font-medium">Stock real</label>
                             <input
                                 ref={countInputRef}
                                 type="number"
@@ -950,13 +950,13 @@ const InventoryControl = () => {
                                 {isCounted ? <CheckCircle2 size={16} className="text-emerald-400" /> : <Package size={16} className="text-zinc-600" />}
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className={`text-sm font-medium truncate ${isCounted ? 'text-emerald-300' : 'text-white'}`}>{p.name}</p>
-                                <p className="text-[10px] text-zinc-500 truncate">{p.sku || 'Sin código'}{p.category ? ` • ${p.category}` : ''}</p>
+                                <p className={`text-sm font-medium truncate ${isCounted ? 'text-emerald-300' : 'text-[var(--color-text)]'}`}>{p.name}</p>
+                                <p className="text-[10px] text-[var(--color-text-muted)] truncate">{p.sku || 'Sin código'}{p.category ? ` • ${p.category}` : ''}</p>
                             </div>
                             {isCounted ? (
                                 <div className="flex items-center gap-2 flex-shrink-0">
                                     <div className="text-right">
-                                        <p className="text-xs text-zinc-400">{fmtNum(p.system_stock)} → <span className="text-white font-semibold">{fmtNum(p.counted_stock)}</span></p>
+                                        <p className="text-xs text-[var(--color-text-muted)]">{fmtNum(p.system_stock)} → <span className="text-[var(--color-text)] font-semibold">{fmtNum(p.counted_stock)}</span></p>
                                         <p className={`text-[10px] font-medium ${Math.abs(p.difference) <= 0.001 ? 'text-emerald-400' : p.difference < 0 ? 'text-red-400' : 'text-orange-400'}`}>
                                             {Math.abs(p.difference) <= 0.001 ? '✓ Cuadrado' : p.difference < 0 ? `▼ ${fmtNum(Math.abs(p.difference))}` : `▲ +${fmtNum(p.difference)}`}
                                         </p>
@@ -968,7 +968,7 @@ const InventoryControl = () => {
                                 </div>
                             ) : (
                                 <div className="text-right flex-shrink-0">
-                                    <p className="text-xs text-zinc-400">Stock: <span className="text-white">{fmtNum(p.stock)}</span></p>
+                                    <p className="text-xs text-[var(--color-text-muted)]">Stock: <span className="text-[var(--color-text)]">{fmtNum(p.stock)}</span></p>
                                 </div>
                             )}
                         </div>
@@ -980,7 +980,7 @@ const InventoryControl = () => {
                     </div>
                 )}
                 {!loadingProducts && products.length === 0 && (
-                    <div className="text-center py-10 text-zinc-500">
+                    <div className="text-center py-10 text-[var(--color-text-muted)]">
                         <Package size={40} className="mx-auto mb-2 opacity-30" />
                         <p className="text-sm">No se encontraron productos</p>
                     </div>
@@ -1050,12 +1050,12 @@ const InventoryControl = () => {
             <div className="max-w-4xl mx-auto p-4 space-y-5">
                 {/* Header */}
                 <div className="flex items-center gap-3">
-                    <button onClick={handleBackHome} className="p-2 rounded-xl hover:bg-white/5 text-zinc-400 transition-all">
+                    <button onClick={handleBackHome} className="p-2 rounded-xl hover:bg-white/5 text-[var(--color-text-muted)] transition-all">
                         <ArrowLeft size={20} />
                     </button>
                     <div className="flex-1 min-w-0">
-                        <h1 className="text-xl font-bold text-white truncate">Reporte — {reportControl?.name}</h1>
-                        <p className="text-xs text-zinc-500">
+                        <h1 className="text-xl font-bold text-[var(--color-text)] truncate">Reporte — {reportControl?.name}</h1>
+                        <p className="text-xs text-[var(--color-text-muted)]">
                             {typeLabel(reportControl?.type, reportControl?.category)} • {reportControl?.user_name} • {new Date(reportControl?.completed_at || reportControl?.started_at).toLocaleString()}
                         </p>
                     </div>
@@ -1095,7 +1095,7 @@ const InventoryControl = () => {
                 {/* Report table */}
                 <GlassCard>
                     {/* Desktop header */}
-                    <div className="hidden md:grid grid-cols-[1fr_80px_80px_80px_90px_90px] gap-2 px-4 py-3 text-xs text-zinc-500 font-medium border-b border-white/5">
+                    <div className="hidden md:grid grid-cols-[1fr_80px_80px_80px_90px_90px] gap-2 px-4 py-3 text-xs text-[var(--color-text-muted)] font-medium border-b border-white/5">
                         <span>Producto</span>
                         <span className="text-right">Sistema</span>
                         <span className="text-right">Real</span>
@@ -1114,32 +1114,32 @@ const InventoryControl = () => {
                                     <div className="md:hidden space-y-2">
                                         <div className="flex items-center justify-between">
                                             <div className="min-w-0">
-                                                <p className="text-sm font-medium text-white truncate">{item.product_name}</p>
-                                                <p className="text-[10px] text-zinc-500">{item.product_sku || 'Sin código'}</p>
+                                                <p className="text-sm font-medium text-[var(--color-text)] truncate">{item.product_name}</p>
+                                                <p className="text-[10px] text-[var(--color-text-muted)]">{item.product_sku || 'Sin código'}</p>
                                             </div>
                                             <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${isMatched ? 'text-emerald-400 bg-emerald-500/10' : isMissing ? 'text-red-400 bg-red-500/10' : 'text-orange-400 bg-orange-500/10'}`}>
                                                 {isMatched ? '✓' : isMissing ? `▼ ${fmtNum(absDiff)}` : `▲ +${fmtNum(absDiff)}`}
                                             </span>
                                         </div>
                                         <div className="grid grid-cols-4 gap-2 text-[10px]">
-                                            <div><span className="text-zinc-500">Sistema</span><p className="text-zinc-300 font-medium">{fmtNum(item.system_stock)}</p></div>
-                                            <div><span className="text-zinc-500">Real</span><p className="text-white font-bold">{fmtNum(item.counted_stock)}</p></div>
-                                            <div><span className="text-zinc-500">Costo</span><p className="text-zinc-300">{fmt(item.cost)}</p></div>
-                                            <div><span className="text-zinc-500">Valor</span><p className={isMatched ? 'text-zinc-500' : isMissing ? 'text-red-400 font-medium' : 'text-orange-400 font-medium'}>{isMatched ? '—' : fmt(absDiff * (item.cost || 0))}</p></div>
+                                            <div><span className="text-[var(--color-text-muted)]">Sistema</span><p className="text-[var(--color-text-muted)] font-medium">{fmtNum(item.system_stock)}</p></div>
+                                            <div><span className="text-[var(--color-text-muted)]">Real</span><p className="text-[var(--color-text)] font-bold">{fmtNum(item.counted_stock)}</p></div>
+                                            <div><span className="text-[var(--color-text-muted)]">Costo</span><p className="text-[var(--color-text-muted)]">{fmt(item.cost)}</p></div>
+                                            <div><span className="text-[var(--color-text-muted)]">Valor</span><p className={isMatched ? 'text-[var(--color-text-muted)]' : isMissing ? 'text-red-400 font-medium' : 'text-orange-400 font-medium'}>{isMatched ? '—' : fmt(absDiff * (item.cost || 0))}</p></div>
                                         </div>
                                     </div>
                                     {/* Desktop */}
                                     <div className="hidden md:grid grid-cols-[1fr_80px_80px_80px_90px_90px] gap-2 items-center">
                                         <div className="min-w-0">
-                                            <p className="text-sm text-white truncate">{item.product_name}</p>
-                                            <p className="text-[10px] text-zinc-500">{item.product_sku || 'Sin código'}</p>
+                                            <p className="text-sm text-[var(--color-text)] truncate">{item.product_name}</p>
+                                            <p className="text-[10px] text-[var(--color-text-muted)]">{item.product_sku || 'Sin código'}</p>
                                         </div>
-                                        <p className="text-sm text-zinc-400 text-right">{fmtNum(item.system_stock)}</p>
-                                        <p className="text-sm text-white font-semibold text-right">{fmtNum(item.counted_stock)}</p>
+                                        <p className="text-sm text-[var(--color-text-muted)] text-right">{fmtNum(item.system_stock)}</p>
+                                        <p className="text-sm text-[var(--color-text)] font-semibold text-right">{fmtNum(item.counted_stock)}</p>
                                         <p className={`text-sm font-bold text-right ${isMatched ? 'text-emerald-400' : isMissing ? 'text-red-400' : 'text-orange-400'}`}>
                                             {isMatched ? '✓' : isMissing ? fmtNum(item.difference) : `+${fmtNum(item.difference)}`}
                                         </p>
-                                        <p className="text-sm text-zinc-400 text-right">{fmt(item.cost)}</p>
+                                        <p className="text-sm text-[var(--color-text-muted)] text-right">{fmt(item.cost)}</p>
                                         <p className={`text-sm text-right font-medium ${isMatched ? 'text-zinc-600' : isMissing ? 'text-red-400' : 'text-orange-400'}`}>
                                             {isMatched ? '—' : fmt(absDiff * (item.cost || 0))}
                                         </p>
@@ -1148,7 +1148,7 @@ const InventoryControl = () => {
                             );
                         })}
                         {filteredReportItems.length === 0 && (
-                            <div className="text-center py-10 text-zinc-500 text-sm">Sin resultados para este filtro</div>
+                            <div className="text-center py-10 text-[var(--color-text-muted)] text-sm">Sin resultados para este filtro</div>
                         )}
                     </div>
                 </GlassCard>
@@ -1171,7 +1171,7 @@ const InventoryControl = () => {
                     </button>
                     <button
                         onClick={handleBackHome}
-                        className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-zinc-400 font-medium hover:bg-white/10 transition-all"
+                        className="flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-[var(--color-text-muted)] font-medium hover:bg-white/10 transition-all"
                     >
                         <ArrowLeft size={18} /> Volver al Inicio
                     </button>

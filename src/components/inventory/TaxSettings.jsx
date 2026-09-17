@@ -85,8 +85,8 @@ const TaxSettings = () => {
         <div className="space-y-6 animate-in fade-in duration-300">
             <div className="flex justify-between items-center">
                 <div>
-                    <h2 className="text-xl font-bold text-white">Configuración de Impuestos</h2>
-                    <p className="text-sm text-gray-400">Administra los impuestos aplicables a tus productos</p>
+                    <h2 className="text-xl font-bold text-[var(--color-text)]">Configuración de Impuestos</h2>
+                    <p className="text-sm text-[var(--color-text-muted)]">Administra los impuestos aplicables a tus productos</p>
                 </div>
                 {(can('taxes.create')) && !isCreating && (
                     <button
@@ -107,7 +107,7 @@ const TaxSettings = () => {
 
             <div className="glass-card overflow-hidden">
                 <table className="w-full text-left">
-                    <thead className="bg-black/20 text-gray-400 uppercase text-xs font-semibold">
+                    <thead className="bg-black/20 text-[var(--color-text-muted)] uppercase text-xs font-semibold">
                         <tr>
                             <th className="px-6 py-4">Nombre</th>
                             <th className="px-6 py-4">Tasa (%)</th>
@@ -211,8 +211,8 @@ const TaxSettings = () => {
                                     </>
                                 ) : (
                                     <>
-                                        <td className="px-6 py-4 font-medium text-white">{tax.name}</td>
-                                        <td className="px-6 py-4 text-gray-300">{tax.rate}%</td>
+                                        <td className="px-6 py-4 font-medium text-[var(--color-text)]">{tax.name}</td>
+                                        <td className="px-6 py-4 text-[var(--color-text-muted)]">{tax.rate}%</td>
                                         <td className="px-6 py-4">
                                             {tax.is_default === 1 && (
                                                 <span className="px-2 py-1 bg-[var(--color-primary)]/20 text-[var(--color-primary)] text-xs rounded-full border border-[var(--color-primary)]/30">

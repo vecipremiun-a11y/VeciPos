@@ -1401,7 +1401,7 @@ const Orders = () => {
                                 {selectedProduct.image ? (
                                     <img src={selectedProduct.image} alt={selectedProduct.name} className="max-w-full max-h-full object-contain" />
                                 ) : (
-                                    <Package size={48} className="text-gray-300" />
+                                    <Package size={48} className="text-[var(--color-text-muted)]" />
                                 )}
                             </div>
 

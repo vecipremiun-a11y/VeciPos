@@ -1034,11 +1034,11 @@ const POS = () => {
                         <div className="col-span-full flex items-center justify-center py-12">
                             <div className="text-center">
                                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mx-auto mb-4"></div>
-                                <p className="text-gray-400">Cargando productos...</p>
+                                <p className="text-[var(--color-text-muted)]">Cargando productos...</p>
                             </div>
                         </div>
                     ) : visibleProducts.length === 0 ? (
-                        <div className="col-span-full text-center py-12 text-gray-400">
+                        <div className="col-span-full text-center py-12 text-[var(--color-text-muted)]">
                             No hay productos disponibles
                         </div>
                     ) : (
@@ -1168,7 +1168,7 @@ const POS = () => {
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-1.5">
                                                 <ShoppingCart size={14} className={isActive ? "text-cyan-400" : "text-gray-500"} />
-                                                <span className={cn("text-xs font-bold tracking-wide", isActive ? "text-white" : "text-gray-400")}>
+                                                <span className={cn("text-xs font-bold tracking-wide", isActive ? "text-[var(--color-text)]" : "text-[var(--color-text-muted)]")}>
                                                     {cart.name}
                                                 </span>
                                             </div>
@@ -1220,7 +1220,7 @@ const POS = () => {
                             {carts.length < 3 && (
                                 <button
                                     onClick={addCart}
-                                    className="flex-[0.4] min-w-[60px] max-w-[100px] h-20 rounded-xl border border-dashed border-gray-800 hover:border-gray-600 bg-transparent hover:bg-white/5 flex flex-col items-center justify-center gap-1 text-gray-600 hover:text-gray-400 transition-all group"
+                                    className="flex-[0.4] min-w-[60px] max-w-[100px] h-20 rounded-xl border border-dashed border-gray-800 hover:border-gray-600 bg-transparent hover:bg-white/5 flex flex-col items-center justify-center gap-1 text-gray-600 hover:text-[var(--color-text-muted)] transition-all group"
                                     title="Agregar Ticket"
                                 >
                                     <div className="w-8 h-8 rounded-full bg-gray-800 group-hover:bg-gray-700 flex items-center justify-center transition-colors">
@@ -1556,7 +1556,7 @@ const POS = () => {
                         />
 
                         {/* Sheet Content */}
-                        <div className="relative bg-[#0f1016] w-full rounded-t-3xl shadow-2xl border-t border-white/10 flex flex-col max-h-[85vh] animate-slide-up">
+                        <div className="panel-oscuro relative bg-[#0f1016] w-full rounded-t-3xl shadow-2xl border-t border-white/10 flex flex-col max-h-[85vh] animate-slide-up">
                             {/* Handle */}
                             <div
                                 className="w-full flex justify-center pt-3 pb-2 cursor-pointer"
@@ -1809,7 +1809,7 @@ const POS = () => {
                     <div className="fixed inset-0 z-[9998]" onClick={cerrarMenu} />
 
                     <div
-                        className="fixed z-[9999] w-52 max-h-[60vh] overflow-y-auto rounded-xl border border-[var(--glass-border)] bg-[#0f0f2d] shadow-2xl shadow-black/60 py-1.5 custom-scrollbar"
+                        className="panel-oscuro fixed z-[9999] w-52 max-h-[60vh] overflow-y-auto rounded-xl border border-[var(--glass-border)] bg-[#0f0f2d] shadow-2xl shadow-black/60 py-1.5 custom-scrollbar"
                         style={{
                             left: Math.min(menu.x, window.innerWidth - 208 - 12),
                             top: menu.y,
@@ -1862,7 +1862,7 @@ const POS = () => {
                     {/* Tercer nivel: sale al costado derecho del panel anterior. */}
                     {subsubcategorias.length > 0 && (
                         <div
-                            className="fixed z-[9999] w-48 max-h-[60vh] overflow-y-auto rounded-xl border border-[var(--glass-border)] bg-[#0f0f2d] shadow-2xl shadow-black/60 py-1.5 custom-scrollbar"
+                            className="panel-oscuro fixed z-[9999] w-48 max-h-[60vh] overflow-y-auto rounded-xl border border-[var(--glass-border)] bg-[#0f0f2d] shadow-2xl shadow-black/60 py-1.5 custom-scrollbar"
                             style={{
                                 left: Math.min(menu.x + 208 + 6, window.innerWidth - 192 - 12),
                                 top: menu.y,

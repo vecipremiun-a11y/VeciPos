@@ -46,8 +46,8 @@ const PWAUpdatePrompt = () => {
         <RefreshCw className="w-5 h-5 text-blue-400" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-bold text-white">Nueva versión disponible</p>
-        <p className="text-xs text-gray-300 mt-0.5">
+        <p className="text-sm font-bold text-[var(--color-text)]">Nueva versión disponible</p>
+        <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
           Hay una actualización lista. Se aplicará automáticamente en 30 min de
           inactividad — o puedes recargar ahora para tenerla ya.
         </p>
@@ -63,7 +63,7 @@ const PWAUpdatePrompt = () => {
           <button
             type="button"
             onClick={handleDismiss}
-            className="text-gray-400 hover:text-white text-xs font-medium
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xs font-medium
                        py-1.5 px-3 rounded-md transition-colors"
           >
             Más tarde
@@ -73,7 +73,7 @@ const PWAUpdatePrompt = () => {
       <button
         type="button"
         onClick={handleDismiss}
-        className="text-gray-500 hover:text-white p-1 flex-shrink-0"
+        className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] p-1 flex-shrink-0"
         aria-label="Cerrar"
       >
         <X className="w-4 h-4" />

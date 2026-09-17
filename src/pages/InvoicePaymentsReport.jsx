@@ -345,7 +345,7 @@ const InvoicePaymentsReport = () => {
                                                     className="w-full h-auto max-h-96 object-contain rounded-xl border border-[var(--glass-border)] bg-black/20"
                                                 />
                                                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex items-center justify-center">
-                                                    <span className="text-white font-semibold flex items-center gap-2">
+                                                    <span className="text-[var(--color-text)] font-semibold flex items-center gap-2">
                                                         <Eye size={20} /> Click para ampliar
                                                     </span>
                                                 </div>

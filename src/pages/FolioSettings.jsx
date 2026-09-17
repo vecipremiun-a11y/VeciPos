@@ -192,7 +192,7 @@ const FolioSettings = () => {
                                     {enabled ? (
                                         <ToggleRight size={40} className={c.text} />
                                     ) : (
-                                        <ToggleLeft size={40} className="text-gray-500" />
+                                        <ToggleLeft size={40} className="text-[var(--color-text-muted)]" />
                                     )}
                                 </button>
                             </div>

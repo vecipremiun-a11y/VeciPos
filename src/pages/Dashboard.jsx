@@ -623,7 +623,7 @@ const SubscriptionBanner = () => {
                 <div>
                     <h3 className="text-blue-400 font-bold text-sm">Periodo de Prueba Activo</h3>
                     <p className="text-blue-500/70 text-xs">
-                        Te quedan <span className="text-white font-bold">{daysLeft} días</span> de prueba gratuita.
+                        Te quedan <span className="text-[var(--color-text)] font-bold">{daysLeft} días</span> de prueba gratuita.
                     </p>
                 </div>
             </div>

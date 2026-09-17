@@ -84,7 +84,7 @@ const PreorderHistory = () => {
             {/* Header + filtros */}
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                    <h1 className="text-2xl font-bold text-[var(--color-text)] flex items-center gap-2">
                         <TrendingUp className="text-[var(--primary)]" /> Historial de Encargos
                     </h1>
                     <p className="text-sm text-[var(--text-muted)]">Inteligencia y crecimiento · encargos por fecha de entrega</p>
@@ -144,7 +144,7 @@ const PreorderHistory = () => {
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Distribución por estado (círculo de %) */}
                         <div className="glass-card p-6">
-                            <h3 className="text-lg font-bold mb-4 text-white">Distribución por Estado</h3>
+                            <h3 className="text-lg font-bold mb-4 text-[var(--color-text)]">Distribución por Estado</h3>
                             <div className="h-72 w-full">
                                 {pieData.length === 0 ? (
                                     <div className="h-full flex items-center justify-center text-[var(--text-muted)] text-sm">Sin encargos</div>
@@ -170,7 +170,7 @@ const PreorderHistory = () => {
                         {/* Encargos por día */}
                         <div className="glass-card p-6">
                             <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-lg font-bold text-white">Encargos por Día de Entrega</h3>
+                                <h3 className="text-lg font-bold text-[var(--color-text)]">Encargos por Día de Entrega</h3>
                                 {data.peakDay && (
                                     <span className="text-xs px-2 py-1 rounded-lg bg-[var(--primary)]/15 text-[var(--primary)] flex items-center gap-1">
                                         <Calendar size={12} /> Pico: {data.peakDay.day.slice(5)} ({data.peakDay.orders})
@@ -200,7 +200,7 @@ const PreorderHistory = () => {
 
                     {/* Medios de pago */}
                     <div className="glass-card p-6">
-                        <h3 className="text-lg font-bold mb-4 text-white">Medios de Pago (entregados)</h3>
+                        <h3 className="text-lg font-bold mb-4 text-[var(--color-text)]">Medios de Pago (entregados)</h3>
                         {(!data.byPaymentMethod || data.byPaymentMethod.length === 0) ? (
                             <p className="text-sm text-[var(--text-muted)]">Sin pagos registrados</p>
                         ) : (
@@ -212,7 +212,7 @@ const PreorderHistory = () => {
                                             <div className="flex items-center gap-2 mb-2" style={{ color: meta.color }}>
                                                 {meta.icon}<span className="text-sm font-semibold">{meta.label}</span>
                                             </div>
-                                            <p className="text-xl font-bold text-white font-mono">{formatCurrency(p.total, currentCurrency)}</p>
+                                            <p className="text-xl font-bold text-[var(--color-text)] font-mono">{formatCurrency(p.total, currentCurrency)}</p>
                                             <p className="text-xs text-[var(--text-muted)]">{p.orders} encargo(s)</p>
                                         </div>
                                     );
@@ -225,7 +225,7 @@ const PreorderHistory = () => {
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <div className="glass-card p-0 overflow-hidden">
                             <div className="p-4 border-b border-[var(--glass-border)]">
-                                <h3 className="text-lg font-bold text-white">Productos Más Encargados</h3>
+                                <h3 className="text-lg font-bold text-[var(--color-text)]">Productos Más Encargados</h3>
                             </div>
                             <div className="overflow-y-auto max-h-[360px]">
                                 <table className="w-full text-left text-sm">
@@ -242,8 +242,8 @@ const PreorderHistory = () => {
                                             <tr><td colSpan={4} className="px-4 py-6 text-center text-[var(--text-muted)]">Sin datos</td></tr>
                                         ) : data.byProduct.map((p, i) => (
                                             <tr key={i} className="hover:bg-[var(--glass-bg)]">
-                                                <td className="px-4 py-2 text-gray-300">{p.name}</td>
-                                                <td className="px-4 py-2 text-right text-white font-bold">{Number(p.quantity).toLocaleString()} {p.billing_unit === 'kg' ? 'kg' : 'un'}</td>
+                                                <td className="px-4 py-2 text-[var(--color-text-muted)]">{p.name}</td>
+                                                <td className="px-4 py-2 text-right text-[var(--color-text)] font-bold">{Number(p.quantity).toLocaleString()} {p.billing_unit === 'kg' ? 'kg' : 'un'}</td>
                                                 <td className="px-4 py-2 text-right text-blue-300">{p.orders}</td>
                                                 <td className="px-4 py-2 text-right text-green-400">{formatCurrency(p.revenue, currentCurrency)}</td>
                                             </tr>
@@ -255,7 +255,7 @@ const PreorderHistory = () => {
 
                         <div className="glass-card p-0 overflow-hidden">
                             <div className="p-4 border-b border-[var(--glass-border)]">
-                                <h3 className="text-lg font-bold text-white">Mejores Clientes</h3>
+                                <h3 className="text-lg font-bold text-[var(--color-text)]">Mejores Clientes</h3>
                             </div>
                             <div className="overflow-y-auto max-h-[360px]">
                                 <table className="w-full text-left text-sm">
@@ -272,7 +272,7 @@ const PreorderHistory = () => {
                                             <tr><td colSpan={4} className="px-4 py-6 text-center text-[var(--text-muted)]">Sin datos</td></tr>
                                         ) : data.byClient.map((c, i) => (
                                             <tr key={i} className="hover:bg-[var(--glass-bg)]">
-                                                <td className="px-4 py-2 font-medium text-white">{c.client_name || 'Cliente Casual'}</td>
+                                                <td className="px-4 py-2 font-medium text-[var(--color-text)]">{c.client_name || 'Cliente Casual'}</td>
                                                 <td className="px-4 py-2 text-center text-green-400">{c.delivered_count}</td>
                                                 <td className="px-4 py-2 text-center text-red-400">{c.canceled_count}</td>
                                                 <td className="px-4 py-2 text-right text-green-400 font-bold">{formatCurrency(c.total_spend, currentCurrency)}</td>
@@ -292,7 +292,7 @@ const PreorderHistory = () => {
 const Kpi = ({ title, value, icon, color, raw = false }) => (
     <div className="glass-card p-4 flex flex-col items-center justify-center text-center">
         <div className={cn("p-2.5 rounded-full bg-white/5 mb-2", color)}>{icon}</div>
-        <p className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">{title}</p>
+        <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider font-semibold">{title}</p>
         <p className={cn("font-bold font-mono mt-1", color, raw ? "text-lg" : "text-2xl")}>{value}</p>
     </div>
 );
@@ -302,8 +302,8 @@ const GrowthCard = ({ title, current, change, sub }) => {
     return (
         <div className="glass-card p-5 flex items-center justify-between">
             <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">{title}</p>
-                <p className="text-2xl font-bold text-white font-mono mt-1">{current}</p>
+                <p className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider font-semibold">{title}</p>
+                <p className="text-2xl font-bold text-[var(--color-text)] font-mono mt-1">{current}</p>
                 <p className="text-xs text-[var(--text-muted)] mt-1">{sub}</p>
             </div>
             <div className={cn("flex flex-col items-center px-4 py-3 rounded-xl", up ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400")}>

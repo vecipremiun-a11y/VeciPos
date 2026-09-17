@@ -447,7 +447,7 @@ const CashClosuresReport = () => {
                                         </div>
                                         <div className="flex justify-between text-base">
                                             <span className="font-bold">Efectivo Real</span>
-                                            <span className="font-bold text-white text-lg">${Number(selectedRegister.final_amount || 0).toFixed(2)}</span>
+                                            <span className="font-bold text-[var(--color-text)] text-lg">${Number(selectedRegister.final_amount || 0).toFixed(2)}</span>
                                         </div>
                                         <div className="border-t border-[var(--glass-border)] pt-2 flex justify-between items-center">
                                             <span className="text-sm font-medium">Diferencia</span>

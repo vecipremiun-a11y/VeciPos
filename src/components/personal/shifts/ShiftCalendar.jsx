@@ -631,19 +631,19 @@ const ShiftCalendar = () => {
                                                 )}
                                                 {/* Lock icon for locked shifts */}
                                                 {isLocked && shift && (
-                                                    <Lock size={10} className="absolute top-1 right-1 text-gray-400 dark:text-white/30" />
+                                                    <Lock size={10} className="absolute top-1 right-1 text-[var(--color-text-muted)] dark:text-[var(--color-text-muted)]" />
                                                 )}
                                                 {shift || realSchedule ? (
                                                     <>
                                                         {shift && (
                                                             shiftType === 'dayoff' ? (
-                                                                <span className="relative text-xs font-bold flex items-center gap-1 text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
+                                                                <span className="relative text-xs font-bold flex items-center gap-1 text-[var(--color-text)] drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
                                                                     <Coffee size={12} /> Descanso
                                                                 </span>
                                                             ) : (
-                                                                <span className="relative text-sm font-bold tracking-wide text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.85)]">
+                                                                <span className="relative text-sm font-bold tracking-wide text-[var(--color-text)] drop-shadow-[0_1px_3px_rgba(0,0,0,0.85)]">
                                                                     {format(new Date(shift.start_time), 'HH:mm')}
-                                                                    <span className="text-white/80 font-medium">–{format(new Date(shift.end_time), 'HH:mm')}</span>
+                                                                    <span className="text-[var(--color-text)] font-medium">–{format(new Date(shift.end_time), 'HH:mm')}</span>
                                                                 </span>
                                                             )
                                                         )}
@@ -652,7 +652,7 @@ const ShiftCalendar = () => {
                                                         {hasRealAttendance && shiftType !== 'dayoff' && (
                                                             <span className={cn(
                                                                 "relative text-[9px] mt-0.5 font-mono",
-                                                                shift ? "text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" : "text-gray-500 dark:text-white/50"
+                                                                shift ? "text-[var(--color-text)] drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" : "text-gray-500 dark:text-[var(--color-text-muted)]"
                                                             )}>
                                                                 Real: {firstEntry ? format(new Date(firstEntry.recorded_at), 'HH:mm') : '--:--'} / {displayExit ? format(new Date(displayExit.recorded_at), 'HH:mm') : '--:--'}
                                                             </span>

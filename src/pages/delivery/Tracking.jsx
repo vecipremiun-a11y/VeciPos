@@ -127,7 +127,7 @@ export default function Tracking() {
                 <div className="flex-1 min-h-[320px] rounded-2xl overflow-hidden border border-[var(--glass-border)] relative">
                     <div ref={mapRef} className="w-full h-full" style={{ minHeight: 320, background: '#0b0b17' }} />
                     {loading && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-white text-sm gap-2">
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-[var(--color-text)] text-sm gap-2">
                             <Loader2 className="animate-spin" size={18} /> Cargando mapa…
                         </div>
                     )}

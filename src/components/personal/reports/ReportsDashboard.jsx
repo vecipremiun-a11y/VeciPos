@@ -373,7 +373,7 @@ const ReportsDashboard = () => {
                             <div key={emp.userId} className="flex items-center gap-3 p-3 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
                                 <div className={cn(
                                     "w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm",
-                                    i === 0 ? "bg-red-500/20 text-red-400" : i === 1 ? "bg-amber-500/20 text-amber-400" : "bg-gray-500/20 text-gray-400"
+                                    i === 0 ? "bg-red-500/20 text-red-400" : i === 1 ? "bg-amber-500/20 text-amber-400" : "bg-gray-500/20 text-[var(--color-text-muted)]"
                                 )}>
                                     {i + 1}
                                 </div>

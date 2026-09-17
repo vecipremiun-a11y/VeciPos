@@ -355,7 +355,7 @@ const CashStatusWidget = () => {
                             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)}></div>
                             {/* En celular ocupa la pantalla (inset-4). En escritorio crece:
                                 con 360 px fijos quedaba con ancho de teléfono en un monitor. */}
-                            <div className="absolute inset-4 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 w-auto sm:w-[420px] lg:w-[640px] glass-card p-0 !bg-[#0f0f2d]/98 border-[var(--glass-border)] shadow-2xl overflow-hidden animate-[float_0.2s_ease-out] max-h-[90vh] flex flex-col rounded-2xl">
+                            <div className="panel-oscuro absolute inset-4 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 w-auto sm:w-[420px] lg:w-[640px] glass-card p-0 !bg-[#0f0f2d]/98 border-[var(--glass-border)] shadow-2xl overflow-hidden animate-[float_0.2s_ease-out] max-h-[90vh] flex flex-col rounded-2xl">
                                 {/* Header */}
                                 <div className="p-3 border-b border-[var(--glass-border)] flex justify-between items-center shrink-0">
                                     {/* "Mi caja · <nombre>": el número es de ESTE usuario, no del
@@ -617,7 +617,7 @@ const CashStatusWidget = () => {
                 una vez por caja y sesión. Reutiliza el cierre de caja de siempre. */}
             {showStaleNotice && cashRegister && createPortal(
                 <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-                    <div className="glass-card w-full max-w-sm p-6 !bg-[#0f0f2d]/98 border border-amber-500/40 rounded-2xl text-center">
+                    <div className="panel-oscuro glass-card w-full max-w-sm p-6 !bg-[#0f0f2d]/98 border border-amber-500/40 rounded-2xl text-center">
                         <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400 mb-4">
                             <AlertTriangle size={24} />
                         </div>
@@ -712,7 +712,7 @@ const TransactionModal = ({ isOpen, onClose, type, onConfirm, isProcessing }) =>
 
     return createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--color-surface)]/50 dark:bg-black/80 backdrop-blur-sm">
-            <div className="glass-card w-full max-w-sm p-6 relative animate-[float_0.3s_ease-out] !bg-[#0f0f2d]/90">
+            <div className="panel-oscuro glass-card w-full max-w-sm p-6 relative animate-[float_0.3s_ease-out] !bg-[#0f0f2d]/90">
                 <button onClick={onClose} className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"><X size={20} /></button>
 
                 <h3 className="text-xl font-bold text-[var(--color-text)] mb-6 flex items-center gap-2">

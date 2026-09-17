@@ -69,10 +69,13 @@
   /* Gray-100 */
   --color-surface: #ffffff;
   --color-surface-hover: #f3f4f6;
-  --color-text: #1f2937;
-  /* Gray-800 */
-  --color-text-muted: #6b7280;
-  /* Gray-500 */
+  /* Texto del modo día. Antes eran gray-800 (#1f2937) y gray-500 (#6b7280): el
+     gris del secundario daba 4,39:1 sobre el fondo de página —justo en el borde
+     del mínimo legible— y en pantalla se veía lavado, sobre todo en los textos
+     chicos (etiquetas de tabla, subtítulos, contadores). Ahora gray-900 y
+     gray-700: 16,1:1 y 8,8:1 sobre ese mismo fondo. */
+  --color-text: #111827;
+  --color-text-muted: #374151;
   --glass-bg: #ffffff;
   --glass-border: #e5e7eb;
   /* Gray-200 */
@@ -400,6 +403,25 @@ body {
 }
 [data-theme="light"] .mobile-drawer {
   --color-text-muted: #475569;
+}
+
+/* Gráficos (recharts): los números de los ejes van con un gris fijo escrito en
+   cada gráfico (#888 y #9ca3af). Sobre el fondo claro daban 3,5:1 y 2,5:1 —los
+   números del eje casi no se leían—. Que sigan al texto del tema: en modo
+   oscuro el resultado es el mismo gris de antes. */
+.recharts-cartesian-axis-tick text {
+  fill: var(--color-text-muted);
+}
+
+/* Paneles que siguen OSCUROS aunque el tema sea claro: el modal de sesión
+   expirada, los de caja, el carrito del celular, los menús flotantes del POS,
+   las tarjetas de Pedidos Web. Su fondo está fijo en el código (#0f0f2d y
+   parientes), así que el texto del tema —que en modo día es casi negro— quedaba
+   negro sobre negro: ilegible. Acá se les devuelven los colores claros, y como
+   las variables se heredan, alcanza con marcar el contenedor. */
+[data-theme="light"] .panel-oscuro {
+  --color-text: #f8fafc;
+  --color-text-muted: #cbd5e1;
 }
 
 /* Paneles a pantalla completa anclados con position:fixed (menú lateral móvil,

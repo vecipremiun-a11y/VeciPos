@@ -141,7 +141,7 @@ const ClientPaymentModal = ({ isOpen, onClose, client, sales, onConfirm, soloVen
                 >
                     <div className="absolute inset-0 bg-green-500/20 blur-3xl rounded-full opacity-30 pointer-events-none" />
 
-                    <div className="relative glass-card bg-[#0f0f13] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+                    <div className="panel-oscuro relative glass-card bg-[#0f0f13] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
 
                         {/* Header */}
                         <div className="p-6 border-b border-white/10 flex justify-between items-center relative overflow-hidden">

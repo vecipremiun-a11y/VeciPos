@@ -193,7 +193,7 @@ const PreorderReports = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Ventas por día */}
                 <div className="glass-card p-6">
-                    <h3 className="text-lg font-bold mb-4 text-white">Ventas por Día (Entregados)</h3>
+                    <h3 className="text-lg font-bold mb-4 text-[var(--color-text)]">Ventas por Día (Entregados)</h3>
                     <div className="h-64 w-full">
                         {dailyRevenue.length === 0 ? (
                             <div className="h-full flex items-center justify-center text-[var(--text-muted)] text-sm">
@@ -219,7 +219,7 @@ const PreorderReports = () => {
                 {/* Top Products */}
                 <div className="glass-card p-0 overflow-hidden flex flex-col h-full">
                     <div className="p-4 border-b border-[var(--glass-border)]">
-                        <h3 className="text-lg font-bold text-white">Top Productos Encargados</h3>
+                        <h3 className="text-lg font-bold text-[var(--color-text)]">Top Productos Encargados</h3>
                     </div>
                     <div className="overflow-y-auto flex-1 max-h-[300px]">
                         <table className="w-full text-left text-sm">
@@ -233,8 +233,8 @@ const PreorderReports = () => {
                             <tbody className="divide-y divide-[var(--glass-border)]">
                                 {data.byProduct.slice(0, 10).map((p, idx) => (
                                     <tr key={idx} className="hover:bg-[var(--glass-bg)] transition-colors">
-                                        <td className="px-4 py-2 text-gray-300">{p.name}</td>
-                                        <td className="px-4 py-2 text-right text-white font-bold">{p.quantity} {p.billing_unit === 'kg' ? 'kg' : 'un'}</td>
+                                        <td className="px-4 py-2 text-[var(--color-text-muted)]">{p.name}</td>
+                                        <td className="px-4 py-2 text-right text-[var(--color-text)] font-bold">{p.quantity} {p.billing_unit === 'kg' ? 'kg' : 'un'}</td>
                                         <td className="px-4 py-2 text-right text-green-400">{formatCurrency(p.revenue, currentCurrency)}</td>
                                     </tr>
                                 ))}
@@ -247,7 +247,7 @@ const PreorderReports = () => {
             {/* Top Clients */}
             <div className="glass-card p-0 overflow-hidden">
                 <div className="p-4 border-b border-[var(--glass-border)]">
-                    <h3 className="text-lg font-bold text-white">Mejores Clientes (Encargos)</h3>
+                    <h3 className="text-lg font-bold text-[var(--color-text)]">Mejores Clientes (Encargos)</h3>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">
@@ -262,8 +262,8 @@ const PreorderReports = () => {
                         <tbody className="divide-y divide-[var(--glass-border)]">
                             {data.byClient.slice(0, 10).map((c, idx) => (
                                 <tr key={idx} className="hover:bg-[var(--glass-bg)] transition-colors">
-                                    <td className="px-6 py-3 font-medium text-white">{c.client_name || 'Cliente Casual'}</td>
-                                    <td className="px-6 py-3 text-center text-gray-400">{c.phone || '-'}</td>
+                                    <td className="px-6 py-3 font-medium text-[var(--color-text)]">{c.client_name || 'Cliente Casual'}</td>
+                                    <td className="px-6 py-3 text-center text-[var(--color-text-muted)]">{c.phone || '-'}</td>
                                     <td className="px-6 py-3 text-center text-blue-300 font-bold">{c.orders_count}</td>
                                     <td className="px-6 py-3 text-right text-green-400 font-bold">{formatCurrency(c.total_spend, currentCurrency)}</td>
                                 </tr>
@@ -279,7 +279,7 @@ const PreorderReports = () => {
 const StatCard = ({ title, value, color, icon, isCurrency = true, currency }) => (
     <div className="glass-card p-4 flex flex-col items-center justify-center text-center hover:scale-[1.02] transition-transform duration-200">
         <div className={cn("p-3 rounded-full bg-white/5 mb-3 shadow-[0_0_15px_rgba(0,0,0,0.3)]", color)}>{icon}</div>
-        <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">{title}</p>
+        <p className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider font-semibold">{title}</p>
         <p className={cn("text-2xl font-bold font-mono mt-1 drop-shadow-sm", color)}>
             {isCurrency ? formatCurrency(value, currency) : value}
         </p>

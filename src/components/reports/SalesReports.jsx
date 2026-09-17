@@ -190,7 +190,7 @@ const SalesReports = () => {
             {/* Detailed Table */}
             <div className="glass-card p-0 overflow-hidden">
                 <div className="p-4 border-b border-[var(--glass-border)]">
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2">
                         <FileText size={18} className="text-[var(--color-primary)]" /> Detalle de Productos (Resumen Diario)
                     </h3>
                 </div>
@@ -216,11 +216,11 @@ const SalesReports = () => {
                             ) : (
                                 items.map((item, idx) => (
                                     <tr key={`${item.day}-${item.productId}-${idx}`} className="hover:bg-[var(--glass-bg)] transition-colors">
-                                        <td className="px-6 py-3 text-gray-400">{item.day}</td>
-                                        <td className="px-6 py-3 font-medium text-white">{item.productName}</td>
+                                        <td className="px-6 py-3 text-[var(--color-text-muted)]">{item.day}</td>
+                                        <td className="px-6 py-3 font-medium text-[var(--color-text)]">{item.productName}</td>
                                         <td className="px-6 py-3 text-gray-500">{item.barcode}</td>
-                                        <td className="px-6 py-3 text-right text-white font-bold">{item.quantity}</td>
-                                        <td className="px-6 py-3 text-right text-gray-400">{formatCurrency(item.unitCost, currentCurrency)}</td>
+                                        <td className="px-6 py-3 text-right text-[var(--color-text)] font-bold">{item.quantity}</td>
+                                        <td className="px-6 py-3 text-right text-[var(--color-text-muted)]">{formatCurrency(item.unitCost, currentCurrency)}</td>
                                         <td className="px-6 py-3 text-right text-blue-300">{formatCurrency(item.unitPrice, currentCurrency)}</td>
                                         <td className="px-6 py-3 text-right text-blue-300 font-bold">{formatCurrency(item.totalSale, currentCurrency)}</td>
                                         <td className={cn(
@@ -243,7 +243,7 @@ const SalesReports = () => {
 const StatCard = ({ title, value, color, icon, isCurrency = true, currency }) => (
     <div className="glass-card p-4 flex flex-col items-center justify-center text-center">
         <div className={cn("p-2 rounded-full bg-white/5 mb-2", color)}>{icon}</div>
-        <p className="text-xs text-gray-400 uppercase tracking-wider">{title}</p>
+        <p className="text-xs text-[var(--color-text-muted)] uppercase tracking-wider">{title}</p>
         <p className={cn("text-xl font-bold font-mono mt-1", color)}>
             {isCurrency ? formatCurrency(value, currency) : value}
         </p>

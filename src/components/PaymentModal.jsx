@@ -390,15 +390,15 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                     <div className="flex items-center gap-3">
                         {step === 'payment-details' && (
                             <button onClick={() => setStep('select-method')} className="p-1 hover:bg-white/10 rounded-full transition-colors">
-                                <ArrowLeft size={20} className="text-gray-400" />
+                                <ArrowLeft size={20} className="text-[var(--color-text-muted)]" />
                             </button>
                         )}
-                        <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                        <h2 className="text-2xl font-bold text-[var(--color-text)] flex items-center gap-2">
                             {step === 'select-method' ? 'Seleccionar método de pago' : 'Pagar factura'}
                         </h2>
                     </div>
 
-                    <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
+                    <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">
                         <X size={24} />
                     </button>
                 </div>
@@ -417,7 +417,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                 </div>
                             )}
 
-                            <h3 className="text-center text-gray-300 text-lg">
+                            <h3 className="text-center text-[var(--color-text-muted)] text-lg">
                                 Elige cómo quieres procesar el pago por <span className="text-[var(--color-primary)] font-bold text-xl">{formatCurrency(total, currentCurrency)}</span>
                             </h3>
 
@@ -486,7 +486,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                     {step === 'payment-details' && method === 'Tarjeta' && (
                         <div className="flex flex-col gap-6 max-w-lg mx-auto">
                             <div className="text-center space-y-4">
-                                <p className="text-gray-300 text-lg">
+                                <p className="text-[var(--color-text-muted)] text-lg">
                                     La cajera cobrará con el datáfono físico. Cuando salga el recibo, confirma el pago.
                                 </p>
                                 <div className="bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 p-8 rounded-xl shadow-[0_0_20px_rgba(0,240,255,0.1)]">
@@ -496,10 +496,10 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                 </div>
                             </div>
                             <div className="space-y-4 mt-4">
-                                <h4 className="font-bold text-white text-lg">Datáfono utilizado</h4>
+                                <h4 className="font-bold text-[var(--color-text)] text-lg">Datáfono utilizado</h4>
                                 <div className="grid grid-cols-2 gap-4">
                                     {paymentTerminals.length === 0 ? (
-                                        <p className="col-span-2 text-center text-gray-400 py-4 italic">
+                                        <p className="col-span-2 text-center text-[var(--color-text-muted)] py-4 italic">
                                             No hay terminales configurados. Ve a Configuración &gt; Medios de Pago.
                                         </p>
                                     ) : (
@@ -521,8 +521,8 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                                 >
                                                     <CreditCard size={32} />
                                                 </div>
-                                                <span className="font-bold text-lg text-white">{terminal.name}</span>
-                                                {selectedTerminal === terminal.name && <div className="absolute top-2 right-2 text-white"><Check size={16} strokeWidth={4} /></div>}
+                                                <span className="font-bold text-lg text-[var(--color-text)]">{terminal.name}</span>
+                                                {selectedTerminal === terminal.name && <div className="absolute top-2 right-2 text-[var(--color-text)]"><Check size={16} strokeWidth={4} /></div>}
                                             </button>
                                         ))
                                     )}
@@ -533,7 +533,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                 banco cuadra al 100% — sin él, se cuadra por monto + hora
                                 (menos preciso). Es opcional pero altamente recomendado. */}
                             <div className="space-y-2">
-                                <label className="font-bold text-white text-base flex items-center gap-2">
+                                <label className="font-bold text-[var(--color-text)] text-base flex items-center gap-2">
                                     Código de autorización
                                     <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">Recomendado</span>
                                 </label>
@@ -547,7 +547,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                     className="glass-input w-full p-3 text-lg font-mono tracking-wider"
                                     autoComplete="off"
                                 />
-                                <p className="text-xs text-gray-400">
+                                <p className="text-xs text-[var(--color-text-muted)]">
                                     El número de 6 dígitos que sale en el recibo del datáfono (Cód. Aut. / Auth #).
                                     Con este código la conciliación con el banco cuadra al peso, sin errores.
                                 </p>
@@ -558,16 +558,16 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                     {step === 'payment-details' && method === 'Transferencia' && (
                         <div className="flex flex-col gap-6 max-w-lg mx-auto">
                             <div className="text-center space-y-2">
-                                <p className="text-gray-300">El cliente ya realizó la transferencia por el monto exacto.</p>
+                                <p className="text-[var(--color-text-muted)]">El cliente ya realizó la transferencia por el monto exacto.</p>
                                 <div className="bg-green-500/10 border border-green-500/30 p-6 rounded-xl shadow-[0_0_15px_rgba(34,197,94,0.2)]">
                                     <p className="text-green-400 font-bold mb-1 uppercase text-xs tracking-wider">Monto transferido</p>
-                                    <span className="text-5xl font-bold text-white tracking-tight">{formatCurrency(total, currentCurrency)}</span>
+                                    <span className="text-5xl font-bold text-[var(--color-text)] tracking-tight">{formatCurrency(total, currentCurrency)}</span>
                                     <p className="text-green-400/80 text-sm mt-2 font-medium">El cliente transfirió el monto total exacto</p>
                                 </div>
                             </div>
                             <div className="space-y-4">
                                 <div className="space-y-2">
-                                    <label className="text-white font-medium block">Cuenta de destino</label>
+                                    <label className="text-[var(--color-text)] font-medium block">Cuenta de destino</label>
                                     <select
                                         className="glass-input w-full p-4 text-lg appearance-none cursor-pointer hover:bg-white/10 transition-colors"
                                         value={observations}
@@ -594,7 +594,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                     {step === 'payment-details' && method === 'Mixto' && (
                         <div className="flex flex-col gap-6 max-w-2xl mx-auto w-full">
                             <div className="text-center mb-2">
-                                <h3 className="text-4xl font-bold text-white tracking-tight">{formatCurrency(safeTotal, currentCurrency)}</h3>
+                                <h3 className="text-4xl font-bold text-[var(--color-text)] tracking-tight">{formatCurrency(safeTotal, currentCurrency)}</h3>
                                 <div className="flex justify-center gap-4 text-sm font-medium mt-2">
                                     <span className="text-green-400">Total recibido: {formatCurrency(getMixedTotal(), currentCurrency)}</span>
                                     <span className={cn(
@@ -606,7 +606,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                             </div>
 
                             <div className="space-y-3">
-                                <label className="text-sm text-gray-400 font-medium">Métodos de pago</label>
+                                <label className="text-sm text-[var(--color-text-muted)] font-medium">Métodos de pago</label>
                                 {mixedPayments.map((row, index) => (
                                     <div key={row.id} className="bg-white/5 border border-white/10 rounded-xl p-4 animate-[fadeIn_0.3s_ease-out]">
                                         <div className="flex gap-3 items-start">
@@ -704,7 +704,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                             </div>
 
                             <div>
-                                <label className="block text-sm text-gray-400 mb-1">Observaciones</label>
+                                <label className="block text-sm text-[var(--color-text-muted)] mb-1">Observaciones</label>
                                 <textarea
                                     value={observations}
                                     onChange={(e) => setObservations(e.target.value)}
@@ -719,10 +719,10 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                     {step === 'payment-details' && method === 'Crédito' && (
                         <div className="flex flex-col gap-6 max-w-lg mx-auto">
                             <div className="text-center space-y-2">
-                                <p className="text-gray-300">Venta a Crédito para:</p>
+                                <p className="text-[var(--color-text-muted)]">Venta a Crédito para:</p>
                                 <div className="bg-red-500/10 border border-red-500/30 p-6 rounded-xl shadow-[0_0_15px_rgba(239,68,68,0.2)]">
                                     <p className="text-red-400 font-bold mb-1 uppercase text-xs tracking-wider">Cliente</p>
-                                    <span className="text-3xl font-bold text-white tracking-tight">{posSelectedClient?.name}</span>
+                                    <span className="text-3xl font-bold text-[var(--color-text)] tracking-tight">{posSelectedClient?.name}</span>
                                     <p className="text-red-400/80 text-sm mt-2 font-medium">Monto a anotar: {formatCurrency(total, currentCurrency)}</p>
                                 </div>
                             </div>
@@ -731,12 +731,12 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                             {creditStatus && clientData?.credit_limit > 0 && (
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="glass-card p-3 text-center">
-                                        <p className="text-xs text-gray-400">Deuda Actual</p>
-                                        <p className="text-lg font-bold text-white">{formatCurrency(creditStatus.totalDebt, currentCurrency)}</p>
+                                        <p className="text-xs text-[var(--color-text-muted)]">Deuda Actual</p>
+                                        <p className="text-lg font-bold text-[var(--color-text)]">{formatCurrency(creditStatus.totalDebt, currentCurrency)}</p>
                                     </div>
                                     <div className="glass-card p-3 text-center">
-                                        <p className="text-xs text-gray-400">Límite</p>
-                                        <p className="text-lg font-bold text-white">{formatCurrency(clientData.credit_limit, currentCurrency)}</p>
+                                        <p className="text-xs text-[var(--color-text-muted)]">Límite</p>
+                                        <p className="text-lg font-bold text-[var(--color-text)]">{formatCurrency(clientData.credit_limit, currentCurrency)}</p>
                                     </div>
                                 </div>
                             )}
@@ -771,7 +771,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
 
                             <div className="space-y-4">
                                 <div className="space-y-2">
-                                    <label className="text-white font-medium block">Observaciones (Opcional)</label>
+                                    <label className="text-[var(--color-text)] font-medium block">Observaciones (Opcional)</label>
                                     <textarea
                                         value={observations}
                                         onChange={(e) => setObservations(e.target.value)}
@@ -792,13 +792,13 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                         <div className="flex flex-col gap-6 max-w-md mx-auto">
 
                             <div className="text-center">
-                                <span className="text-5xl font-bold text-white tracking-tight">{formatCurrency(total, currentCurrency)}</span>
+                                <span className="text-5xl font-bold text-[var(--color-text)] tracking-tight">{formatCurrency(total, currentCurrency)}</span>
                                 <p className="text-red-400 text-sm mt-1 font-medium">Por cobrar: {formatCurrency(total, currentCurrency)}</p>
                             </div>
 
                             <div className="space-y-4">
                                 <div>
-                                    <label className="block text-sm text-gray-400 mb-1">
+                                    <label className="block text-sm text-[var(--color-text-muted)] mb-1">
                                         Valor del pago en {method} <span className="text-red-400">*</span>
                                     </label>
                                     <input
@@ -823,7 +823,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                                     </span>
                                 </div>
                                 <div>
-                                    <label className="block text-sm text-gray-400 mb-1">Observaciones</label>
+                                    <label className="block text-sm text-[var(--color-text-muted)] mb-1">Observaciones</label>
                                     <textarea value={observations} onChange={(e) => setObservations(e.target.value)} className="glass-input w-full h-20 resize-none text-sm" placeholder="Observaciones adicionales (opcional)"></textarea>
                                 </div>
                             </div>
@@ -836,7 +836,7 @@ const PaymentModal = ({ isOpen, onClose, total, onConfirm }) => {
                     <div className="p-6 border-t border-white/10 bg-black/20 flex gap-4">
                         <button
                             onClick={onClose}
-                            className="flex-1 py-3 rounded-xl border border-white/10 text-white hover:bg-white/5 transition-colors font-medium"
+                            className="flex-1 py-3 rounded-xl border border-white/10 text-[var(--color-text)] hover:bg-white/5 transition-colors font-medium"
                         >
                             Cancelar
                         </button>
@@ -893,7 +893,7 @@ const MethodButton = ({ icon, label, color, onClick, disabled }) => (
         <div className={cn("transition-transform duration-300", color, !disabled && "group-hover:scale-110")}>
             {icon}
         </div>
-        <span className="text-white font-bold text-lg">{label}</span>
+        <span className="text-[var(--color-text)] font-bold text-lg">{label}</span>
     </button>
 );
 

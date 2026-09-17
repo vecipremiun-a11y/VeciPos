@@ -223,7 +223,7 @@ const InvoiceDataModal = ({ isOpen, onClose, onConfirm, initialTipoDte = 33 }) =
             <div className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={onClose} />
 
             {/* Modal */}
-            <div className="relative w-full max-w-lg bg-[#0f0f2a] border border-[var(--glass-border)] rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="panel-oscuro relative w-full max-w-lg bg-[#0f0f2a] border border-[var(--glass-border)] rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--glass-border)]">
                     <div className="flex items-center gap-2">

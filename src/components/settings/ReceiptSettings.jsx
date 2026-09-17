@@ -644,11 +644,11 @@ const ReceiptSettings = ({ companyInfo }) => {
                                             <span className="font-black text-sm">TOTAL A PAGAR</span>
                                             <span className="font-black text-lg">$5.200</span>
                                         </div>
-                                        <div className="text-[8px] text-gray-400">3 artículos</div>
+                                        <div className="text-[8px] text-[var(--color-text-muted)]">3 artículos</div>
                                     </div>
 
                                     <div className="text-center border-t border-dashed border-gray-400 pt-2 mb-1">
-                                        <div className="bg-gray-200 h-10 flex items-center justify-center text-[8px] text-gray-400 rounded">
+                                        <div className="bg-gray-200 h-10 flex items-center justify-center text-[8px] text-[var(--color-text-muted)] rounded">
                                             [ Código de barras ]
                                         </div>
                                         <div className="font-bold text-[10px] tracking-[2px] mt-1">PV26041113003985</div>
@@ -657,7 +657,7 @@ const ReceiptSettings = ({ companyInfo }) => {
                                     <div className="text-center text-[9px] font-bold border-t border-dashed border-gray-400 pt-1 mt-1">
                                         {preventaConfig.footer_message || 'Presentar este ticket en caja para pago'}
                                     </div>
-                                    <div className="text-center text-[7px] text-gray-400 mt-0.5">
+                                    <div className="text-center text-[7px] text-[var(--color-text-muted)] mt-0.5">
                                         Este documento no es válido como boleta o factura
                                     </div>
                                 </div>

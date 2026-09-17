@@ -179,7 +179,7 @@ const InventoryReconciliation = () => {
                 <div className="bg-gray-600 text-white p-3 lg:p-4 rounded-xl shadow-lg">
                     <h3 className="text-[10px] lg:text-xs font-bold uppercase">Stock Negativo</h3>
                     <p className="text-xl lg:text-2xl font-bold">{stats.negativeStock}</p>
-                    <p className="text-gray-300 text-[10px]">Productos con stock {'<'} 0</p>
+                    <p className="text-[var(--color-text-muted)] text-[10px]">Productos con stock {'<'} 0</p>
                 </div>
             </div>
 
@@ -253,7 +253,7 @@ const InventoryReconciliation = () => {
                                     {product.image ? (
                                         <img src={product.image} alt={product.name} className="w-10 h-10 lg:w-12 lg:h-12 object-cover rounded" />
                                     ) : (
-                                        <Box className="w-10 h-10 lg:w-12 lg:h-12 text-gray-300 p-2" />
+                                        <Box className="w-10 h-10 lg:w-12 lg:h-12 text-[var(--color-text-muted)] p-2" />
                                     )}
                                 </div>
                                 <div className="flex-1 min-w-0">

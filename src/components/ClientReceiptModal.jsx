@@ -24,7 +24,7 @@ const ClientReceiptModal = ({ isOpen, onClose, sale, client }) => {
                     <div className="absolute inset-0 bg-cyan-500/20 blur-3xl rounded-full opacity-50 pointer-events-none" />
 
                     {/* Ticket Container */}
-                    <div className="relative bg-[#0f0f13] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+                    <div className="panel-oscuro relative bg-[#0f0f13] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
                         {/* Header with Neon Effect */}
                         <div className="p-6 pb-4 border-b border-white/10 relative overflow-hidden">
                             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-75" />

@@ -179,7 +179,7 @@ const DocumentosSII = () => {
                 );
             case 'pending':
                 return (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-gray-500/20 text-gray-400 border border-gray-500/30">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-gray-500/20 text-[var(--color-text-muted)] border border-gray-500/30">
                         <Clock size={12} /> Pendiente
                     </span>
                 );
@@ -191,7 +191,7 @@ const DocumentosSII = () => {
                 );
             default:
                 return (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-gray-500/20 text-gray-400 border border-gray-500/30">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-gray-500/20 text-[var(--color-text-muted)] border border-gray-500/30">
                         {status || 'Desconocido'}
                     </span>
                 );
@@ -222,14 +222,14 @@ const DocumentosSII = () => {
                         <Stamp size={24} />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-bold text-white">Documentos SII</h1>
-                        <p className="text-sm text-gray-400">Documentos tributarios electrónicos emitidos</p>
+                        <h1 className="text-2xl font-bold text-[var(--color-text)]">Documentos SII</h1>
+                        <p className="text-sm text-[var(--color-text-muted)]">Documentos tributarios electrónicos emitidos</p>
                     </div>
                 </div>
                 <button
                     onClick={fetchDtes}
                     disabled={loading}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)] text-gray-300 hover:text-white hover:border-white/20 transition-all disabled:opacity-50"
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-white/20 transition-all disabled:opacity-50"
                 >
                     <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
                     Actualizar
@@ -239,24 +239,24 @@ const DocumentosSII = () => {
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div className="glass-card p-4">
-                    <div className="text-2xl font-black text-white">{stats.total}</div>
-                    <div className="text-xs text-gray-400">Total DTEs</div>
+                    <div className="text-2xl font-black text-[var(--color-text)]">{stats.total}</div>
+                    <div className="text-xs text-[var(--color-text-muted)]">Total DTEs</div>
                 </div>
                 <div className="glass-card p-4">
                     <div className="text-2xl font-black text-green-400">{stats.accepted}</div>
-                    <div className="text-xs text-gray-400 flex items-center gap-1"><CheckCircle2 size={12} /> Aceptados</div>
+                    <div className="text-xs text-[var(--color-text-muted)] flex items-center gap-1"><CheckCircle2 size={12} /> Aceptados</div>
                 </div>
                 <div className="glass-card p-4">
                     <div className="text-2xl font-black text-red-400">{stats.rejected}</div>
-                    <div className="text-xs text-gray-400 flex items-center gap-1"><XCircle size={12} /> Rechazados</div>
+                    <div className="text-xs text-[var(--color-text-muted)] flex items-center gap-1"><XCircle size={12} /> Rechazados</div>
                 </div>
                 <div className="glass-card p-4">
                     <div className="text-2xl font-black text-yellow-400">{stats.pending}</div>
-                    <div className="text-xs text-gray-400 flex items-center gap-1"><Clock size={12} /> Pendientes</div>
+                    <div className="text-xs text-[var(--color-text-muted)] flex items-center gap-1"><Clock size={12} /> Pendientes</div>
                 </div>
                 <div className="glass-card p-4 col-span-2 md:col-span-1">
                     <div className="text-2xl font-black text-cyan-400">{formatCurrency(stats.totalAmount, currentCurrency)}</div>
-                    <div className="text-xs text-gray-400">Monto Total</div>
+                    <div className="text-xs text-[var(--color-text-muted)]">Monto Total</div>
                 </div>
             </div>
 
@@ -264,7 +264,7 @@ const DocumentosSII = () => {
             <div className="glass-card p-4">
                 <div className="flex flex-wrap gap-3 items-end">
                     <div className="flex flex-col gap-1">
-                        <label className="text-xs text-gray-400">Desde</label>
+                        <label className="text-xs text-[var(--color-text-muted)]">Desde</label>
                         <input
                             type="date"
                             value={dateFrom}
@@ -273,7 +273,7 @@ const DocumentosSII = () => {
                         />
                     </div>
                     <div className="flex flex-col gap-1">
-                        <label className="text-xs text-gray-400">Hasta</label>
+                        <label className="text-xs text-[var(--color-text-muted)]">Hasta</label>
                         <input
                             type="date"
                             value={dateTo}
@@ -282,7 +282,7 @@ const DocumentosSII = () => {
                         />
                     </div>
                     <div className="flex flex-col gap-1">
-                        <label className="text-xs text-gray-400">Tipo</label>
+                        <label className="text-xs text-[var(--color-text-muted)]">Tipo</label>
                         <select
                             value={tipoFilter}
                             onChange={e => setTipoFilter(e.target.value)}
@@ -294,7 +294,7 @@ const DocumentosSII = () => {
                         </select>
                     </div>
                     <div className="flex flex-col gap-1">
-                        <label className="text-xs text-gray-400">Estado</label>
+                        <label className="text-xs text-[var(--color-text-muted)]">Estado</label>
                         <select
                             value={statusFilter}
                             onChange={e => setStatusFilter(e.target.value)}
@@ -309,9 +309,9 @@ const DocumentosSII = () => {
                         </select>
                     </div>
                     <div className="flex flex-col gap-1">
-                        <label className="text-xs text-gray-400">Buscar Folio</label>
+                        <label className="text-xs text-[var(--color-text-muted)]">Buscar Folio</label>
                         <div className="relative">
-                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
                             <input
                                 type="text"
                                 value={searchFolio}
@@ -328,10 +328,10 @@ const DocumentosSII = () => {
             <div className="glass-card overflow-hidden">
                 {loading ? (
                     <div className="flex items-center justify-center py-20">
-                        <RefreshCw size={24} className="animate-spin text-gray-400" />
+                        <RefreshCw size={24} className="animate-spin text-[var(--color-text-muted)]" />
                     </div>
                 ) : filteredDtes.length === 0 ? (
-                    <div className="text-center py-20 text-gray-400">
+                    <div className="text-center py-20 text-[var(--color-text-muted)]">
                         <Stamp size={48} className="mx-auto mb-4 opacity-30" />
                         <p className="text-lg font-medium">No hay documentos</p>
                         <p className="text-sm">No se encontraron DTEs para los filtros seleccionados</p>
@@ -342,7 +342,7 @@ const DocumentosSII = () => {
                         <div className="hidden md:block overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>
-                                    <tr className="border-b border-[var(--glass-border)] text-left text-gray-400">
+                                    <tr className="border-b border-[var(--glass-border)] text-left text-[var(--color-text-muted)]">
                                         <th className="px-4 py-3 font-medium">Folio</th>
                                         <th className="px-4 py-3 font-medium">Tipo</th>
                                         <th className="px-4 py-3 font-medium">Estado</th>
@@ -359,13 +359,13 @@ const DocumentosSII = () => {
                                             className="border-b border-[var(--glass-border)] hover:bg-white/5 transition-colors cursor-pointer"
                                             onClick={() => setSelectedDte(selectedDte?.id === dte.id ? null : dte)}
                                         >
-                                            <td className="px-4 py-3 font-bold text-white">N° {dte.folio}</td>
+                                            <td className="px-4 py-3 font-bold text-[var(--color-text)]">N° {dte.folio}</td>
                                             <td className="px-4 py-3">{getTipoBadge(dte.tipo)}</td>
                                             <td className="px-4 py-3">{getStatusBadge(dte.status)}</td>
                                             <td className="px-4 py-3 text-green-400 font-bold">
                                                 {dte.sale_total ? formatCurrency(Number(dte.sale_total), currentCurrency) : '-'}
                                             </td>
-                                            <td className="px-4 py-3 text-gray-300">
+                                            <td className="px-4 py-3 text-[var(--color-text-muted)]">
                                                 {formatInCompanyTime(dte.created_at, currentCompanyTimezone, 'dd/MM/yy HH:mm')}
                                             </td>
                                             <td className="px-4 py-3 text-gray-500 font-mono text-xs">
@@ -410,7 +410,7 @@ const DocumentosSII = () => {
                                     onClick={() => setSelectedDte(selectedDte?.id === dte.id ? null : dte)}
                                 >
                                     <div className="flex items-center justify-between mb-2">
-                                        <span className="font-bold text-white text-lg">N° {dte.folio}</span>
+                                        <span className="font-bold text-[var(--color-text)] text-lg">N° {dte.folio}</span>
                                         {getTipoBadge(dte.tipo)}
                                     </div>
                                     <div className="flex items-center justify-between">
@@ -438,16 +438,16 @@ const DocumentosSII = () => {
                                     {selectedDte?.id === dte.id && (
                                         <div className="mt-3 p-3 rounded-lg bg-white/5 border border-white/10 space-y-2 text-sm">
                                             <div className="flex justify-between">
-                                                <span className="text-gray-400">Sale ID:</span>
-                                                <span className="text-white font-mono">{dte.sale_id || '-'}</span>
+                                                <span className="text-[var(--color-text-muted)]">Sale ID:</span>
+                                                <span className="text-[var(--color-text)] font-mono">{dte.sale_id || '-'}</span>
                                             </div>
                                             <div className="flex justify-between">
-                                                <span className="text-gray-400">Track ID:</span>
-                                                <span className="text-white font-mono text-xs">{dte.track_id || '-'}</span>
+                                                <span className="text-[var(--color-text-muted)]">Track ID:</span>
+                                                <span className="text-[var(--color-text)] font-mono text-xs">{dte.track_id || '-'}</span>
                                             </div>
                                             <div className="flex justify-between">
-                                                <span className="text-gray-400">Pago:</span>
-                                                <span className="text-white">{dte.payment_method || '-'}</span>
+                                                <span className="text-[var(--color-text-muted)]">Pago:</span>
+                                                <span className="text-[var(--color-text)]">{dte.payment_method || '-'}</span>
                                             </div>
                                         </div>
                                     )}
@@ -462,7 +462,7 @@ const DocumentosSII = () => {
             {selectedDte && (
                 <div className="hidden md:block glass-card p-6">
                     <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <h3 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2">
                             {Number(selectedDte.tipo) === 33 ? <FileText size={20} /> : <Receipt size={20} />}
                             Detalle DTE N° {selectedDte.folio}
                         </h3>
@@ -472,45 +472,45 @@ const DocumentosSII = () => {
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div>
-                            <span className="text-xs text-gray-400">Tipo Documento</span>
+                            <span className="text-xs text-[var(--color-text-muted)]">Tipo Documento</span>
                             <div className="mt-1">{getTipoBadge(selectedDte.tipo)}</div>
                         </div>
                         <div>
-                            <span className="text-xs text-gray-400">Estado</span>
+                            <span className="text-xs text-[var(--color-text-muted)]">Estado</span>
                             <div className="mt-1">{getStatusBadge(selectedDte.status)}</div>
                         </div>
                         <div>
-                            <span className="text-xs text-gray-400">Monto Venta</span>
+                            <span className="text-xs text-[var(--color-text-muted)]">Monto Venta</span>
                             <div className="mt-1 text-green-400 font-bold">
                                 {selectedDte.sale_total ? formatCurrency(Number(selectedDte.sale_total), currentCurrency) : '-'}
                             </div>
                         </div>
                         <div>
-                            <span className="text-xs text-gray-400">Método de Pago</span>
-                            <div className="mt-1 text-white">{selectedDte.payment_method || '-'}</div>
+                            <span className="text-xs text-[var(--color-text-muted)]">Método de Pago</span>
+                            <div className="mt-1 text-[var(--color-text)]">{selectedDte.payment_method || '-'}</div>
                         </div>
                         <div>
-                            <span className="text-xs text-gray-400">Folio</span>
-                            <div className="mt-1 text-white font-bold">{selectedDte.folio}</div>
+                            <span className="text-xs text-[var(--color-text-muted)]">Folio</span>
+                            <div className="mt-1 text-[var(--color-text)] font-bold">{selectedDte.folio}</div>
                         </div>
                         <div>
-                            <span className="text-xs text-gray-400">Sale ID</span>
-                            <div className="mt-1 text-white font-mono">{selectedDte.sale_id || '-'}</div>
+                            <span className="text-xs text-[var(--color-text-muted)]">Sale ID</span>
+                            <div className="mt-1 text-[var(--color-text)] font-mono">{selectedDte.sale_id || '-'}</div>
                         </div>
                         <div className="col-span-2">
-                            <span className="text-xs text-gray-400">Track ID</span>
-                            <div className="mt-1 text-white font-mono text-sm break-all">{selectedDte.track_id || '-'}</div>
+                            <span className="text-xs text-[var(--color-text-muted)]">Track ID</span>
+                            <div className="mt-1 text-[var(--color-text)] font-mono text-sm break-all">{selectedDte.track_id || '-'}</div>
                         </div>
                         <div>
-                            <span className="text-xs text-gray-400">Fecha de Emisión</span>
-                            <div className="mt-1 text-white">
+                            <span className="text-xs text-[var(--color-text-muted)]">Fecha de Emisión</span>
+                            <div className="mt-1 text-[var(--color-text)]">
                                 {formatInCompanyTime(selectedDte.created_at, currentCompanyTimezone, 'dd/MM/yyyy HH:mm:ss')}
                             </div>
                         </div>
                         {selectedDte.sii_response && (
                             <div className="col-span-2 md:col-span-4">
-                                <span className="text-xs text-gray-400">Respuesta SII</span>
-                                <div className="mt-1 p-3 rounded-lg bg-white/5 border border-white/10 font-mono text-xs text-gray-300 break-all whitespace-pre-wrap">
+                                <span className="text-xs text-[var(--color-text-muted)]">Respuesta SII</span>
+                                <div className="mt-1 p-3 rounded-lg bg-white/5 border border-white/10 font-mono text-xs text-[var(--color-text-muted)] break-all whitespace-pre-wrap">
                                     {(() => {
                                         const parsed = parseSiiResponse(selectedDte.sii_response);
                                         if (parsed?.error) return <span className="text-red-400">{parsed.error}</span>;

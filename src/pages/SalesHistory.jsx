@@ -495,7 +495,7 @@ const SalesHistory = () => {
 
                                 {/* Actions Toolbar */}
                                 <div className="p-3 border-b border-[var(--glass-border)] flex gap-2 flex-wrap">
-                                    <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-2 bg-[var(--glass-bg)] hover:bg-[var(--color-surface-hover)] rounded-lg text-sm text-gray-200 transition-colors">
+                                    <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-2 bg-[var(--glass-bg)] hover:bg-[var(--color-surface-hover)] rounded-lg text-sm text-[var(--color-text-muted)] transition-colors">
                                         <Download size={16} />
                                         Descargar PDF
                                     </button>

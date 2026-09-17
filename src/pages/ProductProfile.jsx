@@ -577,7 +577,7 @@ const ProductProfile = () => {
                                 >
                                     <Icon size={16} />
                                     {tab.label}
-                                    <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-black/20 text-white/80`}>
+                                    <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-black/20 text-[var(--color-text)]`}>
                                         {tab.count}
                                     </span>
                                 </button>
@@ -795,7 +795,7 @@ const ProductProfile = () => {
                                                                     ) : isSoon ? (
                                                                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-yellow-500/20 text-yellow-400">POR VENCER</span>
                                                                     ) : isEmpty ? (
-                                                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-500/20 text-gray-400">AGOTADO</span>
+                                                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-500/20 text-[var(--color-text-muted)]">AGOTADO</span>
                                                                     ) : (
                                                                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-500/20 text-green-400">VIGENTE</span>
                                                                     )}

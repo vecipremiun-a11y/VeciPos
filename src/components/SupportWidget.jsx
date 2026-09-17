@@ -366,7 +366,7 @@ const SupportWidget = () => {
             />
 
             {/* Panel */}
-            <div className="fixed right-0 top-0 bottom-0 w-full md:w-[400px] bg-[#0a0a1a] z-[101] flex flex-col shadow-2xl animate-in slide-in-from-right duration-300">
+            <div className="panel-oscuro fixed right-0 top-0 bottom-0 w-full md:w-[400px] bg-[#0a0a1a] z-[101] flex flex-col shadow-2xl animate-in slide-in-from-right duration-300">
                 {/* Header */}
                 <div className="flex items-center justify-between p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)]">
                     <div>

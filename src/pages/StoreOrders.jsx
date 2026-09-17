@@ -69,7 +69,7 @@ function CodChargeModal({ order, onClose, onCharged, currentCurrency }) {
 
     return (
         <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="glass-card w-full max-w-sm p-0 overflow-hidden !bg-[#18181b]" onClick={e => e.stopPropagation()}>
+            <div className="panel-oscuro glass-card w-full max-w-sm p-0 overflow-hidden !bg-[#18181b]" onClick={e => e.stopPropagation()}>
                 <div className="p-4 border-b border-[var(--glass-border)] flex items-center justify-between">
                     <h3 className="font-bold text-sm text-[var(--color-text)]">Cobrar y entregar #{order.external_public_code || order.id}</h3>
                     <button onClick={onClose} className="p-1 rounded-full hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]"><X size={16} /></button>
@@ -124,7 +124,7 @@ function RefundModal({ order, amount, onClose, onConfirm, currentCurrency }) {
     };
     return (
         <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="glass-card w-full max-w-sm p-0 overflow-hidden !bg-[#18181b]" onClick={e => e.stopPropagation()}>
+            <div className="panel-oscuro glass-card w-full max-w-sm p-0 overflow-hidden !bg-[#18181b]" onClick={e => e.stopPropagation()}>
                 <div className="p-4 border-b border-[var(--glass-border)] flex items-center justify-between">
                     <h3 className="font-bold text-sm text-[var(--color-text)]">Devolver y entregar #{order.external_public_code || order.id}</h3>
                     <button onClick={onClose} className="p-1 rounded-full hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]"><X size={16} /></button>
@@ -187,7 +187,7 @@ function AddProductModal({ onAdd, onClose, currentCurrency }) {
 
     return (
         <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="glass-card w-full max-w-md p-0 overflow-hidden !bg-[#18181b] flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+            <div className="panel-oscuro glass-card w-full max-w-md p-0 overflow-hidden !bg-[#18181b] flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
                 <div className="p-4 border-b border-[var(--glass-border)] flex items-center justify-between shrink-0">
                     <h3 className="font-bold text-sm text-[var(--color-text)]">Añadir producto al pedido</h3>
                     <button onClick={onClose} className="p-1 rounded-full hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]"><X size={16} /></button>
@@ -677,7 +677,7 @@ export default function StoreOrders() {
             {/* Detalle en modal (móvil) */}
             {!isDesktop && selectedOrder && (
                 <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setSelectedId(null)}>
-                    <div className="glass-card w-full sm:max-w-lg h-[92vh] sm:h-auto p-0 overflow-hidden !bg-[#18181b]" onClick={e => e.stopPropagation()}>
+                    <div className="panel-oscuro glass-card w-full sm:max-w-lg h-[92vh] sm:h-auto p-0 overflow-hidden !bg-[#18181b]" onClick={e => e.stopPropagation()}>
                         <StoreOrderDetail
                             key={selectedOrder.id}
                             order={selectedOrder}

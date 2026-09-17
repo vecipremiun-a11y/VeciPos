@@ -223,7 +223,7 @@ const SupplierOrders = () => {
             case 'cancelled':
                 return <span className="px-2 py-1 rounded bg-red-500/20 text-red-400 text-xs font-bold uppercase">Cancelado</span>;
             default:
-                return <span className="px-2 py-1 rounded bg-gray-500/20 text-gray-400 text-xs font-bold uppercase">{status}</span>;
+                return <span className="px-2 py-1 rounded bg-gray-500/20 text-[var(--color-text-muted)] text-xs font-bold uppercase">{status}</span>;
         }
     };
 

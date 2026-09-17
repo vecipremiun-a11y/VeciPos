@@ -183,7 +183,7 @@ const PlanCheckoutModal = ({ plan, billingCycle, currency, companyId, onClose, k
             onClick={onClose}
         >
             <div
-                className="glass-card w-full max-w-md max-h-[90vh] overflow-y-auto border border-white/10 shadow-2xl !bg-[#18181b] !backdrop-blur-none"
+                className="panel-oscuro glass-card w-full max-w-md max-h-[90vh] overflow-y-auto border border-white/10 shadow-2xl !bg-[#18181b] !backdrop-blur-none"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}

@@ -171,7 +171,7 @@ const Suppliers = () => {
                 {/* Desktop View - Original Table */}
                 <div className="hidden lg:block overflow-x-auto">
                     <table className="w-full text-left">
-                        <thead className="bg-[var(--glass-bg)] text-gray-300 uppercase text-sm font-semibold">
+                        <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] uppercase text-sm font-semibold">
                             <tr>
                                 <th className="px-6 py-5">Nombre</th>
                                 <th className="px-6 py-5">Teléfono</th>

@@ -12,7 +12,7 @@ const AccessDenied = () => {
             </div>
 
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Acceso Denegado</h1>
-            <p className="text-gray-500 max-w-md mb-8">
+            <p className="text-[var(--color-text-muted)] max-w-md mb-8">
                 No tienes los permisos necesarios para ver esta página.
                 Si crees que es un error, contacta a tu administrador.
             </p>

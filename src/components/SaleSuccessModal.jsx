@@ -566,7 +566,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                 }
             }}
         >
-            <div className="glass-card w-full max-w-md relative animate-[float_0.5s_ease-out] flex flex-col items-center text-center p-8 bg-[#0f0f2d]">
+            <div className="panel-oscuro glass-card w-full max-w-md relative animate-[float_0.5s_ease-out] flex flex-col items-center text-center p-8 bg-[#0f0f2d]">
                 <button
                     onClick={onNewSale} // Close triggers new sale/cleanup
                     className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"

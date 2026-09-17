@@ -25,7 +25,7 @@ const ClientAccountModal = ({ isOpen, onClose, client }) => {
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <div
-                className="bg-[#18181b] border border-[var(--glass-border)] rounded-xl w-full max-w-2xl p-0 overflow-hidden flex flex-col max-h-[85vh] shadow-2xl relative"
+                className="panel-oscuro bg-[#18181b] border border-[var(--glass-border)] rounded-xl w-full max-w-2xl p-0 overflow-hidden flex flex-col max-h-[85vh] shadow-2xl relative"
             >
                 {/* Header */}
                 <div className="p-6 border-b border-[var(--glass-border)] flex justify-between items-center bg-[var(--glass-bg)]">
