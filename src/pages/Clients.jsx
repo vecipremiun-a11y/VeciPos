@@ -22,7 +22,15 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
         client_status: client?.client_status || 'active'
     });
 
+    // Los datos de factura se piden solo si el cliente los va a usar. Al editar,
+    // la sección arranca abierta si ya tiene alguno cargado: si no, parecería que
+    // se perdieron.
+    const [pideFactura, setPideFactura] = useState(Boolean(
+        client?.razon_social || client?.giro || client?.comuna || client?.ciudad
+    ));
+
     React.useEffect(() => {
+        setPideFactura(Boolean(client?.razon_social || client?.giro || client?.comuna || client?.ciudad));
         if (client) {
             setFormData({
                 name: client.name || '',
@@ -48,7 +56,11 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSubmit(formData);
+        // Si no va a pedir factura, esos campos se guardan vacíos (y se borran los
+        // que tuviera de antes: es lo que significa destildar la casilla).
+        onSubmit(pideFactura
+            ? formData
+            : { ...formData, razon_social: '', giro: '', comuna: '', ciudad: '' });
     };
 
     return (
@@ -89,11 +101,15 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
 
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                            <label className="text-sm font-medium text-[var(--color-text-muted)]">RUT / DNI</label>
+                            <label className="text-sm font-medium text-[var(--color-text-muted)]">
+                                RUT / DNI {pideFactura && <span className="text-red-400">*</span>}
+                            </label>
                             <div className="relative">
                                 <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={18} />
                                 <input
                                     type="text"
+                                    // Sin RUT no se puede emitir una factura: si la pide, acá se exige.
+                                    required={pideFactura}
                                     className="glass-input !pl-10 w-full"
                                     value={formData.rut}
                                     onChange={e => setFormData({ ...formData, rut: e.target.value })}
@@ -144,17 +160,37 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
                         </div>
                     </div>
 
-                    {/* Datos de Facturación SII */}
+                    {/* Datos de Facturación SII: solo si el cliente pide factura */}
                     <div className="border-t border-[var(--glass-border)] pt-4 mt-4">
-                        <h3 className="text-sm font-bold text-[var(--color-text)] mb-3 flex items-center gap-2">
-                            <FileText size={16} className="text-blue-400" />
-                            Datos de Facturación (SII)
-                        </h3>
-                        <div className="space-y-3">
+                        <label className="flex items-start gap-3 p-3 rounded-xl border border-[var(--glass-border)] cursor-pointer select-none hover:bg-[var(--color-surface-hover)] transition-colors">
+                            <input
+                                type="checkbox"
+                                checked={pideFactura}
+                                onChange={e => setPideFactura(e.target.checked)}
+                                className="w-5 h-5 mt-0.5 shrink-0 accent-[var(--color-primary)] cursor-pointer"
+                            />
+                            <span className="min-w-0">
+                                <span className="text-sm font-bold text-[var(--color-text)] flex items-center gap-2">
+                                    <FileText size={16} className="text-blue-400 shrink-0" />
+                                    Este cliente pide factura
+                                </span>
+                                <span className="block text-xs text-[var(--color-text-muted)] leading-snug mt-0.5">
+                                    Solo entonces hacen falta razón social, giro, comuna y ciudad. Para boleta, no.
+                                </span>
+                            </span>
+                        </label>
+                    </div>
+
+                    {pideFactura && (
+                        <div className="animate-in fade-in slide-in-from-top-1 duration-200">
+                            <div className="space-y-3">
                             <div className="space-y-2">
-                                <label className="text-sm font-medium text-[var(--color-text-muted)]">Razón Social</label>
+                                <label className="text-sm font-medium text-[var(--color-text-muted)]">
+                                    Razón Social <span className="text-red-400">*</span>
+                                </label>
                                 <input
                                     type="text"
+                                    required
                                     className="glass-input w-full"
                                     value={formData.razon_social}
                                     onChange={e => setFormData({ ...formData, razon_social: e.target.value })}
@@ -193,8 +229,9 @@ const ClientModal = ({ isOpen, onClose, client, onSubmit }) => {
                                     />
                                 </div>
                             </div>
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     {/* Credit Management Section */}
                     <div className="border-t border-[var(--glass-border)] pt-4 mt-4">

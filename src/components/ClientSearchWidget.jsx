@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Search, UserPlus, X, User, Check, ShieldAlert, AlertTriangle, Ban } from 'lucide-react';
+import { Search, UserPlus, X, User, Check, ShieldAlert, AlertTriangle, Ban, FileText } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -45,6 +45,12 @@ const ClientSearchWidget = () => {
         ciudad: ''
     });
 
+    // Los datos de factura solo se piden si el cliente los va a necesitar. Antes
+    // el formulario mostraba siempre razón social, giro, comuna y ciudad: cuatro
+    // casillas que en la mayoría de las ventas quedan vacías y solo hacen más
+    // largo el formulario en el celular, que es donde se carga un cliente apurado.
+    const [pideFactura, setPideFactura] = useState(false);
+
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
@@ -77,10 +83,17 @@ const ClientSearchWidget = () => {
         e.preventDefault();
         if (!newClientData.name) return;
 
-        const result = await addClient(newClientData);
+        // Sin factura no se guardan datos de factura, aunque hayan quedado
+        // escritos antes de destildar la casilla.
+        const datos = pideFactura
+            ? newClientData
+            : { ...newClientData, razon_social: '', giro: '', comuna: '', ciudad: '' };
+
+        const result = await addClient(datos);
         if (result.success) {
             handleSelectClient(result.client);
             setIsAddModalOpen(false);
+            setPideFactura(false);
             setNewClientData({ name: '', rut: '', razon_social: '', giro: '', phone: '', email: '', address: '', comuna: '', ciudad: '' });
         } else if (result.error === 'RUT_DUPLICATE') {
             alert(result.message || 'Ya existe un cliente con ese RUT.');
@@ -219,7 +232,7 @@ const ClientSearchWidget = () => {
 
                     {/* Dropdown Results */}
                     {isOpen && searchTerm.length > 0 && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-[#18181b] border border-[var(--glass-border)] shadow-xl z-[100] rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                        <div className="panel-oscuro absolute top-full left-0 right-0 mt-1 bg-[#18181b] border border-[var(--glass-border)] shadow-xl z-[100] rounded-lg overflow-hidden max-h-60 overflow-y-auto">
                             {filteredClients.length > 0 ? (
                                 filteredClients.map(client => (
                                     <button
@@ -248,7 +261,7 @@ const ClientSearchWidget = () => {
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
                     <div className="glass-card modal-solido w-full max-w-md p-6 relative animate-in fade-in zoom-in duration-200">
                         <button
-                            onClick={() => setIsAddModalOpen(false)}
+                            onClick={() => { setIsAddModalOpen(false); setPideFactura(false); }}
                             className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
                         >
                             <X size={20} />
@@ -273,9 +286,13 @@ const ClientSearchWidget = () => {
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
-                                    <label className="text-xs font-medium text-[var(--color-text-muted)]">RUT / DNI</label>
+                                    <label className="text-xs font-medium text-[var(--color-text-muted)]">
+                                        RUT / DNI {pideFactura && <span className="text-red-400">*</span>}
+                                    </label>
                                     <input
                                         type="text"
+                                        // Sin RUT no se puede emitir una factura: si la pidió, acá se exige.
+                                        required={pideFactura}
                                         className="glass-input w-full"
                                         value={newClientData.rut}
                                         onChange={e => setNewClientData({ ...newClientData, rut: e.target.value })}
@@ -314,14 +331,35 @@ const ClientSearchWidget = () => {
                                 />
                             </div>
 
-                            {/* Datos Facturación SII */}
+                            {/* Datos Facturación SII: solo si los va a necesitar */}
                             <div className="border-t border-[var(--glass-border)] pt-3">
-                                <p className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Datos Facturación</p>
-                                <div className="space-y-3">
+                                <label className="flex items-start gap-3 p-3 -mx-1 rounded-xl border border-[var(--glass-border)] cursor-pointer select-none hover:bg-[var(--color-surface-hover)] transition-colors">
+                                    <input
+                                        type="checkbox"
+                                        checked={pideFactura}
+                                        onChange={e => setPideFactura(e.target.checked)}
+                                        className="w-5 h-5 mt-0.5 shrink-0 accent-[var(--color-primary)] cursor-pointer"
+                                    />
+                                    <span className="min-w-0">
+                                        <span className="block text-sm font-bold text-[var(--color-text)] flex items-center gap-1.5">
+                                            <FileText size={14} className="text-blue-400 shrink-0" /> Va a pedir factura
+                                        </span>
+                                        <span className="block text-[11px] text-[var(--color-text-muted)] leading-snug mt-0.5">
+                                            Solo entonces hacen falta razón social, giro, comuna y ciudad. Para boleta, no.
+                                        </span>
+                                    </span>
+                                </label>
+                            </div>
+
+                            {pideFactura && (
+                                <div className="space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
                                     <div className="space-y-2">
-                                        <label className="text-xs font-medium text-[var(--color-text-muted)]">Razón Social</label>
+                                        <label className="text-xs font-medium text-[var(--color-text-muted)]">
+                                            Razón Social <span className="text-red-400">*</span>
+                                        </label>
                                         <input
                                             type="text"
+                                            required
                                             className="glass-input w-full"
                                             value={newClientData.razon_social}
                                             onChange={e => setNewClientData({ ...newClientData, razon_social: e.target.value })}
@@ -361,7 +399,7 @@ const ClientSearchWidget = () => {
                                         </div>
                                     </div>
                                 </div>
-                            </div>
+                            )}
 
                             <button
                                 type="submit"
