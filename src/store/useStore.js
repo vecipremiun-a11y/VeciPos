@@ -6319,7 +6319,7 @@ export const useStore = create(persist((set, get) => ({
     // recargas y caerse sola cuando alguien ya lo atendió.
     webOrders: [],                 // encargos web pendientes (toast + campanita)
     dismissedWebOrderToasts: [],   // ids cuyo toast se cerró con la X (siguen en campanita)
-    orderBadges: { encargo: 0, store: 0 }, // conteo de pedidos activos por tipo (badges de pestañas)
+    orderBadges: { encargo: 0, store: 0, delivery: 0 }, // conteo de pedidos activos por tipo (badges de pestañas)
 
     // Devuelve true solo si agregó un encargo NUEVO (para sonar el aviso una vez,
     // no en duplicados ni en encargos de otra empresa).
@@ -6871,7 +6871,13 @@ export const useStore = create(persist((set, get) => ({
     },
 
     fetchDeliveryBoard: async () => {
-        const r = await get().deliveryCall('deliveryBoard');
+        // Medianoche de HOY en hora local, mandada en UTC: es el corte para
+        // decidir qué envíos cerrados se siguen viendo. Lo calcula el navegador
+        // porque el servidor solo conoce UTC, y en Chile el día UTC cambia a las
+        // 21:00 — a esa hora la bandeja se vaciaba sola.
+        const medianocheLocal = new Date();
+        medianocheLocal.setHours(0, 0, 0, 0);
+        const r = await get().deliveryCall('deliveryBoard', { desdeCierre: medianocheLocal.toISOString() });
         if (r?.success) {
             set({
                 deliveries: r.deliveries || [],
@@ -6883,7 +6889,8 @@ export const useStore = create(persist((set, get) => ({
     },
     createDelivery: async (data) => {
         const r = await get().deliveryCall('deliveryCreate', data);
-        if (r?.success) await get().fetchDeliveryBoard();
+        // El contador de la pestaña Delivery del POS también cambia con esto.
+        if (r?.success) { await get().fetchDeliveryBoard(); get().fetchOrderBadges(); }
         return r;
     },
     assignDelivery: async (id, courierId) => {
@@ -6893,7 +6900,8 @@ export const useStore = create(persist((set, get) => ({
     },
     setDeliveryStatus: async (id, status, extra = {}) => {
         const r = await get().deliveryCall('deliveryStatus', { id, status, ...extra });
-        if (r?.success) { await get().fetchDeliveryBoard(); get().fetchCouriers(); }
+        // Entregar o marcar fallido saca el envío de la cuenta de la pestaña.
+        if (r?.success) { await get().fetchDeliveryBoard(); get().fetchCouriers(); get().fetchOrderBadges(); }
         return r;
     },
     fetchImportableOrders: async () => get().deliveryCall('deliveryImportable'),

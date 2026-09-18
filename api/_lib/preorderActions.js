@@ -206,6 +206,9 @@ async function pendingWebOrders(turso, companyId) {
 //   - Encargos: solo los de HOY (due_date = today) que faltan por finalizar,
 //     igual que la vista por defecto de la pestaña Encargos.
 //   - Tienda: todos los activos (esa pestaña no filtra por fecha).
+//   - Delivery: los envíos que siguen en la calle o esperando salir (pendiente,
+//     asignado, aceptado, retirado, en ruta). Entregado y fallido ya no cuentan,
+//     igual que en el tablero de Envíos.
 async function preorderActiveCounts(turso, companyId, session, { today = null } = {}) {
     await ensureOrderKindColumn(turso);
 
@@ -225,11 +228,26 @@ async function preorderActiveCounts(turso, companyId, session, { today = null } 
         args: [companyId],
     });
 
+    // La tabla de envíos es de la App Delivery: si la empresa no la tiene, la
+    // consulta no debe tumbar los otros dos contadores.
+    let delivery = 0;
+    try {
+        const del = await turso.execute({
+            sql: `SELECT COUNT(*) AS n FROM deliveries
+                  WHERE company_id = ? AND status NOT IN ('delivered', 'failed', 'canceled', 'cancelled')`,
+            args: [companyId],
+        });
+        delivery = Number(del.rows[0]?.n) || 0;
+    } catch (error) {
+        console.warn('preorderActiveCounts: no se pudo contar envíos:', error.message);
+    }
+
     return {
         success: true,
         counts: {
             encargo: Number(enc.rows[0]?.n) || 0,
             store: Number(sto.rows[0]?.n) || 0,
+            delivery,
         },
     };
 }

@@ -164,10 +164,10 @@ const POS = () => {
     const orderBadges = useStore((s) => s.orderBadges);
     const fetchOrderBadges = useStore((s) => s.fetchOrderBadges);
 
-    // Contadores de pedidos activos para las pestañas Encargos/Tienda.
+    // Contadores de pedidos activos para las pestañas Encargos/Tienda/Delivery.
     useEffectReact(() => {
-        if (canPreorders || canStore) fetchOrderBadges();
-    }, [canPreorders, canStore, fetchOrderBadges]);
+        if (canPreorders || canStore || canDelivery) fetchOrderBadges();
+    }, [canPreorders, canStore, canDelivery, fetchOrderBadges]);
 
     const cart = React.useMemo(() => {
         const activeCart = carts.find(c => c.id === activeCartId);
@@ -894,7 +894,7 @@ const POS = () => {
                 {/* Tabs: Venta / Encargos (App Cocina) / Tienda (App Tienda Web).
                     Cada pestaña especializada aparece según su App; la barra se
                     muestra si hay al menos una de ellas activa. */}
-                {(canPreorders || canStore) && (
+                {(canPreorders || canStore || canDelivery) && (
                 <div className="flex shrink-0">
                     <div className="inline-flex p-0.5 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)]">
                         <button
@@ -932,6 +932,8 @@ const POS = () => {
                         >
                             <Truck size={14} />
                             Delivery
+                            {/* Envíos que siguen en la calle o esperando salir. */}
+                            <OrderTabBadge count={orderBadges?.delivery} />
                         </button>
                         )}
                     </div>

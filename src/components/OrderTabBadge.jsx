@@ -1,6 +1,6 @@
 import React from 'react';
 
-// Badge de conteo para las pestañas Encargos / Tienda (número de pedidos activos).
+// Badge de conteo para las pestañas Encargos / Tienda / Delivery (pedidos activos).
 // Rojo para que resalte como notificación; se oculta cuando no hay pedidos.
 export default function OrderTabBadge({ count }) {
     const n = Number(count) || 0;

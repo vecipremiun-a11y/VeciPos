@@ -206,8 +206,29 @@ async function courierDelete(turso, companyId, session, { id } = {}) {
 }
 
 // ── Envíos ───────────────────────────────────────────────────────
-async function deliveryBoard(turso, companyId, session, { includeDelivered = true } = {}) {
+/**
+ * La bandeja muestra: todo lo que sigue abierto (de cualquier día) más lo que se
+ * cerró HOY —entregado o fallido—. Pasada la medianoche, lo cerrado ayer sale de
+ * la lista y lo que quedó sin entregar se mantiene.
+ *
+ * El corte lo manda el navegador (`desdeCierre`, la medianoche local en UTC) y NO
+ * se calcula con `date('now')`: eso es la fecha UTC, y en Chile cambia de día a
+ * las 21:00. Por eso, a partir de esa hora, los envíos del día desaparecían de la
+ * pantalla: el 17-sep-2026 a las 23:29 la bandeja mostraba "No hay envíos
+ * todavía" con dos entregas hechas esa misma tarde.
+ *
+ * Además el corte se mide por el CIERRE (delivered_at / updated_at), no por la
+ * creación: un envío creado ayer y entregado hoy tiene que verse hoy.
+ */
+async function deliveryBoard(turso, companyId, session, { desdeCierre = null } = {}) {
     await ensureColumns(turso);
+    // Sin corte del navegador (llamadas viejas), medianoche UTC: el comportamiento
+    // de antes, pero mirando el cierre.
+    const corte = desdeCierre || null;
+    const filtroCerrados = corte
+        ? `datetime(COALESCE(d.delivered_at, d.updated_at, d.created_at)) >= datetime(?)`
+        : `datetime(COALESCE(d.delivered_at, d.updated_at, d.created_at)) >= datetime('now','start of day')`;
+    const filtroCerradosCount = filtroCerrados.replaceAll('d.', '');
     const [rows, counts, mode] = await turso.batch([
         {
             // `pendiente_real` = lo que el pedido/venta debe AHORA. Si ya se cobró
@@ -225,19 +246,20 @@ async function deliveryBoard(turso, companyId, session, { includeDelivered = tru
                   FROM deliveries d LEFT JOIN couriers c ON c.id = d.courier_id
                   WHERE d.company_id = ?
                     AND (d.status NOT IN ('delivered','failed','canceled')
-                         OR date(d.created_at) = date('now'))
+                         OR ${filtroCerrados})
                   ORDER BY
                     CASE d.status WHEN 'pending' THEN 0 WHEN 'assigned' THEN 1
                          WHEN 'picked_up' THEN 2 WHEN 'on_route' THEN 3 ELSE 4 END,
                     d.created_at DESC
                   LIMIT 200`,
-            args: [companyId],
+            args: corte ? [companyId, corte] : [companyId],
         },
         {
             sql: `SELECT status, COUNT(*) AS n FROM deliveries
-                  WHERE company_id = ? AND (status NOT IN ('delivered','failed','canceled') OR date(created_at) = date('now'))
+                  WHERE company_id = ?
+                    AND (status NOT IN ('delivered','failed','canceled') OR ${filtroCerradosCount})
                   GROUP BY status`,
-            args: [companyId],
+            args: corte ? [companyId, corte] : [companyId],
         },
         { sql: 'SELECT delivery_assign_mode FROM companies WHERE id = ? LIMIT 1', args: [companyId] },
     ], 'read');
