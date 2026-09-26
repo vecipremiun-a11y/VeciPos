@@ -460,7 +460,16 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
         const amount = parseFloat(payAmount);
         if (!amount || amount <= 0) return;
 
-        const result = await addPreorderPayment(preorder.id, amount, payMethod, 'final', {
+        // El dinero que entra ANTES de entregar es un abono, no el pago final —
+        // aunque cubra todo el estimado. Con 'final', el servidor cierra el
+        // encargo como entregado apenas lo pagado alcanza el total, y así se salta
+        // el pesaje: el encargo queda "entregado" sin que nadie pusiera el peso
+        // real, sin registrar la venta y sin sumar al reporte de productos. Pasó
+        // 4 veces en producción (encargos entregados sin `delivered_at`).
+        // El total de verdad se arma al entregar, en la ventana de pesos.
+        const tipo = details?.preorder?.status === 'delivered' ? 'final' : 'deposit';
+
+        const result = await addPreorderPayment(preorder.id, amount, payMethod, tipo, {
             terminalId: payMethod === 'Tarjeta' ? payTerminalId : null,
             bankAccountId: payMethod === 'Transferencia' ? payBankAccountId : null,
         });
@@ -475,6 +484,17 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
             setPayBankAccountId(null);
         }
     };
+
+    // Quién puede recibir plata y cómo:
+    //   · Mientras se está haciendo (pendiente/confirmado/preparando) → ABONAR.
+    //     El total no está cerrado: falta pesar.
+    //   · Listo → NADA. El cobro es parte de entregar, que es donde se ponen los
+    //     gramos reales y sale el total de verdad.
+    //   · Entregado con saldo → COBRAR SALDO, que ahí ya no queda nada por pesar.
+    const estadoEncargo = details?.preorder?.status;
+    const puedeAbonar = ['pending', 'confirmed', 'preparing'].includes(estadoEncargo);
+    const puedeCobrarTodo = estadoEncargo === 'delivered';
+    const estaListo = estadoEncargo === 'ready';
 
     const statusConfig = STATUS_CONFIG[preorder.status] || STATUS_CONFIG.pending;
     const StatusIcon = statusConfig.icon;
@@ -608,12 +628,21 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
                         )}
 
                         {/* Pay Balance Section */}
-                        {showPayment && (
+                        {showPayment && (puedeAbonar || puedeCobrarTodo) && (
                             <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-3 space-y-3 animate-in slide-in-from-top-2">
-                                <p className="text-sm font-bold text-green-400">💰 Cobrar Saldo</p>
+                                <p className="text-sm font-bold text-green-400">
+                                    {puedeCobrarTodo ? '💰 Cobrar saldo' : '💰 Abonar a cuenta'}
+                                </p>
+                                {!puedeCobrarTodo && (
+                                    <p className="text-[11px] text-[var(--color-text-muted)] leading-snug">
+                                        El total definitivo se arma al entregar, con el peso real de cada producto.
+                                        Hasta entonces esto es un abono; queda {formatCurrency(details.preorder.remaining_amount, currentCurrency)} estimado.
+                                    </p>
+                                )}
                                 <div className="relative">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
-                                    <input type="number" placeholder={String(details.preorder.remaining_amount)}
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] font-bold">$</span>
+                                    <input type="number" inputMode="decimal"
+                                        placeholder={puedeCobrarTodo ? String(details.preorder.remaining_amount) : 'Monto que deja'}
                                         className="glass-input w-full !pl-8 font-bold"
                                         value={payAmount} onChange={e => setPayAmount(e.target.value)} />
                                 </div>
@@ -645,19 +674,29 @@ const PreorderDetailModal = ({ preorder, onClose, onStatusChange, onPayBalance, 
                                     </button>
                                     <button onClick={handlePayBalance}
                                         className="flex-1 py-2 rounded-lg text-sm font-bold bg-green-500 text-black">
-                                        Confirmar Pago
+                                        {puedeCobrarTodo ? 'Confirmar pago' : 'Confirmar abono'}
                                     </button>
                                 </div>
                             </div>
                         )}
 
+                        {/* Listo: el cobro es parte de entregar. Se dice, así nadie
+                            busca el botón de cobrar que estaba acá antes. */}
+                        {estaListo && details.preorder.remaining_amount > 0 && (
+                            <p className="text-[11px] text-[var(--color-text-muted)] flex items-start gap-1.5">
+                                <DollarSign size={12} className="shrink-0 mt-0.5 text-green-400" />
+                                Queda {formatCurrency(details.preorder.remaining_amount, currentCurrency)} por cobrar.
+                                Se cobra al entregar, cuando se pone el peso real de cada producto.
+                            </p>
+                        )}
+
                         {/* Actions */}
                         <div className="flex gap-2 pt-2">
-                            {details.preorder.remaining_amount > 0 && details.preorder.status !== 'canceled' && (
+                            {details.preorder.remaining_amount > 0 && (puedeAbonar || puedeCobrarTodo) && (
                                 <button onClick={() => setShowPayment(!showPayment)}
                                     className="flex-1 py-3 rounded-xl font-bold text-sm bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 transition-all flex items-center justify-center gap-2">
                                     <DollarSign size={16} />
-                                    Cobrar Saldo
+                                    {puedeCobrarTodo ? 'Cobrar saldo' : 'Abonar'}
                                 </button>
                             )}
                             {STATUS_NEXT_LABEL[preorder.status] && (
