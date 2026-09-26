@@ -4,7 +4,7 @@ import {
     Search, ShoppingCart, Trash2, Plus, Minus, X, Clock, Phone, User,
     MapPin, FileText, Calendar, ChevronDown, Check, DollarSign, Package,
     ClipboardList, Truck, AlertCircle, CreditCard, Banknote, ArrowRight, CakeSlice, Printer,
-    Store as StoreIcon, UserPlus
+    Store as StoreIcon, UserPlus, CalendarDays
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
@@ -20,6 +20,8 @@ import { printPreorder } from '../utils/printPreorder';
 import OrderTabBadge from '../components/OrderTabBadge';
 import CancelarEncargoModal from '../components/CancelarEncargoModal';
 import HistorialEncargo from '../components/HistorialEncargo';
+import CalendarioRango from '../components/CalendarioRango';
+import { fechaCorta } from '../utils/fechaCorta';
 import { filtroDe } from '../lib/busquedaProductos';
 
 const STATUS_CONFIG = {
@@ -742,6 +744,9 @@ const Preorders = () => {
 
     // List filters
     const [dateFilter, setDateFilter] = useState('today');
+    // 'range' = un día suelto o un desde–hasta elegido en el calendario propio.
+    const [rangoFechas, setRangoFechas] = useState({ desde: null, hasta: null });
+    const [calendarioAbierto, setCalendarioAbierto] = useState(false);
     const [statusFilter, setStatusFilter] = useState('all');
 
     const categoryList = ['Todos', ...storedCategories
@@ -858,6 +863,12 @@ const Preorders = () => {
         const filters = { status: statusFilter };
         if (dateFilter === 'today') filters.date = today;
         else if (dateFilter === 'tomorrow') filters.date = tomorrow;
+        else if (dateFilter === 'range' && rangoFechas.desde) {
+            // El servidor filtra con BETWEEN, así que un día suelto se manda como
+            // rango de un día (desde = hasta).
+            filters.startDate = rangoFechas.desde;
+            filters.endDate = rangoFechas.hasta || rangoFechas.desde;
+        }
         // 'all' = no date filter
         return filters;
     };
@@ -866,7 +877,7 @@ const Preorders = () => {
         if (activeTab === 'list') {
             fetchPreorders(getListFilters());
         }
-    }, [activeTab, dateFilter, statusFilter]);
+    }, [activeTab, dateFilter, statusFilter, rangoFechas]);
 
     // Si llegamos desde el aviso de encargo web ("Ver detalles"), abrir la
     // pestaña de lista (no la de crear) y quitar el filtro de fecha para que el
@@ -1266,17 +1277,34 @@ const Preorders = () => {
                             {[
                                 { key: 'today', label: 'Hoy' },
                                 { key: 'tomorrow', label: 'Mañana' },
-                                { key: 'all', label: 'Todos' }
                             ].map(f => (
                                 <button key={f.key} onClick={() => setDateFilter(f.key)}
                                     className={cn("flex-1 py-2 rounded-lg text-xs font-bold transition-all border",
                                         dateFilter === f.key
-                                            ? "bg-[var(--color-primary)] text-black border-[var(--color-primary)]"
+                                            ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)]"
                                             : "bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)]"
                                     )}>
                                     {f.label}
                                 </button>
                             ))}
+                            {/* Antes acá decía "Todos". Ahora abre el calendario: se puede
+                                elegir un día suelto o un rango desde–hasta, y "Ver todos"
+                                sigue estando adentro. */}
+                            <button onClick={() => setCalendarioAbierto(true)}
+                                className={cn("flex-[1.4] py-2 px-2 rounded-lg text-xs font-bold transition-all border flex items-center justify-center gap-1.5",
+                                    dateFilter === 'range' || dateFilter === 'all'
+                                        ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)]"
+                                        : "bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)]"
+                                )}>
+                                <CalendarDays size={14} className="shrink-0" />
+                                <span className="truncate">
+                                    {dateFilter === 'range' && rangoFechas.desde
+                                        ? (rangoFechas.hasta && rangoFechas.hasta !== rangoFechas.desde
+                                            ? `${fechaCorta(rangoFechas.desde)} → ${fechaCorta(rangoFechas.hasta)}`
+                                            : fechaCorta(rangoFechas.desde))
+                                        : dateFilter === 'all' ? 'Todos' : 'Fechas'}
+                                </span>
+                            </button>
                         </div>
                         <div className="flex gap-1.5 overflow-x-auto">
                             {[
@@ -1431,6 +1459,15 @@ const Preorders = () => {
                 preorderDetails={deliveryPreorder}
                 onDeliver={handleDeliverSuccess}
                 currentCurrency={currentCurrency}
+            />
+
+            <CalendarioRango
+                isOpen={calendarioAbierto}
+                onClose={() => setCalendarioAbierto(false)}
+                desde={rangoFechas.desde}
+                hasta={rangoFechas.hasta}
+                onAplicar={(desde, hasta) => { setRangoFechas({ desde, hasta }); setDateFilter('range'); }}
+                onVerTodos={() => { setRangoFechas({ desde: null, hasta: null }); setDateFilter('all'); }}
             />
         </div>
     );
