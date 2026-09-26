@@ -893,6 +893,13 @@ async function productUpdate(turso, companyId, session, id, product) {
             args: [companyId, id, session?.uid ?? null, session?.username || 'Desconocido', oldStock, newStock,
                 Math.round((newStock - oldStock) * 1000) / 1000, 'manual', new Date().toISOString()],
         });
+        // Corregir el stock a mano también confirma el número: se apaga la marca
+        // de "por confirmar" que dejó una venta sin stock suficiente. Solo cuando
+        // el stock cambió de verdad — guardar el producto por otra cosa no la apaga.
+        await turso.execute({
+            sql: 'UPDATE products SET pending_adjustment = 0 WHERE id = ? AND company_id = ?',
+            args: [id, companyId],
+        });
     }
 
     await auditLog(turso, companyId, session, 'UPDATE', 'PRODUCT', { id, name: product.name, sku: product.sku });

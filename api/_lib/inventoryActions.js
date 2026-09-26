@@ -230,7 +230,9 @@ async function controlSaveItem(turso, companyId, session, { controlId, productId
             sql: 'UPDATE inventory_control_items SET counted_stock = ?, difference = ?, updated_at = ? WHERE control_id = ? AND product_id = ?',
             args: [roundedCount, difference, now, controlId, productId],
         });
-        await turso.execute({ sql: 'UPDATE products SET stock = ROUND(?, 3) WHERE id = ? AND company_id = ?', args: [roundedCount, productId, companyId] });
+        // Contar el producto es, justamente, confirmar su stock: se apaga la marca
+        // morada de "por confirmar" que dejó una venta sin stock suficiente.
+        await turso.execute({ sql: 'UPDATE products SET stock = ROUND(?, 3), pending_adjustment = 0 WHERE id = ? AND company_id = ?', args: [roundedCount, productId, companyId] });
         if (Math.abs(roundedCount - (parseFloat(product.stock) || 0)) >= 0.001) {
             await turso.execute({
                 sql: 'INSERT INTO stock_adjustments (company_id, product_id, user_id, user_name, old_stock, new_stock, difference, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -250,7 +252,9 @@ async function controlSaveItem(turso, companyId, session, { controlId, productId
         sql: 'INSERT INTO inventory_control_items (control_id, product_id, product_name, product_sku, system_stock, counted_stock, difference, cost, counted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         args: [controlId, productId, product.name, product.sku || '', systemStock, roundedCount, difference, product.cost || 0, now],
     });
-    await turso.execute({ sql: 'UPDATE products SET stock = ROUND(?, 3) WHERE id = ? AND company_id = ?', args: [roundedCount, productId, companyId] });
+    // Contar el producto es, justamente, confirmar su stock: se apaga la marca
+        // morada de "por confirmar" que dejó una venta sin stock suficiente.
+        await turso.execute({ sql: 'UPDATE products SET stock = ROUND(?, 3), pending_adjustment = 0 WHERE id = ? AND company_id = ?', args: [roundedCount, productId, companyId] });
     if (Math.abs(roundedCount - systemStock) >= 0.001) {
         await turso.execute({
             sql: 'INSERT INTO stock_adjustments (company_id, product_id, user_id, user_name, old_stock, new_stock, difference, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',

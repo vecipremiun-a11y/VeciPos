@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect as useEffectReact } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, ChevronRight, Gift, FileText, Receipt, ScanBarcode, Package, Store, Truck } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, ImageOff, X, ChevronDown, ChevronUp, ChevronRight, Gift, FileText, Receipt, ScanBarcode, Package, Store, Truck, AlertTriangle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -1116,15 +1116,25 @@ const POS = () => {
                                     </div>
 
                                     <div className="w-full flex justify-between items-center pt-1 lg:pt-2 border-t border-[var(--glass-border)]">
-                                        <span className={cn(
-                                            "font-medium px-1.5 lg:px-2 py-0.5 rounded text-[9px] lg:text-[10px]",
-                                            product.pending_adjustment
-                                                ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
-                                                : product.stock < 10
-                                                    ? "bg-red-500/20 text-red-400 border border-red-500/30"
-                                                    : "bg-green-500/20 text-green-400 border border-green-500/30"
-                                        )}>
-                                            {product.pending_adjustment ? '⚠' : `${product.stock}${product.unit === 'Kg' ? 'kg' : 'und'}`}
+                                        {/* El stock SIEMPRE a la vista. La marca morada dice que ese
+                                            número quedó en duda —se vendió sin stock suficiente, por
+                                            modo ajuste o por una venta cobrada sin conexión— y que hay
+                                            que contarlo. Antes la marca REEMPLAZABA al número: el
+                                            cajero veía un "⚠" sin explicación y sin saber cuánto había. */}
+                                        <span
+                                            title={product.pending_adjustment
+                                                ? 'Stock por confirmar: se vendió sin stock suficiente, así que este número puede no ser real. Cuéntalo en Control de Inventario.'
+                                                : undefined}
+                                            className={cn(
+                                                "font-medium px-1.5 lg:px-2 py-0.5 rounded text-[9px] lg:text-[10px] flex items-center gap-1",
+                                                product.pending_adjustment
+                                                    ? "bg-purple-500/20 text-purple-300 border border-purple-500/30"
+                                                    : product.stock < 10
+                                                        ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                                                        : "bg-green-500/20 text-green-400 border border-green-500/30"
+                                            )}>
+                                            {product.pending_adjustment && <AlertTriangle size={9} className="shrink-0" />}
+                                            {product.stock}{product.unit === 'Kg' ? 'kg' : 'und'}
                                         </span>
                                         <span className="text-[9px] lg:text-[10px] text-[var(--color-text-muted)] font-medium truncate max-w-[40%] text-right">
                                             {product.category || 'General'}
