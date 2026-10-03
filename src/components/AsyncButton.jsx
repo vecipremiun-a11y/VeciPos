@@ -40,7 +40,14 @@ export default function AsyncButton({
     // Evita avisarle a un componente que ya se desmontó (los modales se cierran
     // solos al terminar, así que esto pasa casi siempre).
     const vivo = useRef(true);
-    useEffect(() => () => { vivo.current = false; }, []);
+    // Se vuelve a marcar como vivo al montar, no solo al crearse: en desarrollo
+    // React monta, desmonta y vuelve a montar, y sin esto el botón quedaba
+    // marcado como muerto y se quedaba en "Guardando…" para siempre después de
+    // un error. Mismo arreglo que tiene CargarFacturaModal.
+    useEffect(() => {
+        vivo.current = true;
+        return () => { vivo.current = false; };
+    }, []);
 
     const corriendo = trabajando || busy;
 
