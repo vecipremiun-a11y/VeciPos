@@ -6,6 +6,7 @@ import { useStore } from '../store/useStore';
 import { usePermissions } from '../hooks/usePermissions';
 import { compressImage, validateImage } from '../lib/imageCompression';
 import { formatCurrency } from '../utils/formatCurrency';
+import { desdeSiguiente, puedeAgregarTramo, encadenarHasta, erroresEscala, primerErrorEscala } from '../utils/escalaTramos';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
     const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, hasModule, fetchProductAliases, presentacionesDe, deletePresentation, productPresentations } = useStore();
@@ -246,8 +247,13 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        // Tramos que se pisan o mal armados: la misma cantidad tendría dos precios.
+        const errorEscala = primerErrorEscala(formData.price_ranges || []);
+        if (errorEscala) { alert(errorEscala); return; }
         const dataToSave = {
             ...formData,
+            // Las filas sin precio no son tramos: no se guardan.
+            price_ranges: (formData.price_ranges || []).filter(t => Number(t.price) > 0),
             price: toNum(formData.price),
             cost: toNum(formData.cost),
             stock: Math.round(toNum(formData.stock) * 1000) / 1000,
@@ -270,6 +276,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
         onSave(dataToSave);
     };
+    const erroresTramos = erroresEscala(formData.price_ranges || []);
 
     if (!isOpen && !isInline) return null;
 
@@ -1042,16 +1049,19 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             </h3>
                             <button
                                 type="button"
+                                disabled={!puedeAgregarTramo(formData.price_ranges || [])}
+                                title={puedeAgregarTramo(formData.price_ranges || []) ? undefined : 'Para otro tramo, poné "hasta" en el último'}
                                 onClick={() => {
+                                    // "Desde" automático: 2 el primero (1 es la venta normal), o el "hasta" anterior + 1.
                                     setFormData(prev => ({
                                         ...prev,
                                         price_ranges: [
                                             ...(prev.price_ranges || []),
-                                            { min: 1, max: '', margin: '', price: '' }
+                                            { min: desdeSiguiente(prev.price_ranges || []), max: '', margin: '', price: '' }
                                         ]
                                     }));
                                 }}
-                                className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded-lg text-sm transition-colors border border-purple-500/30"
+                                className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded-lg text-sm transition-colors border border-purple-500/30 disabled:opacity-40"
                             >
                                 <Plus size={16} />
                                 Agregar Rango
@@ -1084,8 +1094,8 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                                 type="number"
                                                 value={range.max}
                                                 onChange={(e) => {
-                                                    const newRanges = [...(formData.price_ranges || [])];
-                                                    newRanges[index] = { ...newRanges[index], max: e.target.value };
+                                                    // El "desde" del tramo siguiente sigue a este "hasta".
+                                                    const newRanges = encadenarHasta(formData.price_ranges || [], index, e.target.value);
                                                     setFormData(prev => ({ ...prev, price_ranges: newRanges }));
                                                 }}
                                                 className="glass-input w-full py-1 px-2 text-sm"
@@ -1169,6 +1179,9 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                             <Trash2 size={16} />
                                         </button>
                                     </div>
+                                    {erroresTramos[index] && (
+                                        <p className="col-span-12 text-xs text-red-400">{erroresTramos[index]}</p>
+                                    )}
                                 </div>
                             ))}
                             {(formData.price_ranges || []).length === 0 && (
