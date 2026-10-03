@@ -21,13 +21,14 @@ import { dataApiCall } from '../lib/dataApi';
 // factura se muestra en plata.
 
 const CargarFacturaModal = ({ archivo, onClose, onCreado }) => {
-    const { activeCompanyId, currentCurrency, addItemsToSupplierOrder } = useStore();
+    const { activeCompanyId, currentCurrency, addItemsToSupplierOrder, setItemPackSupplierOrder } = useStore();
 
     const [estado, setEstado] = useState('leyendo');   // leyendo | error | listo
     const [error, setError] = useState(null);
     const [resultado, setResultado] = useState(null);
     const [vistaPrevia, setVistaPrevia] = useState(null);
     const [enlazando, setEnlazando] = useState(null);  // "posición:idProducto" en curso
+    const [aplicandoCaja, setAplicandoCaja] = useState(null);  // id de producto en curso
 
     // Evita que una respuesta que llega tarde escriba sobre una pantalla ya
     // cerrada: leer una factura tarda, y el usuario puede cerrar mientras tanto.
@@ -114,6 +115,29 @@ const CargarFacturaModal = ({ archivo, onClose, onCreado }) => {
     //
     // La cantidad y el costo salen de la factura, no se vuelven a pedir: ya se
     // leyeron bien, lo único que faltaba era saber a qué producto iban.
+    // "Sí, era una caja de 12": reparte el renglón del pedido. La plata no cambia.
+    const aplicarCaja = async (sugerencia) => {
+        if (!resultado?.pedidoId || aplicandoCaja) return;
+        setAplicandoCaja(sugerencia.productId);
+        const r = await setItemPackSupplierOrder(resultado.pedidoId, sugerencia.productId, sugerencia.unidades);
+        if (!vivo.current) return;
+        setAplicandoCaja(null);
+        if (!r?.success) { toast(r?.error || 'No se pudo aplicar', 'error'); return; }
+        toast(`${sugerencia.producto}: ${sugerencia.cantidadPropuesta} × ${formatCurrency(sugerencia.costoPropuesto, currentCurrency)}`, 'success');
+        setResultado(prev => ({
+            ...prev,
+            // Sale de las sugerencias y pasa a la lista de lo ya convertido.
+            sugerencias: (prev.sugerencias || []).filter(s => s.productId !== sugerencia.productId),
+            porCaja: [...(prev.porCaja || []), {
+                descripcion: sugerencia.descripcion, producto: sugerencia.producto,
+                unidades: sugerencia.unidades, cantidad: sugerencia.cantidadPropuesta, costo: sugerencia.costoPropuesto,
+            }],
+            items: (prev.items || []).map(i => i.producto === sugerencia.producto
+                ? { ...i, cantidad: sugerencia.cantidadPropuesta, costo: sugerencia.costoPropuesto }
+                : i),
+        }));
+    };
+
     const enlazar = async (posicion, candidato) => {
         const linea = sinEmparejar[posicion];
         if (!resultado?.pedidoId || !linea || enlazando) return;
@@ -256,6 +280,81 @@ const CargarFacturaModal = ({ archivo, onClose, onCreado }) => {
                                             El pedido #{resultado.yaCargada.pedidoId} tiene el mismo número de factura.
                                             Si es la misma, borrá uno de los dos antes de pasarlo a compra.
                                         </p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Renglones donde la cantidad leída no daba el total
+                                impreso y se usó la que sí lo da. Pasa en facturas con
+                                dos columnas de cantidad —unidades y kilos—, donde el
+                                precio puede ser por kilo o por unidad en el mismo
+                                documento. Se avisa para poder mirar el papel. */}
+                            {(resultado.corregidas?.length > 0) && (
+                                <div className="flex gap-3 p-4 rounded-xl bg-blue-500/10 border border-blue-500/30">
+                                    <FileWarning size={20} className="text-blue-400 shrink-0 mt-0.5" />
+                                    <div className="text-sm min-w-0">
+                                        <p className="font-bold text-blue-400">
+                                            {resultado.corregidas.length === 1
+                                                ? 'Se corrigió una cantidad con el total del renglón'
+                                                : `Se corrigieron ${resultado.corregidas.length} cantidades con el total del renglón`}
+                                        </p>
+                                        <p className="text-[var(--color-text-muted)] mb-1">
+                                            La cantidad leída no daba el total impreso, así que se usó la que sí lo da
+                                            (suele pasar cuando el precio es por kilo). Comparalo con el papel.
+                                        </p>
+                                        {resultado.corregidas.map((c, idx) => (
+                                            <p key={idx} className="text-[var(--color-text)] break-words">
+                                                · {c.descripcion}: {c.leida} → <strong>{c.usada}</strong> (total {plata(c.totalImpreso)})
+                                            </p>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Renglones que vinieron por caja y el sistema no pudo
+                                estar seguro solo: los confirma quien tiene el papel. */}
+                            {(resultado.sugerencias?.length > 0) && (
+                                <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 p-4 space-y-3">
+                                    <p className="font-bold text-amber-400 text-sm">
+                                        {resultado.sugerencias.length === 1 ? '¿Este renglón vino por caja?' : '¿Estos renglones vinieron por caja?'}
+                                    </p>
+                                    {resultado.sugerencias.map((s) => (
+                                        <div key={s.productId} className="text-sm border-t border-amber-500/20 pt-2 first:border-0 first:pt-0">
+                                            <p className="font-medium text-[var(--color-text)] break-words">{s.producto}</p>
+                                            <p className="text-xs text-[var(--color-text-muted)] break-words">en la factura: {s.descripcion}</p>
+                                            <p className="text-xs text-[var(--color-text-muted)] mb-2">
+                                                Entró como <strong>{s.cantidadActual} × {plata(s.costoActual)}</strong>.
+                                                Si es una caja de {s.unidades}, son <strong>{s.cantidadPropuesta} × {plata(s.costoPropuesto)}</strong> —
+                                                la misma plata. ({s.motivo})
+                                            </p>
+                                            <button
+                                                onClick={() => aplicarCaja(s)}
+                                                disabled={!!aplicandoCaja}
+                                                className="px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold disabled:opacity-50"
+                                            >
+                                                {aplicandoCaja === s.productId ? 'Aplicando…' : `Sí, son ${s.unidades} por caja`}
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Renglones convertidos solos: las dos pistas coincidían. */}
+                            {(resultado.porCaja?.length > 0) && (
+                                <div className="flex gap-3 p-4 rounded-xl bg-blue-500/10 border border-blue-500/30">
+                                    <FileWarning size={20} className="text-blue-400 shrink-0 mt-0.5" />
+                                    <div className="text-sm min-w-0">
+                                        <p className="font-bold text-blue-400">
+                                            {resultado.porCaja.length === 1 ? 'Un renglón venía por caja' : `${resultado.porCaja.length} renglones venían por caja`}
+                                        </p>
+                                        <p className="text-[var(--color-text-muted)] mb-1">
+                                            La factura los cuenta por bulto y el local los vende por unidad. Se repartieron: misma plata, más cantidad.
+                                        </p>
+                                        {resultado.porCaja.map((c, idx) => (
+                                            <p key={idx} className="text-[var(--color-text)] break-words">
+                                                · {c.producto}: {c.cantidad} × {plata(c.costo)} ({c.unidades} por caja)
+                                            </p>
+                                        ))}
                                     </div>
                                 </div>
                             )}

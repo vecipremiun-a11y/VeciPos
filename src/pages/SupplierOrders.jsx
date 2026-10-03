@@ -14,6 +14,23 @@ import { formatCurrency } from '../utils/formatCurrency';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+/**
+ * El neto de un renglón: la plata sin IVA, que es la que la factura muestra en
+ * su columna VALOR y la que se guarda como costo del producto.
+ *
+ * Los renglones guardan `cost` (neto) y `total` (con IVA). Los pedidos viejos
+ * pueden no tener `cost`, así que ahí el neto se saca del total quitándole la
+ * tasa del renglón.
+ */
+function netoDeLinea(item) {
+    const cantidad = Number(item?.quantity) || 0;
+    const costo = Number(item?.cost) || 0;
+    if (costo > 0) return costo * cantidad;
+    const total = Number(item?.total) || 0;
+    const tasa = Number(item?.taxRate) || 0;
+    return total / (1 + tasa / 100);
+}
+
 const SupplierOrders = () => {
     const { fetchSupplierOrders, deleteSupplierOrder, suppliers, currentCurrency } = useStore(); // Add deleteSupplierOrder
     const { can } = usePermissions(); // Helper for permissions
@@ -103,7 +120,8 @@ const SupplierOrders = () => {
         if (order.seller_name) doc.text(`Vendedor: ${order.seller_name}`, 14, 61);
 
         // Items Table
-        const tableColumn = ["Producto", "SKU", "Cant.", "Costo", "Total"];
+        // Mismo desglose que la pantalla y que la factura: el renglón va neto.
+        const tableColumn = ["Producto", "SKU", "Cant.", "Costo", "Neto"];
         const tableRows = [];
 
         order.items.forEach(item => {
@@ -112,7 +130,7 @@ const SupplierOrders = () => {
                 item.sku,
                 item.quantity,
                 formatCurrency(item.cost, currentCurrency),
-                formatCurrency(item.total, currentCurrency)
+                formatCurrency(Math.round(netoDeLinea(item)), currentCurrency)
             ];
             tableRows.push(itemData);
         });
@@ -123,9 +141,13 @@ const SupplierOrders = () => {
             startY: 70,
         });
 
-        // Totals
+        // Totals: neto, IVA y total, como los imprime una factura.
         const finalY = doc.lastAutoTable.finalY + 10;
-        doc.text(`Total: ${formatCurrency(order.total_amount, currentCurrency)}`, 14, finalY);
+        const netoPdf = Math.round((order.items || []).reduce((s, i) => s + netoDeLinea(i), 0));
+        const totalPdf = Number(order.total_amount) || 0;
+        doc.text(`Neto: ${formatCurrency(netoPdf, currentCurrency)}`, 14, finalY);
+        doc.text(`IVA: ${formatCurrency(Math.max(0, Math.round(totalPdf - netoPdf)), currentCurrency)}`, 14, finalY + 6);
+        doc.text(`Total: ${formatCurrency(totalPdf, currentCurrency)}`, 14, finalY + 12);
 
         // Save
         doc.save(`Pedido_${order.id}_${order.supplier_name}.pdf`);
@@ -427,7 +449,7 @@ const SupplierOrders = () => {
                                                 <th className="p-3 text-left font-medium text-[var(--color-text-muted)]">Producto</th>
                                                 <th className="p-3 text-center font-medium text-[var(--color-text-muted)]">Cant.</th>
                                                 <th className="p-3 text-right font-medium text-[var(--color-text-muted)]">Costo</th>
-                                                <th className="p-3 text-right font-medium text-[var(--color-text-muted)]">Total</th>
+                                                <th className="p-3 text-right font-medium text-[var(--color-text-muted)]">Neto</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-[var(--glass-border)]">
@@ -439,15 +461,43 @@ const SupplierOrders = () => {
                                                     </td>
                                                     <td className="p-3 text-center font-bold">{item.quantity}</td>
                                                     <td className="p-3 text-right text-[var(--color-text-muted)]">{formatCurrency(item.cost, currentCurrency)}</td>
-                                                    <td className="p-3 text-right font-bold">{formatCurrency(item.total, currentCurrency)}</td>
+                                                    {/* El renglón va NETO, como la columna VALOR de la
+                                                        factura: el costo que se guarda en cada producto es
+                                                        el neto, y el IVA se suma abajo. */}
+                                                    <td className="p-3 text-right font-bold">{formatCurrency(netoDeLinea(item), currentCurrency)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
+                                        {/* Desglose como lo trae la factura: neto, IVA y total.
+                                            El IVA sale de la diferencia contra el total guardado,
+                                            así este cuadro siempre cierra con el número que usa
+                                            Compras. En una factura exenta el IVA queda en 0 y el
+                                            total es igual al neto. */}
                                         <tfoot className="bg-[var(--glass-bg)]">
-                                            <tr>
-                                                <td colSpan="3" className="p-3 text-right font-bold">Total Pedido</td>
-                                                <td className="p-3 text-right font-bold text-[var(--color-primary)]">{formatCurrency(selectedOrder.total_amount, currentCurrency)}</td>
-                                            </tr>
+                                            {(() => {
+                                                const neto = (selectedOrder.items || []).reduce((s, i) => s + netoDeLinea(i), 0);
+                                                const total = Number(selectedOrder.total_amount) || 0;
+                                                const iva = Math.max(0, Math.round(total - neto));
+                                                const tasas = [...new Set((selectedOrder.items || [])
+                                                    .map(i => Number(i.taxRate)).filter(t => Number.isFinite(t) && t > 0))];
+                                                const etiquetaIva = tasas.length === 1 ? `IVA ${tasas[0]}%` : 'IVA';
+                                                return (
+                                                    <>
+                                                        <tr>
+                                                            <td colSpan="3" className="p-3 pb-1 text-right text-[var(--color-text-muted)]">Neto</td>
+                                                            <td className="p-3 pb-1 text-right font-medium">{formatCurrency(Math.round(neto), currentCurrency)}</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td colSpan="3" className="px-3 py-1 text-right text-[var(--color-text-muted)]">{etiquetaIva}</td>
+                                                            <td className="px-3 py-1 text-right font-medium">{formatCurrency(iva, currentCurrency)}</td>
+                                                        </tr>
+                                                        <tr className="border-t border-[var(--glass-border)]">
+                                                            <td colSpan="3" className="p-3 text-right font-bold">Total Pedido</td>
+                                                            <td className="p-3 text-right font-bold text-[var(--color-primary)]">{formatCurrency(total, currentCurrency)}</td>
+                                                        </tr>
+                                                    </>
+                                                );
+                                            })()}
                                         </tfoot>
                                     </table>
                                 </div>

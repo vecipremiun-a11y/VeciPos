@@ -2928,6 +2928,19 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // "Este renglón era una caja de 12": reparte la línea del pedido (misma plata,
+    // 12 veces la cantidad al doceavo del costo) y lo guarda en el producto.
+    setItemPackSupplierOrder: async (id, productId, unidades) => {
+        try {
+            const { activeCompanyId } = get();
+            const r = await userApiCall('supplierOrderSetItemPack', { companyId: activeCompanyId, id, productId, unidades });
+            return r || { success: false, error: 'Error' };
+        } catch (e) {
+            console.error('Set item pack error', e);
+            return { success: false, error: e.message };
+        }
+    },
+
     deleteSupplierOrder: async (id) => {
         try {
             const { activeCompanyId, currentUser, validateCompanyAccess } = get();

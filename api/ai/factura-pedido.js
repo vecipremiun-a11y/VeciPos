@@ -60,11 +60,18 @@ const ESQUEMA = {
                     // corresponde, esa factura entra sola para siempre.
                     codigo: { type: ['string', 'null'], description: 'El código del proveedor de la columna Código, tal cual. null si la factura no trae esa columna' },
                     descripcion: { type: 'string', description: 'El texto del producto TAL CUAL figura en la factura' },
-                    cantidad: { type: 'number' },
+                    cantidad: { type: 'number', description: 'La cantidad que, multiplicada por el costo, da el total impreso del renglón. Si el precio es por kilo, son los KILOS; si es por unidad, son las unidades' },
                     costo: { type: 'number', description: 'Costo unitario SIN IVA, con el descuento ya aplicado si el total del renglón lo tiene' },
-                    iva: { type: 'number', description: 'Porcentaje de IVA del renglón' },
+                    // El total impreso es el único dato del renglón que no
+                    // depende de interpretar columnas: con él se verifica —y se
+                    // corrige— la cantidad del lado del servidor.
+                    totalLinea: { type: 'number', description: 'El total impreso del renglón (columna VALOR, TOTAL o IMPORTE), sin IVA. 0 si no aparece' },
+                    // Cómo viene armado el bulto, TAL CUAL lo dice el renglón: es
+                    // lo que permite darse cuenta de que "1" es una caja.
+                    empaque: { type: 'string', description: 'El armado del bulto tal como aparece en el texto del renglón: "12x5u", "20x3", "1*6*5", "10 unid". Vacío si el renglón no lo dice' },
+                    iva: { type: 'number', description: 'Porcentaje de IVA del renglón: 19 si paga, 0 si es exento o la factura no lleva IVA' },
                 },
-                required: ['codigo', 'descripcion', 'cantidad', 'costo', 'iva'],
+                required: ['codigo', 'descripcion', 'cantidad', 'costo', 'totalLinea', 'empaque', 'iva'],
                 additionalProperties: false,
             },
         },
@@ -82,7 +89,18 @@ const INSTRUCCIONES = [
     'Los renglones sin cantidad ni precio son formulario en blanco, NO compras: no los incluyas. Un talonario preimpreso puede traer decenas de líneas vacías.',
     'No incluyas renglones que no son productos: fletes, "distribución y logística", redondeos.',
     'Si un renglón trae descuento, fijate si el TOTAL de esa línea ya lo tiene aplicado. El costo unitario que devuelvas tiene que ser el que, multiplicado por la cantidad, da ese total.',
-    'Si la factura no desglosa IVA, poné 19 (el general en Chile) salvo que el documento diga otra cosa.',
+    '',
+    'CANTIDAD: el total impreso del renglón manda. Hay facturas con DOS columnas de cantidad —unidades (UNI, CAJ, BULTOS) y kilos—, y el precio puede ser por kilo o por unidad según el producto, en la misma factura.',
+    'Antes de responder cada renglón, hacé la cuenta: cantidad × costo tiene que dar el total impreso. Si no da, probá con la otra columna.',
+    'Ejemplo real: "UNI 2 · KILOS 20,290 · PRECIO 3.451 · VALOR 70.021". Ahí el precio es por kilo: cantidad = 20,29 (no 2), porque 20,29 × 3.451 = 70.021. Dos líneas más abajo, "UNI 56 · KILOS 2,8 · PRECIO 110 · VALOR 6.160" se cobra por unidad: cantidad = 56, porque 56 × 110 = 6.160.',
+    'Copiá siempre el total impreso del renglón en `totalLinea`, tal como está, sin IVA.',
+    '',
+    'EMPAQUE: muchos renglones dicen "1" porque cuentan CAJAS, y el armado está escrito en el nombre: "Salchicha Sureña Refrigerado Vacio 12x5u" es una caja con 12 paquetes de 5. Copiá esa parte tal cual en `empaque` ("12x5u", "20x3", "1*6*5", "10 unid"). Si el renglón no lo dice, dejalo vacío. No lo conviertas ni lo interpretes: de eso se encarga el sistema con el costo que ya tiene guardado.',
+    '',
+    'IVA: el costo que devolvés es SIEMPRE el neto, sin IVA — es el precio de costo del producto, y el impuesto se suma aparte.',
+    'Si el documento es EXENTO, o el renglón dice exento / E / sin IVA, poné `iva: 0`. No pongas 19 por costumbre.',
+    'Si la factura cobra IVA pero no lo desglosa por renglón, poné 19 (el general en Chile) salvo que el documento diga otra tasa.',
+    'Si los precios impresos ya vinieran CON IVA (lo dice el documento), descontalo para devolver el neto: costo = precio ÷ 1,19.',
 ].join('\n');
 
 export default async function handler(req, res) {

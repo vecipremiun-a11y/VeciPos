@@ -116,6 +116,54 @@ async function supplierOrderSetStatus(turso, companyId, session, { id, status })
 // JSON, así que leer-modificar-escribir desde el cliente pisaría lo que otro
 // haya agregado mientras tanto. El total se recalcula del lado del servidor por
 // lo mismo.
+/**
+ * "Este renglón no era 1 caja, eran 12 paquetes": convierte una línea del pedido.
+ *
+ * La plata del renglón NO cambia —se reparte—: la cantidad se multiplica y el
+ * costo se divide por la misma cantidad de unidades. Lo confirma la persona
+ * desde el resumen de la factura cuando el sistema no pudo estar seguro solo
+ * (ver detectarBulto), y queda guardado en la ficha del producto para que la
+ * próxima factura del mismo proveedor entre sola.
+ */
+async function supplierOrderSetItemPack(turso, companyId, session, { id, productId, unidades }) {
+    const porCaja = Math.round(Number(unidades) || 0);
+    if (!id || !productId || porCaja < 2) return { success: false, error: 'Faltan datos' };
+
+    const r = await turso.execute({
+        sql: 'SELECT items, status FROM supplier_orders WHERE id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    const row = r.rows[0];
+    if (!row) return { success: false, error: 'Pedido no encontrado' };
+    if (row.status === 'received') return { success: false, error: 'El pedido ya fue recibido' };
+
+    let actuales = [];
+    try { actuales = JSON.parse(row.items) || []; } catch { actuales = []; }
+    const idx = actuales.findIndex(i => String(i.id) === String(productId));
+    if (idx < 0) return { success: false, error: 'Ese producto no está en el pedido' };
+
+    const linea = actuales[idx];
+    const cantidad = Math.round((Number(linea.quantity) || 0) * porCaja * 1000) / 1000;
+    const costo = Math.round(((Number(linea.cost) || 0) / porCaja) * 100) / 100;
+    const tasa = Number(linea.taxRate) || 0;
+    const costoConIva = Math.round(costo * (1 + tasa / 100));
+    actuales[idx] = { ...linea, quantity: cantidad, cost: costo, costWithTax: costoConIva, total: costoConIva * cantidad };
+
+    const total = actuales.reduce((s, i) => s + (Number(i.total) || 0), 0);
+    await turso.execute({
+        sql: 'UPDATE supplier_orders SET items = ?, total_amount = ? WHERE id = ? AND company_id = ?',
+        args: [JSON.stringify(actuales), total, id, companyId],
+    });
+    try {
+        await turso.execute({
+            sql: 'UPDATE products SET units_per_box = ? WHERE id = ? AND company_id = ?',
+            args: [porCaja, productId, companyId],
+        });
+    } catch { /* el pedido ya quedó bien; la memoria es un extra */ }
+
+    return { success: true, items: actuales, total, cantidad, costo };
+}
+
 async function supplierOrderAddItems(turso, companyId, session, { id, items }) {
     if (!id || !Array.isArray(items) || !items.length) return { success: false, error: 'Faltan datos' };
 
@@ -459,7 +507,7 @@ async function buscarProducto(turso, companyId, descripcion, codigo = null) {
     const textoCompacto = compacto(descripcion);
     if (codigoLimpio || textoCompacto) {
         const a = await turso.execute({
-            sql: `SELECT p.id, p.name, p.sku, p.cost, p.tax_rate,
+            sql: `SELECT p.id, p.name, p.sku, p.cost, p.tax_rate, p.units_per_box,
                          a.alias_code IS NOT NULL AND a.alias_code = ? AS por_codigo
                   FROM product_supplier_aliases a
                   JOIN products p ON p.id = a.product_id AND p.company_id = a.company_id
@@ -487,7 +535,7 @@ async function buscarProducto(turso, companyId, descripcion, codigo = null) {
         // Se traen más filas que las 4 que se muestran: el nombre exacto puede
         // no quedar primero por puntaje —le pasó a "Detodito II 64g", que
         // empataba con "Detodito I 64g"— y hay que poder encontrarlo abajo.
-        sql: `SELECT id, name, sku, cost, tax_rate, ${puntaje} AS coincidencias
+        sql: `SELECT id, name, sku, cost, tax_rate, units_per_box, ${puntaje} AS coincidencias
               FROM products
               WHERE company_id = ? AND (${alguna})
               ORDER BY coincidencias DESC, LENGTH(name) ASC LIMIT 10`,
@@ -563,6 +611,73 @@ async function buscarProducto(turso, companyId, descripcion, codigo = null) {
     return { ...mejor, alternativas: r.rows.slice(1).map(x => x.name) };
 }
 
+/**
+ * Cuántas unidades vendibles trae un bulto, según cómo está escrito el renglón.
+ *
+ * "Salchicha Sureña Refrigerado Vacio 12x5u" → {12, 5, 60}: puede ser una caja
+ * de 12 paquetes, de 5, o de 60 salchichas sueltas. Cuál de las tres es depende
+ * de qué vende el local, y eso lo dice el costo guardado del producto, no el
+ * papel. Acá solo se juntan los candidatos.
+ */
+function candidatosDeEmpaque(texto) {
+    if (!texto) return [];
+    // 12x5u · 20x3 · 1*6*5 · 10 UND · x56
+    const numeros = String(texto).match(/\d+(?:[.,]\d+)?/g) || [];
+    const factores = numeros.map(n => Math.round(Number(String(n).replace(',', '.')))).filter(n => n >= 2 && n <= 1000);
+    const candidatos = new Set(factores);
+    for (let i = 0; i < factores.length; i++) {
+        for (let j = i + 1; j < factores.length; j++) candidatos.add(factores[i] * factores[j]);
+    }
+    return [...candidatos].filter(n => n >= 2 && n <= 10000);
+}
+
+/**
+ * ¿Este renglón viene por caja?
+ *
+ * La factura de Agrosuper trae "Salchicha Sureña ... 12x5u · UNI 1 · VALOR
+ * 7.710". Entró como 1 unidad de $7.710, pero lo que llegó son 12 paquetes de
+ * $642,5 — que es EXACTAMENTE el costo que ese producto tiene en el catálogo.
+ *
+ * Dos pistas independientes, y se exige que coincidan para tocar la cantidad:
+ *   · el costo guardado del producto: 7.710 ÷ 642,5 = 12 justo;
+ *   · el armado escrito en el renglón o lo que el producto ya tenga en
+ *     `units_per_box`.
+ * Si solo una de las dos aparece, no se cambia nada: se sugiere y decide la
+ * persona, que es la que tiene el papel en la mano.
+ */
+function detectarBulto({ costoLinea, costoCatalogo, unitsPerBox, empaque }) {
+    const candidatos = candidatosDeEmpaque(empaque);
+    const guardado = Number(unitsPerBox) || 0;
+    const base = Number(costoCatalogo) || 0;
+    if (!(costoLinea > 0)) return null;
+
+    let porCosto = null;
+    if (base > 0) {
+        const razon = costoLinea / base;
+        // El costo del renglón es el que ya tiene el producto: viene por unidad y
+        // no hay nada que repartir. Sin esto, un renglón que dice "(56 unid)" en
+        // el nombre se proponía como caja de 56 estando perfecto.
+        if (razon <= 1.1) return null;
+        const entero = Math.round(razon);
+        // 2% de tolerancia: el costo del catálogo puede venir de una compra con
+        // otro redondeo, no tiene que dar exacto al peso.
+        if (entero >= 2 && Math.abs(razon - entero) <= entero * 0.02) porCosto = entero;
+    }
+
+    const porNombre = porCosto && (candidatos.includes(porCosto) || guardado === porCosto)
+        ? porCosto
+        : (guardado >= 2 ? guardado : null);
+
+    if (porCosto && porNombre === porCosto) return { unidades: porCosto, seguro: true };
+    if (porCosto) return { unidades: porCosto, seguro: false, motivo: 'el costo guardado del producto da ese factor, pero el renglón no lo dice' };
+    // Por el nombre solo se sugiere cuando NO hay costo guardado con qué
+    // comparar: si lo hay y no dio factor, el renglón no es una caja.
+    if (base <= 0 && candidatos.length === 1 && candidatos[0] >= 2) {
+        return { unidades: candidatos[0], seguro: false, motivo: 'lo dice el nombre del renglón, pero el producto no tiene costo guardado para confirmarlo' };
+    }
+    return null;
+}
+
 async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, lineas = [], numeroFactura = null }) {
     if (!Array.isArray(lineas) || lineas.length === 0) {
         return { success: false, error: 'La factura no trae renglones' };
@@ -581,9 +696,39 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
 
     const items = [];
     const sinEmparejar = [];
+    const corregidas = [];
+    // Renglones que vinieron por caja: convertidos (porCaja) o a confirmar (sugerencias).
+    const porCaja = [];
+    const sugerencias = [];
     for (const l of lineas) {
-        const cantidad = Number(l.cantidad) || 0;
         const costo = Number(l.costo) || 0;
+        // La cantidad se verifica contra el TOTAL impreso del renglón, que es el
+        // único dato que no depende de interpretar columnas.
+        //
+        // Por qué: hay facturas con dos columnas de cantidad —unidades y kilos— y
+        // el precio puede ser por kilo o por unidad en el mismo documento. En la
+        // factura de Agrosuper del 2-oct-2026, "Pechuga de pollo deshuesada" venía
+        // como UNI 2 · KILOS 20,290 · PRECIO 3.451 · VALOR 70.021: se leyó
+        // cantidad 2 y el renglón entró por $6.902 en vez de $70.021, porque ahí
+        // el precio es por kilo. Dos líneas más abajo, en cambio, el mismo
+        // formato se cobra por unidad.
+        //
+        // Con el total impreso la duda se resuelve sola: la cantidad correcta es
+        // la que, multiplicada por el costo, da ese total.
+        let cantidad = Number(l.cantidad) || 0;
+        const totalImpreso = Number(l.totalLinea) || 0;
+        if (totalImpreso > 0 && costo > 0) {
+            const calculado = cantidad * costo;
+            // 2% de tolerancia: los redondeos del papel (centavos por kilo) no
+            // son un error de lectura.
+            if (Math.abs(calculado - totalImpreso) > totalImpreso * 0.02) {
+                const corregida = Math.round((totalImpreso / costo) * 1000) / 1000;
+                if (corregida > 0) {
+                    corregidas.push({ descripcion: l.descripcion, leida: cantidad, usada: corregida, totalImpreso });
+                    cantidad = corregida;
+                }
+            }
+        }
         if (cantidad <= 0 || costo <= 0) {
             sinEmparejar.push({ descripcion: l.descripcion, motivo: 'sin cantidad o sin costo' });
             continue;
@@ -611,24 +756,66 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
             });
             continue;
         }
+        // ── ¿Vino por caja? ──────────────────────────────────────────────
+        // La factura cuenta bultos y el local vende paquetes. Ver detectarBulto.
+        let cantidadFinal = cantidad;
+        let costoFinal = costo;
+        const bulto = detectarBulto({
+            costoLinea: costo,
+            costoCatalogo: p.cost,
+            unitsPerBox: p.units_per_box,
+            empaque: l.empaque || l.descripcion,
+        });
+        if (bulto?.seguro) {
+            cantidadFinal = Math.round(cantidad * bulto.unidades * 1000) / 1000;
+            costoFinal = Math.round((costo / bulto.unidades) * 100) / 100;
+            porCaja.push({
+                descripcion: l.descripcion, producto: p.name,
+                unidades: bulto.unidades, cantidad: cantidadFinal, costo: costoFinal,
+            });
+            // Se guarda en la ficha para que la próxima factura entre sola.
+            if (Number(p.units_per_box) !== bulto.unidades) {
+                try {
+                    await turso.execute({
+                        sql: 'UPDATE products SET units_per_box = ? WHERE id = ? AND company_id = ?',
+                        args: [bulto.unidades, p.id, companyId],
+                    });
+                } catch { /* que no se caiga la carga de la factura por esto */ }
+            }
+        } else if (bulto) {
+            sugerencias.push({
+                productId: p.id, producto: p.name, descripcion: l.descripcion,
+                unidades: bulto.unidades, motivo: bulto.motivo,
+                cantidadActual: cantidad, costoActual: costo,
+                cantidadPropuesta: Math.round(cantidad * bulto.unidades * 1000) / 1000,
+                costoPropuesto: Math.round((costo / bulto.unidades) * 100) / 100,
+            });
+        }
+
+        const cantidad2 = cantidadFinal;
+        const costo2 = costoFinal;
         const tasa = l.iva != null ? Number(l.iva) : Number(p.tax_rate) || 0;
-        const costoConIva = Math.round(costo * (1 + tasa / 100));
+        const costoConIva = Math.round(costo2 * (1 + tasa / 100));
         items.push({
             id: p.id,
             name: p.name,
             sku: p.sku || '',
-            cost: costo,
+            cost: costo2,
             costWithTax: costoConIva,
-            quantity: cantidad,
+            quantity: cantidad2,
             taxRate: tasa,
             // Con IVA, igual que en "Realizar Pedido" (Orders.jsx). Antes acá se
             // guardaba el neto y el pedido nacido de una foto mostraba un total
             // 19% más bajo que el mismo pedido cargado a mano — y ese número es
             // el que después viaja a Compras.
-            total: costoConIva * cantidad,
+            total: costoConIva * cantidad2,
             // Se guarda cómo venía en la factura: al revisar en Compras, es lo
             // único que permite darse cuenta de un emparejamiento equivocado.
             desdeFactura: l.descripcion,
+            // El código que el proveedor imprime en el renglón. Viaja hasta la
+            // compra, que lo muestra y lo aprende al guardarse: así la próxima
+            // factura de ese proveedor se empareja por código, sin adivinar.
+            codigoProveedor: l.codigo ? String(l.codigo).trim() : null,
             alternativas: p.alternativas,
             // Cómo se resolvió: por lo aprendido, por nombre igual, o por
             // puntaje. Se muestra en el resumen para que se note cuándo la
@@ -673,6 +860,12 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
             producto: i.name, desdeFactura: i.desdeFactura,
             cantidad: i.quantity, costo: i.cost, comoSeEmparejo: i.comoSeEmparejo,
         })),
+        // Renglones donde la cantidad leída no daba el total impreso y se usó la
+        // que sí lo da. Se devuelven para poder mostrarlos: es un renglón que
+        // conviene mirar en el papel.
+        corregidas,
+        porCaja,
+        sugerencias,
         sinEmparejar,
     };
 }
@@ -830,6 +1023,7 @@ export const purchaseActions = {
     supplierOrderCreate,
     supplierOrderSetStatus,
     supplierOrderAddItems,
+    supplierOrderSetItemPack,
     supplierOrderDelete,
     purchaseCreate,
     purchasesFetch,
