@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ArrowLeft, Trash2, Plus, Bell, ScanBarcode, Truck, Sparkles } from 'lucide-react';
+import { X, ArrowLeft, Trash2, Plus, Bell, ScanBarcode, Truck, Sparkles, Package } from 'lucide-react';
+import PresentacionModal from './PresentacionModal';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { usePermissions } from '../hooks/usePermissions';
@@ -7,7 +8,11 @@ import { compressImage, validateImage } from '../lib/imageCompression';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
-    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, hasModule, fetchProductAliases } = useStore();
+    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, hasModule, fetchProductAliases, presentacionesDe, deletePresentation, productPresentations } = useStore();
+    // Unidades de medida (Caja, Display…): "nueva" o la presentación que se edita.
+    // Se guardan al instante desde su propia ventana, no con el botón Guardar.
+    const [presentacionEditando, setPresentacionEditando] = useState(null);
+    void productPresentations; // suscripción: la lista se redibuja al agregar o borrar
     // Sin módulo Pedidos (Medium+) no se pueden crear productos con encargo
     const canPreorders = hasModule('preorders');
     const { can } = usePermissions();
@@ -515,23 +520,77 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                         </div>
                     </div>
 
-                    {/* Units per box - only for Und */}
+                    {/* Unidades de medida: vender el mismo producto por Caja, Display o
+                        Pack. Reemplaza al viejo "Unidades por Caja", que era solo un
+                        número de referencia y no servía para vender. El stock sigue en
+                        unidades. Por ahora solo para productos por unidad. */}
                     {(formData.unit === 'Und' || !formData.unit) && (
-                        <div className="bg-[#1a1a3d]/50 rounded-xl p-4 border border-white/5">
-                            <label className="block text-sm text-gray-400 mb-1">Unidades por Caja <span className="text-gray-500">(Opcional)</span></label>
-                            <input
-                                type="number"
-                                name="units_per_box"
-                                min="0"
-                                step="1"
-                                placeholder="Ej: 24"
-                                value={formData.units_per_box || ''}
-                                onChange={handleChange}
-                                className="glass-input w-full"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">Cantidad de unidades que trae una caja. Se usa como referencia al hacer pedidos.</p>
+                        <div className="rounded-xl p-4 border border-[var(--glass-border)] bg-[var(--glass-bg)] space-y-3">
+                            <div>
+                                <p className="text-sm font-bold text-[var(--color-text)] flex items-center gap-2">
+                                    <Package size={16} className="text-[var(--color-primary)]" /> Unidades de medida
+                                </p>
+                                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                                    Se vende por unidad. Agregá una caja, display o pack para venderlo también así:
+                                    en el POS se elige en el carrito o se escanea su código.
+                                </p>
+                            </div>
+
+                            {productToEdit?.id ? (
+                                <>
+                                    {presentacionesDe(productToEdit.id).map(pres => (
+                                        <div key={pres.id} className="flex items-center gap-2 p-2.5 rounded-lg border border-[var(--glass-border)] bg-[var(--color-surface)]">
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-bold text-[var(--color-text)] truncate">
+                                                    {pres.name} <span className="font-normal text-[var(--color-text-muted)]">· {Number(pres.units)} und</span>
+                                                </p>
+                                                <p className="text-xs text-[var(--color-text-muted)] truncate">
+                                                    {formatCurrency(pres.price, currentCurrency)}
+                                                    {pres.barcode ? ` · ${pres.barcode}` : ' · sin código'}
+                                                    {' · '}{Math.floor((Number(formData.stock) || 0) / Number(pres.units))} armadas
+                                                </p>
+                                            </div>
+                                            <button type="button" onClick={() => setPresentacionEditando(pres)}
+                                                className="px-2.5 py-1.5 rounded-lg text-xs font-bold border border-[var(--glass-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]">
+                                                Editar
+                                            </button>
+                                            <button type="button" title="Borrar"
+                                                onClick={async () => {
+                                                    if (!window.confirm(`¿Borrar "${pres.name}" de ${Number(pres.units)} und? El producto se sigue vendiendo por unidad.`)) return;
+                                                    const r = await deletePresentation(pres.id);
+                                                    if (!r?.success) alert(r?.error || 'No se pudo borrar');
+                                                }}
+                                                className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10">
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                    <button type="button" onClick={() => setPresentacionEditando('nueva')}
+                                        className="w-full py-2.5 rounded-lg border border-dashed border-[var(--color-primary)]/50 text-[var(--color-primary)] text-sm font-bold flex items-center justify-center gap-1.5 hover:bg-[var(--color-primary)]/10">
+                                        <Plus size={16} /> Agregar unidad de medida
+                                    </button>
+                                </>
+                            ) : (
+                                <p className="text-xs text-[var(--color-text-muted)] italic">
+                                    Guardá el producto primero; después vas a poder agregarle cajas o displays.
+                                </p>
+                            )}
                         </div>
                     )}
+
+                    <PresentacionModal
+                        isOpen={!!presentacionEditando}
+                        onClose={() => setPresentacionEditando(null)}
+                        product={productToEdit?.id ? {
+                            id: productToEdit.id,
+                            name: formData.name,
+                            cost: formData.cost,
+                            tax_rate: formData.tax_rate,
+                            stock: formData.stock,
+                            price: formData.price,
+                        } : null}
+                        presentation={presentacionEditando === 'nueva' ? null : presentacionEditando}
+                    />
 
                     <div>
                         <label className="block text-sm text-gray-400 mb-1">Imagen (URL o Archivo)</label>

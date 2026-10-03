@@ -207,6 +207,19 @@ export async function productoPorCodigoLocal(companyId, codigo) {
     return conFoto;
 }
 
+/**
+ * Un producto por su id. Lo usa el escaneo de una CAJA: el código de barras de la
+ * caja apunta a una presentación, y de ahí hay que llegar al producto.
+ */
+export async function productoPorIdLocal(companyId, id) {
+    if (!companyId || id === undefined || id === null) return null;
+    const filas = await filasDe(companyId);
+    const p = filas.find((x) => String(x.id) === String(id));
+    if (!p) return null;
+    const [conFoto] = await conFotosGuardadas([paraLaUI(p)]);
+    return conFoto;
+}
+
 /** Cuántos productos hay guardados para esta empresa. */
 export async function cuantosProductosLocales(companyId) {
     if (!companyId) return 0;

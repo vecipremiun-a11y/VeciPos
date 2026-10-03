@@ -4,7 +4,7 @@ import { persist } from 'zustand/middleware';
 import { getNowInCompanyTime, getCompanyDayStart, getCompanyDayEnd, getStartFromDateString, getEndFromDateString, formatInCompanyTime } from '../lib/dateHelpers';
 import { localDb, pendingOpsApi, siiFoliosApi } from '../lib/db/localdb';
 import { syncCatalogIncremental } from '../lib/db/sync';
-import { buscarProductosLocal, productosPorCategoriaLocal, productoPorCodigoLocal } from '../lib/db/catalogoLocal';
+import { buscarProductosLocal, productosPorCategoriaLocal, productoPorCodigoLocal, productoPorIdLocal } from '../lib/db/catalogoLocal';
 import { guardarImagenes, imagenesGuardadas } from '../lib/db/imagenesLocal';
 import { traerFotos } from '../lib/fotosProductos';
 import { mapaDeConteos } from '../lib/arbolCategorias';
@@ -481,6 +481,10 @@ export const useStore = create(persist((set, get) => ({
     // con la principal marcada). Las de origen 'miniveci' las maneja el cliente
     // desde la tienda y acá son de solo lectura. Ver migración 0029.
     clientAddresses: [],
+    // Unidades de medida de los productos (Caja de 30, Display de 24…). Ver
+    // migración 0030. Se guardan con la sesión para que escanear el código de una
+    // caja funcione también sin conexión.
+    productPresentations: [],
     // setPosSelectedClient is defined below in the multi-cart section (L3641+)
 
     addClient: async (client) => {
@@ -601,6 +605,7 @@ export const useStore = create(persist((set, get) => ({
             companyApps: [], // 🧩 Clear apps
             clients: [],
             clientAddresses: [],
+            productPresentations: [],
             purchases: [],
             sales: [],
             // Clear Dashboard/POS specific state
@@ -812,6 +817,7 @@ export const useStore = create(persist((set, get) => ({
             set({
                 productLots, categories, suppliers, users, clients,
                 clientAddresses: boot.clientAddresses || [],
+                productPresentations: boot.productPresentations || [],
                 rolePermissions: boot.rolePermissions,
                 taxRates: boot.taxRates,
                 companyModules: boot.companyModules,
@@ -905,6 +911,35 @@ export const useStore = create(persist((set, get) => ({
     // minuto. Pero no se le espera para siempre: si tarda más de ESPERA_ESCANEO_MS y
     // el producto está guardado, se sigue con el guardado. Escanear no puede quedar
     // trabado esperando una red pesada.
+    /**
+     * ¿El código escaneado es el de una caja? Devuelve la presentación o null.
+     * Se mira en la lista que ya está en memoria (y guardada con la sesión), así
+     * que responde al instante y también sin conexión.
+     */
+    presentacionPorCodigo: (codigo) => {
+        const c = String(codigo || '').trim().toUpperCase();
+        if (!c) return null;
+        return (get().productPresentations || [])
+            .find(p => p.barcode && String(p.barcode).trim().toUpperCase() === c) || null;
+    },
+
+    /**
+     * El producto de una caja escaneada, con su stock al día: se busca por el SKU
+     * del producto por el mismo camino que un escaneo normal (servidor, y si no hay
+     * conexión, lo guardado en el equipo).
+     */
+    getProductForPresentation: async (pres) => {
+        const { activeCompanyId } = get();
+        const local = await productoPorIdLocal(activeCompanyId, pres.product_id).catch(() => null)
+            || get().products.find(p => String(p.id) === String(pres.product_id))
+            || null;
+        if (local?.sku) {
+            const fresco = await get().getProductByBarcode(local.sku).catch(() => null);
+            if (fresco && String(fresco.id) === String(pres.product_id)) return fresco;
+        }
+        return local;
+    },
+
     getProductByBarcode: async (barcode) => {
         const { activeCompanyId } = get();
 
@@ -2663,6 +2698,50 @@ export const useStore = create(persist((set, get) => ({
         }
     },
 
+    // ── Unidades de medida (Caja, Display, Pack) — migración 0030 ─────────
+    presentacionesDe: (productId) =>
+        (get().productPresentations || []).filter(p => String(p.product_id) === String(productId)),
+
+    savePresentation: async (presentation) => {
+        const { activeCompanyId } = get();
+        try {
+            const r = await userApiCall('presentationSave', { companyId: activeCompanyId, presentation });
+            if (!r?.success) return r || { success: false, error: 'No se pudo guardar' };
+            const fila = r.presentation;
+            set(state => {
+                const lista = state.productPresentations || [];
+                const existe = lista.some(p => p.id === fila.id);
+                return {
+                    productPresentations: existe
+                        ? lista.map(p => (p.id === fila.id ? fila : p))
+                        : [...lista, fila],
+                    // La primera caja también le da `units_per_box` al producto
+                    // (lo usa la carga de facturas con IA).
+                    products: state.products.map(p => (String(p.id) === String(fila.product_id) && !(Number(p.units_per_box) >= 2)
+                        ? { ...p, units_per_box: Math.round(Number(fila.units)) }
+                        : p)),
+                };
+            });
+            return { success: true, presentation: fila };
+        } catch (e) {
+            console.error('Save presentation error', e);
+            return { success: false, error: e.message };
+        }
+    },
+
+    deletePresentation: async (id) => {
+        const { activeCompanyId } = get();
+        try {
+            const r = await userApiCall('presentationDelete', { companyId: activeCompanyId, id });
+            if (!r?.success) return r || { success: false, error: 'No se pudo borrar' };
+            set(state => ({ productPresentations: (state.productPresentations || []).filter(p => p.id !== id) }));
+            return { success: true };
+        } catch (e) {
+            console.error('Delete presentation error', e);
+            return { success: false, error: e.message };
+        }
+    },
+
     deleteProduct: async (id) => {
         try {
             const { activeCompanyId, currentUser, validateCompanyAccess } = get();
@@ -3363,7 +3442,8 @@ export const useStore = create(persist((set, get) => ({
         // 1. Calculate totals per group
         const groupTotals = {};
         cartItems.forEach(item => {
-            if (item.scale_group_id) {
+            // Una caja tiene su propio precio fijo: no suma para el mayoreo del grupo.
+            if (item.scale_group_id && !item.presentacion) {
                 groupTotals[item.scale_group_id] = (groupTotals[item.scale_group_id] || 0) + item.quantity;
             }
         });
@@ -3394,6 +3474,15 @@ export const useStore = create(persist((set, get) => ({
                 return item;
             }
 
+            // Vendido por caja (unidades de medida, migración 0030): el precio es el
+            // de la caja repartido en sus unidades, y el mayoreo no se mete. Es
+            // justo lo que se buscaba: el vendedor no tiene que saber hasta cuántas
+            // unidades agregar para que salte el descuento.
+            if (item.presentacion) {
+                const p = item.presentacion;
+                return { ...item, price: Number(p.precio) / Number(p.unidades) };
+            }
+
             let quantityForScale = item.quantity;
 
             if (item.scale_group_id && groupTotals[item.scale_group_id]) {
@@ -3407,6 +3496,69 @@ export const useStore = create(persist((set, get) => ({
                 price: newPrice
             };
         });
+    },
+
+    // ── Vender por caja (unidades de medida, migración 0030) ─────────────
+    //
+    // Un renglón por caja guarda en `quantity` las UNIDADES (2 cajas de 30 = 60)
+    // y en `price` el precio de la caja repartido (7.600 ÷ 30). Así la venta, el
+    // stock, los reportes y la boleta reciben unidades, como siempre —no cambia
+    // una línea de la venta—, y `presentacion` es lo que le dice al carrito y al
+    // ticket que eso fueron cajas.
+
+    /** Pasa un renglón a caja (con `pres`) o de vuelta a unidad (con null). */
+    setCartItemPresentation: (productId, pres) => {
+        const item = get().carts.find(c => c.id === get().activeCartId)?.items.find(i => i.id === productId);
+        if (!item) return false;
+        if (!pres) {
+            get().updateCartItem(productId, { quantity: 1, presentacion: null });
+            return true;
+        }
+        const unidades = Number(pres.units ?? pres.unidades);
+        const antes = item.quantity;
+        get().updateCartItem(productId, {
+            quantity: unidades,
+            presentacion: { id: pres.id, nombre: pres.name ?? pres.nombre, unidades, precio: Number(pres.price ?? pres.precio), cantidad: 1 },
+        });
+        // updateCartItem no cambia nada si no alcanza el stock (y ya avisó).
+        const despues = get().carts.find(c => c.id === get().activeCartId)?.items.find(i => i.id === productId);
+        void antes;
+        return !!despues?.presentacion;
+    },
+
+    /** + y − de un renglón por caja: suman y restan cajas enteras. */
+    setCartItemBoxes: (productId, cantidad) => {
+        const item = get().carts.find(c => c.id === get().activeCartId)?.items.find(i => i.id === productId);
+        if (!item?.presentacion) return;
+        if (cantidad <= 0) { get().removeFromCart(productId); return; }
+        get().updateCartItem(productId, {
+            quantity: cantidad * Number(item.presentacion.unidades),
+            presentacion: { ...item.presentacion, cantidad },
+        });
+    },
+
+    /** Escanear el código de una caja: entra directo como caja. */
+    addPresentationToCart: (product, pres) => {
+        const carrito = get().carts.find(c => c.id === get().activeCartId);
+        const existente = carrito?.items.find(i => String(i.id) === String(product.id));
+        if (existente) {
+            if (existente.presentacion && String(existente.presentacion.id) === String(pres.id)) {
+                get().setCartItemBoxes(existente.id, (Number(existente.presentacion.cantidad) || 0) + 1);
+                return;
+            }
+            // Un producto tiene un solo renglón: o va por unidad o va por caja.
+            alert(`"${product.name}" ya está en el carrito ${existente.presentacion ? `por ${existente.presentacion.nombre.toLowerCase()}` : 'por unidad'}. Cambialo a ${pres.name} en su renglón.`);
+            return;
+        }
+        // Antes de agregar, que alcance para la caja entera (no para 1 unidad).
+        const { inventoryAdjustmentMode } = get();
+        const unidades = Number(pres.units);
+        if (!inventoryAdjustmentMode && (Number(product.stock) || 0) < unidades) {
+            alert(`Stock insuficiente para 1 ${pres.name.toLowerCase()} de "${product.name}": hay ${Number(product.stock) || 0} y la ${pres.name.toLowerCase()} trae ${unidades}.`);
+            return;
+        }
+        get().addToCart(product);
+        get().setCartItemPresentation(product.id, pres);
     },
 
     addToCart: (product) => {
@@ -8329,6 +8481,10 @@ export const useStore = create(persist((set, get) => ({
         // Mismo motivo: sin esto, offline no sabe si la empresa bloquea o solo
         // avisa al pasarse del crédito.
         creditBlockMode: state.creditBlockMode,
+        // Las unidades de medida (Caja, Display…): sin esto, un arranque sin
+        // conexión no reconocería el código de barras de una caja. Es una lista
+        // chica —una fila por presentación—.
+        productPresentations: state.productPresentations,
         // Los permisos del rol se guardan junto con la sesión, y no es un detalle:
         // sin esto, cualquier arranque que no logre hablar con el servidor deja
         // `rolePermissions` en [] y `hasPermission` niega TODO. Al dueño y a los

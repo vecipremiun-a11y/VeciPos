@@ -24,6 +24,7 @@ import { taxActions } from '../_lib/taxActions.js';
 import { bootstrapActions } from '../_lib/bootstrapActions.js';
 import { financeActions } from '../_lib/financeActions.js';
 import { appActions } from '../_lib/appActions.js';
+import { presentationActions } from '../_lib/presentationActions.js';
 
 // Endpoint de datos del app normal (Fase 1 · Paso 4).
 // Exige: sesión firmada + que el usuario sea MIEMBRO de la empresa (companyId).
@@ -139,6 +140,10 @@ export default async function handler(req, res) {
                 return res.status(200).json(await productPriceUpdate(turso, companyId, session, body));
             case 'productUpdate':
                 return res.status(200).json(await productUpdate(turso, companyId, session, body.id, body.product));
+            // Unidades de medida del producto (Caja, Display, Pack) — migración 0030
+            case 'presentationSave':
+            case 'presentationDelete':
+                return res.status(200).json(await presentationActions[action](turso, companyId, session, body));
             case 'productDelete':
                 return res.status(200).json(await productDelete(turso, companyId, session, body.id));
             case 'categoryCreate':

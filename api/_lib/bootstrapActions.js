@@ -76,6 +76,20 @@ async function bootstrap(turso, companyId) {
         console.warn('⚠️  bootstrap: no se pudo leer client_addresses:', error.message);
     }
 
+    // Unidades de medida (Caja, Display, Pack…) — migración 0030. Fuera del batch
+    // por la misma razón que la libreta: si la tabla no existiera todavía, el
+    // arranque no se cae; los productos se venden por unidad como siempre.
+    let productPresentations = [];
+    try {
+        const r = await turso.execute({
+            sql: 'SELECT * FROM product_presentations WHERE company_id = ? AND is_active = 1 ORDER BY product_id, units',
+            args: [companyId],
+        });
+        productPresentations = r.rows;
+    } catch (error) {
+        console.warn('⚠️  bootstrap: no se pudo leer product_presentations:', error.message);
+    }
+
     // Asegurar config de medios de pago (default si no existe) — idempotente.
     let paymentMethodsConfig = payConfigRes.rows[0];
     if (!paymentMethodsConfig) {
@@ -94,6 +108,7 @@ async function bootstrap(turso, companyId) {
         users,
         clients: clientsRes.rows,
         clientAddresses,
+        productPresentations,
         rolePermissions: permissionsRes.rows,
         taxRates: taxesRes.rows,
         companyModules: modulesRes.rows,

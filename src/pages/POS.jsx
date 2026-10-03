@@ -15,6 +15,7 @@ import ClientSearchWidget from '../components/ClientSearchWidget';
 import OptimizedImage from '../components/OptimizedImage';
 import SuspendedSalesModal from '../components/SuspendedSalesModal';
 import DispatchModal from '../components/DispatchModal';
+import SelectorUnidadCarrito from '../components/SelectorUnidadCarrito';
 import InvoiceDataModal from '../components/InvoiceDataModal';
 import PreventaSuccessModal from '../components/PreventaSuccessModal';
 import PreventasListModal from '../components/PreventasListModal';
@@ -86,6 +87,9 @@ const POS = () => {
         removeFromCart,
         clearCart,
         updateCartItem,
+        setCartItemPresentation,
+        setCartItemBoxes,
+        productPresentations,
         addSale,
         currentUser,
         cashRegister,
@@ -122,6 +126,9 @@ const POS = () => {
             removeFromCart: s.removeFromCart,
             clearCart: s.clearCart,
             updateCartItem: s.updateCartItem,
+            setCartItemPresentation: s.setCartItemPresentation,
+            setCartItemBoxes: s.setCartItemBoxes,
+            productPresentations: s.productPresentations,
             addSale: s.addSale,
             currentUser: s.currentUser,
             cashRegister: s.cashRegister,
@@ -173,6 +180,18 @@ const POS = () => {
         const activeCart = carts.find(c => c.id === activeCartId);
         return activeCart?.items || [];
     }, [carts, activeCartId]);
+
+    // Unidades de medida de cada producto del carrito (Caja de 30, Display…).
+    const presentacionesPorProducto = React.useMemo(() => {
+        const mapa = new Map();
+        for (const p of productPresentations || []) {
+            const k = String(p.product_id);
+            if (!mapa.has(k)) mapa.set(k, []);
+            mapa.get(k).push(p);
+        }
+        return mapa;
+    }, [productPresentations]);
+    const presentacionesDelCarrito = (productId) => presentacionesPorProducto.get(String(productId)) || [];
 
     const posSelectedClient = React.useMemo(() => {
         return carts.find(c => c.id === activeCartId)?.client || null;
@@ -301,6 +320,21 @@ const POS = () => {
                 }
             } catch (e) {
                 console.error('Error loading preventa:', e);
+            }
+        }
+
+        // ¿Es el código de una CAJA? (unidades de medida, migración 0030). El código
+        // del producto sigue vendiendo por unidad; el de la caja la vende entera.
+        const presentacion = useStore.getState().presentacionPorCodigo(scannedCode);
+        if (presentacion) {
+            try {
+                const productoDeLaCaja = await useStore.getState().getProductForPresentation(presentacion);
+                if (productoDeLaCaja) {
+                    useStore.getState().addPresentationToCart(productoDeLaCaja, presentacion);
+                    return;
+                }
+            } catch (e) {
+                console.error('Error al escanear una caja:', e);
             }
         }
 
@@ -1266,9 +1300,14 @@ const POS = () => {
                                     <div className="flex justify-between items-start gap-2">
                                         <div className="flex flex-col">
                                             <h4 className="text-[var(--color-text)] font-medium text-sm line-clamp-2">{item.name}</h4>
-                                            {item.scale_group_id && (
+                                            {item.scale_group_id && !item.presentacion && (
                                                 <span className="text-[10px] text-purple-400 font-mono">Grupo: {item.scale_group_id}</span>
                                             )}
+                                            <SelectorUnidadCarrito
+                                                item={item}
+                                                presentaciones={presentacionesDelCarrito(item.id)}
+                                                onElegir={(p) => setCartItemPresentation(item.id, p)}
+                                            />
                                         </div>
                                         <button
                                             className="text-[var(--color-text-muted)] hover:text-red-400 transition-colors p-1"
@@ -1280,6 +1319,19 @@ const POS = () => {
 
                                     {/* Row 2: Prices */}
                                     <div className="flex justify-between items-center text-xs text-[var(--color-text-muted)]">
+                                        {item.presentacion ? (
+                                            // Por caja: el precio es el de la caja, fijo. Sin
+                                            // casilla para editarlo por unidad — tocarla rompería
+                                            // el precio de la caja.
+                                            <div className="flex flex-col">
+                                                <span className="text-sm font-bold text-[var(--color-text)]">
+                                                    {item.presentacion.nombre}: {formatCurrency(item.presentacion.precio, currentCurrency)}
+                                                </span>
+                                                <span className="text-[10px]">
+                                                    {item.presentacion.unidades} und · {formatCurrency(item.presentacion.precio / item.presentacion.unidades, currentCurrency)} c/u
+                                                </span>
+                                            </div>
+                                        ) : (
                                         <div className="flex items-center gap-2">
                                             <span>{item.unit === 'Kg' ? 'Kg:' : 'Und:'}</span>
                                             <div className="flex items-center gap-1">
@@ -1314,6 +1366,7 @@ const POS = () => {
                                                 </span>
                                             )}
                                         </div>
+                                        )}
                                         <div className="flex flex-col items-end">
                                             <span className="text-[var(--color-primary)] font-bold text-base">
                                                 Total: {formatCurrency(finalPrice, currentCurrency)}
@@ -1347,6 +1400,29 @@ const POS = () => {
                                         )}
 
                                         {/* Quantity Controls */}
+                                        {item.presentacion ? (
+                                            // Por caja: + y − suman y restan cajas enteras.
+                                            <div className="flex items-center gap-3 bg-[var(--glass-bg)] rounded-lg p-1.5 border border-[var(--glass-border)]">
+                                                <button
+                                                    className="w-8 h-8 rounded-lg bg-[var(--glass-bg)] flex items-center justify-center text-[var(--color-text)] hover:bg-white/10 transition-colors"
+                                                    onClick={() => item.presentacion.cantidad > 1 && setCartItemBoxes(item.id, item.presentacion.cantidad - 1)}
+                                                >
+                                                    <Minus size={18} />
+                                                </button>
+                                                <div className="text-center leading-tight min-w-[3rem]">
+                                                    <span className="block text-[var(--color-text)] font-bold text-lg">{item.presentacion.cantidad}</span>
+                                                    <span className="block text-[10px] text-[var(--color-text-muted)] lowercase">
+                                                        {item.presentacion.nombre}{item.presentacion.cantidad === 1 ? '' : 's'} · {item.quantity} und
+                                                    </span>
+                                                </div>
+                                                <button
+                                                    className="w-8 h-8 rounded-lg bg-[var(--color-primary)]/20 flex items-center justify-center text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-black transition-colors"
+                                                    onClick={() => setCartItemBoxes(item.id, item.presentacion.cantidad + 1)}
+                                                >
+                                                    <Plus size={18} />
+                                                </button>
+                                            </div>
+                                        ) : (
                                         <div className="flex items-center gap-4 bg-[var(--glass-bg)] rounded-lg p-1.5 border border-[var(--glass-border)]">
                                             <button
                                                 className="w-8 h-8 rounded-lg bg-[var(--glass-bg)] flex items-center justify-center text-[var(--color-text)] hover:bg-white/10 transition-colors"
@@ -1386,6 +1462,7 @@ const POS = () => {
                                                 <Plus size={18} />
                                             </button>
                                         </div>
+                                        )}
                                     </div>
                                 </div>
                             );
@@ -1615,9 +1692,16 @@ const POS = () => {
                                         return (
                                             <div key={item.id} className="bg-[#1a1b26] rounded-xl p-3 border border-white/5 space-y-2">
                                                 <div className="flex justify-between items-start">
-                                                    <span className="text-white text-sm font-medium line-clamp-2 flex-1 pr-2">
-                                                        {item.name}
-                                                    </span>
+                                                    <div className="flex-1 pr-2 min-w-0">
+                                                        <span className="text-white text-sm font-medium line-clamp-2">
+                                                            {item.name}
+                                                        </span>
+                                                        <SelectorUnidadCarrito
+                                                            item={item}
+                                                            presentaciones={presentacionesDelCarrito(item.id)}
+                                                            onElegir={(p) => setCartItemPresentation(item.id, p)}
+                                                        />
+                                                    </div>
                                                     <button
                                                         onClick={() => removeFromCart(item.id)}
                                                         className="text-gray-500 hover:text-red-400 p-1"
@@ -1628,6 +1712,16 @@ const POS = () => {
 
                                                 {/* Precio unitario editable (+ báscula si es por Kg) */}
                                                 <div className="flex justify-between items-center text-xs text-gray-400">
+                                                    {item.presentacion ? (
+                                                        <div className="flex flex-col">
+                                                            <span className="text-sm font-bold text-white">
+                                                                {item.presentacion.nombre}: {formatCurrency(item.presentacion.precio, currentCurrency)}
+                                                            </span>
+                                                            <span className="text-[10px]">
+                                                                {item.presentacion.unidades} und · {formatCurrency(item.presentacion.precio / item.presentacion.unidades, currentCurrency)} c/u
+                                                            </span>
+                                                        </div>
+                                                    ) : (
                                                     <div className="flex items-center gap-1.5">
                                                         <span>{isKg ? 'Kg:' : 'Und:'}</span>
                                                         <span className="text-sm">{getCurrencySymbol(currentCurrency)}</span>
@@ -1648,6 +1742,7 @@ const POS = () => {
                                                             />
                                                         )}
                                                     </div>
+                                                    )}
                                                     <span className="text-green-400 font-bold text-lg">
                                                         {formatCurrency(finalPrice, currentCurrency)}
                                                     </span>
@@ -1677,6 +1772,29 @@ const POS = () => {
                                                         </div>
                                                     ) : <span />}
 
+                                                    {item.presentacion ? (
+                                                        // Por caja: + y − suman y restan cajas enteras.
+                                                        <div className="flex items-center gap-2 bg-black/30 rounded-lg p-1">
+                                                            <button
+                                                                className="w-9 h-9 flex items-center justify-center bg-gray-700 rounded-lg text-white"
+                                                                onClick={() => item.presentacion.cantidad > 1 && setCartItemBoxes(item.id, item.presentacion.cantidad - 1)}
+                                                            >
+                                                                <Minus size={16} />
+                                                            </button>
+                                                            <div className="text-center leading-tight min-w-[3rem]">
+                                                                <span className="block font-bold text-white">{item.presentacion.cantidad}</span>
+                                                                <span className="block text-[10px] text-gray-400 lowercase">
+                                                                    {item.presentacion.nombre}{item.presentacion.cantidad === 1 ? '' : 's'} · {item.quantity} und
+                                                                </span>
+                                                            </div>
+                                                            <button
+                                                                className="w-9 h-9 flex items-center justify-center bg-emerald-500 rounded-lg text-black"
+                                                                onClick={() => setCartItemBoxes(item.id, item.presentacion.cantidad + 1)}
+                                                            >
+                                                                <Plus size={16} />
+                                                            </button>
+                                                        </div>
+                                                    ) : (
                                                     <div className="flex items-center gap-2 bg-black/30 rounded-lg p-1">
                                                         <button
                                                             className="w-9 h-9 flex items-center justify-center bg-gray-700 rounded-lg text-white"
@@ -1706,6 +1824,7 @@ const POS = () => {
                                                             <Plus size={16} />
                                                         </button>
                                                     </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         );

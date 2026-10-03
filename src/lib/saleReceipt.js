@@ -13,6 +13,23 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { isThermalAvailable, getSavedPrinter, printThermalReceipt, buildTimbreRaster } from './thermalPrint';
 
 /**
+ * Cómo se lee la cantidad de un renglón en el ticket.
+ *
+ * Un renglón vendido por caja (unidades de medida, migración 0030) viaja en
+ * unidades —30 × $253,33— para que la venta, el stock y la boleta del SII no
+ * cambien. Pero en el ticket "30 × $253" confunde: a ojo da $7.590 y no los
+ * $7.600 que se cobraron. Acá se muestra como lo vio el cliente:
+ * "1 Caja (30 und) × $7.600". El total del renglón es el mismo en los dos casos.
+ */
+export function cantidadTicket(item) {
+    const p = item?.presentacion;
+    if (p && Number(p.unidades) > 0 && Number(p.cantidad) > 0) {
+        return { cantidad: `${p.cantidad} ${p.nombre} (${p.unidades} und)`, precio: Number(p.precio) };
+    }
+    return { cantidad: item?.quantity, precio: item?.price };
+}
+
+/**
  * Normaliza una venta al modelo de boleta que consumen el generador térmico y el
  * HTML web. `receiptConfig` es la config editable de la boleta (nombre, RUT, pie…).
  */
@@ -44,10 +61,13 @@ export function buildSaleReceiptModel(sale, { sellerName, receiptConfig = {}, cu
         datetime: new Date(sale.date || Date.now()).toLocaleString('es-CL'),
         seller: sellerName || 'Vendedor',
         clientName: sale.clientName || sale.client_name || null,
-        items: (sale.items || []).map(it => ({
-            name: it.name, qty: it.quantity, unit: it.unit || 'Und',
-            unitPrice: it.price, lineTotal: it.price * it.quantity,
-        })),
+        items: (sale.items || []).map(it => {
+            const c = cantidadTicket(it);
+            return {
+                name: it.name, qty: c.cantidad, unit: it.unit || 'Und',
+                unitPrice: c.precio, lineTotal: it.price * it.quantity,
+            };
+        }),
         total: sale.total,
         paymentMethod: paymentLabel,
         paidLabel: isCash ? `Pagó con: ${money(amountPaid)}` : null,

@@ -9,7 +9,7 @@ import { reportCall, dataApiCall } from '../lib/dataApi';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
 import { isThermalAvailable, getSavedPrinter, printThermalReceipt, buildTimbreRaster } from '../lib/thermalPrint';
-import { buildSaleReceiptModel } from '../lib/saleReceipt';
+import { buildSaleReceiptModel, cantidadTicket } from '../lib/saleReceipt';
 
 // Extraer TED XML del DTE firmado
 function extractTED(xmlFirmado) {
@@ -228,7 +228,8 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
             doc.text(splitName, 2, yPos);
             yPos += splitName.length * 3;
 
-            doc.text(`${item.quantity} x ${formatCurrency(item.price, currentCurrency)}`, 2, yPos);
+            const ct = cantidadTicket(item);
+            doc.text(`${ct.cantidad} x ${formatCurrency(ct.precio, currentCurrency)}`, 2, yPos);
             doc.text(`${formatCurrency(item.price * item.quantity, currentCurrency)}`, rightX, yPos, { align: 'right' });
             yPos += 5;
         });
@@ -339,7 +340,8 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
             const total = item.price * item.quantity;
             receiptText += `${name}\n`;
 
-            const qtyPrice = `${item.quantity} x ${formatMoney(item.price)}`;
+            const ct = cantidadTicket(item);
+            const qtyPrice = `${ct.cantidad} x ${formatMoney(ct.precio)}`;
             const totalStr = formatMoney(total);
 
             const spaceNeeded = 27 - qtyPrice.length - totalStr.length;
@@ -492,7 +494,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                         <div class="item" style="font-size: ${itemFontSize};">
                             <div class="item-name">${item.name}</div>
                             <div class="item-details">
-                                <span>${item.quantity} x ${formatCurrency(item.price, currentCurrency)}</span>
+                                <span>${cantidadTicket(item).cantidad} x ${formatCurrency(cantidadTicket(item).precio, currentCurrency)}</span>
                                 <span>${formatCurrency(item.price * item.quantity, currentCurrency)}</span>
                             </div>
                         </div>
@@ -736,7 +738,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                                 {item.name}
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <span>{item.quantity} x {formatCurrency(item.price, currentCurrency)}</span>
+                                <span>{cantidadTicket(item).cantidad} x {formatCurrency(cantidadTicket(item).precio, currentCurrency)}</span>
                                 <span>{formatCurrency(item.price * item.quantity, currentCurrency)}</span>
                             </div>
                         </div>
