@@ -354,6 +354,22 @@ const REPORTS = {
             args: (cid) => [cid, ...list],
         }];
     },
+    // Lo que la pantalla de Compras necesita para revisar los precios de cada
+    // renglón: la escala de mayoreo actual (que queda descuadrada cuando cambia
+    // el costo) y el código con que el proveedor nombra al producto.
+    productosParaCompra: ({ ids = [] }) => {
+        const list = (Array.isArray(ids) ? ids : []).map(Number).filter(Number.isFinite);
+        const ph = list.length ? list.map(() => '?').join(',') : '0';
+        return [{
+            sql: `SELECT p.id, p.name, p.sku, p.price, p.cost, p.tax_rate, p.unit, p.units_per_box, p.price_ranges,
+                         (SELECT GROUP_CONCAT(a.alias_code, ' · ')
+                            FROM product_supplier_aliases a
+                           WHERE a.company_id = p.company_id AND a.product_id = p.id
+                             AND COALESCE(a.alias_code, '') <> '') AS codigos_proveedor
+                  FROM products p WHERE p.company_id = ? AND p.id IN (${ph})`,
+            args: (cid) => [cid, ...list],
+        }];
+    },
     productImages: ({ ids = [] }) => {
         const list = (Array.isArray(ids) ? ids : []).map(Number).filter(Number.isFinite);
         const ph = list.length ? list.map(() => '?').join(',') : '0';

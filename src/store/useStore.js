@@ -3115,13 +3115,27 @@ export const useStore = create(persist((set, get) => ({
      * la compra ya quedó guardada igual — no se pierde nada, solo hay que volver
      * a guardar el producto cuando la tienda vuelva.
      */
-    sincronizarCompraConTienda: async (productIds) => {
+    sincronizarCompraConTienda: async (productIds, renglones = []) => {
         const { activeCompanyId, products } = get();
         if (!activeCompanyId || !productIds?.length) return;
 
-        const aEnviar = products.filter(
-            (p) => productIds.includes(p.id) && p.sku && normalizeSku(p.sku)
-        );
+        // El catálogo en memoria no siempre tiene todos los productos (se carga
+        // por partes). Un producto comprado que no estaba en memoria no se
+        // avisaba a la tienda, y ahora la compra puede cambiarle la escala. Se
+        // trae fresco del servidor —la compra ya está guardada, así que viene con
+        // el costo, el precio y la escala nuevos— y completo: mandar un producto a
+        // medias le apagaría la oferta o el modo de venta en la tienda.
+        const enMemoria = new Map(products.map(p => [String(p.id), p]));
+        const aEnviar = [];
+        for (const id of productIds) {
+            const p = enMemoria.get(String(id));
+            if (p) { aEnviar.push(p); continue; }
+            const r = renglones.find(x => String(x.id) === String(id));
+            if (!r?.sku) continue;
+            const fresco = await get().getProductByBarcode(r.sku).catch(() => null);
+            if (fresco && String(fresco.id) === String(id)) aEnviar.push(fresco);
+        }
+        aEnviar.splice(0, aEnviar.length, ...aEnviar.filter(p => p.sku && normalizeSku(p.sku)));
         if (!aEnviar.length) return;
 
         let enviados = 0;
@@ -3241,11 +3255,28 @@ export const useStore = create(persist((set, get) => ({
                             price: parseFloat(purchasedItem.price),
                             sku: purchasedItem.sku,
                             tax_rate: parseFloat(purchasedItem.tax || 0),
-                            supplier: purchase.supplierName // Update supplier
+                            supplier: purchase.supplierName, // Update supplier
+                            // Escala revisada en la misma compra (ya aplicada en el servidor).
+                            ...(Array.isArray(purchasedItem.cambiosPrecios?.priceRanges)
+                                ? { price_ranges: purchasedItem.cambiosPrecios.priceRanges }
+                                : {}),
                         };
                     }
                     return p;
-                })
+                }),
+                // Precios de cajas/bandejas revisados en la compra.
+                productPresentations: [
+                    ...(state.productPresentations || []).map(pp => {
+                        for (const it of itemsAplicados) {
+                            const cambio = (it.cambiosPrecios?.presentaciones || []).find(c => String(c.id) === String(pp.id));
+                            const noAplicado = (r.preciosNoAplicados || []).some(n => n.presentacion === pp.name && n.producto === it.name);
+                            if (cambio && !noAplicado) return { ...pp, price: Math.round(Number(cambio.price)) };
+                        }
+                        return pp;
+                    }),
+                    // Cajas creadas desde la compra: ya escaneables en el POS.
+                    ...(r.presentacionesCreadas || []),
+                ],
             }));
 
             // (El resumen por proveedor ya lo actualizó purchaseCreate server-side)
@@ -3254,7 +3285,7 @@ export const useStore = create(persist((set, get) => ({
             // el POS ya está mostrando (stock sumado, costo y precio nuevos), y no
             // lo que venía en la factura antes de aplicarse.
             const idsComprados = itemsAplicados.map((i) => i.id).filter(Boolean);
-            get().sincronizarCompraConTienda(idsComprados).catch((e) =>
+            get().sincronizarCompraConTienda(idsComprados, itemsAplicados).catch((e) =>
                 console.warn('No se pudo avisar a la tienda de la compra:', e)
             );
 
@@ -3264,7 +3295,13 @@ export const useStore = create(persist((set, get) => ({
                 get().checkInventoryAlerts(productIds);
             }, 100);
 
-            return { success: true, purchaseId, itemsSinAplicar: sinAplicar };
+            // Los avisos de precios y códigos también viajan: la pantalla los muestra.
+            return {
+                success: true, purchaseId, itemsSinAplicar: sinAplicar,
+                preciosNoAplicados: r.preciosNoAplicados || [],
+                codigosAprendidos: r.codigosAprendidos || [],
+                codigosEnConflicto: r.codigosEnConflicto || [],
+            };
         } catch (e) {
             console.error("Add purchase error", e);
             return { success: false, error: e.message };

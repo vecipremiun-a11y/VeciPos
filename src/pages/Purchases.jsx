@@ -1,14 +1,48 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
-import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus, Edit, X, ArrowLeft, Paperclip, ScanBarcode } from 'lucide-react';
+import { Search, Plus, Save, Trash2, ShoppingCart, PackagePlus, Edit, X, ArrowLeft, Paperclip, ScanBarcode, Layers } from 'lucide-react';
 import ProductModal from '../components/ProductModal';
+import EscalaCompraEditor from '../components/EscalaCompraEditor';
 import { usePermissions } from '../hooks/usePermissions';
 import AsyncButton from '../components/AsyncButton';
 import { toast } from '../lib/toast';
 import { reportCall } from '../lib/dataApi';
 
+/**
+ * El botón de "Precios" de un renglón: muestra si el producto tiene escala de
+ * mayoreo o cajas que revisar con el costo nuevo, y si ya se revisaron.
+ */
+function BotonPreciosRenglon({ item, contexto, cajas, onAbrir }) {
+    const tieneEscala = Array.isArray(contexto?.priceRanges) && contexto.priceRanges.length > 0;
+    const tieneCajas = cajas.length > 0;
+    const revisado = !!item.cambiosPrecios;
+    if (!tieneEscala && !tieneCajas && !revisado) return null;
+    const costoCambio = contexto?.costoAnterior > 0 && Math.abs(Number(item.cost) - Number(contexto.costoAnterior)) >= 0.5;
+    const etiqueta = [tieneEscala && 'escala', tieneCajas && `${cajas.length} ${cajas.length === 1 ? 'caja' : 'cajas'}`].filter(Boolean).join(' · ');
+    return (
+        <button
+            type="button"
+            onClick={onAbrir}
+            title={revisado ? 'Precios revisados: se aplican al guardar la compra' : 'Revisar escala y cajas con el costo nuevo'}
+            className={`px-2 py-1 rounded-md text-[11px] font-bold border flex items-center gap-1 whitespace-nowrap ${revisado
+                ? 'bg-green-500/15 border-green-500/40 text-green-400'
+                : costoCambio
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                    : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text-muted)]'}`}
+        >
+            <Layers size={13} /> {revisado ? 'Revisado' : etiqueta}
+        </button>
+    );
+}
+
 const Purchases = () => {
-    const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown, fetchProductImage, activeCompanyId, setSupplierOrderStatus } = useStore();
+    const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown, fetchProductImage, activeCompanyId, setSupplierOrderStatus, productPresentations } = useStore();
+
+    // Lo que hace falta para revisar los precios de cada renglón: la escala de
+    // mayoreo actual, el costo de antes de esta compra y los códigos con que el
+    // proveedor nombra al producto. Se trae una vez por producto.
+    const [contextoPrecios, setContextoPrecios] = useState({});
+    const cajasDe = (productId) => (productPresentations || []).filter(p => String(p.product_id) === String(productId));
     const { can } = usePermissions();
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
     const [isMobileDetailsOpen, setIsMobileDetailsOpen] = useState(false);
@@ -42,6 +76,13 @@ const Purchases = () => {
     // Left Column: Product Entry
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedProduct, setSelectedProduct] = useState(null);
+    // Escala y cajas revisadas para el renglón que se está cargando en el panel.
+    // Viajan con el renglón al agregarlo y se aplican al guardar la compra.
+    const [cambiosForm, setCambiosForm] = useState(null);
+    // Cada vez que se elige (o se vuelve a elegir) un producto, el editor de
+    // escala arranca de cero: sin esto, elegir el mismo producto otra vez
+    // conservaba los tramos a medio cargar de antes.
+    const [sesionEditor, setSesionEditor] = useState(0);
     const [entryForm, setEntryForm] = useState({
         cost: '',
         price: '',
@@ -68,6 +109,36 @@ const Purchases = () => {
         document: null
     });
     const [invoiceItems, setInvoiceItems] = useState([]);
+
+    // Contexto de precios de los productos nuevos en la factura (escala, costo
+    // anterior, códigos del proveedor). Una consulta por tanda, no por renglón.
+    useEffect(() => {
+        const faltan = [...new Set([...invoiceItems.map(i => i.id), selectedProduct?.id].filter(id => id && !contextoPrecios[String(id)]))];
+        if (!faltan.length || !activeCompanyId) return;
+        let vivo = true;
+        reportCall(activeCompanyId, 'productosParaCompra', { ids: faltan })
+            .then(rows => {
+                if (!vivo || !Array.isArray(rows)) return;
+                setContextoPrecios(prev => {
+                    const n = { ...prev };
+                    for (const p of rows) {
+                        let escala = [];
+                        try { escala = p.price_ranges ? (typeof p.price_ranges === 'string' ? JSON.parse(p.price_ranges) : p.price_ranges) : []; } catch { escala = []; }
+                        n[String(p.id)] = {
+                            priceRanges: Array.isArray(escala) ? escala : [],
+                            costoAnterior: Number(p.cost) || 0,
+                            codigos: p.codigos_proveedor || '',
+                            unidad: p.unit || 'Und',
+                            unitsPerBox: Number(p.units_per_box) || 0,
+                        };
+                    }
+                    return n;
+                });
+            })
+            .catch(() => { /* sin contexto el renglón sigue funcionando; solo no ofrece revisar precios */ });
+        return () => { vivo = false; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [invoiceItems, selectedProduct, activeCompanyId]);
 
     // Derived
     // Derived
@@ -128,6 +199,7 @@ const Purchases = () => {
                     total: cantidad * costo,
                     expiryDate: null,
                     batchNumber: null,
+                    codigoProveedor: i.codigoProveedor || null,
                 };
             }));
             if (falloPrecios) {
@@ -155,6 +227,8 @@ const Purchases = () => {
 
     const handleSelectProduct = (product) => {
         setSelectedProduct(product);
+        setCambiosForm(null);
+        setSesionEditor(n => n + 1);
         setSearchTerm(product.name);
 
         // La búsqueda ya no trae la foto (pesaba de más). Se pide solo la del
@@ -296,6 +370,12 @@ const Purchases = () => {
     const handleAddToInvoice = (e) => {
         e.preventDefault();
         if (!selectedProduct) return;
+        if (cambiosForm?.invalidas) {
+            alert(typeof cambiosForm.invalidas === 'string'
+                ? cambiosForm.invalidas
+                : 'Hay una caja con un precio que no se divide exacto por sus unidades: elegí uno de los sugeridos.');
+            return;
+        }
 
         const newItem = {
             id: selectedProduct.id,
@@ -308,13 +388,16 @@ const Purchases = () => {
             total: parseFloat(entryForm.quantity) * parseFloat(entryForm.cost),
             image: selectedProduct.image,
             expiryDate: entryForm.expiryDate || null,
-            batchNumber: entryForm.batchNumber || null
+            batchNumber: entryForm.batchNumber || null,
+            codigoProveedor: (entryForm.codigoProveedor || '').trim() || null,
+            ...(cambiosForm ? { cambiosPrecios: { priceRanges: cambiosForm.priceRanges, presentaciones: cambiosForm.presentaciones || [], nuevas: cambiosForm.nuevas || [] } } : {}),
         };
 
         setInvoiceItems([...invoiceItems, newItem]);
 
         // Reset Left
         setSelectedProduct(null);
+        setCambiosForm(null);
         setSearchTerm('');
         setEntryForm({ cost: '', price: '', quantity: '1', total: '', margin: '', sku: '', tax: 0, expiryDate: '', batchNumber: '' });
         setTrioFijados(['cost', 'quantity']);
@@ -334,8 +417,10 @@ const Purchases = () => {
             image: itemToEdit.image,
             cost: itemToEdit.cost,
             price: itemToEdit.price,
-            tax_rate: itemToEdit.tax
+            tax_rate: itemToEdit.tax,
         };
+        setCambiosForm(itemToEdit.cambiosPrecios || null);
+        setSesionEditor(n => n + 1);
 
         let margin = '';
         if (itemToEdit.price && itemToEdit.cost > 0) {
@@ -359,7 +444,8 @@ const Purchases = () => {
             margin: margin,
             tax: itemToEdit.tax,
             expiryDate: itemToEdit.expiryDate || '',
-            batchNumber: itemToEdit.batchNumber || ''
+            batchNumber: itemToEdit.batchNumber || '',
+            codigoProveedor: itemToEdit.codigoProveedor || '',
         });
         setTrioFijados(['cost', 'quantity']);
 
@@ -421,6 +507,18 @@ const Purchases = () => {
             // con un mensajito que se va solo: es mercadería que se pagó y que
             // el sistema no va a contar.
             if (res.itemsSinAplicar?.length) setAvisoSinAplicar(res.itemsSinAplicar);
+            // Cajas que no se aplicaron o no se pudieron crear (precio que no
+            // divide exacto, código de barras repetido…). La compra igual quedó
+            // guardada; se avisa para corregirlas en la ficha.
+            if (res.preciosNoAplicados?.length) {
+                toast(`Compra guardada, pero ${res.preciosNoAplicados.length} caja(s) no se aplicaron: ${res.preciosNoAplicados.map(n => `${n.producto} (${n.presentacion}: ${n.motivo})`).join(' · ')}. Revisalas en la ficha del producto.`, 'error');
+            }
+            // Códigos del proveedor que ya eran de OTRO producto: no se movieron.
+            if (res.codigosEnConflicto?.length) {
+                toast(`Estos códigos ya estaban en otro producto y no se movieron: ${res.codigosEnConflicto.map(c => `${c.codigo} (es de ${c.yaEsDe})`).join(', ')}. Si están mal, corregilos en la ficha del producto.`, 'error');
+            }
+            // El costo de estos productos ya cambió: el contexto guardado quedó viejo.
+            setContextoPrecios({});
             // Si la compra vino de un pedido, ese pedido ya está recibido: se
             // marca para que no siga figurando como pendiente ni se pueda pasar
             // a compra por segunda vez.
@@ -444,6 +542,7 @@ const Purchases = () => {
 
     const handleCancel = () => {
         setSelectedProduct(null);
+        setCambiosForm(null);
         setSearchTerm('');
         setEntryForm({ cost: '', price: '', quantity: '1', total: '', margin: '', sku: '', tax: 0, expiryDate: '', batchNumber: '' });
         setTrioFijados(['cost', 'quantity']);
@@ -461,6 +560,39 @@ const Purchases = () => {
     const subtotal = invoiceItems.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
     const taxAmount = invoiceItems.reduce((sum, item) => sum + ((parseFloat(item.total) || 0) * ((parseFloat(item.tax) || 0) / 100)), 0);
     const totalAmount = subtotal + taxAmount;
+
+    // Código del proveedor + escala y cajas del producto que se está cargando.
+    // Va en el mismo panel que costo y precio de venta (celular y escritorio).
+    const contextoSeleccionado = selectedProduct ? contextoPrecios[String(selectedProduct.id)] : null;
+    const campoCodigoProveedor = selectedProduct ? (
+            <div>
+                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Código proveedor</label>
+                {/* Si ya tiene uno guardado, se ve de fondo. Al guardar la compra se aprende. */}
+                <input
+                    type="text"
+                    name="codigoProveedor"
+                    value={entryForm.codigoProveedor || ''}
+                    onChange={handleEntryChange}
+                    placeholder={contextoSeleccionado?.codigos || ''}
+                    className="glass-input w-full text-sm font-mono"
+                />
+            </div>
+    ) : null;
+    const seccionPreciosCompra = selectedProduct ? (
+            <EscalaCompraEditor
+                key={`${selectedProduct.id}-${sesionEditor}-${contextoSeleccionado ? 'ctx' : 'sin'}`}
+                costo={parseFloat(entryForm.cost) || 0}
+                iva={parseFloat(entryForm.tax) || 0}
+                contexto={contextoSeleccionado}
+                presentaciones={cajasDe(selectedProduct.id)}
+                valor={cambiosForm}
+                onChange={setCambiosForm}
+                currentCurrency={useStore.getState().currentCurrency}
+                // Cajas y bandejas solo para lo que se vende por unidad (igual que la ficha).
+                permiteCajas={(selectedProduct.unit || contextoSeleccionado?.unidad || 'Und') === 'Und'}
+                precioUnidad={parseFloat(entryForm.price) || 0}
+            />
+    ) : null;
 
     return (
         <>
@@ -534,20 +666,21 @@ const Purchases = () => {
                                 </div>
                             </div>
 
-                            {/* SKU and Cost */}
+                            {/* Primero el código del proveedor (es lo que se lee en la factura), al lado el SKU. */}
                             <div className="grid grid-cols-2 gap-3">
+                                {campoCodigoProveedor}
                                 <div>
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">SKU / Código</label>
                                     <input type="text" name="sku" value={entryForm.sku} onChange={handleEntryChange} className="glass-input w-full text-sm" />
                                 </div>
+                            </div>
+
+                            {/* Costo e IVA */}
+                            <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">Costo ($)<ChipTrio campo="cost" /></label>
                                     <input type="number" name="cost" value={entryForm.cost} onChange={handleEntryChange} className="glass-input w-full text-sm" required min="0" step="0.01" />
                                 </div>
-                            </div>
-
-                            {/* IVA and Margin */}
-                            <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">IVA</label>
                                     <select name="tax" value={entryForm.tax} onChange={handleEntryChange} className="glass-input w-full text-sm">
@@ -555,17 +688,21 @@ const Purchases = () => {
                                         <option value="19">IVA (19%)</option>
                                     </select>
                                 </div>
+                            </div>
+
+                            {/* Utilidad y precio de venta */}
+                            <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">Utilidad (%)</label>
                                     <input type="number" name="margin" value={entryForm.margin} onChange={handleEntryChange} className="glass-input w-full text-sm" />
                                 </div>
+                                <div>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Precio Venta ($)</label>
+                                    <input type="number" name="price" value={entryForm.price} onChange={handleEntryChange} className="glass-input w-full text-sm" />
+                                </div>
                             </div>
 
-                            {/* Precio Venta */}
-                            <div>
-                                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Precio Venta ($)</label>
-                                <input type="number" name="price" value={entryForm.price} onChange={handleEntryChange} className="glass-input w-full text-sm" />
-                            </div>
+                            {seccionPreciosCompra}
 
                             {/* Quantity */}
                             <div>
@@ -723,7 +860,20 @@ const Purchases = () => {
                                         <div key={index} className="px-3 py-3 flex gap-3">
                                             <div className="min-w-0 flex-1">
                                                 <p className="text-sm font-medium text-[var(--color-text)] leading-snug break-words">{item.name}</p>
-                                                <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5 break-all">{item.sku}</p>
+                                                <p className="text-[11px] text-[var(--color-text-muted)] mt-0.5 break-all">
+                                                    {(item.codigoProveedor || contextoPrecios[String(item.id)]?.codigos)
+                                                        ? <><span className="text-[var(--color-text)] font-mono">{item.codigoProveedor || contextoPrecios[String(item.id)].codigos}</span> · </>
+                                                        : null}
+                                                    {item.sku}
+                                                </p>
+                                                <div className="mt-1">
+                                                    <BotonPreciosRenglon
+                                                        item={item}
+                                                        contexto={contextoPrecios[String(item.id)]}
+                                                        cajas={cajasDe(item.id)}
+                                                        onAbrir={() => { handleEditItem(index); setIsMobileDetailsOpen(false); }}
+                                                    />
+                                                </div>
                                                 <p className="text-xs text-[var(--color-text-muted)] mt-1">
                                                     {item.quantity} × ${item.cost.toLocaleString()} · IVA {item.tax}%
                                                 </p>
@@ -843,16 +993,20 @@ const Purchases = () => {
                                     </div>
                                 </div>
 
-                                <div>
-                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">SKU / Código</label>
-                                    <input
-                                        type="text"
-                                        name="sku"
-                                        value={entryForm.sku}
-                                        onChange={handleEntryChange}
-                                        className="glass-input w-full"
-                                        required
-                                    />
+                                {/* Primero el código del proveedor (es lo que se lee en la factura), al lado el SKU. */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    {campoCodigoProveedor}
+                                    <div>
+                                        <label className="block text-xs text-[var(--color-text-muted)] mb-1">SKU / Código</label>
+                                        <input
+                                            type="text"
+                                            name="sku"
+                                            value={entryForm.sku}
+                                            onChange={handleEntryChange}
+                                            className="glass-input w-full"
+                                            required
+                                        />
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">
@@ -909,6 +1063,8 @@ const Purchases = () => {
                                         />
                                     </div>
                                 </div>
+
+                                {seccionPreciosCompra}
 
                                 <div>
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">Cantidad a ingresar<ChipTrio campo="quantity" /></label>
@@ -1153,7 +1309,10 @@ const Purchases = () => {
                             <table className="w-full text-left">
                                 <thead className="bg-[var(--glass-bg)] text-[var(--color-text-muted)] text-xs uppercase font-semibold sticky top-0 backdrop-blur-md">
                                     <tr>
-                                        <th className="px-4 py-3">Código</th>
+                                        {/* Primero el código del proveedor: es el que se lee en la
+                                            factura de papel, así se encuentra el renglón de un vistazo. */}
+                                        <th className="px-4 py-3">Cód. prov.</th>
+                                        <th className="px-4 py-3">SKU</th>
                                         <th className="px-4 py-3">Producto</th>
                                         <th className="px-4 py-3 text-right">Cant.</th>
                                         <th className="px-4 py-3 text-right">Costo U.</th>
@@ -1165,15 +1324,28 @@ const Purchases = () => {
                                 <tbody className="divide-y divide-[var(--glass-border)]">
                                     {invoiceItems.length === 0 ? (
                                         <tr>
-                                            <td colSpan="6" className="text-center py-10 text-[var(--color-text-muted)]">
+                                            <td colSpan="8" className="text-center py-10 text-[var(--color-text-muted)]">
                                                 No hay productos en la factura.
                                             </td>
                                         </tr>
                                     ) : (
                                         invoiceItems.map((item, index) => (
                                             <tr key={index} className="hover:bg-[var(--glass-bg)] transition-colors">
+                                                <td className="px-4 py-3 text-[var(--color-text)] text-sm font-mono">
+                                                    {item.codigoProveedor || contextoPrecios[String(item.id)]?.codigos || <span className="text-[var(--color-text-muted)]">—</span>}
+                                                </td>
                                                 <td className="px-4 py-3 text-[var(--color-text-muted)] text-sm">{item.sku}</td>
-                                                <td className="px-4 py-3 text-[var(--color-text)] font-medium">{item.name}</td>
+                                                <td className="px-4 py-3 text-[var(--color-text)] font-medium">
+                                                    {item.name}
+                                                    <div className="mt-1">
+                                                        <BotonPreciosRenglon
+                                                            item={item}
+                                                            contexto={contextoPrecios[String(item.id)]}
+                                                            cajas={cajasDe(item.id)}
+                                                            onAbrir={() => handleEditItem(index)}
+                                                        />
+                                                    </div>
+                                                </td>
                                                 <td className="px-4 py-3 text-right text-[var(--color-text-muted)]">{item.quantity}</td>
                                                 <td className="px-4 py-3 text-right text-[var(--color-text-muted)]">${item.cost.toLocaleString()}</td>
                                                 <td className="px-4 py-3 text-center text-[var(--color-text-muted)]">{item.tax}%</td>

@@ -3,6 +3,7 @@
 // + espejo purchase_items (mismo módulo compartido) + resumen por proveedor.
 
 import { mirrorPurchaseItems } from '../../src/lib/itemNormalization.js';
+import { presentationActions } from './presentationActions.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -281,6 +282,31 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
     const rawId = purchaseResult.rows[0]?.id || purchaseResult.lastInsertRowid;
     const purchaseId = typeof rawId === 'bigint' ? Number(rawId) : rawId;
 
+    // ── Precios revisados en la compra (escala de mayoreo y cajas) ──────
+    //
+    // Al cambiar el costo, la escala de mayoreo y el precio de las cajas quedan
+    // descuadrados. Antes había que ir producto por producto a corregirlos
+    // después de guardar. Ahora se revisan en la misma pantalla de Compras y
+    // viajan con la compra: se aplican ACÁ, en el mismo batch, así que no cambia
+    // nada hasta que la compra se guarda — y si la compra falla, tampoco.
+    //
+    // El precio de una caja tiene que dividirse exacto por sus unidades (ver
+    // presentationActions): lo que no cumple no se aplica y vuelve avisado.
+    const presentacionesPorId = new Map();
+    const idsPresentaciones = seAplican.flatMap(i => (i?.cambiosPrecios?.presentaciones || []).map(p => Number(p.id)))
+        .filter(Number.isFinite);
+    if (idsPresentaciones.length) {
+        try {
+            const pr = await turso.execute({
+                sql: `SELECT id, product_id, name, units FROM product_presentations
+                      WHERE company_id = ? AND id IN (${idsPresentaciones.map(() => '?').join(',')})`,
+                args: [companyId, ...idsPresentaciones],
+            });
+            for (const f of pr.rows) presentacionesPorId.set(Number(f.id), f);
+        } catch { /* sin la tabla (migración 0030) no hay cajas que actualizar */ }
+    }
+    const preciosNoAplicados = [];
+
     // 2. Batch: stock/costo/precio + lote por item + audit.
     //    Solo los renglones que sí tienen su producto: los otros ya se
     //    apartaron arriba y viajan de vuelta al navegador para que avise.
@@ -290,6 +316,37 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
             sql: 'UPDATE products SET stock = ROUND(stock + ?, 3), cost = ?, price = ?, sku = ?, tax_rate = ?, supplier = ? WHERE id = ? AND company_id = ?',
             args: [item.quantity, item.cost, item.price, item.sku, item.tax || 0, purchase.supplierName, item.id, companyId],
         });
+        const cambios = item.cambiosPrecios;
+        if (cambios && Array.isArray(cambios.priceRanges)) {
+            const escala = cambios.priceRanges
+                .map(r => ({
+                    min: Number(r.min) || 0,
+                    // "Hasta" vacío o 0 = sin tope. Un 0 la tienda lo rechaza (exige >= 1) y
+                    // rechazaría el producto entero, stock incluido.
+                    max: Number(r.max) > 0 ? Number(r.max) : '',
+                    margin: Number(r.margin) || 0,
+                    price: Math.round(Number(r.price) || 0),
+                }))
+                .filter(r => r.min > 0 && r.price > 0);
+            queries.push({
+                sql: 'UPDATE products SET price_ranges = ?, updated_at = ? WHERE id = ? AND company_id = ?',
+                args: [JSON.stringify(escala), nowIso(), item.id, companyId],
+            });
+        }
+        for (const cp of (cambios?.presentaciones || [])) {
+            const pres = presentacionesPorId.get(Number(cp.id));
+            const precio = Math.round(Number(cp.price) || 0);
+            if (!pres || String(pres.product_id) !== String(item.id)) continue;
+            if (!(precio > 0) || !Number.isInteger(precio / Number(pres.units))) {
+                preciosNoAplicados.push({ producto: item.name, presentacion: pres.name, precio, motivo: 'no se divide exacto por sus unidades' });
+                continue;
+            }
+            queries.push({
+                sql: `UPDATE product_presentations SET price = ?, updated_at = datetime('now')
+                      WHERE id = ? AND company_id = ? AND product_id = ?`,
+                args: [precio, pres.id, companyId, item.id],
+            });
+        }
         queries.push({
             sql: `INSERT INTO product_lots (product_id, batch_number, expiry_date, quantity, initial_quantity, cost,
                     supplier_name, created_at, status, company_id, purchase_id)
@@ -303,6 +360,68 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
         args: [companyId, session?.uid ?? null, 'CREATE', 'PURCHASE', JSON.stringify({ total: purchase.total }), nowIso()],
     });
     await turso.batch(queries);
+
+    // ── Aprender el código del proveedor de cada renglón ────────────────
+    //
+    // Quien guarda la compra revisó los renglones con la factura en la mano:
+    // que "1012990" de Agrosuper es la Pechuga Deshuesada queda confirmado. Se
+    // guarda como equivalencia, y la próxima factura con ese código se
+    // empareja sola. Medido el 3-oct-2026: el pedido #51 tenía 6 productos
+    // emparejados de una foto y ninguno con su código guardado.
+    //
+    // Solo se agregan códigos NUEVOS. Si ese código ya apunta a OTRO producto
+    // no se pisa: puede ser un error de tipeo, y moverlo en silencio rompería
+    // la próxima factura. Para corregirlo está la ficha del producto.
+    // Best-effort: la compra ya quedó guardada pase lo que pase acá.
+    const codigosAprendidos = [];
+    const codigosEnConflicto = [];
+    for (const item of seAplican) {
+        const codigo = item?.codigoProveedor ? String(item.codigoProveedor).trim().slice(0, 64) : '';
+        if (!codigo) continue;
+        try {
+            const previo = await turso.execute({
+                sql: `SELECT a.product_id, p.name FROM product_supplier_aliases a
+                      LEFT JOIN products p ON p.id = a.product_id AND p.company_id = a.company_id
+                      WHERE a.company_id = ? AND a.alias_code = ? LIMIT 1`,
+                args: [companyId, codigo],
+            });
+            const ya = previo.rows[0];
+            if (ya && String(ya.product_id) === String(item.id)) continue;
+            if (ya) { codigosEnConflicto.push({ codigo, producto: item.name, yaEsDe: ya.name }); continue; }
+            await turso.execute({
+                sql: `INSERT INTO product_supplier_aliases
+                        (company_id, product_id, supplier_id, alias_code, source, created_at, created_by)
+                      VALUES (?, ?, ?, ?, 'aprendido', ?, ?)`,
+                args: [companyId, item.id, purchase.supplierId || null, codigo, nowIso(), session?.uid ?? null],
+            });
+            codigosAprendidos.push({ codigo, producto: item.name });
+        } catch (err) {
+            console.warn('[compra] no se pudo aprender el código', codigo, err?.message);
+        }
+    }
+
+    // ── Cajas/bandejas creadas desde la compra ──────────────────────────
+    //
+    // Un producto que se vendía solo por unidad puede estrenar su caja acá
+    // mismo, sin ir a la ficha. Se crean con presentationSave para que valgan
+    // exactamente las mismas reglas (precio que divide exacto, código de
+    // barras que no choque con nada). Lo que no pasa vuelve avisado.
+    // Best-effort: la compra ya quedó guardada pase lo que pase acá.
+    const presentacionesCreadas = [];
+    for (const item of seAplican) {
+        for (const n of (item?.cambiosPrecios?.nuevas || [])) {
+            try {
+                const res = await presentationActions.presentationSave(turso, companyId, session, {
+                    presentation: { product_id: item.id, name: n.name, units: n.units, barcode: n.barcode, price: n.price },
+                });
+                if (res.success) presentacionesCreadas.push(res.presentation);
+                else preciosNoAplicados.push({ producto: item.name, presentacion: n.name || 'Caja', precio: Number(n.price) || 0, motivo: res.error });
+            } catch (err) {
+                console.warn('[compra] no se pudo crear la caja', n?.name, err?.message);
+                preciosNoAplicados.push({ producto: item.name, presentacion: n?.name || 'Caja', precio: Number(n?.price) || 0, motivo: 'no se pudo crear' });
+            }
+        }
+    }
 
     // 3. Espejo purchase_items (post-commit; nunca hace fallar la compra).
     //    Va con TODOS los renglones a propósito, incluidos los que no llegaron
@@ -358,7 +477,7 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
 
     // `itemsSinAplicar` viaja siempre, aunque venga vacío: así la pantalla
     // puede confiar en el campo en vez de adivinar.
-    return { success: true, purchaseId, itemsSinAplicar: sinAplicar };
+    return { success: true, purchaseId, itemsSinAplicar: sinAplicar, preciosNoAplicados, codigosAprendidos, codigosEnConflicto, presentacionesCreadas };
 }
 
 async function purchasesFetch(turso, companyId, session, { offset = 0, limit = 50 }) {
