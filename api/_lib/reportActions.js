@@ -362,6 +362,7 @@ const REPORTS = {
         const ph = list.length ? list.map(() => '?').join(',') : '0';
         return [{
             sql: `SELECT p.id, p.name, p.sku, p.price, p.cost, p.tax_rate, p.unit, p.units_per_box, p.price_ranges,
+                         p.is_offer, p.offer_price,
                          (SELECT GROUP_CONCAT(a.alias_code, ' · ')
                             FROM product_supplier_aliases a
                            WHERE a.company_id = p.company_id AND a.product_id = p.id

@@ -3266,6 +3266,14 @@ export const useStore = create(persist((set, get) => ({
                             ...(Array.isArray(purchasedItem.cambiosPrecios?.priceRanges)
                                 ? { price_ranges: purchasedItem.cambiosPrecios.priceRanges }
                                 : {}),
+                            // Oferta puesta o sacada en la misma compra (mismo criterio que el servidor).
+                            ...(purchasedItem.cambiosPrecios?.oferta
+                                ? (() => {
+                                    const precio = Math.round(Number(purchasedItem.cambiosPrecios.oferta.precio) || 0);
+                                    const activa = !!purchasedItem.cambiosPrecios.oferta.activa && precio > 0;
+                                    return { is_offer: activa ? 1 : 0, offer_price: activa ? precio : 0 };
+                                })()
+                                : {}),
                         };
                     }
                     return p;

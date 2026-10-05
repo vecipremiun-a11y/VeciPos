@@ -416,6 +416,16 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
                 args: [JSON.stringify(escala), nowIso(), item.id, companyId],
             });
         }
+        // Oferta puesta o sacada desde la compra. Una oferta sin precio no se
+        // prende: quedaría vendiendo a $0.
+        if (cambios?.oferta && typeof cambios.oferta === 'object') {
+            const precioOferta = Math.round(Number(cambios.oferta.precio) || 0);
+            const activa = !!cambios.oferta.activa && precioOferta > 0;
+            queries.push({
+                sql: 'UPDATE products SET is_offer = ?, offer_price = ?, updated_at = ? WHERE id = ? AND company_id = ?',
+                args: [activa ? 1 : 0, activa ? precioOferta : 0, nowIso(), item.id, companyId],
+            });
+        }
         for (const cp of (cambios?.presentaciones || [])) {
             const pres = presentacionesPorId.get(Number(cp.id));
             const precio = Math.round(Number(cp.price) || 0);

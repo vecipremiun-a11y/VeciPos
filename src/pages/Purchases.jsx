@@ -7,6 +7,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import AsyncButton from '../components/AsyncButton';
 import { toast } from '../lib/toast';
 import { reportCall } from '../lib/dataApi';
+import { formatCurrency } from '../utils/formatCurrency';
 
 /**
  * El botón de "Precios" de un renglón: muestra si el producto tiene escala de
@@ -83,6 +84,9 @@ const Purchases = () => {
     // escala arranca de cero: sin esto, elegir el mismo producto otra vez
     // conservaba los tramos a medio cargar de antes.
     const [sesionEditor, setSesionEditor] = useState(0);
+    // Oferta del producto puesta desde la compra: { activa, precio }, o null si
+    // no se tocó. Como la escala, se aplica recién al guardar la compra.
+    const [ofertaForm, setOfertaForm] = useState(null);
     // Clave de la compra que se está guardando: se crea al primer "Guardar" y se
     // reutiliza en los reintentos, hasta que la compra entra (migración 0031).
     const claveCompra = useRef(null);
@@ -131,6 +135,8 @@ const Purchases = () => {
                             priceRanges: Array.isArray(escala) ? escala : [],
                             costoAnterior: Number(p.cost) || 0,
                             codigos: p.codigos_proveedor || '',
+                            enOferta: p.is_offer === 1 || p.is_offer === true,
+                            precioOferta: Number(p.offer_price) || 0,
                             unidad: p.unit || 'Und',
                             unitsPerBox: Number(p.units_per_box) || 0,
                         };
@@ -231,6 +237,7 @@ const Purchases = () => {
     const handleSelectProduct = (product) => {
         setSelectedProduct(product);
         setCambiosForm(null);
+        setOfertaForm(null);
         setSesionEditor(n => n + 1);
         setSearchTerm(product.name);
 
@@ -373,6 +380,10 @@ const Purchases = () => {
     const handleAddToInvoice = (e) => {
         e.preventDefault();
         if (!selectedProduct) return;
+        if (ofertaForm?.activa && !(Number(ofertaForm.precio) > 0 && Number(ofertaForm.precio) < (parseFloat(entryForm.price) || 0))) {
+            alert('El precio de oferta tiene que ser mayor que 0 y menor que el precio de venta.');
+            return;
+        }
         if (cambiosForm?.invalidas) {
             alert(typeof cambiosForm.invalidas === 'string'
                 ? cambiosForm.invalidas
@@ -393,7 +404,12 @@ const Purchases = () => {
             expiryDate: entryForm.expiryDate || null,
             batchNumber: entryForm.batchNumber || null,
             codigoProveedor: (entryForm.codigoProveedor || '').trim() || null,
-            ...(cambiosForm ? { cambiosPrecios: { priceRanges: cambiosForm.priceRanges, presentaciones: cambiosForm.presentaciones || [], nuevas: cambiosForm.nuevas || [] } } : {}),
+            ...((cambiosForm || ofertaForm) ? {
+                cambiosPrecios: {
+                    ...(cambiosForm ? { priceRanges: cambiosForm.priceRanges, presentaciones: cambiosForm.presentaciones || [], nuevas: cambiosForm.nuevas || [] } : {}),
+                    ...(ofertaForm ? { oferta: { activa: !!ofertaForm.activa, precio: Number(ofertaForm.precio) || 0 } } : {}),
+                },
+            } : {}),
         };
 
         setInvoiceItems([...invoiceItems, newItem]);
@@ -401,6 +417,7 @@ const Purchases = () => {
         // Reset Left
         setSelectedProduct(null);
         setCambiosForm(null);
+        setOfertaForm(null);
         setSearchTerm('');
         setEntryForm({ cost: '', price: '', quantity: '1', total: '', margin: '', sku: '', tax: 0, expiryDate: '', batchNumber: '' });
         setTrioFijados(['cost', 'quantity']);
@@ -422,7 +439,9 @@ const Purchases = () => {
             price: itemToEdit.price,
             tax_rate: itemToEdit.tax,
         };
-        setCambiosForm(itemToEdit.cambiosPrecios || null);
+        const { oferta: ofertaGuardada, ...cambiosEscala } = itemToEdit.cambiosPrecios || {};
+        setCambiosForm(Object.keys(cambiosEscala).length ? cambiosEscala : null);
+        setOfertaForm(ofertaGuardada || null);
         setSesionEditor(n => n + 1);
 
         let margin = '';
@@ -560,6 +579,7 @@ const Purchases = () => {
     const handleCancel = () => {
         setSelectedProduct(null);
         setCambiosForm(null);
+        setOfertaForm(null);
         setSearchTerm('');
         setEntryForm({ cost: '', price: '', quantity: '1', total: '', margin: '', sku: '', tax: 0, expiryDate: '', batchNumber: '' });
         setTrioFijados(['cost', 'quantity']);
@@ -593,6 +613,47 @@ const Purchases = () => {
                     placeholder={contextoSeleccionado?.codigos || ''}
                     className="glass-input w-full text-sm font-mono"
                 />
+            </div>
+    ) : null;
+    // Oferta: lo que ya tiene el producto, o lo que se cambió en esta compra.
+    const ofertaActual = ofertaForm ?? {
+        activa: !!(contextoSeleccionado?.enOferta),
+        precio: Number(contextoSeleccionado?.precioOferta) || '',
+    };
+    const precioVentaForm = parseFloat(entryForm.price) || 0;
+    const precioOfertaNum = Number(ofertaActual.precio) || 0;
+    const ofertaMala = ofertaActual.activa && !(precioOfertaNum > 0 && precioOfertaNum < precioVentaForm);
+    const campoOferta = selectedProduct ? (
+            <div className={`rounded-xl border p-3 ${ofertaActual.activa ? 'border-[var(--color-primary)]/50 bg-[var(--color-primary)]/5' : 'border-[var(--glass-border)] bg-[var(--glass-bg)]'}`}>
+                <div className="flex items-center gap-3">
+                    <button
+                        type="button"
+                        role="switch"
+                        aria-checked={ofertaActual.activa}
+                        onClick={() => setOfertaForm({ ...ofertaActual, activa: !ofertaActual.activa })}
+                        className={`w-11 h-6 shrink-0 rounded-full flex items-center p-1 transition-all ${ofertaActual.activa ? 'bg-[var(--color-primary)]' : 'bg-gray-500'}`}
+                    >
+                        <span className={`w-4 h-4 bg-white rounded-full shadow transition-all ${ofertaActual.activa ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                    <span className="text-sm font-bold text-[var(--color-text)] flex-1">Oferta</span>
+                    {ofertaActual.activa && (
+                        <input
+                            type="number"
+                            inputMode="numeric"
+                            value={ofertaActual.precio}
+                            onChange={(e) => setOfertaForm({ ...ofertaActual, precio: e.target.value })}
+                            placeholder="Precio oferta"
+                            className={`glass-input w-32 !py-1.5 !px-2 text-sm font-bold ${ofertaMala && precioOfertaNum > 0 ? '!border-red-500/70' : ''}`}
+                        />
+                    )}
+                </div>
+                {ofertaActual.activa && precioOfertaNum > 0 && (
+                    <p className={`text-[11px] mt-1.5 ${ofertaMala ? 'text-red-400' : 'text-[var(--color-text-muted)]'}`}>
+                        {ofertaMala
+                            ? 'Tiene que ser menor que el precio de venta.'
+                            : `${Math.round((1 - precioOfertaNum / precioVentaForm) * 100)}% menos que ${formatCurrency(precioVentaForm, useStore.getState().currentCurrency)}`}
+                    </p>
+                )}
             </div>
     ) : null;
     const seccionPreciosCompra = selectedProduct ? (
@@ -719,6 +780,7 @@ const Purchases = () => {
                                 </div>
                             </div>
 
+                            {campoOferta}
                             {seccionPreciosCompra}
 
                             {/* Quantity */}
@@ -1081,6 +1143,7 @@ const Purchases = () => {
                                     </div>
                                 </div>
 
+                                {campoOferta}
                                 {seccionPreciosCompra}
 
                                 <div>
