@@ -736,7 +736,7 @@ const SalesHistory = () => {
 
                                 {/* Return Success Toast */}
                                 {returnSuccess && (
-                                    <div className="absolute top-4 right-4 z-30 bg-green-500/90 text-white px-4 py-3 rounded-xl shadow-lg animate-[float_0.3s_ease-out] flex items-center gap-2">
+                                    <div className="absolute top-4 right-4 z-30 bg-green-500/90 text-[var(--color-text)] px-4 py-3 rounded-xl shadow-lg animate-[float_0.3s_ease-out] flex items-center gap-2">
                                         <RotateCcw size={16} />
                                         <span className="text-sm font-bold">Devolución procesada: {formatCurrency(returnSuccess, currentCurrency)}</span>
                                     </div>
@@ -1156,7 +1156,7 @@ const SalesHistory = () => {
 
                     {/* Mobile Return Success Toast */}
                     {returnSuccess && (
-                        <div className="fixed top-4 left-4 right-4 z-[99999] bg-green-500/90 text-white px-4 py-3 rounded-xl shadow-lg flex items-center justify-center gap-2">
+                        <div className="fixed top-4 left-4 right-4 z-[99999] bg-green-500/90 text-[var(--color-text)] px-4 py-3 rounded-xl shadow-lg flex items-center justify-center gap-2">
                             <RotateCcw size={16} />
                             <span className="text-sm font-bold">Devolución: {formatCurrency(returnSuccess, currentCurrency)}</span>
                         </div>

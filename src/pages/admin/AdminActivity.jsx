@@ -84,15 +84,15 @@ const AdminActivity = () => {
         <div className="p-6 lg:p-8 max-w-[1400px] mx-auto">
             <div className="flex flex-wrap items-start justify-between gap-4 mb-1">
                 <div>
-                    <h1 className="text-3xl font-bold text-white">Monitoreo de Clientes</h1>
-                    <p className="text-sm text-gray-400 mt-1">
+                    <h1 className="text-3xl font-bold text-[var(--color-text)]">Monitoreo de Clientes</h1>
+                    <p className="text-sm text-[var(--color-text-muted)] mt-1">
                         Quién está usando el sistema y quién se está enfriando, para llegar antes de que se vaya.
                     </p>
                 </div>
                 <button
                     onClick={cargar}
                     disabled={loading}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#18181b] border border-white/10 text-sm font-bold text-white hover:border-red-500/40 disabled:opacity-60"
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#18181b] border border-white/10 text-sm font-bold text-[var(--color-text)] hover:border-red-500/40 disabled:opacity-60"
                 >
                     <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
                     Actualizar
@@ -121,7 +121,7 @@ const AdminActivity = () => {
                     >
                         <div className="flex items-center gap-2 mb-2">
                             <span className={cn('w-2.5 h-2.5 rounded-full', s.dot)} />
-                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{s.label}</span>
+                            <span className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider">{s.label}</span>
                         </div>
                         <p className={cn('text-3xl font-bold', s.text)}>{conteo[key] || 0}</p>
                         <p className="text-[11px] text-gray-600 mt-1 leading-snug">{s.hint}</p>
@@ -146,7 +146,7 @@ const AdminActivity = () => {
                             <button
                                 key={c.id}
                                 onClick={() => { setFiltro('todos'); setBusca(c.name); setAbierta(c.id); }}
-                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/30 border border-amber-500/20 text-xs text-white hover:border-amber-500/50"
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/30 border border-amber-500/20 text-xs text-[var(--color-text)] hover:border-amber-500/50"
                             >
                                 <span className={cn('w-1.5 h-1.5 rounded-full', SALUD[c.salud].dot)} />
                                 {c.name}
@@ -164,7 +164,7 @@ const AdminActivity = () => {
                     value={busca}
                     onChange={e => setBusca(e.target.value)}
                     placeholder="Buscar por empresa, dueño o email..."
-                    className="w-full bg-[#18181b] border border-white/10 rounded-xl pl-11 pr-4 py-3 text-sm text-white placeholder-gray-500 focus:border-red-500/50 outline-none"
+                    className="w-full bg-[#18181b] border border-white/10 rounded-xl pl-11 pr-4 py-3 text-sm text-[var(--color-text)] placeholder-gray-500 focus:border-red-500/50 outline-none"
                 />
             </div>
 
@@ -207,13 +207,13 @@ const TarjetaCliente = ({ c, abierta, onToggle }) => {
                     <div className="flex items-start gap-3 min-w-[220px] flex-1">
                         <div className="relative mt-0.5">
                             <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
-                                <Building2 size={17} className="text-gray-400" />
+                                <Building2 size={17} className="text-[var(--color-text-muted)]" />
                             </div>
                             <span className={cn('absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#18181b]', s.dot)} />
                         </div>
                         <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                                <h3 className="font-bold text-white truncate">{c.name}</h3>
+                                <h3 className="font-bold text-[var(--color-text)] truncate">{c.name}</h3>
                                 {c.isBranch && (
                                     <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-white/5 text-gray-500 border border-white/10">sucursal</span>
                                 )}
@@ -222,7 +222,7 @@ const TarjetaCliente = ({ c, abierta, onToggle }) => {
                             <div className="flex items-center gap-1.5 mt-2">
                                 <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-bold border', s.chip)}>{s.label}</span>
                                 <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-bold border', est.chip)}>{est.label}</span>
-                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border border-white/10 text-gray-400 capitalize">{c.plan}</span>
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border border-white/10 text-[var(--color-text-muted)] capitalize">{c.plan}</span>
                             </div>
                         </div>
                     </div>
@@ -284,13 +284,13 @@ const TarjetaCliente = ({ c, abierta, onToggle }) => {
                                         <td className="py-2.5 pr-4">
                                             <div className="flex items-center gap-2">
                                                 <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', SALUD[u.salud].dot)} />
-                                                <span className="text-white font-medium">{u.name}</span>
+                                                <span className="text-[var(--color-text)] font-medium">{u.name}</span>
                                                 <span className="text-gray-600 text-xs">@{u.username}</span>
                                             </div>
                                         </td>
-                                        <td className="py-2.5 pr-4 text-gray-400 text-xs capitalize">{u.role}</td>
+                                        <td className="py-2.5 pr-4 text-[var(--color-text-muted)] text-xs capitalize">{u.role}</td>
                                         <td className={cn('py-2.5 pr-4 text-xs', SALUD[u.salud].text)}>{hace(u.lastActivity)}</td>
-                                        <td className="py-2.5 text-right text-gray-300 text-xs">{miles(u.events7d)}</td>
+                                        <td className="py-2.5 text-right text-[var(--color-text-soft)] text-xs">{miles(u.events7d)}</td>
                                         <td className="py-2.5 text-right text-gray-500 text-xs">{miles(u.events30d)}</td>
                                     </tr>
                                 ))}
@@ -323,7 +323,7 @@ const Metrica = ({ icon, label, value, tone = 'text-white' }) => (
 const Dato = ({ label, value }) => (
     <div>
         <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1">{label}</p>
-        <p className="text-xs text-gray-300">{value}</p>
+        <p className="text-xs text-[var(--color-text-soft)]">{value}</p>
     </div>
 );
 

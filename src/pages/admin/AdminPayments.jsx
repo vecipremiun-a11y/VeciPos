@@ -26,7 +26,7 @@ const StatCard = ({ title, value, icon, color, bgColor }) => (
     <div className="bg-[#18181b] border border-white/10 rounded-2xl p-5">
         <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center mb-3', bgColor, color)}>{icon}</div>
         <div className={cn('text-2xl font-bold', color)}>{value}</div>
-        <div className="text-sm text-gray-400">{title}</div>
+        <div className="text-sm text-[var(--color-text-muted)]">{title}</div>
     </div>
 );
 
@@ -89,8 +89,8 @@ const AdminPayments = () => {
     return (
         <div className="p-8 max-w-7xl mx-auto">
             <div className="mb-6">
-                <h1 className="text-3xl font-bold text-white mb-2">Pagos</h1>
-                <p className="text-gray-400">Pagos en curso, pendientes y transferencias por aprobar</p>
+                <h1 className="text-3xl font-bold text-[var(--color-text)] mb-2">Pagos</h1>
+                <p className="text-[var(--color-text-muted)]">Pagos en curso, pendientes y transferencias por aprobar</p>
             </div>
 
             {/* Tabs */}
@@ -104,7 +104,7 @@ const AdminPayments = () => {
                         onClick={() => setTab(t.id)}
                         className={cn(
                             'px-4 py-2.5 text-sm font-bold border-b-2 -mb-px transition-all',
-                            tab === t.id ? 'border-[var(--color-primary)] text-white' : 'border-transparent text-gray-400 hover:text-white'
+                            tab === t.id ? 'border-[var(--color-primary)] text-[var(--color-text)]' : 'border-transparent text-[var(--color-text-muted)] hover:text-white'
                         )}
                     >
                         {t.label}
@@ -149,7 +149,7 @@ const AdminPayments = () => {
                         <thead className="bg-white/5">
                             <tr>
                                 {['Empresa', 'Descripción', 'Método', 'Monto', 'Estado', 'Fecha', 'Acciones'].map(h => (
-                                    <th key={h} className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">{h}</th>
+                                    <th key={h} className="px-6 py-4 text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase">{h}</th>
                                 ))}
                             </tr>
                         </thead>
@@ -164,8 +164,8 @@ const AdminPayments = () => {
                                 const MethodIcon = method?.icon;
                                 return (
                                     <tr key={p.id} className="hover:bg-white/5 transition-colors">
-                                        <td className="px-6 py-4 text-white font-medium">{p.company_name || p.company_id}</td>
-                                        <td className="px-6 py-4 text-gray-300">{p.description || '—'}</td>
+                                        <td className="px-6 py-4 text-[var(--color-text)] font-medium">{p.company_name || p.company_id}</td>
+                                        <td className="px-6 py-4 text-[var(--color-text-soft)]">{p.description || '—'}</td>
                                         <td className="px-6 py-4">
                                             {method ? (
                                                 <span className={cn('inline-flex items-center gap-1.5 text-sm', method.cls)}>
@@ -173,11 +173,11 @@ const AdminPayments = () => {
                                                 </span>
                                             ) : <span className="text-gray-500">—</span>}
                                         </td>
-                                        <td className="px-6 py-4 text-white font-bold">{formatMoney(p.amount, p.currency || 'CLP')}</td>
+                                        <td className="px-6 py-4 text-[var(--color-text)] font-bold">{formatMoney(p.amount, p.currency || 'CLP')}</td>
                                         <td className="px-6 py-4">
                                             <span className={cn('text-xs font-bold px-2.5 py-1 rounded-full border', badge.cls)}>{badge.label}</span>
                                         </td>
-                                        <td className="px-6 py-4 text-gray-400">{formatDate(p.created_at)}</td>
+                                        <td className="px-6 py-4 text-[var(--color-text-muted)]">{formatDate(p.created_at)}</td>
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-2">
                                                 {p.has_receipt ? (
@@ -235,7 +235,7 @@ const ReceiptModal = ({ loading, data, onClose }) => {
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
             <div className="bg-[#18181b] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-                    <h3 className="font-bold text-white flex items-center gap-2"><Paperclip size={16} className="text-sky-400" /> Comprobante de transferencia</h3>
+                    <h3 className="font-bold text-[var(--color-text)] flex items-center gap-2"><Paperclip size={16} className="text-sky-400" /> Comprobante de transferencia</h3>
                     <div className="flex items-center gap-3">
                         {data && (
                             <a
@@ -248,12 +248,12 @@ const ReceiptModal = ({ loading, data, onClose }) => {
                                 Abrir / Descargar
                             </a>
                         )}
-                        <button onClick={onClose} className="text-gray-400 hover:text-white p-1"><X size={18} /></button>
+                        <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-white p-1"><X size={18} /></button>
                     </div>
                 </div>
                 <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-black/30 min-h-[200px]">
                     {loading ? (
-                        <span className="text-gray-400 text-sm">Cargando comprobante…</span>
+                        <span className="text-[var(--color-text-muted)] text-sm">Cargando comprobante…</span>
                     ) : !data ? (
                         <span className="text-gray-500 text-sm flex items-center gap-2"><FileText size={16} /> Sin comprobante</span>
                     ) : isPdf ? (
@@ -326,15 +326,15 @@ const TransferSettingsForm = () => {
         <div className="max-w-2xl space-y-6">
             {/* Datos bancarios */}
             <div className="bg-[#18181b] border border-white/10 rounded-2xl p-6">
-                <h2 className="text-lg font-bold text-white flex items-center gap-2 mb-1">
+                <h2 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2 mb-1">
                     <Landmark size={18} className="text-emerald-400" /> Datos de transferencia bancaria
                 </h2>
-                <p className="text-sm text-gray-400 mb-5">Estos datos los verán tus clientes al elegir pagar por transferencia.</p>
+                <p className="text-sm text-[var(--color-text-muted)] mb-5">Estos datos los verán tus clientes al elegir pagar por transferencia.</p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {fields.map(f => (
                         <div key={f.k}>
-                            <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">{f.label}</label>
+                            <label className="block text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5">{f.label}</label>
                             <input
                                 type="text"
                                 className={INPUT_CLS}
@@ -349,10 +349,10 @@ const TransferSettingsForm = () => {
 
             {/* PayPal */}
             <div className="bg-[#18181b] border border-white/10 rounded-2xl p-6">
-                <h2 className="text-lg font-bold text-white flex items-center gap-2 mb-1">
+                <h2 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2 mb-1">
                     <Wallet size={18} className="text-indigo-400" /> PayPal (clientes en USD)
                 </h2>
-                <p className="text-sm text-gray-400 mb-4">Tu usuario de PayPal.me. Déjalo vacío para mostrar "Próximamente".</p>
+                <p className="text-sm text-[var(--color-text-muted)] mb-4">Tu usuario de PayPal.me. Déjalo vacío para mostrar "Próximamente".</p>
                 <div className="flex items-center gap-2">
                     <span className="text-gray-500 text-sm">paypal.me/</span>
                     <input

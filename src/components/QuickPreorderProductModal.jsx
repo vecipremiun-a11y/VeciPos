@@ -82,12 +82,12 @@ const QuickPreorderProductModal = ({ isOpen, onClose, onSuccess }) => {
             <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
                 {/* Header */}
                 <div className="flex items-center justify-between p-4 border-b border-white/10 bg-black/40">
-                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2">
                         <span className="text-orange-400">⚡</span> Producto Rápido (Encargo)
                     </h2>
                     <button
                         onClick={onClose}
-                        className="p-2 hover:bg-white/10 rounded-full transition-colors text-gray-400 hover:text-white"
+                        className="p-2 hover:bg-white/10 rounded-full transition-colors text-[var(--color-text-muted)] hover:text-white"
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -103,12 +103,12 @@ const QuickPreorderProductModal = ({ isOpen, onClose, onSuccess }) => {
 
                     {/* Name */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Nombre del producto *</label>
+                        <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-1">Nombre del producto *</label>
                         <input
                             type="text"
                             value={formData.name}
                             onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                            className="glass-input w-full font-bold text-white placeholder-gray-600"
+                            className="glass-input w-full font-bold text-[var(--color-text)] placeholder-gray-600"
                             placeholder="Ej: Pan especial completo"
                             autoFocus
                         />
@@ -117,7 +117,7 @@ const QuickPreorderProductModal = ({ isOpen, onClose, onSuccess }) => {
                     <div className="grid grid-cols-2 gap-4">
                         {/* Price per Kg */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">Precio por Kilo *</label>
+                            <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-1">Precio por Kilo *</label>
                             <div className="relative">
                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold pointer-events-none">$</span>
                                 <input
@@ -132,7 +132,7 @@ const QuickPreorderProductModal = ({ isOpen, onClose, onSuccess }) => {
 
                         {/* Grams per Unit (Optional) */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-1">
+                            <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-1">
                                 Peso unit (g)
                                 <span className="ml-1 text-[10px] text-gray-500 border border-gray-700 px-1 rounded">Opcional</span>
                             </label>
@@ -162,7 +162,7 @@ const QuickPreorderProductModal = ({ isOpen, onClose, onSuccess }) => {
                             onChange={(e) => setFormData(prev => ({ ...prev, allow_notes: e.target.checked }))}
                             className="w-4 h-4 rounded border-gray-600 bg-black/40 text-orange-500 focus:ring-orange-500"
                         />
-                        <label htmlFor="allow_notes" className="text-sm text-gray-300 select-none cursor-pointer">
+                        <label htmlFor="allow_notes" className="text-sm text-[var(--color-text-soft)] select-none cursor-pointer">
                             Permitir notas en este producto
                         </label>
                     </div>
@@ -172,7 +172,7 @@ const QuickPreorderProductModal = ({ isOpen, onClose, onSuccess }) => {
                         <button
                             type="button"
                             onClick={onClose}
-                            className="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-medium transition-colors"
+                            className="flex-1 py-3 bg-gray-800 hover:bg-gray-700 text-[var(--color-text)] rounded-xl font-medium transition-colors"
                         >
                             Cancelar
                         </button>

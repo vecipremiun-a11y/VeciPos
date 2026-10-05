@@ -414,7 +414,7 @@ const ExpiringProductsReport = () => {
                                 <p className="text-xl lg:text-2xl font-bold">{lossesStats.total_exchanges || 0}</p>
                                 <p className="text-blue-200 text-[10px]">{lossesStats.total_exchanged_units || 0} unidades cambiadas</p>
                             </div>
-                            <div className="bg-gray-600 text-white p-3 lg:p-4 rounded-xl shadow-lg">
+                            <div className="bg-gray-600 text-[var(--color-text)] p-3 lg:p-4 rounded-xl shadow-lg">
                                 <h3 className="text-[10px] lg:text-xs font-bold uppercase">Total Registros</h3>
                                 <p className="text-xl lg:text-2xl font-bold">{lossesStats.total_records || 0}</p>
                                 <p className="text-[var(--color-text-muted)] text-[10px]">{lossesStats.total_products || 0} productos</p>

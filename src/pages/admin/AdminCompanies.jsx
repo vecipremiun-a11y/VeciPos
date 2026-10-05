@@ -157,7 +157,7 @@ const AdminCompanies = () => {
 
     if (loading) {
         return (
-            <div className="p-8 text-white">
+            <div className="p-8 text-[var(--color-text)]">
                 <div className="animate-pulse">
                     <div className="h-8 bg-white/5 rounded w-64 mb-8"></div>
                     <div className="space-y-4">
@@ -186,8 +186,8 @@ const AdminCompanies = () => {
             {/* Header */}
             <div className="mb-8 flex items-start justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold text-white mb-2">Gestión de Empresas</h1>
-                    <p className="text-gray-400">Administración de suscripciones y pagos</p>
+                    <h1 className="text-3xl font-bold text-[var(--color-text)] mb-2">Gestión de Empresas</h1>
+                    <p className="text-[var(--color-text-muted)]">Administración de suscripciones y pagos</p>
                 </div>
                 <button
                     onClick={() => setShowCreateModal(true)}
@@ -269,22 +269,22 @@ const AdminCompanies = () => {
                     <table className="w-full">
                         <thead className="bg-white/5">
                             <tr>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase">
                                     Empresa
                                 </th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase">
                                     Estado
                                 </th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase">
                                     Plan
                                 </th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase">
                                     Monto
                                 </th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase">
                                     Período
                                 </th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase">
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase">
                                     Acciones
                                 </th>
                             </tr>
@@ -302,10 +302,10 @@ const AdminCompanies = () => {
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center">
-                                                    <Building2 size={20} className="text-gray-400" />
+                                                    <Building2 size={20} className="text-[var(--color-text-muted)]" />
                                                 </div>
                                                 <div>
-                                                    <div className="font-medium text-white">
+                                                    <div className="font-medium text-[var(--color-text)]">
                                                         {company.company_name}
                                                     </div>
                                                     <div className="text-xs text-gray-500">
@@ -323,11 +323,11 @@ const AdminCompanies = () => {
                                             <select
                                                 value={effStatus(company)}
                                                 onChange={(e) => handleStatusChange(company, e.target.value)}
-                                                className={cn(SELECT_CLS, STATUS_TEXT[effStatus(company)] || 'text-gray-300')}
+                                                className={cn(SELECT_CLS, STATUS_TEXT[effStatus(company)] || 'text-[var(--color-text-soft)]')}
                                                 title="Cambiar estado"
                                             >
                                                 {STATUS_OPTIONS.map(o => (
-                                                    <option key={o.value} value={o.value} className="bg-[#18181b] text-white">{o.label}</option>
+                                                    <option key={o.value} value={o.value} className="bg-[#18181b] text-[var(--color-text)]">{o.label}</option>
                                                 ))}
                                             </select>
                                         </td>
@@ -335,11 +335,11 @@ const AdminCompanies = () => {
                                             <select
                                                 value={normPlan(company.company_plan)}
                                                 onChange={(e) => handlePlanChange(company, e.target.value)}
-                                                className={cn(SELECT_CLS, 'text-white')}
+                                                className={cn(SELECT_CLS, 'text-[var(--color-text)]')}
                                                 title="Cambiar plan"
                                             >
                                                 {PLAN_OPTIONS.map(o => (
-                                                    <option key={o.value} value={o.value} className="bg-[#18181b] text-white">{o.label}</option>
+                                                    <option key={o.value} value={o.value} className="bg-[#18181b] text-[var(--color-text)]">{o.label}</option>
                                                 ))}
                                             </select>
                                         </td>
@@ -349,12 +349,12 @@ const AdminCompanies = () => {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">
-                                            <div className="text-sm text-gray-400">
+                                            <div className="text-sm text-[var(--color-text-muted)]">
                                                 <div className="flex items-center gap-1">
                                                     <Calendar size={14} />
                                                     <span className="text-xs">Acceso hasta</span>
                                                 </div>
-                                                <div className="text-xs text-gray-200 font-medium mt-0.5">
+                                                <div className="text-xs text-[var(--color-text-soft)] font-medium mt-0.5">
                                                     {formatDate(company.access_until)}
                                                 </div>
                                             </div>
@@ -363,7 +363,7 @@ const AdminCompanies = () => {
                                             <div className="flex items-center gap-2">
                                                 <button
                                                     onClick={() => setSelectedCompany(company)}
-                                                    className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
+                                                    className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--color-text-muted)] hover:text-white"
                                                     title="Ver detalles"
                                                 >
                                                     <Eye size={18} />
@@ -448,36 +448,36 @@ const AccessModal = ({ company, status, onClose, onConfirm }) => {
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
             <div className="bg-[#18181b] border border-white/10 rounded-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-start justify-between mb-1">
-                    <h3 className="text-lg font-bold text-white">{esPrueba ? 'Dar prueba' : 'Activar / Extender'}</h3>
-                    <button onClick={onClose} className="text-gray-400 hover:text-white p-1"><X size={18} /></button>
+                    <h3 className="text-lg font-bold text-[var(--color-text)]">{esPrueba ? 'Dar prueba' : 'Activar / Extender'}</h3>
+                    <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-white p-1"><X size={18} /></button>
                 </div>
-                <p className="text-sm text-gray-400 mb-5">
+                <p className="text-sm text-[var(--color-text-muted)] mb-5">
                     {company.company_name} — {esPrueba
                         ? 'elige cuánto dura la prueba. Al terminar, la empresa queda sin acceso hasta que pague.'
                         : 'elige hasta cuándo tendrá acceso. Al llegar esa fecha, vuelve a evaluarse automáticamente.'}
                 </p>
 
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Duración rápida</p>
+                <p className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Duración rápida</p>
                 <div className="grid grid-cols-2 gap-2 mb-5">
                     {quick.map(q => (
                         <button
                             key={q.label}
                             disabled={busy}
                             onClick={() => apply(q.get())}
-                            className="py-2.5 rounded-lg border border-white/10 text-white text-sm font-bold hover:border-[var(--color-primary)]/60 hover:bg-[var(--color-primary)]/10 disabled:opacity-60"
+                            className="py-2.5 rounded-lg border border-white/10 text-[var(--color-text)] text-sm font-bold hover:border-[var(--color-primary)]/60 hover:bg-[var(--color-primary)]/10 disabled:opacity-60"
                         >
                             {q.label}
                         </button>
                     ))}
                 </div>
 
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">O fecha exacta</p>
+                <p className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">O fecha exacta</p>
                 <div className="flex items-center gap-2">
                     <input
                         type="date"
                         value={custom}
                         onChange={(e) => setCustom(e.target.value)}
-                        className="flex-1 bg-[#0f0f12] border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm focus:border-[var(--color-primary)] outline-none"
+                        className="flex-1 bg-[#0f0f12] border border-white/10 rounded-lg px-3 py-2.5 text-[var(--color-text)] text-sm focus:border-[var(--color-primary)] outline-none"
                     />
                     <button
                         disabled={busy || !custom}
@@ -503,7 +503,7 @@ const StatCard = ({ title, value, icon, color, bgColor, isSmall }) => (
         <div className={cn('font-bold mb-1', color, isSmall ? 'text-lg' : 'text-3xl')}>
             {value}
         </div>
-        <div className="text-sm text-gray-400">{title}</div>
+        <div className="text-sm text-[var(--color-text-muted)]">{title}</div>
     </div>
 );
 

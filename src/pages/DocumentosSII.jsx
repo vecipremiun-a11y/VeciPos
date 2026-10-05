@@ -466,7 +466,7 @@ const DocumentosSII = () => {
                             {Number(selectedDte.tipo) === 33 ? <FileText size={20} /> : <Receipt size={20} />}
                             Detalle DTE N° {selectedDte.folio}
                         </h3>
-                        <button onClick={() => setSelectedDte(null)} className="text-gray-400 hover:text-white">
+                        <button onClick={() => setSelectedDte(null)} className="text-[var(--color-text-muted)] hover:text-white">
                             <XCircle size={20} />
                         </button>
                     </div>

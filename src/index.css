@@ -47,6 +47,9 @@
   --color-surface-hover: #1a1a3d;
   --color-text: #ffffff;
   --color-text-muted: #9ca3af;
+  /* Texto secundario fuerte: el que antes era text-gray-200/300 fijo. En modo
+     noche es el mismo gris claro de siempre; en modo día, gris oscuro. */
+  --color-text-soft: #d1d5db;
   /* Texto que va ENCIMA del color primario. Existe porque el primario cambia
      de tema y el texto legible cambia con él: sobre el cyan #00f0ff, el blanco
      da 1,41:1 —ilegible, el mínimo es 4,5— mientras que el oscuro da 13,66:1.
@@ -76,6 +79,7 @@
      gray-700: 16,1:1 y 8,8:1 sobre ese mismo fondo. */
   --color-text: #111827;
   --color-text-muted: #374151;
+  --color-text-soft: #1f2937;
   --glass-bg: #ffffff;
   --glass-border: #e5e7eb;
   /* Gray-200 */
@@ -422,7 +426,79 @@ body {
 [data-theme="light"] .panel-oscuro {
   --color-text: #f8fafc;
   --color-text-muted: #cbd5e1;
+  --color-text-soft: #e2e8f0;
 }
+
+/* ── Modo día: colores fijos pensados para el modo noche ─────────────────────
+   Muchas pantallas se escribieron con colores fijos del modo noche: fondos
+   oscuros (bg-gray-900, bg-[#18181b]…) bajo texto que sí sigue al tema —en modo
+   día, negro sobre negro: el "Reporte de Utilidad Bruta" no se leía— y acentos
+   claros (text-green-400, text-amber-400…) que sobre blanco dan 1,5 a 2,8:1 de
+   contraste, cuando el mínimo legible es 4,5:1.
+
+   Todo lo de acá vale SOLO en modo día: el modo noche queda idéntico. Lo que
+   está dentro de un .panel-oscuro (oscuro a propósito también de día) no se toca.
+   Medido el 3-oct-2026 sobre el JSX: 21 fondos oscuros distintos, ~1.400 usos de
+   acentos claros. */
+
+/* Fondos oscuros fijos → superficie del tema. */
+[data-theme="light"] :is(.bg-gray-900, .bg-zinc-900, .bg-\[\#18181b\], .bg-\[\#09090b\], .bg-\[\#0f0f2d\],
+    .bg-\[\#0a0a1a\], .bg-\[\#0b1120\], .bg-\[\#0a111f\], .bg-\[\#0f0f13\], .bg-\[\#0f0f12\], .bg-\[\#0f0f2a\],
+    .bg-\[\#080d1a\], .bg-\[\#0f1016\], .bg-\[\#14141f\]):not(.panel-oscuro, .panel-oscuro *) {
+  background-color: var(--color-surface);
+}
+/* Los un poco más claros (tarjetas sobre esos fondos) → gris muy claro, para que se distingan. */
+[data-theme="light"] :is(.bg-gray-800, .bg-\[\#1a1a2e\], .bg-\[\#1a1a1a\], .bg-\[\#1a1b26\], .bg-\[\#1a1a3d\],
+    .bg-\[\#1a1a1f\]):not(.panel-oscuro, .panel-oscuro *) {
+  background-color: var(--color-surface-hover);
+}
+/* Recuadros con negro translúcido (bg-black/20…): de noche oscurecen un poco;
+   de día quedaban grises y pesados. El velo de los modales (/50 o más) no se toca. */
+[data-theme="light"] :is(.bg-black\/10, .bg-black\/20, .bg-black\/30, .bg-black\/40):not(.panel-oscuro, .panel-oscuro *) {
+  background-color: var(--color-surface-hover);
+}
+/* Degradado del pie fijo de Control de Inventario. */
+[data-theme="light"] :is(.from-zinc-950):not(.panel-oscuro, .panel-oscuro *) {
+  --tw-gradient-from: var(--color-background);
+}
+[data-theme="light"] :is(.via-zinc-950\/95):not(.panel-oscuro, .panel-oscuro *) {
+  --tw-gradient-via: var(--color-background);
+}
+
+/* Bordes blancos translúcidos: sobre blanco no se ven. */
+[data-theme="light"] :is(.border-white\/5, .border-white\/8, .border-white\/10, .border-white\/15, .border-white\/20,
+    .border-white\/25, .border-white\/30, .border-gray-700, .border-gray-800):not(.panel-oscuro, .panel-oscuro *) {
+  border-color: var(--glass-border);
+}
+[data-theme="light"] .divide-white\/5:not(.panel-oscuro, .panel-oscuro *) > :not(:last-child) {
+  border-color: var(--glass-border);
+}
+
+/* El ícono del calendario se invierte a blanco para el modo noche (arriba); de
+   día quedaba blanco sobre blanco. */
+[data-theme="light"] :is(input[type="date"], input[type="time"], input[type="datetime-local"]):not(.panel-oscuro *)::-webkit-calendar-picker-indicator {
+  filter: none;
+}
+
+[data-theme="light"] .glass-card:not(.panel-oscuro, .panel-oscuro *) {
+  border-color: var(--glass-border);
+}
+
+/* Acentos claros (200/300/400) → su tono 700, legible sobre blanco. */
+[data-theme="light"] :is(.text-red-200, .text-red-300, .text-red-400):not(.panel-oscuro, .panel-oscuro *) { color: #b91c1c; }
+[data-theme="light"] :is(.text-rose-300, .text-rose-400):not(.panel-oscuro, .panel-oscuro *) { color: #be123c; }
+[data-theme="light"] :is(.text-pink-400):not(.panel-oscuro, .panel-oscuro *) { color: #be185d; }
+[data-theme="light"] :is(.text-orange-200, .text-orange-300, .text-orange-400):not(.panel-oscuro, .panel-oscuro *) { color: #c2410c; }
+[data-theme="light"] :is(.text-amber-200, .text-amber-300, .text-amber-400):not(.panel-oscuro, .panel-oscuro *) { color: #b45309; }
+[data-theme="light"] :is(.text-yellow-200, .text-yellow-300, .text-yellow-400):not(.panel-oscuro, .panel-oscuro *) { color: #a16207; }
+[data-theme="light"] :is(.text-green-200, .text-green-300, .text-green-400):not(.panel-oscuro, .panel-oscuro *) { color: #15803d; }
+[data-theme="light"] :is(.text-emerald-300, .text-emerald-400):not(.panel-oscuro, .panel-oscuro *) { color: #047857; }
+[data-theme="light"] :is(.text-cyan-200, .text-cyan-300, .text-cyan-400):not(.panel-oscuro, .panel-oscuro *) { color: #0e7490; }
+[data-theme="light"] :is(.text-sky-300, .text-sky-400):not(.panel-oscuro, .panel-oscuro *) { color: #0369a1; }
+[data-theme="light"] :is(.text-blue-200, .text-blue-300, .text-blue-400):not(.panel-oscuro, .panel-oscuro *) { color: #1d4ed8; }
+[data-theme="light"] :is(.text-indigo-300, .text-indigo-400):not(.panel-oscuro, .panel-oscuro *) { color: #4338ca; }
+[data-theme="light"] :is(.text-violet-300, .text-violet-400):not(.panel-oscuro, .panel-oscuro *) { color: #6d28d9; }
+[data-theme="light"] :is(.text-purple-200, .text-purple-300, .text-purple-400):not(.panel-oscuro, .panel-oscuro *) { color: #7e22ce; }
 
 /* Paneles a pantalla completa anclados con position:fixed (menú lateral móvil,
    modales que ocupan todo el alto). fixed ignora el padding de #root, así que

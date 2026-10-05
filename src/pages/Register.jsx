@@ -97,7 +97,7 @@ const Register = () => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-[#0b1120] py-12">
+        <div className="panel-oscuro min-h-screen flex items-center justify-center relative overflow-hidden bg-[#0b1120] py-12">
             {/* Fondo: minimarket real + velo azul oscuro (mismo que el login) */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
                 <img

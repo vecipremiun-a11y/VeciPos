@@ -143,7 +143,7 @@ const ProtectedRoute = ({ children }) => {
   // Esperar a que intente restaurar
   if (!triedRestore && !currentUser) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-[#09090b] text-white">
+      <div className="panel-oscuro h-screen w-screen flex items-center justify-center bg-[#09090b] text-white">
         <div className="flex flex-col items-center gap-3">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
           <p className="text-sm">Verificando sesión...</p>
@@ -161,7 +161,7 @@ const ProtectedRoute = ({ children }) => {
   // Si está cargando (login manual), mostrar spinner
   if (isLoading) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-[#09090b] text-white">
+      <div className="panel-oscuro h-screen w-screen flex items-center justify-center bg-[#09090b] text-white">
         <div className="flex flex-col items-center gap-3">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
           <p>Iniciando sesión...</p>

@@ -576,7 +576,7 @@ const InventoryControl = () => {
                                 <Plus size={20} className="text-blue-400" />
                                 Nuevo Control
                             </h2>
-                            <button onClick={() => setShowForm(false)} className="p-1.5 rounded-lg hover:bg-white/5 text-zinc-400">
+                            <button onClick={() => setShowForm(false)} className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--color-text-muted)]">
                                 <X size={18} />
                             </button>
                         </div>
@@ -589,7 +589,7 @@ const InventoryControl = () => {
                                 value={formName}
                                 onChange={e => setFormName(e.target.value)}
                                 placeholder="Ej: Conteo marzo, Revisión rápida..."
-                                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/30 transition-all"
+                                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-[var(--color-text)] placeholder-zinc-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/30 transition-all"
                                 autoFocus
                             />
                         </div>
@@ -627,7 +627,7 @@ const InventoryControl = () => {
                                 <select
                                     value={formCategory}
                                     onChange={e => setFormCategory(e.target.value)}
-                                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-blue-500/50 transition-all"
+                                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-[var(--color-text)] focus:outline-none focus:border-blue-500/50 transition-all"
                                 >
                                     <option value="">Seleccionar categoría...</option>
                                     {categories.map(c => (
@@ -644,7 +644,7 @@ const InventoryControl = () => {
                                 <select
                                     value={formSupplier}
                                     onChange={e => setFormSupplier(e.target.value)}
-                                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-blue-500/50 transition-all"
+                                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-[var(--color-text)] focus:outline-none focus:border-blue-500/50 transition-all"
                                 >
                                     <option value="">Seleccionar proveedor...</option>
                                     {(suppliers || []).filter(s => s.status === 'active').map(s => (
@@ -764,7 +764,7 @@ const InventoryControl = () => {
                         value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
                         placeholder="Escanear código de barras o buscar producto..."
-                        className="w-full pl-11 pr-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-zinc-500
+                        className="w-full pl-11 pr-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl text-[var(--color-text)] placeholder-zinc-500
                                    focus:outline-none focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 focus:bg-white/[0.07]
                                    shadow-[0_4px_20px_rgba(0,0,0,0.2)] transition-all text-sm"
                         autoFocus
@@ -867,7 +867,7 @@ const InventoryControl = () => {
                                 onChange={e => setCountedStock(e.target.value)}
                                 onKeyDown={e => { if (e.key === 'Enter') handleSave(); }}
                                 placeholder="Ingresa el stock real..."
-                                className="w-full px-4 py-4 bg-white/5 border-2 border-white/10 rounded-xl text-white text-2xl font-bold text-center
+                                className="w-full px-4 py-4 bg-white/5 border-2 border-white/10 rounded-xl text-[var(--color-text)] text-2xl font-bold text-center
                                            focus:outline-none focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/20 transition-all
                                            placeholder:text-zinc-600 placeholder:text-lg placeholder:font-normal"
                                 step="any"
@@ -900,7 +900,7 @@ const InventoryControl = () => {
                             </button>
                             <button
                                 onClick={() => { setScannedProduct(null); setCountedStock(''); searchInputRef.current?.focus(); }}
-                                className="px-5 py-3 rounded-xl bg-white/5 border border-white/10 text-zinc-400 hover:bg-white/10 transition-all"
+                                className="px-5 py-3 rounded-xl bg-white/5 border border-white/10 text-[var(--color-text-muted)] hover:bg-white/10 transition-all"
                             >
                                 Saltar
                             </button>
@@ -921,7 +921,7 @@ const InventoryControl = () => {
                             key={f.key}
                             onClick={() => setActiveFilter(f.key)}
                             className={`flex-1 py-2 text-xs font-medium rounded-lg transition-all ${activeFilter === f.key
-                                ? 'bg-white/10 text-white shadow-sm'
+                                ? 'bg-white/10 text-[var(--color-text)] shadow-sm'
                                 : 'text-zinc-500 hover:text-zinc-300'
                             }`}
                         >
@@ -1021,7 +1021,7 @@ const InventoryControl = () => {
                             </div>
                             <p className="text-white font-medium">{confirmAction.message}</p>
                             <div className="flex gap-2">
-                                <button onClick={() => setConfirmAction(null)} className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-zinc-400 hover:bg-white/10 transition-all">
+                                <button onClick={() => setConfirmAction(null)} className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-[var(--color-text-muted)] hover:bg-white/10 transition-all">
                                     Volver
                                 </button>
                                 <button
@@ -1083,7 +1083,7 @@ const InventoryControl = () => {
                             key={f.key}
                             onClick={() => setReportFilter(f.key)}
                             className={`flex-1 py-2 px-3 text-xs font-medium rounded-lg transition-all whitespace-nowrap ${reportFilter === f.key
-                                ? 'bg-white/10 text-white shadow-sm'
+                                ? 'bg-white/10 text-[var(--color-text)] shadow-sm'
                                 : 'text-zinc-500 hover:text-zinc-300'
                             }`}
                         >

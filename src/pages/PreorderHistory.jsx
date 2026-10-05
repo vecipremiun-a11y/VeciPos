@@ -93,7 +93,7 @@ const PreorderHistory = () => {
                     {['today', 'yesterday', 'week', 'month', 'custom'].map(r => (
                         <button key={r} onClick={() => setDateRange(r)}
                             className={cn("px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-                                dateRange === r ? "bg-[var(--primary)] text-white" : "bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]")}>
+                                dateRange === r ? "bg-[var(--primary)] text-[var(--color-text)]" : "bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]")}>
                             {r === 'today' ? 'Hoy' : r === 'yesterday' ? 'Ayer' : r === 'week' ? '7 días' : r === 'month' ? '30 días' : 'Personalizado'}
                         </button>
                     ))}

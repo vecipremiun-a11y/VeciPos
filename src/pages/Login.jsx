@@ -46,7 +46,7 @@ const Login = () => {
     };
 
     return (
-        <div className="min-h-screen w-full flex relative bg-[#0b1120] text-white">
+        <div className="panel-oscuro min-h-screen w-full flex relative bg-[#0b1120] text-white">
             {/* Separador diagonal único (va sobre el borde real de los paneles) */}
             <svg
                 className="hidden lg:block absolute inset-y-0 z-10 pointer-events-none"

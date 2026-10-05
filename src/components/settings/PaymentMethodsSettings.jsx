@@ -365,7 +365,7 @@ const PaymentMethodsSettings = () => {
                                     className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all border ${
                                         creditBlockMode === 'warn'
                                             ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-400'
-                                            : 'bg-transparent border-white/10 text-gray-400 hover:bg-white/5'
+                                            : 'bg-transparent border-white/10 text-[var(--color-text-muted)] hover:bg-white/5'
                                     }`}
                                 >
                                     ⚠️ Advertir
@@ -375,7 +375,7 @@ const PaymentMethodsSettings = () => {
                                     className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all border ${
                                         creditBlockMode === 'block'
                                             ? 'bg-red-500/20 border-red-500/50 text-red-400'
-                                            : 'bg-transparent border-white/10 text-gray-400 hover:bg-white/5'
+                                            : 'bg-transparent border-white/10 text-[var(--color-text-muted)] hover:bg-white/5'
                                     }`}
                                 >
                                     🚫 Bloquear

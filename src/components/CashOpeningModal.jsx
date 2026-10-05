@@ -76,7 +76,7 @@ const CashOpeningModal = ({ isOpen, canOpen = true }) => {
                 {/* Back Button */}
                 <button
                     onClick={() => navigate('/dashboard')}
-                    className="absolute top-4 left-4 text-gray-400 hover:text-white transition-colors p-2 hover:bg-white/5 rounded-full"
+                    className="absolute top-4 left-4 text-[var(--color-text-muted)] hover:text-white transition-colors p-2 hover:bg-white/5 rounded-full"
                     title="Volver al Dashboard"
                 >
                     <ArrowLeft size={24} />

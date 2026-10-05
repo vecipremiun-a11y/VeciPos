@@ -289,7 +289,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                 <div className="flex items-center gap-4">
                     <button
                         onClick={onClose}
-                        className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+                        className="flex items-center gap-2 text-[var(--color-text-muted)] hover:text-white transition-colors"
                     >
                         {isInline ? <ArrowLeft size={24} /> : <X size={24} />}
                         {isInline && <span className="text-sm font-bold uppercase tracking-wider">Volver</span>}
@@ -329,13 +329,13 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* LEFT COLUMN: Product Details */}
                 <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                    <h3 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
                         <span className="w-1 h-6 bg-[var(--color-primary)] rounded-full"></span>
                         Detalles del Producto
                     </h3>
 
                     <div>
-                        <label className="block text-sm text-gray-400 mb-1">Nombre del Producto</label>
+                        <label className="block text-sm text-[var(--color-text-muted)] mb-1">Nombre del Producto</label>
                         <input
                             type="text"
                             name="name"
@@ -348,7 +348,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">Categoría</label>
+                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">Categoría</label>
                             <select
                                 name="category"
                                 value={formData.category || ''}
@@ -365,7 +365,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">Proveedor</label>
+                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">Proveedor</label>
                             <select
                                 name="supplier"
                                 value={formData.supplier || ''}
@@ -384,7 +384,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">SKU / Código</label>
+                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">SKU / Código</label>
                             <div className="flex gap-2">
                                 <input
                                     type="text"
@@ -413,7 +413,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                         <div className="flex items-center gap-2 mb-1">
                             <Truck size={15} className="text-[var(--color-primary)]" />
-                            <span className="text-sm font-medium text-gray-300">Códigos del proveedor</span>
+                            <span className="text-sm font-medium text-[var(--color-text-soft)]">Códigos del proveedor</span>
                         </div>
                         <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">
                             El código con el que el proveedor nombra este producto en su factura.
@@ -452,7 +452,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                             "inline-flex items-center gap-1.5 pl-2.5 pr-1 py-1 rounded-lg text-xs border",
                                             c.alias_code
                                                 ? "bg-[var(--color-primary)]/10 border-[var(--color-primary)]/30 text-[var(--color-text)]"
-                                                : "bg-white/5 border-white/10 text-gray-400"
+                                                : "bg-white/5 border-white/10 text-[var(--color-text-muted)]"
                                         )}
                                         title={c.supplier_name ? `Proveedor: ${c.supplier_name}` : undefined}
                                     >
@@ -465,7 +465,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                         <button
                                             type="button"
                                             onClick={() => quitarCodigo(i)}
-                                            className="p-0.5 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
+                                            className="p-0.5 rounded hover:bg-red-500/20 text-[var(--color-text-muted)] hover:text-red-400 transition-colors"
                                             title="Quitar"
                                         >
                                             <X size={12} />
@@ -499,7 +499,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">Stock Actual</label>
+                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">Stock Actual</label>
                             <input
                                 type="number"
                                 step="any"
@@ -511,7 +511,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             />
                         </div>
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">Unidad Medida</label>
+                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">Unidad Medida</label>
                             <select
                                 name="unit"
                                 value={formData.unit || 'Und'}
@@ -600,7 +600,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     />
 
                     <div>
-                        <label className="block text-sm text-gray-400 mb-1">Imagen (URL o Archivo)</label>
+                        <label className="block text-sm text-[var(--color-text-muted)] mb-1">Imagen (URL o Archivo)</label>
                         <div className="flex flex-col gap-2">
                             <div className="flex gap-2">
                                 <input
@@ -667,14 +667,14 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
                 {/* RIGHT COLUMN: Pricing & Review */}
                 <div className="space-y-4 bg-white/5 p-6 rounded-2xl border border-white/5 h-fit">
-                    <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                    <h3 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
                         <span className="w-1 h-6 bg-green-400 rounded-full"></span>
                         Precios y Margen
                     </h3>
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">Costo ($)</label>
+                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">Costo ($)</label>
                             <input
                                 type="number"
                                 step="0.01"
@@ -686,7 +686,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             />
                         </div>
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">Utilidad (%)</label>
+                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">Utilidad (%)</label>
                             <input
                                 type="number"
                                 step="any"
@@ -700,7 +700,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm text-gray-400 mb-1">Impuesto / IVA</label>
+                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">Impuesto / IVA</label>
                             <select
                                 name="tax_rate"
                                 value={formData.tax_rate || 0}
@@ -727,7 +727,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
                     <div className="text-right">
                         <label className="block text-xs text-gray-500 mb-1">Precio Neto Calc.</label>
-                        <div className="text-lg font-mono text-gray-300">
+                        <div className="text-lg font-mono text-[var(--color-text-soft)]">
                             {formatCurrency(parseFloat(formData.cost || 0) * (1 + (parseFloat(marginPercentage || 0)) / 100), currentCurrency)}
                         </div>
                     </div>
@@ -755,7 +755,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     {/* OFFER SECTION */}
                     <div className={`p-4 rounded-xl border transition-all duration-300 ${formData.is_offer ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]' : 'bg-white/5 border-white/10'}`}>
                         <div className="flex justify-between items-center mb-2">
-                            <label className="text-white font-bold flex items-center gap-2">
+                            <label className="text-[var(--color-text)] font-bold flex items-center gap-2">
                                 En Oferta
                                 {formData.is_offer && <span className="text-[10px] bg-[var(--color-primary)] text-black px-2 py-0.5 rounded-full font-bold animate-pulse">ACTIVO</span>}
                             </label>
@@ -783,7 +783,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                         placeholder="0.00"
                                     />
                                 </div>
-                                <div className="text-right mt-2 text-xs text-gray-400">
+                                <div className="text-right mt-2 text-xs text-[var(--color-text-muted)]">
                                     Precio Normal: <span className="line-through text-red-400 decoration-red-400">${formData.price}</span>
                                 </div>
                             </div>
@@ -792,7 +792,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
                     {/* SCALE GROUP ID */}
                     <div className="mt-4 bg-black/20 p-4 rounded-xl border border-white/10">
-                        <label className="block text-sm font-medium text-gray-300 mb-1">
+                        <label className="block text-sm font-medium text-[var(--color-text-soft)] mb-1">
                             ID Grupo de Escala (Opcional)
                         </label>
                         <div className="flex gap-2">
@@ -814,7 +814,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     {can('alerts.manage') && (
                     <div className={`mt-4 p-4 rounded-xl border transition-all duration-300 ${alertConfig.is_active ? 'bg-amber-500/10 border-amber-500/30' : 'bg-black/20 border-white/10'}`}>
                         <div className="flex justify-between items-center mb-2">
-                            <label className="text-white font-bold flex items-center gap-2">
+                            <label className="text-[var(--color-text)] font-bold flex items-center gap-2">
                                 <Bell size={16} className={alertConfig.is_active ? 'text-amber-400' : 'text-gray-500'} />
                                 Alerta de Stock
                                 {alertConfig.is_active && <span className="text-[10px] bg-amber-500 text-black px-2 py-0.5 rounded-full font-bold">ACTIVO</span>}
@@ -858,7 +858,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Prioridad</label>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Prioridad</label>
                                     <select
                                         value={alertConfig.priority}
                                         onChange={(e) => setAlertConfig(prev => ({ ...prev, priority: e.target.value }))}
@@ -878,7 +878,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                             onChange={(e) => setAlertConfig(prev => ({ ...prev, notify_system: e.target.checked }))}
                                             className="w-4 h-4 accent-amber-500"
                                         />
-                                        <span className="text-xs text-gray-300">Notificación sistema</span>
+                                        <span className="text-xs text-[var(--color-text-soft)]">Notificación sistema</span>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <input
@@ -887,12 +887,12 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                             onChange={(e) => setAlertConfig(prev => ({ ...prev, notify_whatsapp: e.target.checked }))}
                                             className="w-4 h-4 accent-green-500"
                                         />
-                                        <span className="text-xs text-gray-300">WhatsApp</span>
+                                        <span className="text-xs text-[var(--color-text-soft)]">WhatsApp</span>
                                     </div>
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs text-gray-400 mb-1">Cooldown (horas)</label>
+                                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Cooldown (horas)</label>
                                     <input
                                         type="number"
                                         value={alertConfig.cooldown_hours}
@@ -911,7 +911,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     {/* AVAILABILITY / PREORDERS SECTION (Only shows specific options if enabled) */}
                     {canPreorders && (formData.sale_mode === 'preorder_only' || formData.sale_mode === 'both') && (
                         <div className="mt-6 border-t border-white/10 pt-6">
-                            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                            <h3 className="text-lg font-semibold text-[var(--color-text)] mb-4 flex items-center gap-2">
                                 <span className="w-1 h-6 bg-orange-400 rounded-full"></span>
                                 Configuración de Encargos
                             </h3>
@@ -919,7 +919,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             <div className="space-y-4">
                                 {/* Se solicita en */}
                                 <div>
-                                    <label className="block text-sm text-gray-400 mb-1">Se solicita en (producción)</label>
+                                    <label className="block text-sm text-[var(--color-text-muted)] mb-1">Se solicita en (producción)</label>
                                     <select
                                         name="preorder_unit"
                                         value={formData.preorder_unit || ''}
@@ -938,7 +938,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
                                 {/* Se cobra en */}
                                 <div>
-                                    <label className="block text-sm text-gray-400 mb-1">Se cobra en (al entregar)</label>
+                                    <label className="block text-sm text-[var(--color-text-muted)] mb-1">Se cobra en (al entregar)</label>
                                     <div className="flex gap-2 mb-2">
                                         {[{ value: 'unit', label: 'Por unidad' }, { value: 'kg', label: 'Por kilo' }].map(opt => (
                                             <button
@@ -948,7 +948,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                                 className={cn("flex-1 py-2 rounded-xl text-sm font-bold transition-all border",
                                                     formData.preorder_billing_unit === opt.value
                                                         ? "bg-orange-400/20 text-orange-300 border-orange-400/50"
-                                                        : "bg-black/20 text-gray-400 border-white/10 hover:border-orange-400/30"
+                                                        : "bg-black/20 text-[var(--color-text-muted)] border-white/10 hover:border-orange-400/30"
                                                 )}
                                             >
                                                 {opt.label}
@@ -966,7 +966,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 <div className="bg-black/20 p-3 rounded-xl border border-white/10 space-y-3">
                                     <div className="flex justify-between items-center">
                                         <div>
-                                            <label className="text-white font-bold text-sm">Usar precio de venta</label>
+                                            <label className="text-[var(--color-text)] font-bold text-sm">Usar precio de venta</label>
                                             <p className="text-[10px] text-gray-500">
                                                 Reutilizar el precio normal ({formatCurrency(
                                                     (formData.is_offer && formData.offer_price > 0) ? parseFloat(formData.offer_price) : parseFloat(formData.price || 0),
@@ -985,7 +985,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
                                     {!formData.preorder_use_base_price && (
                                         <div className="animate-in slide-in-from-top-2 pt-2 border-t border-white/10">
-                                            <label className="block text-sm text-gray-400 mb-1">
+                                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">
                                                 Precio especial para encargo ({formData.preorder_billing_unit === 'kg' ? '$/kg' : '$/unidad'})
                                             </label>
                                             <div className="relative">
@@ -1006,7 +1006,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 {/* Peso aproximado (Only if Request=Unit AND Billing=Kg) */}
                                 {(formData.preorder_billing_unit === 'kg' && (!formData.preorder_unit || formData.preorder_unit === 'Und')) && (
                                     <div className="animate-in slide-in-from-top-2">
-                                        <label className="block text-sm text-gray-400 mb-1">⚖️ Peso aproximado por unidad (gramos)</label>
+                                        <label className="block text-sm text-[var(--color-text-muted)] mb-1">⚖️ Peso aproximado por unidad (gramos)</label>
                                         <div className="relative">
                                             <input
                                                 type="number"
@@ -1025,7 +1025,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 {/* Allow Item Notes */}
                                 <div className="flex justify-between items-center bg-black/20 p-3 rounded-xl border border-white/10">
                                     <div>
-                                        <label className="text-white font-bold text-sm">Permitir notas por item</label>
+                                        <label className="text-[var(--color-text)] font-bold text-sm">Permitir notas por item</label>
                                         <p className="text-[10px] text-gray-500">Ej: "sin sal", "rebanado grueso"</p>
                                     </div>
                                     <button
@@ -1043,7 +1043,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     {/* PRICE RANGES SECTION (Wholesale) */}
                     <div className="mt-6 border-t border-white/10 pt-6">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                            <h3 className="text-lg font-semibold text-[var(--color-text)] flex items-center gap-2">
                                 <span className="w-1 h-6 bg-purple-500 rounded-full"></span>
                                 Precios por Escala (Mayoreo)
                             </h3>
@@ -1160,7 +1160,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                                     newRanges[index] = { ...newRanges[index], price: val, margin: margin };
                                                     setFormData(prev => ({ ...prev, price_ranges: newRanges }));
                                                 }}
-                                                className="glass-input w-full py-1 px-2 text-sm !pl-5 font-bold text-white"
+                                                className="glass-input w-full py-1 px-2 text-sm !pl-5 font-bold text-[var(--color-text)]"
                                                 placeholder="0.00"
                                             />
                                         </div>
@@ -1196,7 +1196,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                         <button
                             type="button"
                             onClick={onClose}
-                            className="px-6 py-3 rounded-xl hover:bg-white/10 text-white transition-colors"
+                            className="px-6 py-3 rounded-xl hover:bg-white/10 text-[var(--color-text)] transition-colors"
                         >
                             Cancelar
                         </button>

@@ -31,7 +31,7 @@ const Reports = () => {
                         className={cn(
                             "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all",
                             activeTab === 'sales'
-                                ? "bg-[var(--primary)] text-white shadow-lg shadow-[var(--primary)]/20"
+                                ? "bg-[var(--primary)] text-[var(--color-text)] shadow-lg shadow-[var(--primary)]/20"
                                 : "text-[var(--text-muted)] hover:text-white"
                         )}
                     >
@@ -44,7 +44,7 @@ const Reports = () => {
                             className={cn(
                                 "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all",
                                 activeTab === 'preorders'
-                                    ? "bg-[var(--primary)] text-white shadow-lg shadow-[var(--primary)]/20"
+                                    ? "bg-[var(--primary)] text-[var(--color-text)] shadow-lg shadow-[var(--primary)]/20"
                                     : "text-[var(--text-muted)] hover:text-white"
                             )}
                         >

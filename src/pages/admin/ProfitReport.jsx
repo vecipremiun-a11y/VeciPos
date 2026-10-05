@@ -517,7 +517,7 @@ const ProfitReport = () => {
                                     <div className="flex items-center justify-between mb-2">
                                         <div className="flex items-center gap-2">
                                             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${index === 0 ? 'bg-yellow-500/20 text-yellow-400' :
-                                                    index === 1 ? 'bg-gray-400/20 text-gray-400' :
+                                                    index === 1 ? 'bg-gray-400/20 text-[var(--color-text-muted)]' :
                                                         index === 2 ? 'bg-orange-500/20 text-orange-400' :
                                                             'bg-blue-500/20 text-blue-400'
                                                 }`}>

@@ -457,11 +457,11 @@ const CategoryModal = ({ isOpen, onClose, onSave, categoryToEdit, categorias = [
                             onChange={(e) => setFormData({ ...formData, parentId: e.target.value === '' ? null : Number(e.target.value) })}
                             className="glass-input w-full appearance-none !pl-4 !pr-10 py-3 cursor-pointer hover:border-[var(--color-primary)] transition-colors"
                         >
-                            <option value="" className="bg-gray-900 text-white py-2">
+                            <option value="" className="bg-gray-900 text-[var(--color-text)] py-2">
                                 — Ninguna: es una categoría principal —
                             </option>
                             {posiblesMadres.map((c) => (
-                                <option key={c.id} value={c.id} className="bg-gray-900 text-white py-2">
+                                <option key={c.id} value={c.id} className="bg-gray-900 text-[var(--color-text)] py-2">
                                     {'\u00A0\u00A0\u00A0'.repeat(c.nivel - 1)}{c.nivel > 1 ? '└ ' : ''}{c.name}
                                 </option>
                             ))}
@@ -505,8 +505,8 @@ const CategoryModal = ({ isOpen, onClose, onSave, categoryToEdit, categorias = [
                                     onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                                     className="glass-input w-full appearance-none !pl-4 !pr-10 py-3 cursor-pointer hover:border-[var(--color-primary)] transition-colors"
                                 >
-                                    <option value="active" className="bg-gray-900 text-white py-2">🟢 Activa</option>
-                                    <option value="inactive" className="bg-gray-900 text-white py-2">🔴 Inactiva</option>
+                                    <option value="active" className="bg-gray-900 text-[var(--color-text)] py-2">🟢 Activa</option>
+                                    <option value="inactive" className="bg-gray-900 text-[var(--color-text)] py-2">🔴 Inactiva</option>
                                 </select>
                                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] pointer-events-none" size={16} />
                             </div>

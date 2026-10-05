@@ -332,7 +332,7 @@ const Settings = () => {
                                             className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] w-full max-w-md focus:outline-none focus:border-[var(--color-primary)]"
                                         >
                                             {timezones.map(tz => (
-                                                <option key={tz.value} value={tz.value} className="bg-[#1a1a2e] text-white">
+                                                <option key={tz.value} value={tz.value} className="bg-[#1a1a2e] text-[var(--color-text)]">
                                                     {tz.label}
                                                 </option>
                                             ))}

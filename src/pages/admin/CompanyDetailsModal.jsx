@@ -146,7 +146,7 @@ const CompanyDetailsModal = ({ company, onClose }) => {
                             <Building2 size={24} className="text-[var(--color-primary)]" />
                         </div>
                         <div>
-                            <h2 className="text-xl font-bold text-white mb-1">{company.company_name}</h2>
+                            <h2 className="text-xl font-bold text-[var(--color-text)] mb-1">{company.company_name}</h2>
                             <div className="flex items-center gap-2">
                                 <span className="text-xs text-gray-500 font-mono">ID: {company.company_id}</span>
                                 <StatusBadge status={company.company_status} />
@@ -155,7 +155,7 @@ const CompanyDetailsModal = ({ company, onClose }) => {
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
+                        className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--color-text-muted)] hover:text-white"
                     >
                         <X size={20} />
                     </button>
@@ -165,37 +165,37 @@ const CompanyDetailsModal = ({ company, onClose }) => {
 
                     {/* Subscription Info */}
                     <div>
-                        <h3 className="text-sm font-semibold text-gray-400 uppercase mb-4 flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-[var(--color-text-muted)] uppercase mb-4 flex items-center gap-2">
                             <CreditCard size={16} /> Suscripción
                         </h3>
                         <div className="bg-white/5 rounded-xl p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                 <div className="text-xs text-gray-500 mb-1">Plan Actual</div>
-                                <div className="text-white font-medium">{company.plan_name || (company.plan_id === 'monthly' ? 'Plan Mensual' : 'Sin Plan')}</div>
+                                <div className="text-[var(--color-text)] font-medium">{company.plan_name || (company.plan_id === 'monthly' ? 'Plan Mensual' : 'Sin Plan')}</div>
                             </div>
                             <div>
                                 <div className="text-xs text-gray-500 mb-1">Estado Suscripción</div>
                                 <div className={cn(
                                     "font-medium",
-                                    company.subscription_status === 'active' ? "text-green-400" : "text-gray-400"
+                                    company.subscription_status === 'active' ? "text-green-400" : "text-[var(--color-text-muted)]"
                                 )}>
                                     {company.subscription_status === 'active' ? 'Activa' : 'Inactiva / Pendiente'}
                                 </div>
                             </div>
                             <div>
                                 <div className="text-xs text-gray-500 mb-1">Monto</div>
-                                <div className="text-white font-medium font-mono">{formatCurrency(company.amount || 0)} <span className="text-xs text-gray-500">CLP</span></div>
+                                <div className="text-[var(--color-text)] font-medium font-mono">{formatCurrency(company.amount || 0)} <span className="text-xs text-gray-500">CLP</span></div>
                             </div>
                             <div>
                                 <div className="text-xs text-gray-500 mb-1">Próximo Pago</div>
-                                <div className="text-white font-medium">{formatDate(company.current_period_end)}</div>
+                                <div className="text-[var(--color-text)] font-medium">{formatDate(company.current_period_end)}</div>
                             </div>
                         </div>
                     </div>
 
                     {/* Modules Management */}
                     <div>
-                        <h3 className="text-sm font-semibold text-gray-400 uppercase mb-4 flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-[var(--color-text-muted)] uppercase mb-4 flex items-center gap-2">
                             <Package size={16} /> Módulos Habilitados
                         </h3>
                         <p className="text-xs text-gray-500 mb-4">
@@ -222,7 +222,7 @@ const CompanyDetailsModal = ({ company, onClose }) => {
                                     >
                                         <div className="flex-1 mr-4">
                                             <div className="flex items-center gap-2">
-                                                <span className="text-white font-medium text-sm">{mod.label}</span>
+                                                <span className="text-[var(--color-text)] font-medium text-sm">{mod.label}</span>
                                                 {mod.plan === 'professional' && (
                                                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/20">
                                                         <Sparkles size={8} />
@@ -245,7 +245,7 @@ const CompanyDetailsModal = ({ company, onClose }) => {
 
                     {/* Complementos (Apps) — god-mode: precio / prueba / gratis / apagar */}
                     <div>
-                        <h3 className="text-sm font-semibold text-gray-400 uppercase mb-4 flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-[var(--color-text-muted)] uppercase mb-4 flex items-center gap-2">
                             <Store size={16} /> Complementos (Apps)
                         </h3>
                         <p className="text-xs text-gray-500 mb-4">
@@ -255,12 +255,12 @@ const CompanyDetailsModal = ({ company, onClose }) => {
                             <strong className="text-red-400">Apagar</strong>: da de baja.
                         </p>
 
-                        <div className="flex items-center gap-2 mb-4 text-xs text-gray-400">
+                        <div className="flex items-center gap-2 mb-4 text-xs text-[var(--color-text-muted)]">
                             <span>Días de prueba:</span>
                             <input
                                 type="number" min="1" max="365" value={trialDays}
                                 onChange={(e) => setTrialDays(Math.max(1, Number(e.target.value) || 30))}
-                                className="w-16 bg-white/5 border border-white/10 rounded px-2 py-1 text-white text-xs outline-none focus:border-[var(--color-primary)]"
+                                className="w-16 bg-white/5 border border-white/10 rounded px-2 py-1 text-[var(--color-text)] text-xs outline-none focus:border-[var(--color-primary)]"
                             />
                         </div>
 
@@ -283,7 +283,7 @@ const CompanyDetailsModal = ({ company, onClose }) => {
                                         <div key={app.key} className="p-4 rounded-xl border border-white/10 bg-white/5">
                                             <div className="flex items-center justify-between mb-3">
                                                 <div>
-                                                    <span className="text-white font-medium text-sm">{app.name}</span>
+                                                    <span className="text-[var(--color-text)] font-medium text-sm">{app.name}</span>
                                                     <span className="text-gray-500 text-xs ml-2">${price.toLocaleString('es-CL')}/mes</span>
                                                 </div>
                                                 <span className={cn('text-xs font-bold', st.cls)}>{st.label}</span>
@@ -299,7 +299,7 @@ const CompanyDetailsModal = ({ company, onClose }) => {
                                                             disabled={!!updatingApp}
                                                             className={cn(
                                                                 'py-1.5 rounded-lg text-xs font-bold border transition-colors',
-                                                                isActive ? m.cls : 'border-white/10 text-gray-400 hover:text-white hover:border-white/20',
+                                                                isActive ? m.cls : 'border-white/10 text-[var(--color-text-muted)] hover:text-white hover:border-white/20',
                                                                 updatingApp && 'opacity-60'
                                                             )}
                                                         >
@@ -317,17 +317,17 @@ const CompanyDetailsModal = ({ company, onClose }) => {
 
                     {/* Dates Info */}
                     <div>
-                        <h3 className="text-sm font-semibold text-gray-400 uppercase mb-4 flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-[var(--color-text-muted)] uppercase mb-4 flex items-center gap-2">
                             <Clock size={16} /> Fechas
                         </h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-white/5 p-3 rounded-lg">
                                 <div className="text-xs text-gray-500 mb-1">Fecha de Creación</div>
-                                <div className="text-sm text-white">{formatDate(company.created_at || new Date().toISOString())}</div>
+                                <div className="text-sm text-[var(--color-text)]">{formatDate(company.created_at || new Date().toISOString())}</div>
                             </div>
                             <div className="bg-white/5 p-3 rounded-lg">
                                 <div className="text-xs text-gray-500 mb-1">Inicio Periodo Actual</div>
-                                <div className="text-sm text-white">{formatDate(company.current_period_start)}</div>
+                                <div className="text-sm text-[var(--color-text)]">{formatDate(company.current_period_start)}</div>
                             </div>
                         </div>
                     </div>

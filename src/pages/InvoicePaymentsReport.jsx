@@ -529,7 +529,7 @@ const InvoicePaymentsReport = () => {
                 >
                     <button
                         onClick={() => setShowDocumentModal(false)}
-                        className="absolute top-4 right-4 p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+                        className="absolute top-4 right-4 p-3 bg-white/20 hover:bg-white/30 rounded-full text-[var(--color-text)] transition-colors"
                     >
                         <X size={24} />
                     </button>

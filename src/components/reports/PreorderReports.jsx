@@ -119,7 +119,7 @@ const PreorderReports = () => {
                         className={cn(
                             "px-4 py-2 rounded-lg text-sm font-medium transition-all capitalize",
                             dateRange === range
-                                ? "bg-[var(--primary)] text-white shadow-lg shadow-[var(--primary)]/20"
+                                ? "bg-[var(--primary)] text-[var(--color-text)] shadow-lg shadow-[var(--primary)]/20"
                                 : "bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
                         )}
                     >

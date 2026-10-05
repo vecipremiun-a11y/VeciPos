@@ -176,7 +176,7 @@ const InventoryReconciliation = () => {
                     <p className="text-xl lg:text-2xl font-bold">{stats.lotsGreater}</p>
                     <p className="text-purple-200 text-[10px]">Lotes suman más que stock</p>
                 </div>
-                <div className="bg-gray-600 text-white p-3 lg:p-4 rounded-xl shadow-lg">
+                <div className="bg-gray-600 text-[var(--color-text)] p-3 lg:p-4 rounded-xl shadow-lg">
                     <h3 className="text-[10px] lg:text-xs font-bold uppercase">Stock Negativo</h3>
                     <p className="text-xl lg:text-2xl font-bold">{stats.negativeStock}</p>
                     <p className="text-[var(--color-text-muted)] text-[10px]">Productos con stock {'<'} 0</p>

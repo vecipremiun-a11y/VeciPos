@@ -97,14 +97,14 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
 
     const InputField = ({ label, field, type = 'text', placeholder, error, ...props }) => (
         <div>
-            <label className="block text-xs font-medium text-gray-400 mb-1.5">{label}</label>
+            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5">{label}</label>
             <input
                 type={type}
                 value={form[field]}
                 onChange={(e) => handleChange(field, e.target.value)}
                 placeholder={placeholder}
                 className={cn(
-                    'w-full px-3 py-2.5 bg-white/5 border rounded-xl text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 transition-all',
+                    'w-full px-3 py-2.5 bg-white/5 border rounded-xl text-[var(--color-text)] text-sm placeholder-gray-600 focus:outline-none focus:ring-2 transition-all',
                     error
                         ? 'border-red-500/50 focus:ring-red-500/30'
                         : 'border-white/10 focus:ring-[var(--color-primary)]/30 focus:border-[var(--color-primary)]/50'
@@ -126,13 +126,13 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                             <Building2 size={20} className="text-[var(--color-primary)]" />
                         </div>
                         <div>
-                            <h2 className="text-lg font-bold text-white">Nueva Empresa</h2>
+                            <h2 className="text-lg font-bold text-[var(--color-text)]">Nueva Empresa</h2>
                             <p className="text-xs text-gray-500">Crear empresa manualmente</p>
                         </div>
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white"
+                        className="p-2 hover:bg-white/10 rounded-lg transition-colors text-[var(--color-text-muted)] hover:text-white"
                     >
                         <X size={20} />
                     </button>
@@ -153,7 +153,7 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                     {/* Company ID */}
                     <div>
                         <div className="flex items-center justify-between mb-1.5">
-                            <label className="text-xs font-medium text-gray-400">ID de Empresa</label>
+                            <label className="text-xs font-medium text-[var(--color-text-muted)]">ID de Empresa</label>
                             <button
                                 type="button"
                                 onClick={generateId}
@@ -168,7 +168,7 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                             onChange={(e) => handleChange('id', e.target.value.replace(/\s/g, '-').toLowerCase())}
                             placeholder="mi-tienda"
                             className={cn(
-                                'w-full px-3 py-2.5 bg-white/5 border rounded-xl text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:ring-2 transition-all',
+                                'w-full px-3 py-2.5 bg-white/5 border rounded-xl text-[var(--color-text)] text-sm font-mono placeholder-gray-600 focus:outline-none focus:ring-2 transition-all',
                                 errors.id
                                     ? 'border-red-500/50 focus:ring-red-500/30'
                                     : 'border-white/10 focus:ring-[var(--color-primary)]/30 focus:border-[var(--color-primary)]/50'
@@ -180,11 +180,11 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                     {/* Country & Plan */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-xs font-medium text-gray-400 mb-1.5">País</label>
+                            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5">País</label>
                             <select
                                 value={form.country}
                                 onChange={(e) => handleChange('country', e.target.value)}
-                                className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 transition-all appearance-none"
+                                className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 transition-all appearance-none"
                             >
                                 <option value="CL">🇨🇱 Chile</option>
                                 <option value="AR">🇦🇷 Argentina</option>
@@ -196,11 +196,11 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-gray-400 mb-1.5">Plan</label>
+                            <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5">Plan</label>
                             <select
                                 value={form.plan}
                                 onChange={(e) => handleChange('plan', e.target.value)}
-                                className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 transition-all appearance-none"
+                                className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 transition-all appearance-none"
                             >
                                 <option value="standard">Standard</option>
                                 <option value="professional">Profesional</option>
@@ -210,13 +210,13 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
 
                     {/* Dueño de la empresa (cliente) — el enlace a su cuenta se deduce de aquí */}
                     <div>
-                        <label className="block text-xs font-medium text-gray-400 mb-1.5">Dueño de la empresa</label>
+                        <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5">Dueño de la empresa</label>
                         <select
                             value={form.ownerUserId}
                             onChange={(e) => handleChange('ownerUserId', e.target.value)}
                             disabled={form.createUser}
                             className={cn(
-                                'w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 transition-all appearance-none',
+                                'w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-[var(--color-text)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 transition-all appearance-none',
                                 form.createUser && 'opacity-50 cursor-not-allowed'
                             )}
                         >
@@ -241,8 +241,8 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                             className="flex items-center justify-between w-full group"
                         >
                             <div className="flex items-center gap-2">
-                                <UserPlus size={16} className="text-gray-400 group-hover:text-white transition-colors" />
-                                <span className="text-sm font-medium text-gray-300 group-hover:text-white transition-colors">
+                                <UserPlus size={16} className="text-[var(--color-text-muted)] group-hover:text-white transition-colors" />
+                                <span className="text-sm font-medium text-[var(--color-text-soft)] group-hover:text-white transition-colors">
                                     Crear dueño nuevo (cliente)
                                 </span>
                             </div>
@@ -291,7 +291,7 @@ const CreateCompanyModal = ({ onClose, onCreated }) => {
                         <button
                             type="button"
                             onClick={onClose}
-                            className="flex-1 px-4 py-2.5 bg-white/5 text-gray-400 font-medium rounded-xl hover:bg-white/10 transition-colors text-sm"
+                            className="flex-1 px-4 py-2.5 bg-white/5 text-[var(--color-text-muted)] font-medium rounded-xl hover:bg-white/10 transition-colors text-sm"
                         >
                             Cancelar
                         </button>
