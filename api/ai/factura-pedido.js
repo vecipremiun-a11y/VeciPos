@@ -50,7 +50,7 @@ const ESQUEMA = {
         totalNeto: { type: 'number', description: 'Total neto impreso, 0 si no aparece' },
         lineas: {
             type: 'array',
-            description: 'Un renglón por producto comprado',
+            description: 'Un renglón por producto comprado, en el MISMO orden en que aparecen en la factura, de arriba hacia abajo',
             items: {
                 type: 'object',
                 properties: {
@@ -86,6 +86,7 @@ const INSTRUCCIONES = [
     'Transcribí lo que ves, sin corregir ni completar. Si un dato está borroso, dejalo vacío en vez de suponerlo.',
     'Si la factura trae una columna de código de producto, copiala EXACTA en `codigo`. Es lo que después permite reconocer el producto sin depender del nombre.',
     'La descripción va tal cual está impresa, con sus abreviaturas: no la expandas ni la corrijas. "DINAMITA FH 100" se transcribe así, no como "Doritos Dinamita Flamin Hot".',
+    'Devolvé los renglones en el MISMO orden en que están impresos, de arriba hacia abajo, sin agruparlos ni ordenarlos: quien revisa el pedido lo va siguiendo con la factura en la mano.',
     'Los renglones sin cantidad ni precio son formulario en blanco, NO compras: no los incluyas. Un talonario preimpreso puede traer decenas de líneas vacías.',
     'No incluyas renglones que no son productos: fletes, "distribución y logística", redondeos.',
     'Si un renglón trae descuento, fijate si el TOTAL de esa línea ya lo tiene aplicado. El costo unitario que devuelvas tiene que ser el que, multiplicado por la cantidad, da ese total.',

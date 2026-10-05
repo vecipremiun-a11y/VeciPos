@@ -194,17 +194,38 @@ async function supplierOrderAddItems(turso, companyId, session, { id, items }) {
             quantity: Number(nuevo.quantity) || 0,
             taxRate: Number(nuevo.taxRate) || 0,
         };
+        // Un renglón de factura enganchado a mano trae su número de renglón y
+        // cómo venía escrito: con eso vuelve a su lugar y se ve de dónde salió.
+        if (Number(nuevo.renglon) > 0) linea.renglon = Number(nuevo.renglon);
+        if (nuevo.desdeFactura) linea.desdeFactura = String(nuevo.desdeFactura);
+        if (nuevo.codigoProveedor) linea.codigoProveedor = String(nuevo.codigoProveedor).trim();
         linea.total = bruto * linea.quantity;
 
         // Si el producto ya estaba en el pedido se suma la cantidad, en vez de
-        // dejar dos líneas del mismo producto.
+        // dejar dos líneas del mismo producto. Se conserva lo que ya tenía (de
+        // qué renglón de la factura vino, su código): antes se pisaba.
         const idx = fusionados.findIndex(i => String(i.id) === String(linea.id));
         if (idx >= 0) {
-            const cantidad = (Number(fusionados[idx].quantity) || 0) + linea.quantity;
-            fusionados[idx] = { ...linea, quantity: cantidad, total: bruto * cantidad };
+            const previa = fusionados[idx];
+            const cantidad = (Number(previa.quantity) || 0) + linea.quantity;
+            const renglones = [previa.renglon, linea.renglon].filter(n => Number(n) > 0);
+            fusionados[idx] = {
+                ...previa, ...linea,
+                desdeFactura: previa.desdeFactura || linea.desdeFactura,
+                codigoProveedor: previa.codigoProveedor || linea.codigoProveedor,
+                ...(renglones.length ? { renglon: Math.min(...renglones) } : {}),
+                quantity: cantidad, total: bruto * cantidad,
+            };
         } else {
             fusionados.push(linea);
         }
+    }
+
+    // Mismo orden que la factura. Lo que no viene de un renglón (agregado con
+    // "Agregar productos") queda al final, en el orden en que se agregó.
+    // Pedidos que no nacieron de una factura no tienen renglón: quedan igual.
+    if (fusionados.some(i => Number(i.renglon) > 0)) {
+        fusionados.sort((a, b) => (Number(a.renglon) || Infinity) - (Number(b.renglon) || Infinity));
     }
 
     const total = fusionados.reduce((s, i) => s + (Number(i.total) || 0), 0);
@@ -819,7 +840,11 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
     // Renglones que vinieron por caja: convertidos (porCaja) o a confirmar (sugerencias).
     const porCaja = [];
     const sugerencias = [];
-    for (const l of lineas) {
+    for (const [k, l] of lineas.entries()) {
+        // Número de renglón en la factura (1, 2, 3…). Con él, el pedido se lee en
+        // el mismo orden que el papel, y un renglón que se engancha a mano después
+        // vuelve a su lugar en vez de irse al final (ver supplierOrderAddItems).
+        const renglon = k + 1;
         const costo = Number(l.costo) || 0;
         // La cantidad se verifica contra el TOTAL impreso del renglón, que es el
         // único dato que no depende de interpretar columnas.
@@ -849,13 +874,13 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
             }
         }
         if (cantidad <= 0 || costo <= 0) {
-            sinEmparejar.push({ descripcion: l.descripcion, motivo: 'sin cantidad o sin costo' });
+            sinEmparejar.push({ renglon, descripcion: l.descripcion, motivo: 'sin cantidad o sin costo' });
             continue;
         }
         const p = await buscarProducto(turso, companyId, l.descripcion, l.codigo);
         if (!p) {
             sinEmparejar.push({
-                descripcion: l.descripcion, cantidad, costo,
+                renglon, descripcion: l.descripcion, cantidad, costo,
                 codigo: l.codigo || null,
                 iva: l.iva != null ? Number(l.iva) : null,
                 motivo: 'no está en el catálogo',
@@ -864,7 +889,7 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
         }
         if (p.ambiguo) {
             sinEmparejar.push({
-                descripcion: l.descripcion, cantidad, costo,
+                renglon, descripcion: l.descripcion, cantidad, costo,
                 codigo: l.codigo || null,
                 // El IVA del renglón viaja con él: si después se engancha a mano
                 // desde la pantalla, el costo con impuesto tiene que salir del
@@ -919,6 +944,7 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
             id: p.id,
             name: p.name,
             sku: p.sku || '',
+            renglon,
             cost: costo2,
             costWithTax: costoConIva,
             quantity: cantidad2,
@@ -976,7 +1002,7 @@ async function supplierOrderFromInvoice(turso, companyId, session, { proveedor, 
         total,
         totalNeto,
         items: items.map(i => ({
-            producto: i.name, desdeFactura: i.desdeFactura,
+            renglon: i.renglon, producto: i.name, desdeFactura: i.desdeFactura,
             cantidad: i.quantity, costo: i.cost, comoSeEmparejo: i.comoSeEmparejo,
         })),
         // Renglones donde la cantidad leída no daba el total impreso y se usó la

@@ -153,6 +153,10 @@ const CargarFacturaModal = ({ archivo, onClose, onCreado }) => {
             costWithTax,
             quantity: linea.cantidad,
             taxRate: tasa,
+            // Para que vuelva a su lugar en el pedido (el orden de la factura).
+            renglon: linea.renglon,
+            desdeFactura: linea.descripcion,
+            codigoProveedor: linea.codigo || null,
         }]);
 
         if (!vivo.current) return;
@@ -184,12 +188,14 @@ const CargarFacturaModal = ({ archivo, onClose, onCreado }) => {
             return {
                 ...prev,
                 emparejados: (prev.emparejados || 0) + 1,
+                // En su lugar según el renglón de la factura, igual que en el pedido.
                 items: [...(prev.items || []), {
+                    renglon: linea.renglon,
                     producto: candidato.name,
                     desdeFactura: linea.descripcion,
                     cantidad: linea.cantidad,
                     costo: linea.costo,
-                }],
+                }].sort((a, b) => (Number(a.renglon) || Infinity) - (Number(b.renglon) || Infinity)),
                 // El total lo manda el servidor, que es quien recalculó el pedido.
                 total: Number(r.total_amount) || prev.total,
                 totalNeto: netoNuevo,
