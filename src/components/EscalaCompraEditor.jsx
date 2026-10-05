@@ -111,7 +111,11 @@ export default function EscalaCompraEditor({ costo, iva, contexto, presentacione
         ...c, price: Math.round(precioDesdeUtilidad(costoCaja(c), margenCajaAnterior(c), iva) / c.units) * c.units,
     })));
 
-    const costoCambio = cambioCosto !== null && Math.abs(cambioCosto) >= 0.5;
+    // El aviso "Costo ±x% · revisar" es para la escala y las cajas que YA tiene
+    // el producto: sus precios se calcularon con el costo viejo. Si no tiene
+    // ninguna, no hay nada que revisar y el aviso solo confunde.
+    const costoCambio = cambioCosto !== null && Math.abs(cambioCosto) >= 0.5
+        && (escalaOriginal.length > 0 || cajas.length > 0);
     const hayCajaInvalida = cajas.some(c => c.price > 0 && !Number.isInteger(c.price / c.units));
     const hayNuevaInvalida = nuevas.some(n => Number(n.units) >= 2 && Number(n.price) > 0 && !Number.isInteger(Number(n.price) / Number(n.units)));
     const errores = erroresEscala(escala);
