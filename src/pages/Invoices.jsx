@@ -5,6 +5,7 @@ import { dataApiCall, reportCall } from '../lib/dataApi';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { formatCurrency } from '../utils/formatCurrency';
+import { toast } from '../lib/toast';
 
 const Invoices = () => {
     const { fetchPurchaseDetails, deletePurchase, activeCompanyId, suppliers, currentCurrency } = useStore();
@@ -202,8 +203,17 @@ const Invoices = () => {
 
     const handleDeleteInvoice = async (e, id) => {
         e.stopPropagation();
-        if (window.confirm('¿Estás seguro de eliminar esta factura?')) {
-            await deletePurchase(id);
+        // Eliminar deshace la compra: se descuenta del stock lo que entró con ella.
+        if (window.confirm('¿Eliminar esta compra?\n\nSe descuenta del stock lo que entró con ella. El costo y el precio de venta que actualizó no vuelven atrás.')) {
+            const r = await deletePurchase(id);
+            if (!r?.success) {
+                toast(r?.error ? `No se pudo eliminar: ${r.error}` : 'No se pudo eliminar la compra', 'error');
+                return;
+            }
+            toast(r.sinLotes
+                ? 'Compra eliminada. Es una compra antigua sin lotes enlazados: el stock no se tocó, revisalo a mano.'
+                : `Compra eliminada. Stock descontado: ${r.stockDescontado.map(d => `${d.nombre} −${d.cantidad}`).join(', ')}.`,
+            r.sinLotes ? 'error' : 'success');
             loadInvoices(0, true);
             loadStats();
             loadPendingInvoices();
@@ -597,7 +607,7 @@ const Invoices = () => {
                                                     </td>
                                                     <td className="px-6 py-4 text-right text-[var(--color-text)] font-bold">{formatCurrency(inv.total, currentCurrency)}</td>
                                                     <td className="px-6 py-4 text-right">
-                                                        <button onClick={(e) => handleDeleteInvoice(e, inv.id)} className="p-2 hover:bg-[var(--color-surface-hover)] rounded text-red-400 opacity-0 group-hover:opacity-100"><Trash2 size={20} /></button>
+                                                        <button onClick={(e) => handleDeleteInvoice(e, inv.id)} title="Eliminar compra (descuenta su stock)" className="p-2 hover:bg-[var(--color-surface-hover)] rounded text-red-400 lg:opacity-0 lg:group-hover:opacity-100"><Trash2 size={20} /></button>
                                                     </td>
                                                 </tr>
                                             ))}

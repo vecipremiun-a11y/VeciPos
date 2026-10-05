@@ -83,6 +83,9 @@ const Purchases = () => {
     // escala arranca de cero: sin esto, elegir el mismo producto otra vez
     // conservaba los tramos a medio cargar de antes.
     const [sesionEditor, setSesionEditor] = useState(0);
+    // Clave de la compra que se está guardando: se crea al primer "Guardar" y se
+    // reutiliza en los reintentos, hasta que la compra entra (migración 0031).
+    const claveCompra = useRef(null);
     const [entryForm, setEntryForm] = useState({
         cost: '',
         price: '',
@@ -493,7 +496,12 @@ const Purchases = () => {
             deposit: invoiceData.deposit ? parseFloat(invoiceData.deposit) : 0,
             paymentMethod: invoiceData.paymentMethod,
             observation: invoiceData.observation || null,
-            document: documentBase64
+            document: documentBase64,
+            // La misma clave en cada reintento de ESTA compra: si un intento
+            // anterior sí entró, el servidor contesta con esa y no la duplica.
+            claveCliente: claveCompra.current || (claveCompra.current = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.floor(Math.random() * 1e9)}`),
         };
 
         // `addPurchase` devuelve un OBJETO, siempre. Acá se leía como si fuera
@@ -502,6 +510,11 @@ const Purchases = () => {
         // la compra sin guardar. Hay que mirar el campo, no el objeto.
         const res = await addPurchase(purchase);
         if (res?.success) {
+            // La compra quedó: la próxima empieza con clave nueva.
+            claveCompra.current = null;
+            if (res.repetida) {
+                toast(`Esta compra ya se había guardado (#${res.purchaseId}) en el intento anterior: no se duplicó.`, 'success');
+            }
             // Renglones que no llegaron a ningún inventario: el producto ya no
             // existe, o el renglón nunca quedó emparejado. Se avisa fuerte, no
             // con un mensajito que se va solo: es mercadería que se pagó y que
@@ -530,11 +543,15 @@ const Purchases = () => {
                     toast(`Compra guardada, pero el pedido #${desdePedido.orderId} sigue pendiente: marcalo a mano.`, 'error');
                 }
                 setDesdePedido(null);
-            } else {
+            } else if (!res.repetida) {
                 toast('Compra guardada correctamente', 'success');
             }
             setInvoiceItems([]);
             setInvoiceData({ ...invoiceData, invoiceNumber: '', observation: '', document: null });
+        } else if (res?._network) {
+            // Sin respuesta no quiere decir que no se guardó: el servidor puede
+            // haber terminado igual. Reintentar es seguro (misma clave).
+            toast('No llegó la respuesta del servidor. Puede que la compra se haya guardado igual: volvé a apretar Guardar — no se va a duplicar.', 'error');
         } else {
             toast(res?.error ? `No se pudo guardar la compra: ${res.error}` : 'No se pudo guardar la compra', 'error');
         }

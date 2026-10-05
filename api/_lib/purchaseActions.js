@@ -248,8 +248,42 @@ async function supplierOrderDelete(turso, companyId, session, { id }) {
 
 // ── Compras ──────────────────────────────────────────────────────
 
+// ¿Ya hay una compra guardada con esta clave? (ver migración 0031). Sin la
+// columna —migración aún no aplicada— contesta null y la compra sigue como antes.
+async function compraConClave(turso, companyId, clave) {
+    if (!clave) return null;
+    try {
+        const r = await turso.execute({
+            sql: 'SELECT id FROM purchases WHERE company_id = ? AND client_key = ? LIMIT 1',
+            args: [companyId, clave],
+        });
+        return r.rows[0] ? Number(r.rows[0].id) : null;
+    } catch {
+        return null;
+    }
+}
+
 async function purchaseCreate(turso, companyId, session, { purchase }) {
     if (!purchase?.items?.length) return { success: false, error: 'Compra sin items' };
+
+    // ── Reintento de una compra que ya entró ────────────────────────────
+    //
+    // El 5-oct-2026 la misma compra quedó guardada dos veces (#1701 y #1702) y
+    // el stock se sumó doble: la pantalla dejó de esperar a los 12 s, dijo "Sin
+    // respuesta del servidor", y al volver a apretar Guardar entró otra. El
+    // servidor no se había caído, estaba lento, y terminó la primera.
+    //
+    // El navegador manda la misma `claveCliente` en cada reintento de una
+    // compra. Si ya hay una con esa clave, se contesta con ella: no se crea
+    // otra ni se vuelve a sumar stock.
+    const clave = purchase.claveCliente ? String(purchase.claveCliente).slice(0, 80) : null;
+    const yaGuardada = await compraConClave(turso, companyId, clave);
+    if (yaGuardada) {
+        return {
+            success: true, purchaseId: yaGuardada, repetida: true,
+            itemsSinAplicar: [], preciosNoAplicados: [], codigosAprendidos: [], codigosEnConflicto: [], presentacionesCreadas: [],
+        };
+    }
 
     // ── Antes de tocar nada: ¿qué productos de la factura existen? ───
     //
@@ -288,18 +322,46 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
         }));
 
     // 1. Insert compra (primero, para enlazar lotes por purchase_id)
-    const purchaseResult = await turso.execute({
-        sql: `INSERT INTO purchases (supplier_id, supplier_name, invoice_number, date, total, items, status, user_id,
-                is_credit, credit_days, expiry_date, deposit, payment_method, company_id, payment_observation, payment_document)
-              VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-        args: [
-            purchase.supplierId, purchase.supplierName, purchase.invoiceNumber || '', purchase.date,
-            purchase.total, JSON.stringify(purchase.items), session?.uid ?? null,
-            purchase.isCredit ? 1 : 0, purchase.creditDays || null, purchase.expiryDate || null,
-            purchase.deposit || 0, purchase.paymentMethod || 'Efectivo', companyId,
-            purchase.observation || null, purchase.document || null,
-        ],
-    });
+    const columnas = `supplier_id, supplier_name, invoice_number, date, total, items, status, user_id,
+                is_credit, credit_days, expiry_date, deposit, payment_method, company_id, payment_observation, payment_document`;
+    const valores = [
+        purchase.supplierId, purchase.supplierName, purchase.invoiceNumber || '', purchase.date,
+        purchase.total, JSON.stringify(purchase.items), session?.uid ?? null,
+        purchase.isCredit ? 1 : 0, purchase.creditDays || null, purchase.expiryDate || null,
+        purchase.deposit || 0, purchase.paymentMethod || 'Efectivo', companyId,
+        purchase.observation || null, purchase.document || null,
+    ];
+    let purchaseResult;
+    try {
+        purchaseResult = clave
+            ? await turso.execute({
+                sql: `INSERT INTO purchases (${columnas}, client_key)
+                      VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+                args: [...valores, clave],
+            })
+            : null;
+    } catch (err) {
+        const msg = String(err?.message || '');
+        // Dos intentos al mismo tiempo: el índice único dejó entrar uno solo.
+        if (/UNIQUE/i.test(msg)) {
+            const otra = await compraConClave(turso, companyId, clave);
+            if (otra) {
+                return {
+                    success: true, purchaseId: otra, repetida: true,
+                    itemsSinAplicar: [], preciosNoAplicados: [], codigosAprendidos: [], codigosEnConflicto: [], presentacionesCreadas: [],
+                };
+            }
+        }
+        // Sin la columna (migración 0031 aún no aplicada): se guarda como antes.
+        if (!/no such column|no column named/i.test(msg)) throw err;
+    }
+    if (!purchaseResult) {
+        purchaseResult = await turso.execute({
+            sql: `INSERT INTO purchases (${columnas})
+                  VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+            args: valores,
+        });
+    }
     const rawId = purchaseResult.rows[0]?.id || purchaseResult.lastInsertRowid;
     const purchaseId = typeof rawId === 'bigint' ? Number(rawId) : rawId;
 
@@ -380,7 +442,17 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
         sql: 'INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         args: [companyId, session?.uid ?? null, 'CREATE', 'PURCHASE', JSON.stringify({ total: purchase.total }), nowIso()],
     });
-    await turso.batch(queries);
+    try {
+        await turso.batch(queries);
+    } catch (err) {
+        // El batch es todo o nada, pero la fila de la compra ya se insertó antes
+        // (paso 1). Si quedara, un reintento con la misma clave contestaría "ya
+        // estaba guardada" con una compra que no sumó stock. Se borra.
+        try {
+            await turso.execute({ sql: 'DELETE FROM purchases WHERE id = ? AND company_id = ?', args: [purchaseId, companyId] });
+        } catch { /* lo importante es avisar del error de abajo */ }
+        throw err;
+    }
 
     // ── Aprender el código del proveedor de cada renglón ────────────────
     //
@@ -517,14 +589,71 @@ async function purchaseDetails(turso, companyId, session, { id }) {
     return { success: true, purchase: result.rows[0] || null };
 }
 
+// Eliminar una compra la deshace: descuenta del stock lo que entró con ella.
+//
+// Antes solo borraba la fila de la compra: el stock, los lotes, el detalle de
+// renglones y el resumen por proveedor quedaban como si la compra existiera.
+// Con la compra duplicada del 5-oct-2026 (#1701/#1702) eso significaba que
+// borrar la repetida no arreglaba nada: el stock seguía sumado dos veces.
+//
+// Lo que se descuenta sale de los LOTES que creó esa compra (uno por renglón
+// que llegó al inventario, con su cantidad inicial), no de la lista de
+// renglones: un renglón que no entró al inventario (producto inexistente) no
+// sumó stock y no tiene que restar. Una compra vieja sin lotes enlazados no
+// toca el stock, y la respuesta lo dice.
+//
+// El costo y el precio de venta que la compra actualizó no se vuelven atrás:
+// no se guarda cuál era el anterior.
 async function purchaseDelete(turso, companyId, session, { id }) {
     if (!id) return { success: false, error: 'Falta id' };
-    await turso.execute({
-        sql: 'DELETE FROM purchases WHERE id = ? AND company_id = ?',
+    const compra = (await turso.execute({
+        sql: 'SELECT id, supplier_id, date, total, items FROM purchases WHERE id = ? AND company_id = ?',
         args: [id, companyId],
+    })).rows[0];
+    if (!compra) return { success: false, error: 'Esa compra no existe' };
+
+    const lotes = (await turso.execute({
+        sql: `SELECT l.product_id, SUM(COALESCE(l.initial_quantity, l.quantity, 0)) AS cantidad, p.name, p.sku
+              FROM product_lots l
+              LEFT JOIN products p ON p.id = l.product_id AND p.company_id = l.company_id
+              WHERE l.purchase_id = ? AND l.company_id = ?
+              GROUP BY l.product_id`,
+        args: [id, companyId],
+    })).rows;
+
+    const queries = [];
+    for (const l of lotes) {
+        if (!(Number(l.cantidad) > 0) || !l.name) continue; // producto ya borrado: nada que descontar
+        queries.push({
+            sql: 'UPDATE products SET stock = ROUND(stock - ?, 3), updated_at = ? WHERE id = ? AND company_id = ?',
+            args: [Number(l.cantidad), nowIso(), l.product_id, companyId],
+        });
+    }
+    queries.push({ sql: 'DELETE FROM product_lots WHERE purchase_id = ? AND company_id = ?', args: [id, companyId] });
+    queries.push({ sql: 'DELETE FROM purchase_items WHERE purchase_id = ? AND company_id = ?', args: [id, companyId] });
+
+    // Resumen por proveedor: misma llave que arma purchaseCreate.
+    let renglones = [];
+    try { renglones = JSON.parse(compra.items || '[]'); } catch { renglones = []; }
+    const dia = new Date(compra.date || nowIso()).toLocaleDateString('en-CA');
+    queries.push({
+        sql: `UPDATE supplier_purchase_summary SET
+                total_purchases = MAX(total_purchases - 1, 0),
+                total_amount = total_amount - ?,
+                total_items = total_items - ?,
+                updated_at = ?
+              WHERE id = ?`,
+        args: [Number(compra.total) || 0, renglones.reduce((s, i) => s + (Number(i?.quantity) || 0), 0), nowIso(),
+            `supp_buy_${companyId}_${compra.supplier_id}_${dia}`],
     });
-    await auditLog(turso, companyId, session, 'DELETE', 'PURCHASE', { id });
-    return { success: true };
+    queries.push({ sql: 'DELETE FROM purchases WHERE id = ? AND company_id = ?', args: [id, companyId] });
+    await turso.batch(queries);
+
+    const stockDescontado = lotes
+        .filter(l => Number(l.cantidad) > 0 && l.name)
+        .map(l => ({ productId: l.product_id, nombre: l.name, sku: l.sku, cantidad: Number(l.cantidad) }));
+    await auditLog(turso, companyId, session, 'DELETE', 'PURCHASE', { id, total: compra.total, stockDescontado });
+    return { success: true, stockDescontado, sinLotes: lotes.length === 0 };
 }
 
 async function supplierPurchaseSummaryGet(turso, companyId, session, { startDate, endDate }) {

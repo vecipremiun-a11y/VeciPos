@@ -71,7 +71,13 @@ const ESPERA_NORMAL_MS = 12000;
 // sobra.
 const ESPERA_VENTA_MS = 60000;
 const ACCIONES_DE_VENTA = new Set(['saleCommit', 'saleAggregations']);
-const ESPERA_DE = (accion) => (ACCIONES_DE_VENTA.has(accion) ? ESPERA_VENTA_MS : ESPERA_NORMAL_MS);
+// Guardar o borrar una compra también tiene un minuto. Con 12 s, el 5-oct-2026
+// una compra lenta se dio por perdida, se volvió a apretar Guardar y quedó dos
+// veces con el stock sumado doble. Acá sí hay alguien esperando, pero es mejor
+// esperar unos segundos más que duplicar mercadería. (Y el reintento ya no
+// duplica: ver claveCliente en purchaseCreate.)
+const ACCIONES_LARGAS = new Set([...ACCIONES_DE_VENTA, 'purchaseCreate', 'purchaseDelete']);
+const ESPERA_DE = (accion) => (ACCIONES_LARGAS.has(accion) ? ESPERA_VENTA_MS : ESPERA_NORMAL_MS);
 
 /** ¿El POS se da por sin conexión ahora mismo? Mira el monitor real (latido a
  * /api/ping), no solo `navigator.onLine`, que con WiFi sin internet miente. */
@@ -3298,6 +3304,8 @@ export const useStore = create(persist((set, get) => ({
             // Los avisos de precios y códigos también viajan: la pantalla los muestra.
             return {
                 success: true, purchaseId, itemsSinAplicar: sinAplicar,
+                // El servidor ya la tenía (un intento anterior sí entró): no se duplicó.
+                repetida: !!r.repetida,
                 preciosNoAplicados: r.preciosNoAplicados || [],
                 codigosAprendidos: r.codigosAprendidos || [],
                 codigosEnConflicto: r.codigosEnConflicto || [],
@@ -3343,10 +3351,26 @@ export const useStore = create(persist((set, get) => ({
             const r = await userApiCall('purchaseDelete', { companyId: activeCompanyId, id });
             if (!r?.success) return r || { success: false, error: 'Error eliminando compra' };
 
+            // El servidor descontó del stock lo que había entrado con esta compra
+            // (ver purchaseDelete): se refleja acá y se le avisa a la tienda.
+            const descontado = Array.isArray(r.stockDescontado) ? r.stockDescontado : [];
+            const porProducto = new Map(descontado.map(d => [String(d.productId), Number(d.cantidad) || 0]));
             set((state) => ({
-                purchases: state.purchases.filter(p => p.id !== id)
+                purchases: state.purchases.filter(p => p.id !== id),
+                products: porProducto.size
+                    ? state.products.map(p => (porProducto.has(String(p.id))
+                        ? { ...p, stock: Math.round((parseFloat(p.stock) - porProducto.get(String(p.id))) * 1000) / 1000 }
+                        : p))
+                    : state.products,
+                productLots: (state.productLots || []).filter(l => String(l.purchase_id) !== String(id)),
             }));
-            return { success: true };
+            if (descontado.length) {
+                get().sincronizarCompraConTienda(
+                    descontado.map(d => d.productId),
+                    descontado.map(d => ({ id: d.productId, sku: d.sku })),
+                ).catch((e) => console.warn('No se pudo avisar a la tienda del stock descontado:', e));
+            }
+            return { success: true, stockDescontado: descontado, sinLotes: !!r.sinLotes };
         } catch (e) {
             console.error("Delete purchase error", e);
             return { success: false, error: e.message };
