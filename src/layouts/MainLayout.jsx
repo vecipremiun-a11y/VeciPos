@@ -217,7 +217,9 @@ const MainLayout = () => {
                 { icon: ClipboardList, label: 'Pedidos Realizados', path: '/orders/history', permission: 'supplier_orders.view' },
                 // Movida desde Inventario: una compra es el final del circuito de
                 // una orden de compra, no un dato del catálogo.
-                { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view', moduleKey: 'purchases' }
+                { icon: ClipboardList, label: 'Compras', path: '/purchases', permission: 'purchases.view', moduleKey: 'purchases' },
+                // También movida desde Inventario: las facturas son de las compras.
+                { icon: FileText, label: 'Facturas', path: '/invoices', permission: 'invoices.view', moduleKey: 'purchases' }
             ]
         },
         {
@@ -229,7 +231,6 @@ const MainLayout = () => {
                 { icon: Tags, label: 'Etiquetas', path: '/inventory/labels', permission: 'products.view', moduleKey: 'labels' },
                 { icon: Tag, label: 'Categorías', path: '/categories', permission: 'categories.view' },
                 { icon: Truck, label: 'Proveedores', path: '/suppliers', permission: 'suppliers.view', moduleKey: 'purchases' },
-                { icon: FileText, label: 'Facturas', path: '/invoices', permission: 'invoices.view', moduleKey: 'purchases' },
                 { icon: Percent, label: 'Impuestos', path: '/taxes', permission: 'taxes.view', moduleKey: 'taxes' },
                 { icon: Clipboard, label: 'Perfil de Producto', path: '/product-profile', permission: 'product_profile.view', moduleKey: 'product_profile' },
                 { icon: ShieldCheck, label: 'Conciliación', path: '/inventory/reconciliation', permission: 'products.adjust_stock', moduleKey: 'inventory_control' },
