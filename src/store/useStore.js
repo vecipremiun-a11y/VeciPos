@@ -2438,10 +2438,45 @@ export const useStore = create(persist((set, get) => ({
             // (comparado contra el stock real en BD) y audit log en api/data/actions.js.
             const r = await userApiCall('productUpdate', { companyId: activeCompanyId, id, product: updatedProduct });
             if (!r?.success) return r || { success: false, error: 'Error actualizando producto' };
+            // Reglas de la oferta recién guardadas (o la oferta recién apagada). Si
+            // se prendió de nuevo a mano, deja de valer la marca de "apagada".
+            get()._olvidarApagada(id);
+            get().revisarOfertas().catch(() => {});
 
-            // POS -> Tienda: sincronizar producto completo al editar
+            // POS -> Tienda. Si la ficha mandó solo lo que cambió (_parcial), a la
+            // tienda va solo eso: la tienda deja igual lo que no llega. Así no se
+            // le pisa el stock con el que había al abrir la ficha.
+            const actual = get().products.find(p => p.id === id) || {};
+            if (updatedProduct._parcial) {
+                try {
+                    const sku = updatedProduct.sku ?? actual.sku;
+                    const CAMPOS = ['name', 'category', 'stock', 'price', 'cost', 'unit', 'tax_rate', 'is_offer', 'offer_price',
+                        'price_ranges', 'sale_mode', 'preorder_unit', 'preorder_billing_unit', 'preorder_price_per_kg',
+                        'preorder_gram_per_unit', 'preorder_use_base_price', 'units_per_box'];
+                    const syncPayload = { id, sku };
+                    for (const k of CAMPOS) if (updatedProduct[k] !== undefined) syncPayload[k] = updatedProduct[k];
+                    // El stock se redondea según la unidad: sin ella, uno por kilo se redondearía a entero.
+                    if (syncPayload.stock !== undefined && syncPayload.unit === undefined) syncPayload.unit = actual.unit || 'Und';
+                    if (updatedProduct.image) syncPayload.image = updatedProduct.image;
+                    const hayAlgo = Object.keys(syncPayload).some(k => !['id', 'sku', 'unit'].includes(k));
+                    if (hayAlgo && sku && normalizeSku(sku)) {
+                        fetch(`/api/integration/sync-product?company_id=${encodeURIComponent(activeCompanyId)}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ product: syncPayload }),
+                        }).then(async (res) => {
+                            const data = await res.json().catch(() => null);
+                            if (!res.ok || !data?.success) console.warn('Product sync post-edit failed:', { id, status: res.status, data });
+                        }).catch(syncError => console.warn('Product sync post-edit error:', syncError));
+                    }
+                } catch (syncError) {
+                    console.warn('Product sync post-edit setup error:', syncError);
+                }
+            }
+
+            // Guardado completo (pantallas viejas): producto completo, como antes.
             try {
-                if (updatedProduct.sku && normalizeSku(updatedProduct.sku)) {
+                if (!updatedProduct._parcial && updatedProduct.sku && normalizeSku(updatedProduct.sku)) {
                     // Solo enviar imagen si realmente cambió (evitar enviar ~200KB base64 cada vez)
                     const oldProd = get().products.find(p => p.id === id);
                     const imageChanged = updatedProduct.image !== (oldProd?.image || null);
@@ -2496,8 +2531,10 @@ export const useStore = create(persist((set, get) => ({
                 console.warn('Product sync post-edit setup error:', syncError);
             }
 
+            // En pantalla: solo lo que cambió (sin los campos internos _algo).
+            const cambiosVisibles = Object.fromEntries(Object.entries(updatedProduct).filter(([k]) => !k.startsWith('_')));
             set((state) => ({
-                products: state.products.map((p) => p.id === id ? { ...p, ...updatedProduct } : p),
+                products: state.products.map((p) => p.id === id ? { ...p, ...cambiosVisibles } : p),
                 _preorderCache: { key: '', products: [], ts: 0 }
             }));
 

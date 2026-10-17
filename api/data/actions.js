@@ -859,8 +859,80 @@ async function productPriceUpdate(turso, companyId, session, { id, price, cost, 
     };
 }
 
+// ── Editar un producto guardando SOLO lo que cambió ─────────────────────
+//
+// Antes se reescribían los 22 campos con lo que la ficha tenía AL ABRIRSE,
+// stock incluido: si mientras alguien cambiaba la foto se vendían 5, al guardar
+// el stock volvía al número viejo (y quedaba como "ajuste manual"). Kevin lo
+// detectó el 7-oct-2026. Ahora la ficha manda solo los campos que tocó; los
+// demás, empezando por el stock, quedan como están en la base.
+const CAMPOS_PARCIALES = {
+    name: (v) => v, price: (v) => Number(v) || 0, category: (v) => v, sku: (v) => v,
+    cost: (v) => Number(v) || 0, tax_rate: (v) => Number(v) || 0, unit: (v) => v || 'Und',
+    supplier: (v) => v || null, is_offer: (v) => (v ? 1 : 0), offer_price: (v) => Number(v) || 0,
+    price_ranges: (v) => JSON.stringify(v || []), scale_group_id: (v) => v || null,
+    sale_mode: (v) => v || 'sale_only', allow_item_notes: (v) => (v ? 1 : 0),
+    preorder_unit: (v) => v || null, preorder_billing_unit: (v) => v || 'unit',
+    preorder_price_per_kg: (v) => Number(v) || 0, preorder_gram_per_unit: (v) => Number(v) || 0,
+    preorder_use_base_price: (v) => (v ? 1 : 0), units_per_box: (v) => Number(v) || 0,
+};
+
+async function productUpdateParcial(turso, companyId, session, id, cambios) {
+    const prev = await turso.execute({
+        sql: 'SELECT stock, is_offer FROM products WHERE id = ? AND company_id = ?',
+        args: [id, companyId],
+    });
+    if (!prev.rows.length) return { success: false, error: 'Producto no encontrado' };
+    const oldStock = parseFloat(prev.rows[0].stock) || 0;
+    const estabaEnOferta = Number(prev.rows[0].is_offer) === 1;
+
+    const sets = [];
+    const args = [];
+    for (const [campo, convertir] of Object.entries(CAMPOS_PARCIALES)) {
+        if (cambios[campo] === undefined) continue;
+        sets.push(`${campo} = ?`);
+        args.push(convertir(cambios[campo]));
+    }
+    // Foto: cadena vacía la quita (el botón de quitar foto), igual que antes.
+    if (cambios.image !== undefined) { sets.push('image = ?'); args.push(cambios.image || null); }
+    if (cambios.category !== undefined) {
+        sets.push('category_id = (SELECT id FROM categories WHERE company_id = ? AND name = ? LIMIT 1)');
+        args.push(companyId, cambios.category);
+    }
+    const cambiaStock = cambios.stock !== undefined;
+    const newStock = cambiaStock ? Math.round((parseFloat(cambios.stock) || 0) * 1000) / 1000 : oldStock;
+    if (cambiaStock) { sets.push('stock = ROUND(?, 3)'); args.push(newStock); }
+
+    if (sets.length) {
+        await turso.execute({
+            sql: `UPDATE products SET ${sets.join(', ')} WHERE id = ? AND company_id = ?`,
+            args: [...args, id, companyId],
+        });
+    }
+
+    // El stock se cambió A MANO en la ficha: es un ajuste (igual que antes).
+    if (cambiaStock && Math.abs(newStock - oldStock) >= 0.001) {
+        await turso.execute({
+            sql: `INSERT INTO stock_adjustments (company_id, product_id, user_id, user_name, old_stock, new_stock, difference, reason, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [companyId, id, session?.uid ?? null, session?.username || 'Desconocido', oldStock, newStock,
+                Math.round((newStock - oldStock) * 1000) / 1000, 'manual', new Date().toISOString()],
+        });
+        await turso.execute({ sql: 'UPDATE products SET pending_adjustment = 0 WHERE id = ? AND company_id = ?', args: [id, companyId] });
+    }
+
+    // Reglas de la oferta: solo si se tocó la oferta (la ficha las manda entonces).
+    await guardarReglasOferta(turso, companyId, id, cambios, estabaEnOferta);
+
+    await auditLog(turso, companyId, session, 'UPDATE', 'PRODUCT', {
+        id, campos: [...Object.keys(cambios).filter(k => !k.startsWith('_') && k !== 'image'), ...(cambios.image !== undefined ? ['image'] : [])],
+    });
+    return { success: true, parcial: true };
+}
+
 async function productUpdate(turso, companyId, session, id, product) {
     if (!id || !product) return { success: false, error: 'Faltan datos' };
+    if (product._parcial) return productUpdateParcial(turso, companyId, session, id, product);
 
     // Stock anterior leído del servidor (fuente de verdad) para el registro de ajuste
     const prev = await turso.execute({
@@ -1353,3 +1425,6 @@ async function clientRegisterPayment(turso, companyId, session, body) {
     const debt = await clientSyncDebt(turso, companyId, client.id);
     return { success: true, debt };
 }
+
+// Exportadas para las pruebas del guardado de productos (no cambian el router).
+export { productCreate, productUpdate };

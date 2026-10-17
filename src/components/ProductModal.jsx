@@ -105,15 +105,27 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
     useEffect(() => {
         if (productToEdit) {
-            setFormData({
+            const regla = reglasOferta?.[String(productToEdit.id)];
+            const viva = regla && !regla.apagada;
+            const inicial = {
                 ...productToEdit,
                 unit: productToEdit.unit || 'Und',
                 price_ranges: productToEdit.price_ranges || [],
                 preorder_billing_unit: productToEdit.preorder_billing_unit || 'unit',
                 preorder_price_per_kg: productToEdit.preorder_billing_unit === 'kg' ? (productToEdit.preorder_price_per_kg || '') : '',
                 preorder_gram_per_unit: productToEdit.preorder_gram_per_unit || '',
-                preorder_use_base_price: productToEdit.preorder_use_base_price !== undefined ? (productToEdit.preorder_use_base_price === 1) : true
-            });
+                preorder_use_base_price: productToEdit.preorder_use_base_price !== undefined ? (productToEdit.preorder_use_base_price === 1) : true,
+                is_offer: productToEdit.is_offer === 1 || productToEdit.is_offer === true,
+                offer_price: productToEdit.offer_price || '',
+                // Reglas de la oferta (migración 0033): una sola, o ninguna (permanente).
+                oferta_modo: viva ? (regla.hasta ? 'fecha' : (regla.limite ? 'cantidad' : '')) : '',
+                oferta_hasta: aInputLocal(viva ? regla.hasta : null),
+                // Lo que QUEDA en oferta, no lo que se puso al principio: si había
+                // 80 y se vendieron 30, dice 50.
+                oferta_unidades: viva && regla.limite ? String(Math.max(0, Number(regla.limite) - (Number(regla.vendidas) || 0))) : '',
+            };
+            setFormData(inicial);
+            inicialRef.current = armarDatos(inicial);
 
             // Calculate initial margin %
             if (productToEdit.price && productToEdit.cost) {
@@ -125,11 +137,8 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                     setMarginPercentage(margin.toFixed(2));
                 }
             }
-            // Handle is_offer boolean/integer conversion
-            if (productToEdit.is_offer !== undefined) {
-                setFormData(prev => ({ ...prev, is_offer: productToEdit.is_offer === 1 || productToEdit.is_offer === true, offer_price: productToEdit.offer_price || '' }));
-            }
         } else {
+            inicialRef.current = null;
             setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0, is_offer: false, offer_price: '', sale_mode: 'sale_only', allow_item_notes: false, preorder_unit: '', preorder_billing_unit: 'unit', preorder_price_per_kg: '', preorder_gram_per_unit: '', preorder_use_base_price: true, units_per_box: '' });
             setMarginPercentage('');
             setAlertConfig({ is_active: false, min_stock: 5, critical_stock: 2, priority: 'normal', notify_system: true, notify_whatsapp: false, cooldown_hours: 6 });
@@ -248,24 +257,78 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         setCodigos((prev) => prev.filter((_, i) => i !== indice));
     };
 
+    // Lo que se guarda, normalizado (números como números, tramos sin filas vacías,
+    // reglas de la oferta según el modo). Se usa para lo que había al abrir y para
+    // lo que hay al guardar: así la comparación no ve cambios falsos ("300" vs 300).
+    const armarDatos = (fd) => {
+        const d = {
+            ...fd,
+            // Las filas sin precio no son tramos: no se guardan.
+            price_ranges: (fd.price_ranges || []).filter(t => Number(t.price) > 0),
+            // Reglas de la oferta: sin oferta, no hay reglas.
+            offer_until: fd.is_offer && fd.oferta_modo === 'fecha' ? deInputLocal(fd.oferta_hasta) : null,
+            offer_units_limit: fd.is_offer && fd.oferta_modo === 'cantidad' && Number(fd.oferta_unidades) > 0
+                ? Number(fd.oferta_unidades) : null,
+            price: toNum(fd.price),
+            cost: toNum(fd.cost),
+            stock: Math.round(toNum(fd.stock) * 1000) / 1000,
+            tax_rate: toNum(fd.tax_rate),
+            offer_price: toNum(fd.offer_price),
+            units_per_box: parseInt(fd.units_per_box) || 0,
+            is_offer: !!fd.is_offer,
+        };
+        // Sin módulo Pedidos: nunca guardar productos en modo encargo
+        if (!canPreorders) d.sale_mode = 'sale_only';
+        return d;
+    };
+
     const handleSubmit = (e) => {
         e.preventDefault();
         // Tramos que se pisan o mal armados: la misma cantidad tendría dos precios.
         const errorEscala = primerErrorEscala(formData.price_ranges || []);
         if (errorEscala) { alert(errorEscala); return; }
-        const dataToSave = {
-            ...formData,
-            // Las filas sin precio no son tramos: no se guardan.
-            price_ranges: (formData.price_ranges || []).filter(t => Number(t.price) > 0),
-            price: toNum(formData.price),
-            cost: toNum(formData.cost),
-            stock: Math.round(toNum(formData.stock) * 1000) / 1000,
-            tax_rate: toNum(formData.tax_rate),
-            offer_price: toNum(formData.offer_price),
-            units_per_box: parseInt(formData.units_per_box) || 0,
-        };
-        // Sin módulo Pedidos: nunca guardar productos en modo encargo
-        if (!canPreorders) dataToSave.sale_mode = 'sale_only';
+        if (formData.is_offer && formData.oferta_modo === 'fecha') {
+            if (!formData.oferta_hasta) { alert('Elegí hasta qué fecha y hora vale la oferta, o desactivá "Por fecha".'); return; }
+            if (new Date(formData.oferta_hasta).getTime() <= Date.now()) {
+                alert('La fecha de fin de la oferta ya pasó: elegí una fecha futura.');
+                return;
+            }
+        }
+        if (formData.is_offer && formData.oferta_modo === 'cantidad' && !(Number(formData.oferta_unidades) > 0)) {
+            alert('Poné cuántas unidades van en oferta, o desactivá "Por cantidad".');
+            return;
+        }
+        const completo = armarDatos(formData);
+        let dataToSave = completo;
+
+        // Editar: SOLO lo que cambió. Antes se reescribía todo con lo que había al
+        // abrir la ficha, stock incluido: si se vendía mientras se editaba, al
+        // guardar el stock volvía al número viejo. Lo que no se tocó, no viaja.
+        if (productToEdit && inicialRef.current) {
+            const antes = inicialRef.current;
+            const igual = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+            const SOLO_PANTALLA = ['oferta_modo', 'oferta_hasta', 'oferta_unidades'];
+            const cambios = {};
+            for (const k of Object.keys(completo)) {
+                if (k.startsWith('_') || SOLO_PANTALLA.includes(k)) continue;
+                if (!igual(completo[k], antes[k])) cambios[k] = completo[k];
+            }
+            // La oferta viaja entera si se tocó algo de ella: el servidor necesita
+            // saber si está prendida y a qué precio para guardar sus reglas.
+            const unidadesTocadas = completo.oferta_modo === 'cantidad'
+                && (antes.oferta_modo !== 'cantidad' || String(completo.oferta_unidades) !== String(antes.oferta_unidades));
+            const ofertaTocada = ['is_offer', 'offer_price', 'offer_until', 'offer_units_limit'].some(k => k in cambios)
+                || completo.oferta_modo !== antes.oferta_modo || unidadesTocadas;
+            if (ofertaTocada) {
+                Object.assign(cambios, {
+                    is_offer: completo.is_offer, offer_price: completo.offer_price,
+                    offer_until: completo.offer_until, offer_units_limit: completo.offer_units_limit,
+                    // "Quedan N" desde que se guarda, aunque N sea igual a la cantidad de antes.
+                    ...(unidadesTocadas ? { offer_reiniciar: true } : {}),
+                });
+            }
+            dataToSave = { ...cambios, _parcial: true };
+        }
         // Save alert settings in background (needs product ID, so we pass alertConfig for the caller to handle)
         dataToSave._alertConfig = alertConfig;
 
@@ -507,7 +570,9 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 type="number"
                                 step="any"
                                 name="stock"
-                                value={formData.stock || ''}
+                                // `??` y no `||`: con `||` un stock 0 se mostraba vacío
+                                // al volver a abrir la ficha, y "Guardar" pedía rellenarlo.
+                                value={formData.stock ?? ''}
                                 onChange={handleChange}
                                 className="glass-input w-full"
                                 required
