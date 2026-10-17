@@ -4,6 +4,7 @@
 
 import { mirrorPurchaseItems } from '../../src/lib/itemNormalization.js';
 import { presentationActions } from './presentationActions.js';
+import { guardarReglasOferta, estabaEnOferta } from './offerActions.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -452,6 +453,11 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
         sql: 'INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         args: [companyId, session?.uid ?? null, 'CREATE', 'PURCHASE', JSON.stringify({ total: purchase.total }), nowIso()],
     });
+    // Si la oferta ya estaba prendida antes de esta compra (para saber si la
+    // cuenta de unidades de la oferta empieza de cero). Se lee ANTES del batch.
+    const conOferta = seAplican.filter(i => i?.cambiosPrecios?.oferta && typeof i.cambiosPrecios.oferta === 'object');
+    const ofertaPrevia = new Map();
+    for (const i of conOferta) ofertaPrevia.set(String(i.id), await estabaEnOferta(turso, companyId, i.id));
     try {
         await turso.batch(queries);
     } catch (err) {
@@ -462,6 +468,19 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
             await turso.execute({ sql: 'DELETE FROM purchases WHERE id = ? AND company_id = ?', args: [purchaseId, companyId] });
         } catch { /* lo importante es avisar del error de abajo */ }
         throw err;
+    }
+
+    // Reglas de la oferta puesta en la compra (hasta cuándo, cuántas unidades).
+    for (const i of conOferta) {
+        const o = i.cambiosPrecios.oferta;
+        try {
+            await guardarReglasOferta(turso, companyId, i.id, {
+                is_offer: !!o.activa, offer_price: Math.round(Number(o.precio) || 0),
+                offer_until: o.hasta ?? null, offer_units_limit: o.unidades ?? null,
+            }, ofertaPrevia.get(String(i.id)));
+        } catch (err) {
+            console.warn('[compra] reglas de oferta', i.id, err?.message);
+        }
     }
 
     // ── Aprender el código del proveedor de cada renglón ────────────────

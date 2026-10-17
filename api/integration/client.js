@@ -86,6 +86,27 @@ async function resolverCategoriaPos(companyId, product) {
     }
 }
 
+// Reglas de la oferta para la tienda: hasta cuándo, y cuántas unidades quedan a
+// precio de oferta (null = sin límite). Se leen de la base, que ya tiene lo
+// recién guardado. Sin la migración 0033: oferta sin reglas, como antes.
+async function reglaDeOferta(companyId, product) {
+    if (product.id === undefined || product.id === null) return { hasta: null, quedan: null };
+    try {
+        const r = await turso.execute({
+            sql: 'SELECT offer_until, offer_units_limit, offer_units_sold FROM products WHERE id = ? AND company_id = ? LIMIT 1',
+            args: [product.id, companyId],
+        });
+        const f = r.rows[0] || {};
+        const limite = Number(f.offer_units_limit) || 0;
+        return {
+            hasta: f.offer_until || null,
+            quedan: limite > 0 ? Math.max(0, limite - (Number(f.offer_units_sold) || 0)) : null,
+        };
+    } catch {
+        return { hasta: null, quedan: null };
+    }
+}
+
 export async function syncPriceToStore({ companyId, product }) {
     const config = await getTiendaConfig(companyId);
 
@@ -187,12 +208,21 @@ export async function syncProductToStore({ companyId, product }) {
     // Costo del producto
     if (product.cost !== undefined) payload.cost_price = Number(product.cost || 0);
 
-    // Oferta: siempre enviar ambos campos en snake_case
-    payload.is_offer = product.is_offer ? true : false;
-    payload.offer_price = product.is_offer ? Number(product.offer_price || 0) : 0;
-
-    // Impuesto: siempre enviar en snake_case
-    payload.tax_rate = Number(product.tax_rate || 0);
+    // Oferta, impuesto: solo si vienen. Al editar un producto se manda SOLO lo
+    // que cambió (7-oct-2026); antes estos dos se mandaban siempre, y un envío
+    // sin ellos habría apagado la oferta y dejado el IVA en 0 en la tienda. La
+    // tienda deja igual lo que no llega.
+    if (product.is_offer !== undefined) {
+        payload.is_offer = product.is_offer ? true : false;
+        payload.offer_price = product.is_offer ? Number(product.offer_price || 0) : 0;
+        // Reglas de la oferta (migración 0033), leídas de la base porque el
+        // producto ya se guardó: hasta cuándo, y cuántas unidades QUEDAN a precio
+        // de oferta (la tienda descuenta de ahí sus ventas y no deja pedir más).
+        const regla = payload.is_offer ? await reglaDeOferta(companyId, product) : { hasta: null, quedan: null };
+        payload.offer_ends_at = regla.hasta;
+        payload.offer_stock = regla.quedan;
+    }
+    if (product.tax_rate !== undefined) payload.tax_rate = Number(product.tax_rate || 0);
 
     // Escalas de precio (mayoreo)
     const tiers = normalizePriceTiers(product.price_ranges);

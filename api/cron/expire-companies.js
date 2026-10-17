@@ -1,5 +1,6 @@
 import { createClient } from '@libsql/client';
 import { appExpireDue } from '../_lib/appActions.js';
+import { ofertasRevisarTodas } from '../_lib/offerActions.js';
 
 // Turso lazy (las env se leen en tiempo de request).
 let _turso = null;
@@ -66,12 +67,19 @@ export default async function handler(req, res) {
         //    período ya pasó (no toca las que esperan renovación del plan).
         await appExpireDue(turso);
 
+        // 5) Ofertas con reglas (migración 0033): apagar las vencidas o agotadas.
+        //    El POS ya las revisa mientras está abierto; esto es la red de
+        //    seguridad para las que vencen con todo cerrado. No hace fallar el cron.
+        let ofertas = null;
+        try { ofertas = await ofertasRevisarTodas(turso); } catch (err) { console.warn('[cron] ofertas:', err?.message); }
+
         const result = {
             ok: true,
             ranAt: nowIso,
             trialsBlocked: trials.rowsAffected ?? 0,
             paidBlocked: blocked.rowsAffected ?? 0,
             movedToGrace: grace.rowsAffected ?? 0,
+            ofertas,
         };
         console.log('[cron expire-companies]', result);
         return res.status(200).json(result);

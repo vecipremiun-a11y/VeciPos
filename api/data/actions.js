@@ -25,6 +25,7 @@ import { bootstrapActions } from '../_lib/bootstrapActions.js';
 import { financeActions } from '../_lib/financeActions.js';
 import { appActions } from '../_lib/appActions.js';
 import { presentationActions } from '../_lib/presentationActions.js';
+import { offerActions, guardarReglasOferta } from '../_lib/offerActions.js';
 
 // Endpoint de datos del app normal (Fase 1 · Paso 4).
 // Exige: sesión firmada + que el usuario sea MIEMBRO de la empresa (companyId).
@@ -141,6 +142,9 @@ export default async function handler(req, res) {
             case 'productUpdate':
                 return res.status(200).json(await productUpdate(turso, companyId, session, body.id, body.product));
             // Unidades de medida del producto (Caja, Display, Pack) — migración 0030
+            // Reglas de la oferta (migración 0033): apaga las cumplidas y devuelve las vivas.
+            case 'offersSweep':
+                return res.status(200).json(await offerActions[action](turso, companyId, session, body));
             case 'presentationSave':
             case 'presentationDelete':
                 return res.status(200).json(await presentationActions[action](turso, companyId, session, body));
@@ -770,6 +774,10 @@ async function productCreate(turso, companyId, session, product) {
         ],
     });
 
+    // Reglas de la oferta (hasta cuándo, cuántas unidades): sentencia aparte, para
+    // que el alta no dependa de la migración 0033.
+    if (result.rows[0]?.id) await guardarReglasOferta(turso, companyId, result.rows[0].id, product, false);
+
     await auditLog(turso, companyId, session, 'CREATE', 'PRODUCT', { name: product.name, sku: product.sku });
     return { success: true, product: result.rows[0] };
 }
@@ -856,11 +864,12 @@ async function productUpdate(turso, companyId, session, id, product) {
 
     // Stock anterior leído del servidor (fuente de verdad) para el registro de ajuste
     const prev = await turso.execute({
-        sql: 'SELECT stock FROM products WHERE id = ? AND company_id = ?',
+        sql: 'SELECT stock, is_offer FROM products WHERE id = ? AND company_id = ?',
         args: [id, companyId],
     });
     if (prev.rows.length === 0) return { success: false, error: 'Producto no encontrado' };
     const oldStock = parseFloat(prev.rows[0].stock) || 0;
+    const estabaEnOferta = Number(prev.rows[0].is_offer) === 1;
     const newStock = Math.round((parseFloat(product.stock) || 0) * 1000) / 1000;
 
     await turso.execute({
@@ -914,6 +923,8 @@ async function productUpdate(turso, companyId, session, id, product) {
             args: [id, companyId],
         });
     }
+
+    await guardarReglasOferta(turso, companyId, id, product, estabaEnOferta);
 
     await auditLog(turso, companyId, session, 'UPDATE', 'PRODUCT', { id, name: product.name, sku: product.sku });
     return { success: true };

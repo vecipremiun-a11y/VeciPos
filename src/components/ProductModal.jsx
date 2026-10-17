@@ -7,12 +7,15 @@ import { usePermissions } from '../hooks/usePermissions';
 import { compressImage, validateImage } from '../lib/imageCompression';
 import { formatCurrency } from '../utils/formatCurrency';
 import { desdeSiguiente, puedeAgregarTramo, encadenarHasta, erroresEscala, primerErrorEscala } from '../utils/escalaTramos';
+import { aInputLocal, deInputLocal, finDelDia, resumenOferta } from '../lib/ofertas';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
-    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, hasModule, fetchProductAliases, presentacionesDe, deletePresentation, productPresentations } = useStore();
+    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, hasModule, fetchProductAliases, presentacionesDe, deletePresentation, productPresentations, reglasOferta } = useStore();
     // Unidades de medida (Caja, Display…): "nueva" o la presentación que se edita.
     // Se guardan al instante desde su propia ventana, no con el botón Guardar.
     const [presentacionEditando, setPresentacionEditando] = useState(null);
+    // Lo que tenía la ficha al abrirse (normalizado): al guardar se manda solo lo distinto.
+    const inicialRef = useRef(null);
     void productPresentations; // suscripción: la lista se redibuja al agregar o borrar
     // Sin módulo Pedidos (Medium+) no se pueden crear productos con encargo
     const canPreorders = hasModule('preorders');
@@ -785,6 +788,74 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 </div>
                                 <div className="text-right mt-2 text-xs text-[var(--color-text-muted)]">
                                     Precio Normal: <span className="line-through text-red-400 decoration-red-400">${formData.price}</span>
+                                </div>
+
+                                {/* Regla de la oferta: por fecha O por cantidad, una sola. Sin
+                                    ninguna, la oferta es permanente: queda hasta apagarla a mano. */}
+                                <div className="mt-3 pt-3 border-t border-[var(--color-primary)]/30 space-y-3">
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {[['fecha', 'Por fecha'], ['cantidad', 'Por cantidad']].map(([modo, label]) => {
+                                            const activo = formData.oferta_modo === modo;
+                                            return (
+                                                <button key={modo} type="button"
+                                                    onClick={() => setFormData(prev => ({
+                                                        ...prev,
+                                                        oferta_modo: prev.oferta_modo === modo ? '' : modo,
+                                                        // Al activar "Por fecha" sin fecha cargada, propone 7 días.
+                                                        oferta_hasta: modo === 'fecha' && prev.oferta_modo !== 'fecha' && !prev.oferta_hasta ? aInputLocal(finDelDia(7)) : prev.oferta_hasta,
+                                                    }))}
+                                                    className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-sm font-bold transition-all ${activo
+                                                        ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/15 text-[var(--color-primary)]'
+                                                        : 'border-[var(--glass-border)] text-[var(--color-text-muted)]'}`}>
+                                                    {label}
+                                                    <span className={`w-8 h-4 rounded-full flex items-center p-0.5 transition-all ${activo ? 'bg-[var(--color-primary)]' : 'bg-gray-500'}`}>
+                                                        <span className={`w-3 h-3 bg-white rounded-full transition-all ${activo ? 'translate-x-4' : ''}`} />
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {!formData.oferta_modo && (
+                                        <p className="text-[11px] text-[var(--color-text-muted)]">
+                                            Oferta permanente: queda hasta que la apagues.
+                                        </p>
+                                    )}
+                                    {formData.oferta_modo === 'fecha' && (
+                                        <div>
+                                            <div className="flex flex-wrap gap-1.5 mb-2">
+                                                {[['Hoy', 0], ['3 días', 3], ['7 días', 7]].map(([label, dias]) => (
+                                                    <button key={label} type="button"
+                                                        onClick={() => setFormData(prev => ({ ...prev, oferta_hasta: aInputLocal(finDelDia(dias)) }))}
+                                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${formData.oferta_hasta === aInputLocal(finDelDia(dias))
+                                                            ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/15 text-[var(--color-primary)]'
+                                                            : 'border-[var(--glass-border)] text-[var(--color-text-muted)]'}`}>
+                                                        {label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <input type="datetime-local" value={formData.oferta_hasta || ''}
+                                                onChange={e => setFormData(prev => ({ ...prev, oferta_hasta: e.target.value }))}
+                                                className="glass-input w-full text-sm" />
+                                            <p className="text-[11px] text-[var(--color-text-muted)] mt-1">A esa hora se apaga sola, acá y en la tienda.</p>
+                                        </div>
+                                    )}
+                                    {formData.oferta_modo === 'cantidad' && (
+                                        <div>
+                                            <input type="number" min="1" step="any" inputMode="decimal" value={formData.oferta_unidades || ''}
+                                                onChange={e => setFormData(prev => ({ ...prev, oferta_unidades: e.target.value }))}
+                                                placeholder="Unidades en oferta, ej: 10" className="glass-input w-full text-sm" />
+                                            <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+                                                {inicialRef.current?.oferta_modo === 'cantidad'
+                                                    ? 'Las que QUEDAN a precio de oferta, en el local y en la web. Si no lo cambiás, sigue contando sola.'
+                                                    : 'Las primeras que se vendan, en el local y en la web, van a precio de oferta; al llegar, se apaga sola.'}
+                                            </p>
+                                        </div>
+                                    )}
+                                    {productToEdit?.id && resumenOferta(reglasOferta?.[String(productToEdit.id)]) && (
+                                        <p className="text-xs font-bold text-[var(--color-primary)]">
+                                            Ahora: {resumenOferta(reglasOferta?.[String(productToEdit.id)])}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         )}

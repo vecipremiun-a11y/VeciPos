@@ -19,6 +19,7 @@ import SelectorUnidadCarrito from '../components/SelectorUnidadCarrito';
 import InvoiceDataModal from '../components/InvoiceDataModal';
 import PreventaSuccessModal from '../components/PreventaSuccessModal';
 import EnvioCreadoModal from '../components/delivery/EnvioCreadoModal';
+import { ofertaVigente, resumenOferta } from '../lib/ofertas';
 import PreventasListModal from '../components/PreventasListModal';
 import { createSmartInterval } from '../lib/smartPolling';
 import { hayConexion } from '../lib/conectividad';
@@ -172,6 +173,19 @@ const POS = () => {
     const createDeliveryOrder = useStore((s) => s.createDeliveryOrder);
     const orderBadges = useStore((s) => s.orderBadges);
     const fetchOrderBadges = useStore((s) => s.fetchOrderBadges);
+    // Reglas de la oferta (hasta cuándo, cuántas unidades — migración 0033).
+    const reglasOferta = useStore((s) => s.reglasOferta);
+    const revisarOfertas = useStore((s) => s.revisarOfertas);
+
+    // Se revisan al abrir el POS y cada 3 minutos: apaga las que vencieron o se
+    // agotaron y trae cuántas quedan. Sin conexión no hace nada (las reglas ya
+    // guardadas siguen apagando a la hora).
+    useEffectReact(() => {
+        if (!activeCompanyId) return undefined;
+        revisarOfertas().catch(() => { /* se reintenta en la próxima vuelta */ });
+        const t = setInterval(() => revisarOfertas().catch(() => {}), 3 * 60 * 1000);
+        return () => clearInterval(t);
+    }, [activeCompanyId]);
 
     // Contadores de pedidos activos para las pestañas Encargos/Tienda/Delivery.
     useEffectReact(() => {
@@ -713,6 +727,12 @@ const POS = () => {
             try {
                 if (preventaCode && !result.queued) completePreventa(preventaCode, result.saleId);
 
+                // Oferta por unidades: se cuenta lo vendido apenas se vende.
+                const reglas = useStore.getState().reglasOferta || {};
+                if (!result.queued && saleData.items.some(i => Number(reglas[String(i.id)]?.limite) > 0)) {
+                    revisarOfertas().catch(() => {});
+                }
+
                 // Despacho: la venta ya existe, ahora se crea el envío que la lleva.
                 // Lo que el repartidor debe cobrar es el saldo real: 0 si se pagó aquí.
                 if (dispatch && result.saleId && !result.queued) {
@@ -1158,12 +1178,12 @@ const POS = () => {
                                 }}
                                 className={cn(
                                     "rounded-xl glass-card bg-card p-0 text-[var(--color-text)] shadow-sm cursor-pointer border hover:bg-[var(--color-surface-hover)] transition-all duration-150 flex flex-col h-auto hover:shadow-lg active:scale-95 touch-manipulation relative group",
-                                    (product.is_offer === 1 || product.is_offer === true)
+                                    ofertaVigente(product, reglasOferta?.[String(product.id)])
                                         ? "border-yellow-500/50 bg-yellow-500/5 hover:border-yellow-400 hover:shadow-[0_0_20px_rgba(234,179,8,0.2)]"
                                         : "border-[var(--glass-border)] hover:border-[var(--color-primary)]"
                                 )}
                             >
-                                {(product.is_offer === 1 || product.is_offer === true) && (
+                                {ofertaVigente(product, reglasOferta?.[String(product.id)]) && (
                                     <div className="absolute top-2 left-2 z-20 bg-yellow-500 text-black text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse shadow-lg">
                                         OFERTA
                                     </div>
@@ -1198,7 +1218,7 @@ const POS = () => {
                                         </h3>
 
                                         <div className="mb-1 lg:mb-2">
-                                            {(product.is_offer === 1 || product.is_offer === true) && product.offer_price > 0 ? (
+                                            {ofertaVigente(product, reglasOferta?.[String(product.id)]) ? (
                                                 <div className="flex flex-col items-start leading-none gap-0.5">
                                                     <span className="text-[9px] lg:text-xs text-red-400 line-through decoration-red-400 opacity-70 font-semibold">
                                                         {formatCurrency(product.price, currentCurrency)}
@@ -1206,6 +1226,11 @@ const POS = () => {
                                                     <span className="text-yellow-400 font-extrabold text-base lg:text-xl drop-shadow-sm">
                                                         {formatCurrency(product.offer_price, currentCurrency)}
                                                     </span>
+                                                    {resumenOferta(reglasOferta?.[String(product.id)]) && (
+                                                        <span className="text-[9px] lg:text-[10px] text-yellow-400/80 font-semibold leading-tight mt-0.5">
+                                                            {resumenOferta(reglasOferta?.[String(product.id)])}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             ) : (
                                                 <span className="text-green-400 font-bold text-sm lg:text-lg tracking-tight">

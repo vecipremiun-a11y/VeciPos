@@ -12,6 +12,7 @@ import { markActivity } from '../lib/smartPolling';
 import { setTabUserId, getTabUserId, broadcastLogin, broadcastLogout } from '../lib/sessionGuard';
 import { alExpirarSesion, esSesionExpirada, sesionExpirada, reiniciarAvisoSesion } from '../lib/sesion';
 import { sinDobleEnvio } from '../lib/inFlight';
+import { ofertaVigente } from '../lib/ofertas';
 import { hayConexion, reportarResultadoRed, fetchConLimite, ponerOfflineManual, esOfflineManual } from '../lib/conectividad';
 import { getModuleByKey } from '../constants/modules';
 import { getPlanLevel } from '../config/mercadopago';
@@ -502,6 +503,10 @@ export const useStore = create(persist((set, get) => ({
     // migración 0030. Se guardan con la sesión para que escanear el código de una
     // caja funcione también sin conexión.
     productPresentations: [],
+    // Reglas de las ofertas vivas (migración 0033): id de producto → { hasta,
+    // limite, vendidas, apagada }. Las manda la revisión de ofertas; se guardan
+    // con la sesión para que el POS sin conexión también apague a la hora.
+    reglasOferta: {},
     // setPosSelectedClient is defined below in the multi-cart section (L3641+)
 
     addClient: async (client) => {
@@ -623,6 +628,7 @@ export const useStore = create(persist((set, get) => ({
             clients: [],
             clientAddresses: [],
             productPresentations: [],
+            reglasOferta: {},
             purchases: [],
             sales: [],
             // Clear Dashboard/POS specific state
@@ -2334,6 +2340,8 @@ export const useStore = create(persist((set, get) => ({
             // corren en api/data/actions.js. El navegador ya no toca la BD.
             const r = await userApiCall('productCreate', { companyId: activeCompanyId, product });
             if (!r?.success) return r || { success: false, error: 'Error creando producto' };
+            // Reglas de la oferta recién guardadas: el POS las trae para aplicarlas.
+            if (product?.is_offer) get().revisarOfertas().catch(() => {});
 
             // Safely handle price_ranges for the local state update
             let parsedPriceRanges = [];
@@ -3314,6 +3322,13 @@ export const useStore = create(persist((set, get) => ({
                 console.warn('No se pudo avisar a la tienda de la compra:', e)
             );
 
+            // Oferta puesta en la compra (con sus reglas): el POS la trae al toque.
+            const conOferta = itemsAplicados.filter(i => i.cambiosPrecios?.oferta);
+            if (conOferta.length) {
+                conOferta.forEach(i => get()._olvidarApagada(i.id));
+                get().revisarOfertas().catch(() => {});
+            }
+
             // Check inventory alerts after purchase (non-blocking)
             setTimeout(() => {
                 const productIds = purchase.items?.map(i => i.productId || i.product_id).filter(Boolean);
@@ -3539,8 +3554,10 @@ export const useStore = create(persist((set, get) => ({
                 });
                 if (match) return parseFloat(match.price);
             }
-            // Priority 2: Offer Price
-            if (product.is_offer && product.offer_price > 0) {
+            // Priority 2: Offer Price — solo si sigue vigente (fecha y unidades,
+            // migración 0033). La venta que cruza el límite de unidades lleva
+            // todo a precio de oferta; después se apaga (decidido con Kevin).
+            if (ofertaVigente(product, get().reglasOferta?.[String(product.id)])) {
                 return parseFloat(product.offer_price);
             }
             // Priority 3: Base Price
@@ -6356,7 +6373,7 @@ export const useStore = create(persist((set, get) => ({
         set(state => {
             const billingUnit = product.preorder_billing_unit || 'unit';
             const useBasePrice = product.preorder_use_base_price !== 0; // default true (1)
-            const effectivePrice = (product.is_offer && product.offer_price > 0)
+            const effectivePrice = ofertaVigente(product, get().reglasOferta?.[String(product.id)])
                 ? product.offer_price : product.price;
 
             // Resolve actual price for preorder
@@ -7195,6 +7212,50 @@ export const useStore = create(persist((set, get) => ({
         if (!empujar) return;
         const ids = [...porId.keys()];
         get().sincronizarCompraConTienda(ids, []).catch(() => { /* la tienda se pone al día con el próximo cambio */ });
+    },
+
+    /**
+     * Revisa las ofertas con reglas (servidor): apaga las vencidas o agotadas y
+     * trae las reglas de las que siguen. El POS la llama al abrir, cada pocos
+     * minutos y después de vender un producto con oferta por unidades.
+     */
+    _olvidarApagada: (id) => set(state => {
+        const k = String(id);
+        if (!state.reglasOferta?.[k]?.apagada) return {};
+        const { [k]: _fuera, ...resto } = state.reglasOferta;
+        return { reglasOferta: resto };
+    }),
+
+    revisarOfertas: async () => {
+        const r = await get().deliveryCall('offersSweep');
+        if (!r?.success) return r;
+        const reglas = {};
+        // Las apagadas se recuerdan una hora: alcanza para que el catálogo del
+        // equipo traiga is_offer = 0 aunque no se haya podido marcar acá.
+        for (const [id, x] of Object.entries(get().reglasOferta || {})) {
+            if (x?.apagada && Date.now() - (x.en || 0) < 3600e3) reglas[id] = x;
+        }
+        for (const x of (r.reglas || [])) reglas[String(x.id)] = { hasta: x.hasta, limite: x.limite, vendidas: x.vendidas };
+        for (const x of (r.apagadas || [])) reglas[String(x.id)] = { apagada: true, en: Date.now() };
+        const apagadas = new Set((r.apagadas || []).map(x => String(x.id)));
+        set(state => ({
+            reglasOferta: reglas,
+            products: apagadas.size
+                ? state.products.map(pr => (apagadas.has(String(pr.id)) ? { ...pr, is_offer: 0 } : pr))
+                : state.products,
+        }));
+        if (apagadas.size) {
+            // El catálogo guardado en el equipo también: si no, la grilla seguiría
+            // mostrando "oferta" hasta el próximo sync.
+            try {
+                for (const id of apagadas) await localDb.products?.update(Number(id), { is_offer: 0 });
+            } catch { /* se pone al día con el próximo sync */ }
+            // Si había renglones en el carrito con esa oferta, vuelven a precio normal.
+            set(state => ({
+                carts: state.carts.map(c => ({ ...c, items: get()._recalculateCartPrices(c.items) })),
+            }));
+        }
+        return r;
     },
 
     createDeliveryOrder: async (pedido) => {
@@ -8765,6 +8826,7 @@ export const useStore = create(persist((set, get) => ({
         // conexión no reconocería el código de barras de una caja. Es una lista
         // chica —una fila por presentación—.
         productPresentations: state.productPresentations,
+        reglasOferta: state.reglasOferta,
         // Los permisos del rol se guardan junto con la sesión, y no es un detalle:
         // sin esto, cualquier arranque que no logre hablar con el servidor deja
         // `rolePermissions` en [] y `hasPermission` niega TODO. Al dueño y a los

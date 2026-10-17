@@ -8,6 +8,7 @@ import AsyncButton from '../components/AsyncButton';
 import { toast } from '../lib/toast';
 import { reportCall } from '../lib/dataApi';
 import { formatCurrency } from '../utils/formatCurrency';
+import { aInputLocal, deInputLocal, finDelDia, resumenOferta } from '../lib/ofertas';
 
 /**
  * El botón de "Precios" de un renglón: muestra si el producto tiene escala de
@@ -37,7 +38,7 @@ function BotonPreciosRenglon({ item, contexto, cajas, onAbrir }) {
 }
 
 const Purchases = () => {
-    const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown, fetchProductImage, activeCompanyId, setSupplierOrderStatus, productPresentations } = useStore();
+    const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown, fetchProductImage, activeCompanyId, setSupplierOrderStatus, productPresentations, reglasOferta } = useStore();
 
     // Lo que hace falta para revisar los precios de cada renglón: la escala de
     // mayoreo actual, el costo de antes de esta compra y los códigos con que el
@@ -380,6 +381,14 @@ const Purchases = () => {
     const handleAddToInvoice = (e) => {
         e.preventDefault();
         if (!selectedProduct) return;
+        if (ofertaForm?.activa && ofertaForm.modo === 'fecha' && !(ofertaForm.hasta && new Date(ofertaForm.hasta).getTime() > Date.now())) {
+            alert('Elegí una fecha y hora futura para la oferta, o desactivá "Por fecha".');
+            return;
+        }
+        if (ofertaForm?.activa && ofertaForm.modo === 'cantidad' && !(Number(ofertaForm.unidades) > 0)) {
+            alert('Poné cuántas unidades van en oferta, o desactivá "Por cantidad".');
+            return;
+        }
         if (ofertaForm?.activa && !(Number(ofertaForm.precio) > 0 && Number(ofertaForm.precio) < (parseFloat(entryForm.price) || 0))) {
             alert('El precio de oferta tiene que ser mayor que 0 y menor que el precio de venta.');
             return;
@@ -407,7 +416,15 @@ const Purchases = () => {
             ...((cambiosForm || ofertaForm) ? {
                 cambiosPrecios: {
                     ...(cambiosForm ? { priceRanges: cambiosForm.priceRanges, presentaciones: cambiosForm.presentaciones || [], nuevas: cambiosForm.nuevas || [] } : {}),
-                    ...(ofertaForm ? { oferta: { activa: !!ofertaForm.activa, precio: Number(ofertaForm.precio) || 0 } } : {}),
+                    ...(ofertaForm ? {
+                        oferta: {
+                            activa: !!ofertaForm.activa, precio: Number(ofertaForm.precio) || 0,
+                            // Reglas (migración 0033): hasta cuándo y cuántas unidades.
+                            // Una sola regla (o ninguna: permanente).
+                            hasta: ofertaForm.activa && ofertaForm.modo === 'fecha' ? deInputLocal(ofertaForm.hasta) : null,
+                            unidades: ofertaForm.activa && ofertaForm.modo === 'cantidad' && Number(ofertaForm.unidades) > 0 ? Number(ofertaForm.unidades) : null,
+                        },
+                    } : {}),
                 },
             } : {}),
         };
@@ -616,9 +633,13 @@ const Purchases = () => {
             </div>
     ) : null;
     // Oferta: lo que ya tiene el producto, o lo que se cambió en esta compra.
+    const reglaActual = selectedProduct ? reglasOferta?.[String(selectedProduct.id)] : null;
     const ofertaActual = ofertaForm ?? {
         activa: !!(contextoSeleccionado?.enOferta),
         precio: Number(contextoSeleccionado?.precioOferta) || '',
+        hasta: aInputLocal(reglaActual && !reglaActual.apagada ? reglaActual.hasta : null),
+        unidades: reglaActual && !reglaActual.apagada && reglaActual.limite ? String(reglaActual.limite) : '',
+        modo: reglaActual && !reglaActual.apagada ? (reglaActual.hasta ? 'fecha' : (reglaActual.limite ? 'cantidad' : '')) : '',
     };
     const precioVentaForm = parseFloat(entryForm.price) || 0;
     const precioOfertaNum = Number(ofertaActual.precio) || 0;
@@ -653,6 +674,61 @@ const Purchases = () => {
                             ? 'Tiene que ser menor que el precio de venta.'
                             : `${Math.round((1 - precioOfertaNum / precioVentaForm) * 100)}% menos que ${formatCurrency(precioVentaForm, useStore.getState().currentCurrency)}`}
                     </p>
+                )}
+                {/* Regla: por fecha O por cantidad, una sola. Sin ninguna, permanente. */}
+                {ofertaActual.activa && (
+                    <div className="mt-2 pt-2 border-t border-[var(--glass-border)] space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                            {[['fecha', 'Por fecha'], ['cantidad', 'Por cantidad']].map(([modo, label]) => {
+                                const activo = ofertaActual.modo === modo;
+                                return (
+                                    <button key={modo} type="button"
+                                        onClick={() => setOfertaForm({
+                                            ...ofertaActual,
+                                            modo: activo ? '' : modo,
+                                            hasta: modo === 'fecha' && !activo && !ofertaActual.hasta ? aInputLocal(finDelDia(7)) : ofertaActual.hasta,
+                                        })}
+                                        className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-bold ${activo
+                                            ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/15 text-[var(--color-primary)]'
+                                            : 'border-[var(--glass-border)] text-[var(--color-text-muted)]'}`}>
+                                        {label}
+                                        <span className={`w-7 h-3.5 rounded-full flex items-center p-0.5 ${activo ? 'bg-[var(--color-primary)]' : 'bg-gray-500'}`}>
+                                            <span className={`w-2.5 h-2.5 bg-white rounded-full transition-all ${activo ? 'translate-x-3.5' : ''}`} />
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {!ofertaActual.modo && (
+                            <p className="text-[11px] text-[var(--color-text-muted)]">Oferta permanente: queda hasta que la apagues.</p>
+                        )}
+                        {ofertaActual.modo === 'fecha' && (
+                            <div className="space-y-1.5">
+                                <div className="flex flex-wrap gap-1.5">
+                                    {[['Hoy', 0], ['3 días', 3], ['7 días', 7]].map(([label, dias]) => (
+                                        <button key={label} type="button"
+                                            onClick={() => setOfertaForm({ ...ofertaActual, hasta: aInputLocal(finDelDia(dias)) })}
+                                            className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${ofertaActual.hasta === aInputLocal(finDelDia(dias))
+                                                ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/15 text-[var(--color-primary)]'
+                                                : 'border-[var(--glass-border)] text-[var(--color-text-muted)]'}`}>
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <input type="datetime-local" value={ofertaActual.hasta || ''}
+                                    onChange={(e) => setOfertaForm({ ...ofertaActual, hasta: e.target.value })}
+                                    className="glass-input w-full !py-1.5 !px-2 text-xs" aria-label="Oferta hasta" />
+                            </div>
+                        )}
+                        {ofertaActual.modo === 'cantidad' && (
+                            <input type="number" min="1" step="any" inputMode="decimal" value={ofertaActual.unidades || ''}
+                                onChange={(e) => setOfertaForm({ ...ofertaActual, unidades: e.target.value })}
+                                placeholder="Unidades en oferta, ej: 10" className="glass-input w-full !py-1.5 !px-2 text-xs" aria-label="Unidades en oferta" />
+                        )}
+                        {resumenOferta(reglaActual) && (
+                            <p className="text-[11px] text-[var(--color-text-muted)]">Ahora: {resumenOferta(reglaActual)}</p>
+                        )}
+                    </div>
                 )}
             </div>
     ) : null;
