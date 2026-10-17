@@ -41,6 +41,9 @@ export function buildSaleReceiptModel(sale, { sellerName, receiptConfig = {}, cu
     const money = (n) => formatCurrency(n, currency);
 
     const ticketId = sale?.id ? String(sale.id) : String(Date.now()).slice(-6);
+    // Pedido a domicilio cobrado al entregar (9-oct-2026): el delivery viaja en
+    // paymentDetails, fuera de los productos, y se muestra debajo del subtotal.
+    const deliveryFee = Math.round(Number(sale.paymentDetails?.deliveryFee) || 0);
     const folio = dteInfo?.folio ?? sale.dte_folio ?? null;
     const tipoDte = sale.tipoDte ?? sale.tipo_dte ?? null;
     const docLabel = folio ? (tipoDte === 33 ? 'FACTURA ELECTRONICA' : 'BOLETA ELECTRONICA') : null;
@@ -68,6 +71,9 @@ export function buildSaleReceiptModel(sale, { sellerName, receiptConfig = {}, cu
                 unitPrice: c.precio, lineTotal: it.price * it.quantity,
             };
         }),
+        subtotal: deliveryFee > 0 ? Number(sale.total) - deliveryFee : null,
+        deliveryFee: deliveryFee > 0 ? deliveryFee : null,
+        deliveryLabel: 'Delivery',
         total: sale.total,
         paymentMethod: paymentLabel,
         paidLabel: isCash ? `Pagó con: ${money(amountPaid)}` : null,
@@ -116,6 +122,8 @@ export function receiptModelToHtml(model, { currency = 'CLP' } = {}) {
         <div class="sep"></div>
         ${itemsHtml}
         <div class="sep"></div>
+        ${model.deliveryFee ? `<div class="row"><span>Subtotal</span><span>${money(model.subtotal)}</span></div>
+        <div class="row"><span>${esc(model.deliveryLabel || 'Delivery')}</span><span>${money(model.deliveryFee)}</span></div>` : ''}
         <div class="row b"><span>TOTAL</span><span>${money(model.total)}</span></div>
         <div style="margin-top:6px;">Medio Pago: ${esc(model.paymentMethod)}</div>
         ${model.paidLabel ? `<div>${esc(model.paidLabel)}</div>` : ''}

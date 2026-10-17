@@ -10,6 +10,9 @@ import { usePermissions } from '../hooks/usePermissions';
 import ReturnModal from '../components/ReturnModal';
 import { printSaleReceipt } from '../lib/saleReceipt';
 
+// Delivery de un pedido a domicilio cobrado al entregar: va aparte de los productos.
+const deliveryDeLaVenta = (sale) => Math.round(Number(sale?.paymentDetails?.deliveryFee) || 0);
+
 const SalesHistory = () => {
     const { sales, users, cancelSale, fetchSaleReturns, currentUser, currentCompanyTimezone, fetchSales, fetchSaleDetails, activeCompanyId, currentCurrency } = useStore();
     const [selectedSale, setSelectedSale] = useState(null);
@@ -592,8 +595,14 @@ const SalesHistory = () => {
                                         <div className="w-64 space-y-2">
                                             <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
                                                 <span>Subtotal</span>
-                                                <span>{formatCurrency(selectedSale.total, currentCurrency)}</span>
+                                                <span>{formatCurrency(selectedSale.total - deliveryDeLaVenta(selectedSale), currentCurrency)}</span>
                                             </div>
+                                            {deliveryDeLaVenta(selectedSale) > 0 && (
+                                                <div className="flex justify-between text-[var(--color-text-muted)] text-sm">
+                                                    <span>Delivery</span>
+                                                    <span>{formatCurrency(deliveryDeLaVenta(selectedSale), currentCurrency)}</span>
+                                                </div>
+                                            )}
                                             {totalReturned > 0 && (
                                                 <div className="flex justify-between text-orange-400 text-sm">
                                                     <span>Devoluciones</span>
@@ -986,8 +995,14 @@ const SalesHistory = () => {
                                 <div className="mt-6 space-y-2">
                                     <div className="flex justify-between text-sm text-[var(--color-text-muted)]">
                                         <span>Subtotal</span>
-                                        <span>{formatCurrency(selectedSale.total, currentCurrency)}</span>
+                                        <span>{formatCurrency(selectedSale.total - deliveryDeLaVenta(selectedSale), currentCurrency)}</span>
                                     </div>
+                                    {deliveryDeLaVenta(selectedSale) > 0 && (
+                                        <div className="flex justify-between text-sm text-[var(--color-text-muted)]">
+                                            <span>Delivery</span>
+                                            <span>{formatCurrency(deliveryDeLaVenta(selectedSale), currentCurrency)}</span>
+                                        </div>
+                                    )}
                                     {totalReturned > 0 && (
                                         <div className="flex justify-between text-sm text-orange-400">
                                             <span>Devoluciones</span>

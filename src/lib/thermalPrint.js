@@ -280,7 +280,7 @@ function buildReceiptBytes(receipt, width, money) {
     // Totales
     if (receipt.subtotal != null && receipt.deliveryFee) {
         p.text(row('Subtotal', money(receipt.subtotal), width));
-        p.text(row('Despacho', money(receipt.deliveryFee), width));
+        p.text(row(receipt.deliveryLabel || 'Despacho', money(receipt.deliveryFee), width));
     }
     p.bold(true).size(0x01).text(row('TOTAL', money(receipt.total), width)).size(0).bold(false);
     p.push(0x0A);
@@ -315,7 +315,7 @@ function buildReceiptBytes(receipt, width, money) {
  *   companyName, companyLines: [], title, code, datetime,
  *   clientName, clientPhone, address,
  *   items: [{ name, qty, unit, unitPrice, lineTotal }],
- *   subtotal, deliveryFee, total, paidLabel, remainingLabel, paymentMethod,
+ *   subtotal, deliveryFee, deliveryLabel, total, paidLabel, remainingLabel, paymentMethod,
  *   notes, footer
  * }
  * Devuelve { ok: true } o { ok: false, error }.

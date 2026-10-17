@@ -1,13 +1,15 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import {
     Truck, Plus, MapPin, Phone, Banknote, Clock, Check, X, Loader2,
-    AlertTriangle, Package, Navigation,
+    AlertTriangle, Package, Navigation, CalendarDays, Printer, Download, Ban,
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { usePermissions } from '../../hooks/usePermissions';
 import { toast } from '../../lib/toast';
 import { cn } from '../../lib/utils';
+import CobrarEnvioModal from '../../components/delivery/CobrarEnvioModal';
+import { textoEntrega, imprimirComprobanteEnvio, descargarComprobanteEnvio } from '../../lib/comprobanteEnvio';
 
 // Columnas del tablero (mismo orden que el flujo del envío).
 const COLS = [
@@ -19,7 +21,33 @@ const COLS = [
     { id: 'delivered', label: 'Entregados', cls: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/5' },
 ];
 
-const SOURCE_LABEL = { preorder: 'Pedido', sale: 'Venta', manual: 'Manual' };
+const SOURCE_LABEL = { preorder: 'Pedido', sale: 'Venta', manual: 'Manual', pedido: 'Pedido POS' };
+
+// Se entrega cobrando: el pedido del POS y el de la tienda web que falta pagar.
+const seCobra = (d) => d.source_type === 'pedido'
+    || (d.source_type === 'preorder' && d.pedido_tipo === 'store' && Number(d.pendiente_real) > 0);
+
+// Día del envío respecto de hoy, para agrupar la bandeja. Los cerrados (entregados,
+// fallidos, anulados) se ven en "Hoy": la bandeja solo los muestra si cerraron hoy.
+const diaLocal = (sumar = 0) => {
+    const d = new Date();
+    d.setDate(d.getDate() + sumar);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const GRUPOS = [
+    { id: 'atrasados', label: 'Atrasados', cls: 'text-red-400' },
+    { id: 'hoy', label: 'Hoy', cls: 'text-[var(--color-primary)]' },
+    { id: 'manana', label: 'Mañana', cls: 'text-sky-400' },
+    { id: 'proximos', label: 'Próximos', cls: 'text-violet-400' },
+];
+const grupoDe = (d) => {
+    if (['delivered', 'failed', 'canceled'].includes(d.status) || !d.scheduled_date) return 'hoy';
+    const hoy = diaLocal(0);
+    if (d.scheduled_date < hoy) return 'atrasados';
+    if (d.scheduled_date === hoy) return 'hoy';
+    if (d.scheduled_date === diaLocal(1)) return 'manana';
+    return 'proximos';
+};
 
 const sinceText = (iso) => {
     if (!iso) return '';
@@ -36,7 +64,7 @@ export default function Shipments() {
     const {
         deliveries, deliveryCounts, deliveryAssignMode, couriers, currentCurrency,
         fetchDeliveryBoard, fetchCouriers, assignDelivery, setDeliveryStatus,
-        createDelivery, fetchImportableOrders, saveDeliverySettings,
+        createDelivery, fetchImportableOrders, saveDeliverySettings, activeCompanyId,
     } = useStore();
     const { can } = usePermissions();
 
@@ -45,6 +73,7 @@ export default function Shipments() {
     const [showNew, setShowNew] = useState(false);
     const [importables, setImportables] = useState([]);
     const [failing, setFailing] = useState(null);   // envío al que se le marca "no entregado"
+    const [cobrando, setCobrando] = useState(null); // pedido que se cobra y entrega desde acá
 
     const load = React.useCallback(async () => {
         await Promise.all([fetchDeliveryBoard(), fetchCouriers()]);
@@ -64,6 +93,33 @@ export default function Shipments() {
         () => (filter === 'all' ? deliveries : deliveries.filter(d => d.status === filter)),
         [deliveries, filter]
     );
+    // Agrupada por día de entrega; dentro de cada día, por hora (los sin hora al final).
+    const porDia = useMemo(() => {
+        const g = new Map(GRUPOS.map(x => [x.id, []]));
+        for (const d of shown) g.get(grupoDe(d)).push(d);
+        for (const lista of g.values()) {
+            lista.sort((a, b) => String(a.scheduled_date || '').localeCompare(String(b.scheduled_date || ''))
+                || String(a.scheduled_time || '99').localeCompare(String(b.scheduled_time || '99')));
+        }
+        return GRUPOS.map(x => ({ ...x, envios: g.get(x.id) })).filter(x => x.envios.length);
+    }, [shown]);
+
+    const comprobante = async (d, fn) => {
+        const r = await fn(d, { companyId: activeCompanyId, currency: currentCurrency });
+        if (!r?.ok) {
+            toast(r?.error === 'NO_PRINTER' ? 'Configurá la impresora en Configuración → General → Impresora térmica.'
+                : r?.error === 'POPUP_BLOCKED' ? 'El navegador bloqueó la ventana de impresión.'
+                    : `No se pudo: ${r?.error || ''}`, 'error');
+        }
+    };
+
+    // Anular un pedido sin venta: la mercadería no sale y su stock vuelve.
+    const anular = async (d) => {
+        if (!window.confirm(`¿Anular el envío #${d.id} de ${d.client_name || 'sin cliente'}?\n\nEl stock que tenía separado vuelve al inventario.`)) return;
+        const r = await setDeliveryStatus(d.id, 'canceled', { reason: 'Anulado desde la bandeja' });
+        if (!r?.success) toast(r?.error || 'No se pudo anular', 'error');
+        else toast(r.stockDevuelto?.length ? 'Envío anulado: el stock volvió al inventario.' : 'Envío anulado.', 'success');
+    };
     const activeCouriers = useMemo(() => couriers.filter(c => c.active), [couriers]);
 
     const assign = async (d, courierId) => {
@@ -175,8 +231,13 @@ export default function Shipments() {
                     <p>No hay envíos {filter !== 'all' ? 'en este estado' : 'todavía'}.</p>
                 </div>
             ) : (
-                <div className="space-y-3">
-                    {shown.map(d => {
+                <div className="space-y-5">
+                    {porDia.map(grupo => (
+                    <div key={grupo.id} className="space-y-3">
+                    <p className={cn('text-xs font-black uppercase tracking-wider flex items-center gap-1.5', grupo.cls)}>
+                        <CalendarDays size={14} /> {grupo.label} · {grupo.envios.length}
+                    </p>
+                    {grupo.envios.map(d => {
                         const col = COLS.find(c => c.id === d.status);
                         // Si el pedido ya se cobró en el local, el repartidor no cobra
                         // (y no habrá nada que rendir): se avisa para evitar confusión.
@@ -203,9 +264,15 @@ export default function Shipments() {
                                         <span className={cn('text-[10px] font-bold px-2 py-1 rounded-full border', col?.cls || '')}>
                                             {col?.label || d.status}
                                         </span>
-                                        <p className="text-[11px] text-[var(--color-text-muted)] mt-1 flex items-center gap-1 justify-end">
-                                            <Clock size={10} /> {sinceText(d.created_at)}
-                                        </p>
+                                        {textoEntrega(d.scheduled_date, d.scheduled_time) ? (
+                                            <p className="text-xs font-bold text-[var(--color-text)] mt-1 flex items-center gap-1 justify-end">
+                                                <Clock size={11} /> {textoEntrega(d.scheduled_date, d.scheduled_time)}
+                                            </p>
+                                        ) : (
+                                            <p className="text-[11px] text-[var(--color-text-muted)] mt-1 flex items-center gap-1 justify-end">
+                                                <Clock size={10} /> {sinceText(d.created_at)}
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
 
@@ -223,6 +290,20 @@ export default function Shipments() {
                                     {d.courier_name && (
                                         <span className="text-cyan-400 font-medium">🛵 {d.courier_name}</span>
                                     )}
+                                    {d.source_type === 'pedido' && Number(d.stock_reserved) === 1 && (
+                                        <span className="text-violet-400 font-medium flex items-center gap-1"><Package size={12} /> Stock separado</span>
+                                    )}
+                                    {d.sale_id && <span className="text-[var(--color-text-muted)]">Venta #{d.sale_id}</span>}
+                                    <span className="ml-auto flex items-center gap-1">
+                                        <button onClick={() => comprobante(d, imprimirComprobanteEnvio)} title="Imprimir comprobante del paquete"
+                                            className="p-1.5 rounded-lg border border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                                            <Printer size={13} />
+                                        </button>
+                                        <button onClick={() => comprobante(d, descargarComprobanteEnvio)} title="Descargar comprobante del paquete"
+                                            className="p-1.5 rounded-lg border border-[var(--glass-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                                            <Download size={13} />
+                                        </button>
+                                    </span>
                                 </div>
 
                                 {/* Acciones */}
@@ -253,15 +334,23 @@ export default function Shipments() {
                                             </button>
                                         )}
                                         {d.status === 'on_route' && (
-                                            <button onClick={() => advance(d, 'delivered')}
+                                            // Un pedido sin venta se entrega cobrando: ahí nace la venta
+                                            // (pedido del POS, o de la tienda web que se paga al recibir).
+                                            <button onClick={() => (seCobra(d) ? setCobrando(d) : advance(d, 'delivered'))}
                                                 className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                                                <Check size={12} className="inline mr-1" /> Entregado
+                                                <Check size={12} className="inline mr-1" /> {seCobra(d) ? 'Cobrar y entregar' : 'Entregado'}
                                             </button>
                                         )}
                                         {['assigned', 'accepted', 'picked_up', 'on_route'].includes(d.status) && (
                                             <button onClick={() => setFailing(d)}
                                                 className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-500/10 text-red-400 border border-red-500/30">
                                                 <X size={12} className="inline mr-1" /> No entregado
+                                            </button>
+                                        )}
+                                        {d.source_type === 'pedido' && (
+                                            <button onClick={() => anular(d)}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-bold text-[var(--color-text-muted)] border border-[var(--glass-border)]">
+                                                <Ban size={12} className="inline mr-1" /> Anular
                                             </button>
                                         )}
                                     </div>
@@ -272,10 +361,15 @@ export default function Shipments() {
                             </div>
                         );
                     })}
+                    </div>
+                    ))}
                 </div>
             )}
 
             {showNew && <NewDeliveryModal onClose={() => setShowNew(false)} onSaved={load} />}
+            {cobrando && (
+                <CobrarEnvioModal envio={cobrando} onClose={() => { setCobrando(null); load(); }} onDone={() => load()} />
+            )}
             {failing && (
                 <FailModal d={failing} onClose={() => setFailing(null)}
                     onConfirm={async (reason) => { await advance(failing, 'failed', { reason }); setFailing(null); }} />

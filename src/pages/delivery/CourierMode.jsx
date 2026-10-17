@@ -8,6 +8,9 @@ import { useStore } from '../../store/useStore';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { toast } from '../../lib/toast';
 import { cn } from '../../lib/utils';
+import CobrarEnvioModal from '../../components/delivery/CobrarEnvioModal';
+import { EntregaExitosaModal } from '../../components/delivery/DocumentoVenta';
+import { textoEntrega } from '../../lib/comprobanteEnvio';
 
 // Modo Repartidor. Menú con 4 tarjetas y, dentro de cada una, los envíos del día
 // en ese estado. La ubicación se comparte SOLO mientras hay envíos en curso, cada
@@ -40,6 +43,8 @@ export default function CourierMode() {
     const [busy, setBusy] = useState(null);
     const [failing, setFailing] = useState(null);
     const [delivering, setDelivering] = useState(null);
+    // Pedido ya pagado recién entregado: se puede reimprimir su boleta o factura.
+    const [entregaOk, setEntregaOk] = useState(null);
     const timerRef = useRef(null);
 
     const load = React.useCallback(async () => {
@@ -102,6 +107,7 @@ export default function CourierMode() {
         setBusy(null);
         if (r?.success) { toast('Listo', 'success'); load(); }
         else toast(r?.error || 'No se pudo actualizar', 'error');
+        return r;
     };
 
     const take = async (d) => {
@@ -274,9 +280,20 @@ export default function CourierMode() {
                 <FailModal onClose={() => setFailing(null)}
                     onPick={async (reason) => { await act(failing, 'failed', { reason }); setFailing(null); }} />
             )}
-            {delivering && (
+            {delivering && seEntregaCobrando(delivering) && (
+                <CobrarEnvioModal envio={delivering} onClose={() => { setDelivering(null); load(); }} onDone={() => load()} />
+            )}
+            {delivering && !seEntregaCobrando(delivering) && (
                 <DeliverModal d={delivering} currency={currentCurrency} onClose={() => setDelivering(null)}
-                    onConfirm={async (extra) => { await act(delivering, 'delivered', extra); setDelivering(null); }} />
+                    onConfirm={async (extra) => {
+                        const d = delivering;
+                        const r = await act(d, 'delivered', extra);
+                        setDelivering(null);
+                        if (r?.success && d.venta_id) setEntregaOk({ titulo: `Envío #${d.id}`, saleId: d.venta_id });
+                    }} />
+            )}
+            {entregaOk && (
+                <EntregaExitosaModal titulo={entregaOk.titulo} saleId={entregaOk.saleId} onClose={() => setEntregaOk(null)} />
             )}
             {detail && (
                 <DetailModal d={detail} currency={currentCurrency} fetchDetail={fetchDeliveryDetail}
@@ -287,6 +304,14 @@ export default function CourierMode() {
             {navTarget && <NavModal target={navTarget} onClose={() => setNavTarget(null)} />}
         </div>
     );
+}
+
+// Se entrega COBRANDO (nace la venta con boleta o nota de venta): el pedido a
+// domicilio del POS y el pedido de la tienda web que se paga al recibir.
+function seEntregaCobrando(d) {
+    if (d.source_type === 'pedido') return true;
+    return d.source_type === 'preorder' && d.pedido_tipo === 'store'
+        && Number(d.pendiente_real ?? d.amount_to_collect) > 0;
 }
 
 // ── Tarjeta de un envío ─────────────────────────────────────────────────────
@@ -326,6 +351,11 @@ function OrderCard({ d, view, busy, currency, pickupName, onAccept, onPickedUp, 
                     <MapPin size={14} className="shrink-0 mt-0.5" />
                     <span>{d.address}{d.address_notes ? ` · ${d.address_notes}` : ''}</span>
                 </p>
+                {textoEntrega(d.scheduled_date, d.scheduled_time) && (
+                    <p className="text-sm font-bold text-[var(--color-text)] flex items-center gap-1.5">
+                        <Clock size={14} className="text-[var(--color-primary)]" /> Entrega: {textoEntrega(d.scheduled_date, d.scheduled_time)}
+                    </p>
+                )}
                 <p className={cn('text-sm font-bold flex items-center gap-1.5', cobra ? 'text-amber-400' : 'text-emerald-400')}>
                     <Banknote size={14} />
                     {cobra ? `Cobrar ${formatCurrency(d.amount_to_collect, currency)}` : 'Ya pagado'}
@@ -405,7 +435,9 @@ function OrderCard({ d, view, busy, currency, pickupName, onAccept, onPickedUp, 
                                     </button>
                                     <button onClick={onDeliver} disabled={busy}
                                         className="py-3 rounded-xl font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 disabled:opacity-50">
-                                        <Check size={16} className="inline mr-1" /> Entregar
+                                        {seEntregaCobrando(d)
+                                            ? <><Banknote size={16} className="inline mr-1" /> Cobrar</>
+                                            : <><Check size={16} className="inline mr-1" /> Entregar</>}
                                     </button>
                                 </div>
                             )}

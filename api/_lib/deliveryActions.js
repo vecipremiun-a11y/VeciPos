@@ -8,6 +8,9 @@
 // SOLA VÍA — la liquidación (settlementCreate). Nunca desde la venta, o el arqueo
 // se infla (mismo bug que tuvieron los encargos).
 
+import { moverStock } from './stockSeparado.js';
+import { pedidoTienda, pasarAEnReparto, cerrarPedidoTienda, volverAListo } from './tiendaPedidos.js';
+
 const nowIso = () => new Date().toISOString();
 
 // Estados válidos y su orden natural.
@@ -26,6 +29,18 @@ const NEXT = {
     picked_up: ['on_route', 'failed', 'canceled'],
     on_route: ['delivered', 'failed', 'canceled'],
 };
+// Si el envío es de un pedido de la tienda web ('store') o de un encargo. Un pedido
+// de la tienda que se paga al recibir se entrega cobrando (nace la venta), y si el
+// cliente pidió factura, sus datos (invoice_data, migración 0034) van con el cobro.
+const PEDIDO_TIPO = `CASE WHEN d.source_type = 'preorder'
+                         THEN (SELECT COALESCE(p.order_kind, 'encargo') FROM preorders p
+                               WHERE p.id = d.source_id AND p.company_id = d.company_id)
+                         ELSE NULL END AS pedido_tipo,
+                     CASE WHEN d.source_type = 'preorder'
+                         THEN (SELECT p.invoice_data FROM preorders p
+                               WHERE p.id = d.source_id AND p.company_id = d.company_id)
+                         ELSE NULL END AS invoice_data`;
+
 const STATUS_LABEL = {
     pending: 'Pendiente', assigned: 'Asignado', accepted: 'Aceptado', picked_up: 'Retirado',
     on_route: 'En ruta', delivered: 'Entregado', failed: 'No entregado', canceled: 'Cancelado',
@@ -242,7 +257,11 @@ async function deliveryBoard(turso, companyId, session, { desdeCierre = null } =
                              THEN (SELECT CASE WHEN s.payment_method != 'Crédito' OR s.status = 'paid' THEN 0
                                                ELSE MAX(0, s.total - COALESCE(s.amount_paid, 0)) END
                                    FROM sales s WHERE s.id = d.source_id AND s.company_id = d.company_id)
-                           ELSE NULL END AS pendiente_real
+                           -- Pedido sin venta: lo que hay que cobrar es todo, hasta que se entrega.
+                           WHEN d.source_type = 'pedido'
+                             THEN CASE WHEN d.status = 'delivered' THEN 0 ELSE d.amount_to_collect END
+                           ELSE NULL END AS pendiente_real,
+                         ${PEDIDO_TIPO}
                   FROM deliveries d LEFT JOIN couriers c ON c.id = d.courier_id
                   WHERE d.company_id = ?
                     AND (d.status NOT IN ('delivered','failed','canceled')
@@ -278,11 +297,16 @@ async function deliveryBoard(turso, companyId, session, { desdeCierre = null } =
  * Crea un envío. `source_type` = 'preorder' | 'sale' | 'manual'.
  * Si el pedido ya viene pagado, amountToCollect = 0 y el repartidor no cobra.
  */
+// Fecha AAAA-MM-DD y hora HH:MM de entrega; lo que no tiene esa forma no se guarda.
+const fechaValida = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+const horaValida = (v) => (/^\d{2}:\d{2}$/.test(String(v || '')) ? String(v) : null);
+
 async function deliveryCreate(turso, companyId, session, data = {}) {
     const {
         sourceType = 'manual', sourceId = null,
         clientName, clientPhone, address, addressNotes,
         amountToCollect = 0, deliveryFee = 0, notes, courierId = null,
+        scheduledDate = null, scheduledTime = null,
     } = data;
     if (!address || !String(address).trim()) return { success: false, error: 'Falta la dirección de entrega' };
 
@@ -311,20 +335,197 @@ async function deliveryCreate(turso, companyId, session, data = {}) {
 
     const iso = nowIso();
     const status = courierId ? 'assigned' : 'pending';
+    const fecha = fechaValida(scheduledDate);
+    const hora = horaValida(scheduledTime);
+    // Las columnas de fecha/hora son de la migración 0032: sin fecha no se nombran,
+    // así un envío común se crea igual aunque la migración todavía no esté.
+    const conFecha = fecha || hora;
     const r = await turso.execute({
         sql: `INSERT INTO deliveries
                 (company_id, source_type, source_id, courier_id, status, client_name, client_phone,
                  address, address_notes, amount_to_collect, delivery_fee, notes, created_by,
-                 assigned_at, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+                 assigned_at, created_at, updated_at${conFecha ? ', scheduled_date, scheduled_time' : ''})
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${conFecha ? ', ?, ?' : ''}) RETURNING id`,
         args: [companyId, sourceType, sourceId, courierId, status, clientName || null, clientPhone || null,
             String(address).trim(), addressNotes || null, Number(amountToCollect) || 0,
             Number(deliveryFee) || 0, notes || null, session?.uid ?? null,
-            courierId ? iso : null, iso, iso],
+            courierId ? iso : null, iso, iso, ...(conFecha ? [fecha, hora] : [])],
     });
     const id = r.rows[0]?.id;
     await logEvent(turso, companyId, id, status, session);
     return { success: true, id };
+}
+
+// ── Pedido a domicilio con pago al recibir (migración 0032) ─────────────────
+//
+// Antes, "Al recibir" registraba la venta completa al despachar, a Crédito del
+// cliente: un envío para mañana sumaba en las ventas y la caja de hoy (venta
+// #1036161, $219.000, 5-oct-2026). Ahora se guarda el PEDIDO en el envío
+// (`source_type = 'pedido'`), se separa el stock, y la venta nace al entregar,
+// cuando el repartidor cobra y elige boleta o nota de venta.
+//
+// EL STOCK SEPARADO. Se descuenta de `products.stock` —el número que el POS y la
+// tienda muestran y que la venta respeta— y se anota exactamente qué se separó
+// (`reserved_items`). Los lotes no se tocan: al entregar, primero se devuelve lo
+// separado y DESPUÉS se registra la venta, que descuenta stock y lotes por el
+// camino de siempre. Así el stock nunca se cuenta dos veces y la venta no se
+// rechaza por "stock insuficiente" contra su propia reserva.
+
+// Lo que descuenta del stock cada renglón del carrito: lo mismo que va a
+// descontar la venta (un combo descuenta sus componentes).
+function stockDelCarrito(items) {
+    const m = new Map();
+    const sumar = (id, q) => {
+        if (id === undefined || id === null || !(q > 0)) return;
+        const k = String(id);
+        m.set(k, (m.get(k) || 0) + q);
+    };
+    for (const it of items) {
+        const q = Number(it?.quantity) || 0;
+        if (it?.is_combo) {
+            for (const c of (it.combo_items || [])) sumar(c.product_id, (Number(c.quantity) || 1) * q);
+        } else {
+            sumar(it?.id, q);
+        }
+    }
+    return [...m].map(([productId, qty]) => ({ productId, qty: Math.round(qty * 1000) / 1000 }));
+}
+
+// moverStock vive en stockSeparado.js: lo comparte con el pedido de la tienda web.
+
+/** Crea el pedido a domicilio: envío con sus productos, stock separado, sin venta. */
+async function deliveryOrderCreate(turso, companyId, session, data = {}) {
+    const {
+        items = [], client = null, total = 0,
+        clientPhone, address, addressNotes, deliveryFee = 0, notes,
+        scheduledDate = null, scheduledTime = null, claveCliente = null,
+    } = data;
+    if (!Array.isArray(items) || !items.length) return { success: false, error: 'El pedido no tiene productos' };
+    if (!address || !String(address).trim()) return { success: false, error: 'Falta la dirección de entrega' };
+    const totalProductos = Math.round(Number(total) || 0);
+    if (!(totalProductos > 0)) return { success: false, error: 'El pedido no tiene total' };
+
+    // Doble toque o reintento: el mismo pedido no se crea (ni se separa) dos veces.
+    const clave = claveCliente ? String(claveCliente).slice(0, 80) : null;
+    if (clave) {
+        const ya = await turso.execute({
+            sql: 'SELECT id FROM deliveries WHERE company_id = ? AND client_key = ? LIMIT 1',
+            args: [companyId, clave],
+        });
+        if (ya.rows[0]) return { success: true, id: Number(ya.rows[0].id), repetido: true };
+    }
+
+    const reservas = stockDelCarrito(items);
+    const sep = await moverStock(turso, companyId, reservas, -1);
+    if (!sep.ok) return { success: false, error: sep.error };
+
+    // Sin fotos: pesan y el pedido solo necesita lo que va a la venta.
+    const productos = items.map(({ image: _foto, ...resto }) => resto);
+    const fee = Math.max(0, Math.round(Number(deliveryFee) || 0));
+    const iso = nowIso();
+    let id;
+    try {
+        const r = await turso.execute({
+            sql: `INSERT INTO deliveries
+                    (company_id, source_type, source_id, status, client_name, client_phone,
+                     address, address_notes, amount_to_collect, delivery_fee, notes, created_by,
+                     created_at, updated_at, scheduled_date, scheduled_time,
+                     order_data, order_total, client_id, reserved_items, stock_reserved, client_key)
+                  VALUES (?, 'pedido', NULL, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?) RETURNING id`,
+            args: [companyId, client?.name || null, clientPhone || client?.phone || null,
+                String(address).trim(), addressNotes || null, totalProductos + fee, fee, notes || null,
+                session?.uid ?? null, iso, iso, fechaValida(scheduledDate), horaValida(scheduledTime),
+                JSON.stringify({ items: productos, client, total: totalProductos }), totalProductos,
+                client?.id ?? null, JSON.stringify(reservas), clave],
+        });
+        id = Number(r.rows[0]?.id);
+    } catch (err) {
+        // El envío no quedó: lo separado vuelve al stock.
+        await moverStock(turso, companyId, reservas, +1);
+        if (clave && /UNIQUE/i.test(String(err?.message))) {
+            const ya = await turso.execute({ sql: 'SELECT id FROM deliveries WHERE company_id = ? AND client_key = ? LIMIT 1', args: [companyId, clave] });
+            if (ya.rows[0]) return { success: true, id: Number(ya.rows[0].id), repetido: true };
+        }
+        throw err;
+    }
+    await logEvent(turso, companyId, id, 'pending', session, `Pedido: stock separado (${reservas.length} producto(s))`);
+    return { success: true, id, reservados: reservas };
+}
+
+// Devuelve el stock separado de un pedido, UNA sola vez: la marca stock_reserved
+// pasa de 1 a 0 en la misma sentencia que decide si toca devolver.
+async function liberarPedido(turso, companyId, id) {
+    const marca = await turso.execute({
+        sql: 'UPDATE deliveries SET stock_reserved = 0, updated_at = ? WHERE id = ? AND company_id = ? AND stock_reserved = 1 RETURNING reserved_items',
+        args: [nowIso(), id, companyId],
+    });
+    if (!marca.rows[0]) return { liberados: [] };
+    let reservas = [];
+    try { reservas = JSON.parse(marca.rows[0].reserved_items || '[]'); } catch { reservas = []; }
+    await moverStock(turso, companyId, reservas, +1);
+    return { liberados: reservas };
+}
+
+/**
+ * Paso 1 de "cobrar y entregar": devuelve lo separado para que la venta lo pueda
+ * descontar, y entrega el pedido para armarla. Si la venta después falla, se
+ * vuelve a separar con deliveryOrderReserve.
+ */
+async function deliveryOrderRelease(turso, companyId, session, { id } = {}) {
+    const d = await ownDelivery(turso, companyId, id, 'id, status, source_type, order_data, sale_id');
+    if (!d) return { success: false, error: 'Envío no encontrado' };
+    if (d.source_type !== 'pedido') return { success: false, error: 'Ese envío no es un pedido por cobrar' };
+    if (d.status === 'delivered') return { success: false, error: 'Ese pedido ya se entregó', saleId: d.sale_id || null };
+    if (TERMINAL.includes(d.status)) return { success: false, error: 'Ese envío ya está cerrado' };
+    // Se valida ANTES de la venta: si después no se pudiera marcar entregado,
+    // quedaría una venta registrada de un pedido sin entregar.
+    if (d.status !== 'on_route') {
+        return { success: false, error: `El envío está en "${STATUS_LABEL[d.status]}". Para entregarlo tiene que estar "En ruta".` };
+    }
+    const { liberados } = await liberarPedido(turso, companyId, id);
+    let pedido = null;
+    try { pedido = JSON.parse(d.order_data || 'null'); } catch { pedido = null; }
+    return { success: true, pedido, liberados };
+}
+
+/** La venta no se pudo registrar: el pedido vuelve a separar su stock. */
+async function deliveryOrderReserve(turso, companyId, session, { id } = {}) {
+    const d = await ownDelivery(turso, companyId, id, 'id, status, source_type, reserved_items, stock_reserved');
+    if (!d || d.source_type !== 'pedido') return { success: false, error: 'Envío no encontrado' };
+    if (TERMINAL.includes(d.status) || Number(d.stock_reserved) === 1) return { success: true, yaEstaba: true };
+    let reservas = [];
+    try { reservas = JSON.parse(d.reserved_items || '[]'); } catch { reservas = []; }
+    const sep = await moverStock(turso, companyId, reservas, -1);
+    if (!sep.ok) return { success: false, error: sep.error };
+    await turso.execute({
+        sql: 'UPDATE deliveries SET stock_reserved = 1, updated_at = ? WHERE id = ? AND company_id = ?',
+        args: [nowIso(), id, companyId],
+    });
+    return { success: true };
+}
+
+/**
+ * Paso final: la venta ya existe. Se anota en el envío y se marca entregado con
+ * lo cobrado. Si la venta cayó en una caja abierta del que cobró, se anota: la
+ * rendición no vuelve a sumar ese efectivo (si no, entraría dos veces).
+ */
+async function deliveryOrderComplete(turso, companyId, session, { id, saleId, collectedAmount, collectedMethod, receivedBy, receivedByKind, proofPhoto } = {}) {
+    const d = await ownDelivery(turso, companyId, id, 'id, status, source_type, sale_id');
+    if (!d || d.source_type !== 'pedido') return { success: false, error: 'Envío no encontrado' };
+    if (!saleId) return { success: false, error: 'Falta la venta del pedido' };
+    if (d.status === 'delivered') return { success: true, yaEstaba: true };
+    const venta = await turso.execute({
+        sql: 'SELECT id, register_id FROM sales WHERE id = ? AND company_id = ? LIMIT 1',
+        args: [saleId, companyId],
+    });
+    if (!venta.rows[0]) return { success: false, error: 'La venta del pedido no existe' };
+    await turso.execute({
+        sql: 'UPDATE deliveries SET sale_id = ?, sale_register_id = ?, updated_at = ? WHERE id = ? AND company_id = ?',
+        args: [saleId, venta.rows[0].register_id ?? null, nowIso(), id, companyId],
+    });
+    return deliveryStatus(turso, companyId, session, {
+        id, status: 'delivered', collectedAmount, collectedMethod, receivedBy, receivedByKind, proofPhoto,
+    });
 }
 
 async function deliveryAssign(turso, companyId, session, { id, courierId } = {}) {
@@ -367,9 +568,24 @@ async function deliveryStatus(turso, companyId, session, { id, status, collected
     if (!FLOW.includes(status) && !['failed', 'canceled'].includes(status)) {
         return { success: false, error: 'Estado no válido' };
     }
-    const d = await ownDelivery(turso, companyId, id, 'id, status, courier_id, amount_to_collect, source_type, source_id');
+    const d = await ownDelivery(turso, companyId, id, '*');
     if (!d) return { success: false, error: 'Envío no encontrado' };
     if (TERMINAL.includes(d.status)) return { success: false, error: 'El envío ya está cerrado' };
+    // Un pedido sin venta se entrega COBRANDO (deliveryOrderComplete), que es
+    // donde nace la venta con su boleta. Marcarlo entregado sin eso lo dejaría
+    // entregado y sin vender.
+    if (d.source_type === 'pedido' && status === 'delivered' && !d.sale_id) {
+        return { success: false, error: 'Este pedido se entrega cobrando: usá "Cobrar y entregar".' };
+    }
+    // Pedido de la tienda web que se paga al recibir: igual, se entrega cobrando.
+    let tienda = null;
+    if (d.source_type === 'preorder' && d.source_id) {
+        try { tienda = await pedidoTienda(turso, companyId, d.source_id); } catch { tienda = null; }
+    }
+    if (tienda && status === 'delivered' && !d.sale_id && tienda.status !== 'delivered'
+        && Number(tienda.remaining_amount) > 0) {
+        return { success: false, error: 'Este pedido se paga al recibir: se entrega con "Cobrar".' };
+    }
 
     // No se pueden saltar etapas: asignado → retirado → en ruta → entregado.
     const allowed = NEXT[d.status] || [];
@@ -412,6 +628,26 @@ async function deliveryStatus(turso, companyId, session, { id, status, collected
     await turso.execute({ sql: `UPDATE deliveries SET ${sets.join(', ')} WHERE id = ? AND company_id = ?`, args });
     await logEvent(turso, companyId, id, status, session, reason || null);
 
+    // Pedido anulado o que no se pudo entregar: la mercadería vuelve al local y
+    // lo separado vuelve al stock.
+    let stockDevuelto = [];
+    if (d.source_type === 'pedido' && ['canceled', 'failed'].includes(status)) {
+        stockDevuelto = (await liberarPedido(turso, companyId, id)).liberados;
+    }
+
+    // El pedido de la tienda web sigue al envío: retirado = "En reparto",
+    // entregado = "Entregado" (y miniveci.cl se entera), y si el envío se cae
+    // vuelve a "Listo". Si esto falla, el envío igual queda como se marcó.
+    if (tienda) {
+        try {
+            if (status === 'picked_up') await pasarAEnReparto(turso, companyId, tienda.id, { session });
+            if (status === 'delivered') await cerrarPedidoTienda(turso, companyId, tienda.id, { saleId: d.sale_id || null, session });
+            if (['failed', 'canceled'].includes(status)) await volverAListo(turso, companyId, tienda.id, { session, nota: reason || null });
+        } catch (e) {
+            console.error('[envío → pedido tienda]', id, e?.message || e);
+        }
+    }
+
     // Si el repartidor se queda sin envíos activos, vuelve a "disponible".
     if (d.courier_id && TERMINAL.includes(status)) {
         const left = await turso.execute({
@@ -422,7 +658,63 @@ async function deliveryStatus(turso, companyId, session, { id, status, collected
             await turso.execute({ sql: "UPDATE couriers SET status = 'available', updated_at = ? WHERE id = ? AND company_id = ?", args: [iso, d.courier_id, companyId] });
         }
     }
-    return { success: true };
+    return { success: true, stockDevuelto };
+}
+
+// ── Envío de un pedido de la tienda web, movido desde la pestaña Tienda ──────
+
+/** El envío que sigue abierto para ese pedido (o null). */
+export async function envioActivoDePedido(turso, companyId, preorderId) {
+    try {
+        const r = await turso.execute({
+            sql: `SELECT * FROM deliveries WHERE company_id = ? AND source_type = 'preorder' AND source_id = ?
+                    AND status NOT IN ('delivered', 'failed', 'canceled') ORDER BY id DESC LIMIT 1`,
+            args: [companyId, preorderId],
+        });
+        return r.rows[0] || null;
+    } catch {
+        return null;   // empresa sin la tabla de envíos
+    }
+}
+
+/** La Tienda marcó "En reparto": el repartidor ya tiene el paquete. */
+export async function marcarRetiradoDesdeTienda(turso, companyId, session, envio) {
+    if (!envio || !['assigned', 'accepted'].includes(envio.status)) return { cambiado: false };
+    const iso = nowIso();
+    await turso.execute({
+        sql: `UPDATE deliveries SET status = 'picked_up', picked_up_at = ?, accepted_at = COALESCE(accepted_at, ?), updated_at = ?
+              WHERE id = ? AND company_id = ?`,
+        args: [iso, iso, iso, envio.id, companyId],
+    });
+    await logEvent(turso, companyId, envio.id, 'picked_up', session, 'Entregado al repartidor desde Tienda');
+    return { cambiado: true };
+}
+
+/**
+ * El pedido se entregó desde la Tienda (cobrado en el local, o ya pagado): el
+ * envío que quedaba abierto se cierra sin plata que rendir —la que hubo entró a
+ * la caja de quien cobró—.
+ */
+export async function cerrarEnvioDesdeTienda(turso, companyId, session, envio, { saleId = null, saleRegisterId = null } = {}) {
+    if (!envio || TERMINAL.includes(envio.status)) return { cambiado: false };
+    const iso = nowIso();
+    await turso.execute({
+        sql: `UPDATE deliveries SET status = 'delivered', delivered_at = ?, collected_amount = 0, updated_at = ?,
+                sale_id = COALESCE(?, sale_id), sale_register_id = COALESCE(?, sale_register_id)
+              WHERE id = ? AND company_id = ?`,
+        args: [iso, iso, saleId, saleRegisterId, envio.id, companyId],
+    });
+    await logEvent(turso, companyId, envio.id, 'delivered', session, 'Entregado desde Tienda');
+    if (envio.courier_id) {
+        const left = await turso.execute({
+            sql: `SELECT COUNT(*) AS n FROM deliveries WHERE courier_id = ? AND company_id = ? AND status IN ('assigned','accepted','picked_up','on_route')`,
+            args: [envio.courier_id, companyId],
+        });
+        if (Number(left.rows[0]?.n) === 0) {
+            await turso.execute({ sql: "UPDATE couriers SET status = 'available', updated_at = ? WHERE id = ? AND company_id = ?", args: [iso, envio.courier_id, companyId] });
+        }
+    }
+    return { cambiado: true };
 }
 
 /**
@@ -491,9 +783,23 @@ async function courierMyDeliveries(turso, companyId, session) {
             args: [companyId, me.id],
         },
         {
-            sql: `SELECT * FROM deliveries WHERE company_id = ? AND courier_id = ?
-                    AND status IN ('accepted','picked_up','on_route')
-                  ORDER BY accepted_at, assigned_at`,
+            // Del pedido de la tienda: lo que debe AHORA (si se cobró en el local, 0).
+            sql: `SELECT d.*, ${PEDIDO_TIPO},
+                         CASE WHEN d.source_type = 'preorder'
+                              THEN (SELECT COALESCE(p.remaining_amount, 0) FROM preorders p
+                                    WHERE p.id = d.source_id AND p.company_id = d.company_id)
+                              ELSE NULL END AS pendiente_real,
+                         -- La venta del pedido (ya pagado): al entregar se puede
+                         -- reimprimir su boleta o factura.
+                         COALESCE(d.sale_id, CASE
+                              WHEN d.source_type = 'preorder'
+                                THEN (SELECT p.sale_id FROM preorders p
+                                      WHERE p.id = d.source_id AND p.company_id = d.company_id)
+                              WHEN d.source_type = 'sale' THEN d.source_id
+                              END) AS venta_id
+                  FROM deliveries d WHERE d.company_id = ? AND d.courier_id = ?
+                    AND d.status IN ('accepted','picked_up','on_route')
+                  ORDER BY d.accepted_at, d.assigned_at`,
             args: [companyId, me.id],
         },
         // El corte se calcula en JS y se compara ISO contra ISO. Las funciones de
@@ -785,7 +1091,10 @@ async function settlementCreate(turso, companyId, session, { courierId, register
 
     const pend = await turso.execute({
         sql: `SELECT COUNT(*) AS n, COALESCE(SUM(collected_amount),0) AS total,
-                COALESCE(SUM(CASE WHEN collected_method IS NULL OR collected_method = 'Efectivo' THEN collected_amount ELSE 0 END),0) AS cash
+                -- Un pedido cobrado por alguien con caja abierta ya entró a esa caja con
+                -- su venta (sale_register_id): no se vuelve a sumar acá.
+                COALESCE(SUM(CASE WHEN (collected_method IS NULL OR collected_method = 'Efectivo') AND sale_register_id IS NULL
+                                  THEN collected_amount ELSE 0 END),0) AS cash
               FROM deliveries
               WHERE company_id = ? AND courier_id = ? AND status = 'delivered' AND settlement_id IS NULL`,
         args: [companyId, courierId],
@@ -865,6 +1174,10 @@ async function deliverySettingsSave(turso, companyId, session, { assignMode } = 
 }
 
 export const deliveryActions = {
+    deliveryOrderCreate,
+    deliveryOrderRelease,
+    deliveryOrderReserve,
+    deliveryOrderComplete,
     courierList,
     courierSave,
     courierDelete,

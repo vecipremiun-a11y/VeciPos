@@ -5,6 +5,12 @@
 
 import { broadcastPreorderEvent } from '../events/preorders-stream.js';
 import { saleAggregations } from './salesActions.js';
+import { deliveryActions, envioActivoDePedido, marcarRetiradoDesdeTienda, cerrarEnvioDesdeTienda } from './deliveryActions.js';
+import {
+    pedidoTienda, liberarStockPedido, volverASepararPedido, rehacerReservaPedido,
+    cerrarPedidoTienda, ventaDelPedido, esTransferenciaPorConfirmar, confirmarPagoPedido,
+    pagadoSinDocumento, anotarDocumento,
+} from './tiendaPedidos.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -195,7 +201,8 @@ async function pendingWebOrders(turso, companyId) {
                      (SELECT GROUP_CONCAT(pi.product_name || ' x' || pi.qty, ', ')
                       FROM preorder_items pi WHERE pi.preorder_id = p.id) as items_summary
               FROM preorders p
-              WHERE p.company_id = ? AND p.external_source = 'miniveci' AND p.status = 'pending'
+              WHERE p.company_id = ? AND p.external_source = 'miniveci'
+                AND (p.status = 'pending' OR (p.order_kind = 'store' AND p.status = 'preparing'))
               ORDER BY p.created_at DESC`,
         args: [companyId],
     });
@@ -280,9 +287,10 @@ async function preorderDetails(turso, companyId, session, { preorderId }) {
 // Edita los productos de un pedido (pestaña Tienda): reemplaza los items y
 // recalcula el total. deposit_amount NO se toca (es lo ya pagado); el saldo
 // (remaining_amount = total - deposit) puede quedar negativo = a devolver al
-// entregar. NO toca stock (el stock de tienda lo maneja el webhook sale.created).
+// entregar. Si el pedido tenía stock separado (migración 0034), lo separado pasa
+// a ser lo de los productos nuevos.
 async function preorderItemsEdit(turso, companyId, session, { preorderId, items }) {
-    const pr = await ownPreorder(turso, companyId, preorderId, 'status, deposit_amount, delivery_fee');
+    const pr = await ownPreorder(turso, companyId, preorderId, 'status, deposit_amount, delivery_fee, order_kind');
     if (!pr) return { success: false, error: 'Pedido no encontrado' };
     if (['delivered', 'canceled'].includes(pr.status)) {
         return { success: false, error: 'No se puede editar un pedido entregado o cancelado' };
@@ -340,15 +348,44 @@ async function preorderItemsEdit(turso, companyId, session, { preorderId, items 
     ];
     await turso.batch(queries);
 
-    return { success: true, total, remaining, deposit };
+    return { success: true, total, remaining, deposit, liberados, reservados };
 }
 
-async function preorderStatusUpdate(turso, companyId, session, { preorderId, newStatus, reason = null, source = 'encargos' }) {
-    const info = await ownPreorder(turso, companyId, preorderId, 'external_source, external_public_code, status, client_name');
+// `crearEnvio`: la pestaña Tienda lo manda al marcar "Listo para retiro" un pedido
+// a domicilio, si la empresa tiene Delivery: el pedido aparece ahí para repartir.
+async function preorderStatusUpdate(turso, companyId, session, { preorderId, newStatus, reason = null, source = 'encargos', crearEnvio = false }) {
+    const info = await ownPreorder(turso, companyId, preorderId);
     if (!info) return { success: false, error: 'Encargo no encontrado' };
     const prevStatus = info.status;
+    const esTienda = info.order_kind === 'store';
 
     const motivo = (reason && String(reason).trim()) ? String(reason).trim().slice(0, 300) : '';
+
+    // Un pedido de la tienda que se paga al recibir se entrega COBRANDO: ahí nace
+    // la venta con su boleta o nota de venta (storeOrderRelease/Complete).
+    if (esTienda && newStatus === 'delivered' && prevStatus !== 'delivered' && Number(info.remaining_amount) > 0) {
+        return { success: false, error: 'Este pedido se paga al recibir: se entrega con "Cobrar".' };
+    }
+    // Transferencia sin revisar: avanza solo confirmando el pago (ahí nace la venta).
+    if (esTransferenciaPorConfirmar(info) && !['canceled', prevStatus].includes(newStatus)) {
+        return { success: false, error: 'Primero revisá el comprobante y confirmá la transferencia con "Confirmar pago".' };
+    }
+    // Pagado en la web (Mercado Pago) sin boleta: primero se hace el documento,
+    // que es donde queda registrada la venta. Después sigue como siempre.
+    if (pagadoSinDocumento(info) && ['ready', 'out_for_delivery', 'delivered'].includes(newStatus)) {
+        return { success: false, error: 'Primero hacé la boleta (o la factura) del pedido.' };
+    }
+    // Pedido que ya tiene su venta (transferencia confirmada, o cobrado): para
+    // cancelarlo primero se anula la venta, que es la que devuelve el stock.
+    if (esTienda && newStatus === 'canceled' && prevStatus !== 'canceled' && info.sale_id) {
+        const v = await turso.execute({
+            sql: 'SELECT status FROM sales WHERE id = ? AND company_id = ? LIMIT 1',
+            args: [info.sale_id, companyId],
+        });
+        if (v.rows[0] && v.rows[0].status !== 'cancelled') {
+            return { success: false, error: `Este pedido ya tiene la venta #${info.sale_id}. Para cancelarlo, primero anulá esa venta en Historial de ventas (ahí vuelve el stock).` };
+        }
+    }
 
     // Cancelar SIEMPRE pide motivo, y se valida acá y no solo en la pantalla:
     // una cancelación es lo único que borra un pedido de la vista de producción,
@@ -386,6 +423,36 @@ async function preorderStatusUpdate(turso, companyId, session, { preorderId, new
         source,
     });
 
+    // Pedido de la tienda web: el stock separado y el envío siguen al pedido.
+    let stockDevuelto = [];
+    let envioId = null;
+    let envioError = null;
+    if (esTienda && newStatus !== prevStatus) {
+        try {
+            const envio = await envioActivoDePedido(turso, companyId, preorderId);
+            if (newStatus === 'canceled') {
+                stockDevuelto = (await liberarStockPedido(turso, companyId, preorderId)).liberados;
+                if (envio) await deliveryActions.deliveryStatus(turso, companyId, session, { id: envio.id, status: 'canceled', reason: motivo || 'Pedido cancelado' });
+            } else if (newStatus === 'ready' && crearEnvio && info.delivery_type === 'delivery' && !envio) {
+                const r = await deliveryActions.deliveryCreate(turso, companyId, session, {
+                    sourceType: 'preorder', sourceId: Number(preorderId),
+                    clientName: info.client_name, clientPhone: info.client_phone,
+                    address: info.delivery_address || '',
+                    amountToCollect: Math.max(0, Number(info.remaining_amount) || 0),
+                    deliveryFee: Number(info.delivery_fee) || 0,
+                    notes: info.external_public_code ? `Pedido web ${info.external_public_code}` : null,
+                });
+                if (r?.success) envioId = r.id; else envioError = r?.error || 'No se pudo crear el envío';
+            } else if (newStatus === 'out_for_delivery' && envio) {
+                await marcarRetiradoDesdeTienda(turso, companyId, session, envio);
+            } else if (newStatus === 'delivered' && envio) {
+                await cerrarEnvioDesdeTienda(turso, companyId, session, envio);
+            }
+        } catch (e) {
+            console.error('[tienda] estado', preorderId, newStatus, e?.message || e);
+        }
+    }
+
     // Si se cancela (y no estaba cancelado), calcular efectivo a devolver.
     // El movimiento de caja OUT lo registra el cliente (caja abierta del cajero).
     let cashPaid = 0;
@@ -407,7 +474,126 @@ async function preorderStatusUpdate(turso, companyId, session, { preorderId, new
         cashPaid,
         clientName: info.client_name || '',
         externalPublicCode: info.external_public_code || null,
+        stockDevuelto,
+        envioId,
+        envioError,
     };
+}
+
+// ── Cobrar un pedido de la tienda web que se paga al recibir ────────────────
+//
+// Mismo camino que el pedido a domicilio del POS (deliveryOrderRelease/Complete):
+//   1. storeOrderRelease  devuelve lo separado y entrega lo que hay que vender.
+//   2. el navegador registra la venta con addSale (boleta o nota de venta).
+//   3. storeOrderComplete anota la venta y cierra el pedido (y su envío).
+// Si la venta no entra, storeOrderReserve vuelve a separar el stock.
+// Lo usan la pestaña Tienda (retiro en el local) y el repartidor (a domicilio).
+
+// `confirmarPago`: transferencia que el local revisó. La venta nace al confirmar
+// (no al entregar) y el pedido pasa a "Preparando", ya pagado.
+// `documento`: pedido pagado en la web (Mercado Pago). La venta nace cuando el
+// local hace la boleta o la factura; el estado del pedido no cambia.
+async function storeOrderRelease(turso, companyId, session, { preorderId, deliveryId = null, confirmarPago = false, documento = false } = {}) {
+    const p = await pedidoTienda(turso, companyId, preorderId);
+    if (!p) return { success: false, error: 'Pedido no encontrado' };
+    if (p.status === 'delivered') return { success: false, error: 'Ese pedido ya se entregó', saleId: p.sale_id || null };
+    if (p.status === 'canceled') return { success: false, error: 'Ese pedido está cancelado' };
+    if (documento) {
+        if (!pagadoSinDocumento(p)) return { success: false, error: p.sale_id ? `Ese pedido ya tiene su venta #${p.sale_id}.` : 'Ese pedido no está pagado en la web.' };
+        const { liberados } = await liberarStockPedido(turso, companyId, preorderId);
+        const venta = await ventaDelPedido(turso, companyId, p);
+        let factura = null;
+        try { factura = p.invoice_data ? JSON.parse(p.invoice_data) : null; } catch { factura = null; }
+        return {
+            success: true,
+            pedido: { ...venta, code: p.external_public_code || null, aCobrar: Number(p.total_amount) || 0, factura },
+            liberados,
+        };
+    }
+    if (!(Number(p.remaining_amount) > 0)) return { success: false, error: 'Ese pedido ya está pagado: se entrega sin cobrar.' };
+    if (confirmarPago) {
+        if (!esTransferenciaPorConfirmar(p)) return { success: false, error: 'Ese pedido no tiene una transferencia por confirmar.' };
+    } else if (esTransferenciaPorConfirmar(p)) {
+        return { success: false, error: 'Primero confirmá la transferencia con "Confirmar pago".' };
+    } else if (deliveryId) {
+        const r = await turso.execute({
+            sql: 'SELECT id, status, source_type, source_id FROM deliveries WHERE id = ? AND company_id = ? LIMIT 1',
+            args: [deliveryId, companyId],
+        });
+        const d = r.rows[0];
+        if (!d || d.source_type !== 'preorder' || Number(d.source_id) !== Number(preorderId)) {
+            return { success: false, error: 'Ese envío no es de este pedido' };
+        }
+        // Se valida ANTES de la venta: si después no se pudiera cerrar el envío,
+        // quedaría una venta de un pedido sin entregar.
+        if (d.status !== 'on_route') return { success: false, error: 'Para entregarlo, el envío tiene que estar "En ruta".' };
+    } else if (!['ready', 'out_for_delivery'].includes(p.status)) {
+        return { success: false, error: 'Primero marcá el pedido como "Listo para retiro".' };
+    }
+    const { liberados } = await liberarStockPedido(turso, companyId, preorderId);
+    const venta = await ventaDelPedido(turso, companyId, p);
+    return {
+        success: true,
+        pedido: { ...venta, code: p.external_public_code || null, aCobrar: Number(p.remaining_amount) || 0 },
+        liberados,
+    };
+}
+
+async function storeOrderReserve(turso, companyId, session, { preorderId } = {}) {
+    const p = await pedidoTienda(turso, companyId, preorderId);
+    if (!p) return { success: false, error: 'Pedido no encontrado' };
+    const { reservados } = await volverASepararPedido(turso, companyId, preorderId);
+    return { success: true, reservados };
+}
+
+async function storeOrderComplete(turso, companyId, session, {
+    preorderId, saleId, deliveryId = null, confirmarPago = false, documento = false,
+    collectedAmount, collectedMethod, receivedBy, receivedByKind, proofPhoto,
+} = {}) {
+    const p = await pedidoTienda(turso, companyId, preorderId);
+    if (!p) return { success: false, error: 'Pedido no encontrado' };
+    if (!saleId) return { success: false, error: 'Falta la venta del pedido' };
+    const v = await turso.execute({
+        sql: 'SELECT id, register_id FROM sales WHERE id = ? AND company_id = ? LIMIT 1',
+        args: [saleId, companyId],
+    });
+    const venta = v.rows[0];
+    if (!venta) return { success: false, error: 'La venta del pedido no existe' };
+    if (p.status === 'delivered') return { success: true, yaEstaba: true, saleId: p.sale_id || saleId };
+
+    if (documento) {
+        // Pagado en la web: queda la venta (boleta o factura); el estado no cambia.
+        if (p.sale_id) return { success: true, yaEstaba: true, saleId: p.sale_id };
+        await anotarDocumento(turso, companyId, preorderId, { saleId, session });
+        return { success: true, saleId, registerId: venta.register_id ?? null };
+    }
+
+    if (confirmarPago) {
+        // Transferencia confirmada: pagado y a preparar. Se entrega después, sin cobrar.
+        if (p.sale_id) return { success: true, yaEstaba: true, saleId: p.sale_id };
+        await confirmarPagoPedido(turso, companyId, preorderId, { saleId, session });
+        return { success: true, saleId, registerId: venta.register_id ?? null };
+    }
+
+    if (deliveryId) {
+        // El repartidor cobró: el envío lleva la venta y queda entregado con lo
+        // cobrado (que rinde después). El pedido se cierra con el envío.
+        await turso.execute({
+            sql: `UPDATE deliveries SET sale_id = ?, sale_register_id = ?, updated_at = ?
+                  WHERE id = ? AND company_id = ? AND source_type = 'preorder' AND source_id = ?`,
+            args: [saleId, venta.register_id ?? null, nowIso(), deliveryId, companyId, preorderId],
+        });
+        const r = await deliveryActions.deliveryStatus(turso, companyId, session, {
+            id: deliveryId, status: 'delivered', collectedAmount, collectedMethod, receivedBy, receivedByKind, proofPhoto,
+        });
+        if (!r?.success) return r || { success: false, error: 'No se pudo cerrar el envío' };
+    } else {
+        // Cobrado en el local: si había un envío abierto, se cierra sin plata que rendir.
+        const envio = await envioActivoDePedido(turso, companyId, preorderId);
+        if (envio) await cerrarEnvioDesdeTienda(turso, companyId, session, envio, { saleId, saleRegisterId: venta.register_id ?? null });
+    }
+    await cerrarPedidoTienda(turso, companyId, preorderId, { saleId, session });
+    return { success: true, saleId, registerId: venta.register_id ?? null };
 }
 
 async function preorderPaymentAdd(turso, companyId, session, { preorderId, amount, method, type = 'final', registerId = null, terminalId = null, bankAccountId = null, authCode = null }) {
@@ -739,4 +925,7 @@ export const preorderActions = {
     preorderItemsEdit,
     preorderStatusUpdate,
     preorderPaymentAdd,
+    storeOrderRelease,
+    storeOrderReserve,
+    storeOrderComplete,
 };

@@ -131,6 +131,18 @@ export const generateReceiptPDF = async (saleDetails, seller, receiptConfig = nu
     const amountPaid = saleDetails.paymentDetails?.amount || saleDetails.total;
     const change = saleDetails.paymentDetails?.change || 0;
 
+    // Delivery de un pedido a domicilio: debajo del subtotal, fuera de los productos.
+    const deliveryFee = Math.round(Number(saleDetails.paymentDetails?.deliveryFee) || 0);
+    if (deliveryFee > 0) {
+        doc.setFont('courier', 'normal');
+        doc.text('Subtotal', 2, yPos);
+        doc.text(`${formatCurrency(saleDetails.total - deliveryFee, currencyCode)}`, rightX, yPos, { align: 'right' });
+        yPos += 5;
+        doc.text('Delivery', 2, yPos);
+        doc.text(`${formatCurrency(deliveryFee, currencyCode)}`, rightX, yPos, { align: 'right' });
+        yPos += 5;
+    }
+
     doc.setFont('courier', 'bold');
     doc.setFontSize(fmt === 'a4' ? 14 : 10);
     doc.text('TOTAL', 2, yPos);
@@ -260,6 +272,13 @@ export const generateWhatsAppLink = (phoneNumber, saleDetails, seller, receiptCo
     });
 
     receiptText += `---------------------------\n`;
+
+    const deliveryFee = Math.round(Number(saleDetails.paymentDetails?.deliveryFee) || 0);
+    if (deliveryFee > 0) {
+        const fila = (a, b) => `${a}${' '.repeat(Math.max(1, 27 - a.length - b.length))}${b}\n`;
+        receiptText += fila('Subtotal', formatCurrency(saleDetails.total - deliveryFee, currencyCode));
+        receiptText += fila('Delivery', formatCurrency(deliveryFee, currencyCode));
+    }
 
     const totalLabel = "TOTAL";
     const totalValue = formatCurrency(saleDetails.total, currencyCode);

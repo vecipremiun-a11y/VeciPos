@@ -1,8 +1,15 @@
 import React, { useState, useMemo } from 'react';
-import { Truck, MapPin, X, AlertTriangle, Banknote, CreditCard, Store, Check } from 'lucide-react';
+import { Truck, MapPin, X, AlertTriangle, Banknote, CreditCard, Store, Check, CalendarDays } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
 import { cn } from '../lib/utils';
+
+// Fecha local AAAA-MM-DD (no UTC: de noche, UTC ya es mañana).
+const diaLocal = (sumar = 0) => {
+    const d = new Date();
+    d.setDate(d.getDate() + sumar);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 /** "Videla 1430, La Cisterna" — una dirección en una línea. */
 function lineaDireccion(dir) {
@@ -15,8 +22,12 @@ function lineaDireccion(dir) {
  *
  * Un despacho define DOS cosas independientes: a dónde va y cuándo se paga.
  *   · Paga ahora        → se cobra normal y el repartidor no lleva plata.
- *   · Paga al recibir   → la venta queda a Crédito del cliente; el repartidor
- *                         cobra y, al liquidar, la deuda se salda sola.
+ *   · Paga al recibir   → se guarda el PEDIDO (no hay venta todavía) y su stock
+ *                         queda separado. La venta nace al entregar, cuando el
+ *                         repartidor cobra y elige boleta o nota de venta.
+ *
+ * Y CUÁNDO se entrega: hoy, mañana u otro día, con hora si se acordó. Un envío
+ * para mañana no aparece como pendiente de hoy.
  *
  * LAS DIRECCIONES. Un cliente que viene de miniveci.cl trae su libreta: las
  * direcciones que él mismo cargó allá, con una marcada como principal. Acá se
@@ -51,6 +62,9 @@ export default function DispatchModal({ isOpen, onClose, onConfirm, client, tota
     const [phone, setPhone] = useState('');
     const [fee, setFee] = useState('');
     const [payMode, setPayMode] = useState('on_delivery');   // on_delivery | now
+    const [cuando, setCuando] = useState('hoy');              // hoy | manana | otra
+    const [fecha, setFecha] = useState(diaLocal(0));
+    const [hora, setHora] = useState('');
     const [saving, setSaving] = useState(false);
 
     React.useEffect(() => {
@@ -61,6 +75,7 @@ export default function DispatchModal({ isOpen, onClose, onConfirm, client, tota
         setNotes(principal?.notes || '');
         setPhone(ficha?.phone || '');
         setFee(''); setPayMode('on_delivery');
+        setCuando('hoy'); setFecha(diaLocal(0)); setHora('');
         // `direcciones` se recalcula en cada render; la dependencia es la ficha.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen, ficha]);
@@ -105,6 +120,8 @@ export default function DispatchModal({ isOpen, onClose, onConfirm, client, tota
             clientPhone: phone.trim(),
             deliveryFee: feeNum,
             payMode,
+            scheduledDate: cuando === 'hoy' ? diaLocal(0) : cuando === 'manana' ? diaLocal(1) : fecha,
+            scheduledTime: hora || null,
         });
     };
 
@@ -208,6 +225,37 @@ export default function DispatchModal({ isOpen, onClose, onConfirm, client, tota
                             className="glass-input w-full mt-1" placeholder="Casa azul, portón negro…" />
                     </div>
 
+                    {/* Cuándo se entrega */}
+                    <div>
+                        <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-2 flex items-center gap-1">
+                            <CalendarDays size={13} /> ¿Cuándo se entrega?
+                        </p>
+                        <div className="grid grid-cols-3 gap-2">
+                            {[['hoy', 'Hoy'], ['manana', 'Mañana'], ['otra', 'Otro día']].map(([id, label]) => (
+                                <button key={id} type="button" onClick={() => setCuando(id)}
+                                    className={cn('py-2.5 rounded-lg text-sm font-bold border transition-all',
+                                        cuando === id
+                                            ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+                                            : 'border-[var(--glass-border)] bg-[var(--glass-bg)] text-[var(--color-text-muted)]')}>
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 mt-2">
+                            {cuando === 'otra' && (
+                                <label className="block">
+                                    <span className="block text-[11px] text-[var(--color-text-muted)] mb-0.5">Día</span>
+                                    <input type="date" required value={fecha} min={diaLocal(0)} onChange={e => setFecha(e.target.value)}
+                                        className="glass-input w-full" />
+                                </label>
+                            )}
+                            <label className={cn('block', cuando !== 'otra' && 'col-span-2')}>
+                                <span className="block text-[11px] text-[var(--color-text-muted)] mb-0.5">Hora (opcional)</span>
+                                <input type="time" value={hora} onChange={e => setHora(e.target.value)} className="glass-input w-full" />
+                            </label>
+                        </div>
+                    </div>
+
                     {/* Cuándo se paga */}
                     <div>
                         <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">¿Cuándo paga?</p>
@@ -234,7 +282,7 @@ export default function DispatchModal({ isOpen, onClose, onConfirm, client, tota
                         {payMode === 'on_delivery' && (
                             <p className="text-[11px] text-amber-400 flex items-start gap-1 mt-2">
                                 <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-                                La venta queda a crédito del cliente. Cuando el repartidor rinda, se salda sola.
+                                El stock queda separado. La venta y la boleta salen al entregar, cuando el repartidor cobra.
                             </p>
                         )}
                     </div>

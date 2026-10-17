@@ -18,6 +18,7 @@ import DispatchModal from '../components/DispatchModal';
 import SelectorUnidadCarrito from '../components/SelectorUnidadCarrito';
 import InvoiceDataModal from '../components/InvoiceDataModal';
 import PreventaSuccessModal from '../components/PreventaSuccessModal';
+import EnvioCreadoModal from '../components/delivery/EnvioCreadoModal';
 import PreventasListModal from '../components/PreventasListModal';
 import { createSmartInterval } from '../lib/smartPolling';
 import { hayConexion } from '../lib/conectividad';
@@ -168,6 +169,7 @@ const POS = () => {
     const canStore = useStore((s) => s.hasModule('web'));
     const canDelivery = useStore((s) => s.hasModule('delivery'));
     const createDelivery = useStore((s) => s.createDelivery);
+    const createDeliveryOrder = useStore((s) => s.createDeliveryOrder);
     const orderBadges = useStore((s) => s.orderBadges);
     const fetchOrderBadges = useStore((s) => s.fetchOrderBadges);
 
@@ -278,6 +280,9 @@ const POS = () => {
     // al confirmarse la venta se crea el envío con ese origen.
     const [isDispatchOpen, setIsDispatchOpen] = useState(false);
     const [pendingDispatch, setPendingDispatch] = useState(null);
+    // Pedido a domicilio recién creado (pago al recibir): muestra "Envío creado"
+    // con el comprobante para pegar en el paquete.
+    const [envioCreado, setEnvioCreado] = useState(null);
     const [showTotalsDetail, setShowTotalsDetail] = useState(false);
     const { can } = usePermissions();
 
@@ -523,20 +528,80 @@ const POS = () => {
     };
 
     // El modal ya recogió dirección/costo/forma de pago.
-    const handleDispatchConfirm = (data) => {
-        setPendingDispatch(data);
+    const handleDispatchConfirm = async (data) => {
         setIsDispatchOpen(false);
         if (data.payMode === 'now') {
             // Cobra aquí: sigue el flujo normal de cobro y el envío sale sin monto.
+            setPendingDispatch(data);
             setIsPaymentModalOpen(true);
-        } else {
-            // Paga al recibir: la venta queda a Crédito del cliente y el repartidor cobra.
-            handlePaymentConfirm({
-                method: 'Crédito',
-                amountPaid: finalTotal + (data.deliveryFee || 0),
-                change: 0,
-            }, data);
+            return;
         }
+
+        // Paga al recibir: NO se registra la venta. Antes se registraba completa a
+        // Crédito al despachar, y un envío para mañana sumaba en las ventas y la
+        // caja de hoy (venta #1036161, 5-oct-2026). Ahora se guarda el pedido en
+        // el envío, su stock queda separado, y la venta nace al entregar, cuando
+        // el repartidor cobra y elige boleta o nota de venta.
+        if (cobrandoRef.current) return;
+        cobrandoRef.current = true;
+        if (!claveCobroRef.current) {
+            claveCobroRef.current = (globalThis.crypto?.randomUUID?.())
+                || `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+        }
+        const cliente = posSelectedClient
+            ? {
+                id: posSelectedClient.id, name: posSelectedClient.name, rut: posSelectedClient.rut || null,
+                phone: posSelectedClient.phone || null, email: posSelectedClient.email || null,
+            }
+            : null;
+        const fee = Number(data.deliveryFee) || 0;
+        setGuardandoVenta(true);
+        const r = await createDeliveryOrder({
+            items: cart,
+            client: cliente,
+            total: finalTotal,
+            clientPhone: data.clientPhone,
+            address: data.address,
+            addressNotes: data.addressNotes,
+            deliveryFee: fee,
+            scheduledDate: data.scheduledDate,
+            scheduledTime: data.scheduledTime,
+            claveCliente: claveCobroRef.current,
+        });
+        setGuardandoVenta(false);
+        if (!r?.success) {
+            cobrandoRef.current = false;
+            alert(r?.sinConexion
+                ? 'El envío a domicilio necesita conexión para separar el stock. El carrito sigue igual: probá de nuevo cuando vuelva la señal.'
+                : `No se pudo crear el envío: ${r?.error || 'error desconocido'}`);
+            return;
+        }
+        setEnvioCreado({
+            id: r.id,
+            client_name: cliente?.name || null,
+            client_phone: data.clientPhone || cliente?.phone || null,
+            address: data.address,
+            address_notes: data.addressNotes || null,
+            delivery_fee: fee,
+            amount_to_collect: finalTotal + fee,
+            scheduled_date: data.scheduledDate || null,
+            scheduled_time: data.scheduledTime || null,
+            order_data: { items: cart.map(({ image: _foto, ...resto }) => resto), client: cliente, total: finalTotal },
+            created_at: new Date().toISOString(),
+        });
+        // Si el carrito venía de una preventa, esa preventa ya se despachó: se
+        // cierra para que no se pueda cargar y cobrar otra vez.
+        if (activePreventaCode) completePreventa(activePreventaCode, null);
+        clearCart();
+        setPosSelectedClient(null);
+        setPendingDispatch(null);
+        setActivePreventaCode(null);
+        // Mismo cuidado que el cobro: el candado y la clave se sueltan en el tick
+        // siguiente, cuando el carrito ya está vacío para esta función.
+        setTimeout(() => {
+            claveCobroRef.current = null;
+            cobrandoRef.current = false;
+        }, 0);
     };
 
     const handlePaymentConfirm = async (paymentData, dispatchOverride) => {
@@ -659,6 +724,7 @@ const POS = () => {
                         clientName: saleData.client?.name, clientPhone: dispatch.clientPhone,
                         address: dispatch.address, addressNotes: dispatch.addressNotes,
                         amountToCollect: aCobrar, deliveryFee: dispatch.deliveryFee || 0,
+                        scheduledDate: dispatch.scheduledDate, scheduledTime: dispatch.scheduledTime,
                     });
                     if (!dr?.success) alert('La venta se guardó, pero no se pudo crear el envío: ' + (dr?.error || ''));
                 } else if (dispatch && result.queued) {
@@ -2028,6 +2094,8 @@ const POS = () => {
                 total={finalTotal + (pendingDispatch?.deliveryFee || 0)}
                 onConfirm={handlePaymentConfirm}
             />
+
+            {envioCreado && <EnvioCreadoModal envio={envioCreado} onClose={() => setEnvioCreado(null)} />}
 
             <DispatchModal
                 isOpen={isDispatchOpen}

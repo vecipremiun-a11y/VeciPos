@@ -198,6 +198,17 @@ function conCorte(promesa, ms) {
 // del último sync es mejor respuesta que una pantalla trabada.
 const ESPERA_ESCANEO_MS = 1200;
 
+// ── Delivery dentro de la venta (definido con Kevin el 9-oct-2026) ──────────
+// Un pedido a domicilio cobrado al entregar registra la venta por productos +
+// delivery: el delivery va en paymentDetails.deliveryFee y el ticket lo muestra
+// "Subtotal / Delivery / Total". En la boleta del SII va como una línea más
+// (api/sii/emit.js → itemsConDelivery), así la boleta suma lo que se cobró.
+// Rollback (kill-switch): en false, con boleta el delivery vuelve a ir aparte
+// de la venta y la boleta suma solo los productos; la nota de venta lo sigue
+// llevando.
+const DELIVERY_EN_LA_BOLETA = true;
+const deliveryVaEnLaVenta = (tipoDte) => !Number(tipoDte) || DELIVERY_EN_LA_BOLETA;
+
 const safeJsonStringify = (value) => JSON.stringify(value, (_key, currentValue) => {
     if (typeof currentValue === 'bigint') {
         const asNumber = Number(currentValue);
@@ -6651,7 +6662,12 @@ export const useStore = create(persist((set, get) => ({
     editPreorderItems: async (preorderId, items, refetchFilters = undefined) => {
         try {
             const r = await userApiCall('preorderItemsEdit', { companyId: get().activeCompanyId, preorderId, items });
-            if (r?.success) await get().fetchPreorders(refetchFilters);
+            if (r?.success) {
+                // Pedido de la tienda con stock separado: vuelve lo de antes y se separa lo nuevo.
+                if (r.liberados?.length) get()._moverStockLocal(r.liberados, +1);
+                if (r.reservados?.length) get()._moverStockLocal(r.reservados, -1);
+                await get().fetchPreorders(refetchFilters);
+            }
             return r || { success: false, error: 'Error' };
         } catch (e) {
             console.error('Error editing preorder items:', e);
@@ -6663,11 +6679,25 @@ export const useStore = create(persist((set, get) => ({
     // 'produccion', 'tienda'). Va al historial: un pedido cancelado en la caja
     // no es lo mismo que uno cancelado en producción, y hasta la migración 0028
     // no había forma de distinguirlos —ni de saber quién lo hizo.
-    updatePreorderStatus: async (preorderId, newStatus, reason = null, refetchFilters = undefined, source = 'encargos') => {
+    // `opciones.crearEnvio`: pedido de la tienda a domicilio que queda "Listo para
+    // retiro" en una empresa con Delivery → aparece en Envíos para los repartidores.
+    updatePreorderStatus: async (preorderId, newStatus, reason = null, refetchFilters = undefined, source = 'encargos', opciones = {}) => {
         try {
             // Server-side (con guard de empresa): update + cálculo de efectivo a devolver
-            const r = await userApiCall('preorderStatusUpdate', { companyId: get().activeCompanyId, preorderId, newStatus, reason, source });
+            const r = await userApiCall('preorderStatusUpdate', {
+                companyId: get().activeCompanyId, preorderId, newStatus, reason, source,
+                crearEnvio: !!opciones.crearEnvio,
+            });
             if (!r?.success) return r || { success: false, error: 'Error' };
+            // Pedido de la tienda cancelado: lo que tenía separado volvió al stock.
+            // A la tienda se le manda recién después del aviso de cancelación (abajo).
+            const devuelto = r.stockDevuelto || [];
+            if (devuelto.length) get()._moverStockLocal(devuelto, +1, { empujar: false });
+            const empujarDevuelto = () => {
+                if (!devuelto.length) return;
+                get().sincronizarCompraConTienda(devuelto.map(x => String(x.productId)), []).catch(() => { /* se pone al día con el próximo cambio */ });
+            };
+            if (r.envioId) get().fetchDeliveryBoard?.();
 
             // Si se canceló: devolver el efectivo desde la caja abierta del cajero
             let cashWarning = null;
@@ -6698,10 +6728,13 @@ export const useStore = create(persist((set, get) => ({
                         status: newStatus,
                         ...(reason && reason.trim() ? { reason: reason.trim() } : {}),
                     }),
-                }).catch(err => console.warn('notify-miniveci failed', err));
+                }).catch(err => console.warn('notify-miniveci failed', err))
+                    .finally(empujarDevuelto);
+            } else {
+                empujarDevuelto();
             }
 
-            return { success: true, cashWarning };
+            return { success: true, cashWarning, envioId: r.envioId || null, envioError: r.envioError || null };
         } catch (e) {
             console.error('Error updating preorder status:', e);
             return { success: false, error: e.message };
@@ -7134,9 +7167,187 @@ export const useStore = create(persist((set, get) => ({
     },
     setDeliveryStatus: async (id, status, extra = {}) => {
         const r = await get().deliveryCall('deliveryStatus', { id, status, ...extra });
+        // Pedido anulado o no entregado: el stock que tenía separado volvió.
+        if (r?.success && r.stockDevuelto?.length) get()._moverStockLocal(r.stockDevuelto, +1);
         // Entregar o marcar fallido saca el envío de la cuenta de la pestaña.
         if (r?.success) { await get().fetchDeliveryBoard(); get().fetchCouriers(); get().fetchOrderBadges(); }
         return r;
+    },
+
+    // ── Pedido a domicilio con pago al recibir (migración 0032) ─────────────
+    //
+    // Al despachar NO se registra la venta: se guarda el pedido en el envío y se
+    // separa su stock. La venta nace al entregar (cobrarEntregarPedido), con el
+    // medio de pago que cobró el repartidor y su boleta o nota de venta.
+
+    // Refleja en pantalla (y avisa a la tienda) el stock que el servidor separó
+    // o devolvió: `cambios` = [{ productId, qty }], signo -1 separa, +1 devuelve.
+    // `empujar: false`: solo la pantalla; el stock a la tienda lo manda quien llama
+    // (después de avisarle la cancelación, para que no se sume dos veces allá).
+    _moverStockLocal: (cambios, signo, { empujar = true } = {}) => {
+        const porId = new Map((cambios || []).map(c => [String(c.productId), Number(c.qty) || 0]));
+        if (!porId.size) return;
+        set(state => ({
+            products: state.products.map(p => (porId.has(String(p.id))
+                ? { ...p, stock: Math.round((parseFloat(p.stock) + signo * porId.get(String(p.id))) * 1000) / 1000 }
+                : p)),
+        }));
+        if (!empujar) return;
+        const ids = [...porId.keys()];
+        get().sincronizarCompraConTienda(ids, []).catch(() => { /* la tienda se pone al día con el próximo cambio */ });
+    },
+
+    createDeliveryOrder: async (pedido) => {
+        const r = await get().deliveryCall('deliveryOrderCreate', pedido);
+        if (r?.success && !r.repetido && r.reservados?.length) get()._moverStockLocal(r.reservados, -1);
+        if (r?.success) { get().fetchDeliveryBoard(); get().fetchOrderBadges(); }
+        return r;
+    },
+
+    /**
+     * Cobra y entrega un pedido: libera lo separado, registra la venta con el
+     * proceso de cobro de siempre (addSale, sin cambios) y marca el envío
+     * entregado. Si la venta no entra, el pedido vuelve a separar su stock.
+     *
+     * `envio` = fila del envío · `cobro` = { paymentMethod, tipoDte, collectedAmount,
+     * receivedBy, receivedByKind, proofPhoto }.
+     */
+    cobrarEntregarPedido: async (envio, cobro) => {
+        const lib = await get().deliveryCall('deliveryOrderRelease', { id: envio.id });
+        if (!lib?.success) return lib || { success: false, error: 'No se pudo preparar el cobro' };
+        if (lib.liberados?.length) get()._moverStockLocal(lib.liberados, +1);
+        const pedido = lib.pedido;
+        if (!pedido?.items?.length) return { success: false, error: 'El pedido no tiene productos guardados' };
+
+        const productos = Number(pedido.total) || 0;
+        const fee = Number(envio.delivery_fee) || 0;
+        const feeEnVenta = deliveryVaEnLaVenta(cobro.tipoDte) ? fee : 0;
+        const total = productos + feeEnVenta;
+        const saleData = {
+            items: pedido.items,
+            total,
+            summary: `${pedido.items.length} productos · envío #${envio.id}`,
+            paymentMethod: cobro.paymentMethod,
+            paymentDetails: {
+                method: cobro.paymentMethod, amountPaid: total, amount: total, change: 0,
+                ...(feeEnVenta > 0 ? { deliveryFee: feeEnVenta } : {}),
+            },
+            client: pedido.client || null,
+            tipoDte: cobro.tipoDte,
+            invoiceData: null,
+            // Fija: un reintento del cobro de ESTE envío nunca crea otra venta.
+            clientSaleId: `envio-${envio.id}`,
+        };
+        let venta;
+        try {
+            venta = await get().addSale(saleData);
+        } catch (e) {
+            venta = { success: false, error: e?.message || String(e) };
+        }
+        if (!venta?.success) {
+            const re = await get().deliveryCall('deliveryOrderReserve', { id: envio.id });
+            if (re?.success && !re.yaEstaba) get()._moverStockLocal(JSON.parse(envio.reserved_items || '[]'), -1);
+            return { success: false, error: venta?.error || 'No se pudo registrar la venta' };
+        }
+        if (venta.queued || !venta.saleId) {
+            // Sin conexión: la venta quedó guardada en el equipo y sube sola. El
+            // envío se marca entregado al volver a tocar "Cobrar y entregar".
+            return { success: false, queued: true, error: 'Sin conexión: la venta quedó guardada en el equipo. Cuando vuelva la señal, tocá de nuevo "Cobrar y entregar" para cerrar el envío.' };
+        }
+        const fin = await get().deliveryCall('deliveryOrderComplete', {
+            id: envio.id,
+            saleId: venta.saleId,
+            collectedAmount: cobro.collectedAmount ?? (productos + fee),
+            collectedMethod: cobro.paymentMethod,
+            receivedBy: cobro.receivedBy, receivedByKind: cobro.receivedByKind, proofPhoto: cobro.proofPhoto,
+        });
+        get().fetchOrderBadges();
+        if (!fin?.success) {
+            return { success: false, saleId: venta.saleId, error: `La venta #${venta.saleId} quedó registrada, pero el envío no se pudo cerrar: ${fin?.error || ''}. Tocá de nuevo "Cobrar y entregar".` };
+        }
+        return { success: true, saleId: venta.saleId, venta: { ...saleData, id: venta.saleId, date: new Date().toISOString() } };
+    },
+    /**
+     * Cobra un pedido de la tienda web que se paga al recibir. Mismo camino que
+     * cobrarEntregarPedido: el servidor devuelve lo separado, la venta se
+     * registra con addSale (sin cambios) y el pedido queda entregado y pagado.
+     *
+     * `pedido` = { id } del pedido · `envio` = el envío, si cobra el repartidor
+     * (si no, se cobra en el local) · `cobro` = { paymentMethod, tipoDte,
+     * collectedAmount, receivedBy, receivedByKind, proofPhoto }.
+     */
+    // `confirmarPago`: transferencia que el local revisó. La venta nace ahí y el
+    // pedido pasa a "Preparando", pagado (se entrega después, sin cobrar).
+    // `documento`: pagado con Mercado Pago. No se cobra: se hace la boleta (o la
+    // factura, con `cobro.invoiceData`) y el estado del pedido no cambia.
+    cobrarPedidoTienda: async (pedido, cobro, { envio = null, confirmarPago = false, documento = false } = {}) => {
+        const companyId = get().activeCompanyId;
+        const preorderId = pedido.id;
+        const lib = await userApiCall('storeOrderRelease', { companyId, preorderId, deliveryId: envio?.id || null, confirmarPago, documento });
+        if (!lib?.success) return lib || { success: false, error: 'No se pudo preparar el cobro' };
+        if (lib.liberados?.length) get()._moverStockLocal(lib.liberados, +1);
+        const ped = lib.pedido;
+        if (!ped?.items?.length) return { success: false, error: 'El pedido no tiene productos' };
+
+        const feeEnVenta = deliveryVaEnLaVenta(cobro.tipoDte) ? (Number(ped.fee) || 0) : 0;
+        const total = (Number(ped.total) || 0) + feeEnVenta;
+        const saleData = {
+            items: ped.items,
+            total,
+            summary: `Pedido tienda #${ped.code || preorderId}`,
+            paymentMethod: cobro.paymentMethod,
+            paymentDetails: {
+                method: cobro.paymentMethod, amountPaid: total, amount: total, change: 0,
+                ...(feeEnVenta > 0 ? { deliveryFee: feeEnVenta } : {}),
+            },
+            client: ped.client || null,
+            tipoDte: cobro.tipoDte,
+            // Factura: los datos que el cliente dejó en el checkout de la tienda.
+            invoiceData: cobro.invoiceData || null,
+            // Fija: un reintento del cobro de ESTE pedido nunca crea otra venta.
+            clientSaleId: `tienda-${preorderId}`,
+            // El pedido ya se vendió en la web y la mercadería ya está en manos del
+            // cliente: si el número del sistema no alcanza, la venta entra igual y
+            // el producto queda marcado para contarlo (lo mismo que una venta que
+            // se cobró sin conexión). Rechazarla no devolvería nada.
+            ventaOffline: true,
+        };
+        let venta;
+        try {
+            venta = await get().addSale(saleData);
+        } catch (e) {
+            venta = { success: false, error: e?.message || String(e) };
+        }
+        if (!venta?.success) {
+            const re = await userApiCall('storeOrderReserve', { companyId, preorderId });
+            if (re?.reservados?.length) get()._moverStockLocal(re.reservados, -1);
+            return { success: false, error: venta?.error || 'No se pudo registrar la venta' };
+        }
+        if (venta.queued || !venta.saleId) {
+            return { success: false, queued: true, error: 'Sin conexión: la venta quedó guardada en el equipo. Cuando vuelva la señal, tocá de nuevo "Cobrar" para cerrar el pedido.' };
+        }
+        const fin = await userApiCall('storeOrderComplete', {
+            companyId, preorderId, saleId: venta.saleId, deliveryId: envio?.id || null, confirmarPago, documento,
+            collectedAmount: cobro.collectedAmount ?? ped.aCobrar,
+            collectedMethod: cobro.paymentMethod,
+            receivedBy: cobro.receivedBy, receivedByKind: cobro.receivedByKind, proofPhoto: cobro.proofPhoto,
+        });
+        get().fetchOrderBadges();
+        if (envio) get().fetchDeliveryBoard?.();
+        if (!fin?.success) {
+            return { success: false, saleId: venta.saleId, error: `La venta #${venta.saleId} quedó registrada, pero el pedido no se pudo cerrar: ${fin?.error || ''}. Tocá de nuevo "Cobrar".` };
+        }
+        // Despacho cobrado en el local (sin repartidor) cuando el delivery NO va
+        // en la venta: el efectivo del despacho entra a la caja aparte.
+        let cashWarning = null;
+        if (!feeEnVenta && !envio && !fin.yaEstaba && ped.fee > 0 && cobro.paymentMethod === 'Efectivo') {
+            const cash = await get()._registerPreorderCash({ amount: ped.fee, reason: `Despacho pedido tienda #${ped.code || preorderId}` });
+            if (cash?.noRegister) cashWarning = 'El efectivo del despacho NO entró a ninguna caja porque no tienes una caja abierta.';
+        }
+        return {
+            success: true, saleId: venta.saleId, cashWarning,
+            venta: { ...saleData, id: venta.saleId, date: new Date().toISOString(), clientName: ped.clientName },
+        };
     },
     fetchImportableOrders: async () => get().deliveryCall('deliveryImportable'),
     fetchDeliveryDetail: async (id) => get().deliveryCall('deliveryDetail', { id }),

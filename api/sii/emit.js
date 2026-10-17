@@ -1,6 +1,7 @@
 import { turso } from './_db.js';
 import { requireCompanySession } from '../_lib/guard.js';
 import { loadCertificado, loadCAF, buildBoleta, buildFactura, buildFacturaExenta, enviarDTE } from './_sii.js';
+import { itemsConDelivery } from './_delivery.js';
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
@@ -159,7 +160,12 @@ export default async function handler(req, res) {
         }
 
         const sale = saleRes.rows[0];
-        const items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items;
+        // Si la venta lleva delivery (payment_details.deliveryFee), va como una
+        // línea más: la boleta tiene que sumar lo que pagó el cliente.
+        const items = itemsConDelivery(
+            typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items,
+            sale.payment_details,
+        );
 
         const saleData = {
             items,

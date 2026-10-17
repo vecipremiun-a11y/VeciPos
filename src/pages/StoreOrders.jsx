@@ -3,33 +3,66 @@ import { useNavigate } from 'react-router-dom';
 import {
     ShoppingCart, CakeSlice, Store, Clock, Package, Check, Truck, X, User,
     Phone, MapPin, ArrowRight, RefreshCw, ClipboardList, CreditCard, ThumbsUp,
-    MessageCircle, Plus, Minus, Trash2, Search, Save,
+    MessageCircle, Plus, Minus, Trash2, Search, Save, Bike, ExternalLink, Receipt,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
 import { toast } from '../lib/toast';
-import PaymentDetailPicker from '../components/PaymentDetailPicker';
 import OrderTabBadge from '../components/OrderTabBadge';
 import CancelarEncargoModal from '../components/CancelarEncargoModal';
+import CobrarEnvioModal from '../components/delivery/CobrarEnvioModal';
+import { EntregaExitosaModal } from '../components/delivery/DocumentoVenta';
 
-// Flujo de pedidos de la tienda web (pagados online): incluye el paso
-// "Confirmado" (aceptar el pedido) y entrega SIN checkout — solo estado.
+// Cómo camina un pedido de la tienda web (definido con Kevin el 8 y 9-oct-2026):
+//   Preparando → Listo para retiro → (a domicilio) En reparto → Entregado.
+// Llega "Preparando" con su stock ya separado. Si se paga al recibir, se
+// entrega COBRANDO: ahí nace la venta, con boleta o nota de venta.
+// La transferencia llega "Pendiente": el local revisa el comprobante y la
+// confirma (ahí nace la venta y pasa a Preparando) o la rechaza (se cancela y
+// el stock vuelve). Después se entrega sin cobrar.
+// Mercado Pago llega "Preparando", ya pagado: el local hace la boleta (o la
+// factura, si el cliente la pidió con sus datos) y recién ahí pasa a Listo.
+// "Confirmado" queda solo para pedidos que llegaron antes.
 const STATUS_CONFIG = {
-    pending: { label: 'Pendiente', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30', icon: Clock, next: 'confirmed' },
-    confirmed: { label: 'Confirmado', color: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30', icon: ThumbsUp, next: 'preparing' },
-    preparing: { label: 'Preparando', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30', icon: Package, next: 'ready' },
-    ready: { label: 'Listo', color: 'bg-green-500/20 text-green-400 border-green-500/30', icon: Check, next: 'delivered' },
-    delivered: { label: 'Entregado', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', icon: Truck, next: null },
-    canceled: { label: 'Cancelado', color: 'bg-red-500/20 text-red-400 border-red-500/30', icon: X, next: null },
+    pending: { label: 'Pendiente', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30', icon: Clock },
+    confirmed: { label: 'Confirmado', color: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30', icon: ThumbsUp },
+    preparing: { label: 'Preparando', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30', icon: Package },
+    ready: { label: 'Listo para retiro', color: 'bg-green-500/20 text-green-400 border-green-500/30', icon: Check },
+    out_for_delivery: { label: 'En reparto', color: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30', icon: Bike },
+    delivered: { label: 'Entregado', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', icon: Truck },
+    canceled: { label: 'Cancelado', color: 'bg-red-500/20 text-red-400 border-red-500/30', icon: X },
 };
 
-const STATUS_NEXT_LABEL = {
-    pending: 'Confirmar',
-    confirmed: 'Preparar',
-    preparing: 'Marcar Listo',
-    ready: 'Entregar',
-};
+// Transferencia que el local todavía no revisó (mismo criterio que el servidor).
+const transferenciaPorConfirmar = (o) => ['pending', 'confirmed'].includes(o?.status)
+    && String(o?.payment_method || '').toLowerCase() === 'transferencia' && Number(o?.remaining_amount) > 0;
+
+// Pagado en la web (Mercado Pago) que todavía no tiene su boleta (mismo criterio que el servidor).
+const pagadoSinDocumento = (o) => o?.payment_status === 'paid' && !o?.sale_id
+    && !['delivered', 'canceled'].includes(o?.status);
+const pidioFactura = (o) => !!o?.invoice_data;
+const datosFactura = (o) => { try { return JSON.parse(o?.invoice_data || 'null'); } catch { return null; } };
+
+// El paso que sigue y cómo se llama el botón. `saldo` = lo que falta cobrar.
+function siguientePaso(order, saldo) {
+    const aDomicilio = order.delivery_type === 'delivery';
+    // Pagado con Mercado Pago: antes de seguir, el documento.
+    if (pagadoSinDocumento(order) && ['preparing', 'ready', 'out_for_delivery'].includes(order.status)) {
+        return { status: '__documento', label: pidioFactura(order) ? 'Hacer factura' : 'Hacer boleta' };
+    }
+    const entregar = { status: 'delivered', label: saldo > 0 ? (aDomicilio ? 'Cobrar y entregar' : 'Cobrar') : saldo < 0 ? 'Devolver y entregar' : 'Entregar' };
+    switch (order.status) {
+        case 'pending':
+        case 'confirmed': return transferenciaPorConfirmar(order)
+            ? { status: 'preparing', label: 'Confirmar pago' }
+            : { status: 'preparing', label: 'Preparar' };
+        case 'preparing': return { status: 'ready', label: 'Listo para retiro' };
+        case 'ready': return aDomicilio ? { status: 'out_for_delivery', label: 'En reparto' } : entregar;
+        case 'out_for_delivery': return entregar;
+        default: return null;
+    }
+}
 
 const isEditable = (status) => status !== 'delivered' && status !== 'canceled';
 
@@ -51,67 +84,7 @@ const normalizeItem = (it) => ({
     external_product_id: it.external_product_id || null,
 });
 
-// Cobro contra entrega: registra el pago del saldo (efectivo cuadra en caja,
-// tarjeta/transferencia con su detalle) y el backend auto-marca 'delivered'.
-function CodChargeModal({ order, onClose, onCharged, currentCurrency }) {
-    const [method, setMethod] = useState('Efectivo');
-    const [terminalId, setTerminalId] = useState(null);
-    const [bankAccountId, setBankAccountId] = useState(null);
-    const [saving, setSaving] = useState(false);
-    const amount = Number(order.remaining_amount) || 0;
 
-    const charge = async () => {
-        setSaving(true);
-        const ok = await onCharged(order, amount, method, { terminalId, bankAccountId });
-        setSaving(false);
-        if (ok) onClose();
-    };
-
-    return (
-        <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="panel-oscuro glass-card w-full max-w-sm p-0 overflow-hidden !bg-[#18181b]" onClick={e => e.stopPropagation()}>
-                <div className="p-4 border-b border-[var(--glass-border)] flex items-center justify-between">
-                    <h3 className="font-bold text-sm text-[var(--color-text)]">Cobrar y entregar #{order.external_public_code || order.id}</h3>
-                    <button onClick={onClose} className="p-1 rounded-full hover:bg-[var(--glass-bg)] text-[var(--color-text-muted)]"><X size={16} /></button>
-                </div>
-                <div className="p-4 space-y-4">
-                    <div className="text-center">
-                        <p className="text-xs text-[var(--color-text-muted)]">Monto a cobrar (contra entrega)</p>
-                        <p className="text-3xl font-bold text-[var(--color-primary)]">{formatCurrency(amount, currentCurrency)}</p>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                        {['Efectivo', 'Tarjeta', 'Transferencia'].map(m => (
-                            <button key={m} onClick={() => setMethod(m)}
-                                className={cn('py-2 rounded-lg text-xs font-bold border transition-all',
-                                    method === m
-                                        ? 'bg-[var(--color-primary)] text-black border-[var(--color-primary)]'
-                                        : 'bg-[var(--glass-bg)] text-[var(--color-text-muted)] border-[var(--glass-border)]'
-                                )}>
-                                {m}
-                            </button>
-                        ))}
-                    </div>
-                    <PaymentDetailPicker
-                        method={method}
-                        terminalId={terminalId}
-                        bankAccountId={bankAccountId}
-                        onChange={({ terminalId: t, bankAccountId: b }) => {
-                            if (t !== undefined) setTerminalId(t);
-                            if (b !== undefined) setBankAccountId(b);
-                        }}
-                    />
-                </div>
-                <div className="p-4 border-t border-[var(--glass-border)] flex justify-end gap-2">
-                    <button onClick={onClose} className="px-4 py-2 rounded-lg border border-[var(--glass-border)] text-[var(--color-text)] text-sm">Cancelar</button>
-                    <button onClick={charge} disabled={saving}
-                        className="px-4 py-2 rounded-lg bg-[var(--color-primary)] text-black font-bold text-sm disabled:opacity-50">
-                        {saving ? 'Registrando…' : 'Cobrar y entregar'}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
 
 // Devolución al entregar (cuando el pedido se editó a la baja y quedó saldo a favor).
 function RefundModal({ order, amount, onClose, onConfirm, currentCurrency }) {
@@ -238,7 +211,7 @@ function AddProductModal({ onAdd, onClose, currentCurrency }) {
 
 // Detalle del pedido (panel derecho en desktop / modal en móvil). Cliente,
 // WhatsApp, edición directa de productos (± / quitar / añadir) y acciones.
-function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems, onClose, embedded = false }) {
+function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems, onDocumento, onClose, embedded = false }) {
     const { getPreorderDetails } = useStore();
     const [items, setItems] = useState([]);
     const [draft, setDraft] = useState([]);
@@ -296,9 +269,7 @@ function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems,
     const shownTotal = editable ? draftTotal : (Number(order.total_amount) || 0);
     const shownRemaining = editable ? draftDiff : (Number(order.remaining_amount) || 0);
 
-    const finalLabel = order.status === 'ready'
-        ? (shownRemaining > 0 ? 'Cobrar y entregar' : shownRemaining < 0 ? 'Devolver y entregar' : 'Entregar')
-        : STATUS_NEXT_LABEL[order.status];
+    const paso = siguientePaso(order, shownRemaining);
 
     const list = editable ? draft : items;
 
@@ -358,6 +329,17 @@ function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems,
                         {order.delivery_type === 'delivery' ? ' · Despacho' : ' · Retiro en tienda'}
                     </p>
                     {order.notes && <p className="text-xs text-[var(--color-text-muted)] italic">"{order.notes}"</p>}
+                    {pidioFactura(order) && (() => {
+                        const f = datosFactura(order) || {};
+                        return (
+                            <div className="mt-1 p-2.5 rounded-lg border border-blue-500/30 bg-blue-500/10 text-xs space-y-0.5">
+                                <p className="font-bold text-blue-400 flex items-center gap-1.5"><Receipt size={12} /> Pidió factura</p>
+                                <p className="text-[var(--color-text)]">{f.razon_social} · RUT {f.rut}</p>
+                                {f.giro && <p className="text-[var(--color-text-muted)]">Giro: {f.giro}</p>}
+                                {(f.direccion || f.comuna) && <p className="text-[var(--color-text-muted)]">{[f.direccion, f.comuna, f.ciudad].filter(Boolean).join(', ')}</p>}
+                            </div>
+                        );
+                    })()}
                 </div>
 
                 {/* Productos */}
@@ -433,7 +415,19 @@ function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems,
                         <span className="font-bold text-[var(--color-text)]">Total</span>
                         <span className="text-xl font-bold text-[var(--color-text)]">{formatCurrency(shownTotal, currentCurrency)}</span>
                     </div>
-                    {shownRemaining > 0 ? (
+                    {transferenciaPorConfirmar(order) ? (
+                        <div className="flex items-center gap-2 justify-end flex-wrap">
+                            {order.payment_proof_url && (
+                                <a href={order.payment_proof_url} target="_blank" rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-[var(--glass-bg)] text-[var(--color-text)] border border-[var(--glass-border)]">
+                                    <ExternalLink size={12} /> Ver comprobante
+                                </a>
+                            )}
+                            <p className="text-orange-400 flex items-center gap-2 font-medium">
+                                <CreditCard size={12} /> Pago pendiente · transferencia por revisar
+                            </p>
+                        </div>
+                    ) : shownRemaining > 0 ? (
                         <p className="text-orange-400 flex items-center gap-2 font-medium justify-end">
                             <CreditCard size={12} /> Por cobrar al entregar {formatCurrency(shownRemaining, currentCurrency)}
                         </p>
@@ -441,9 +435,28 @@ function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems,
                         <p className="text-orange-400 flex items-center gap-2 font-medium justify-end">
                             <CreditCard size={12} /> A devolver al entregar {formatCurrency(Math.abs(shownRemaining), currentCurrency)}
                         </p>
+                    ) : order.sale_id ? (
+                        <div className="flex items-center gap-2 justify-end flex-wrap">
+                            <button onClick={() => onDocumento?.(order)}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-[var(--glass-bg)] text-[var(--color-text)] border border-[var(--glass-border)]">
+                                <Receipt size={12} /> Imprimir documento
+                            </button>
+                            <p className="text-green-400 flex items-center gap-2 font-medium">
+                                <CreditCard size={12} /> Pagado · Venta #{order.sale_id}
+                            </p>
+                        </div>
+                    ) : pagadoSinDocumento(order) ? (
+                        <p className="text-green-400 flex items-center gap-2 font-medium justify-end">
+                            <CreditCard size={12} /> Pagado online · falta hacer la {pidioFactura(order) ? 'factura' : 'boleta'}
+                        </p>
                     ) : (
                         <p className="text-green-400 flex items-center gap-2 font-medium justify-end">
                             <CreditCard size={12} /> Pagado online{order.payment_method ? ` · ${order.payment_method}` : ''}
+                        </p>
+                    )}
+                    {Number(order.stock_reserved) === 1 && editable && (
+                        <p className="text-[11px] text-violet-400 flex items-center gap-1.5 justify-end">
+                            <Package size={11} /> Stock separado
                         </p>
                     )}
                 </div>
@@ -452,18 +465,18 @@ function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems,
                     <div className="px-4 pb-4 flex gap-2">
                         <button
                             onClick={() => onStatusChange(order.id, 'canceled')}
-                            className="px-4 py-2.5 rounded-lg text-xs font-bold bg-red-500/15 text-red-400 border border-red-500/30"
+                            className="px-4 py-3 rounded-lg text-xs font-bold bg-red-500/15 text-red-400 border border-red-500/30"
                         >
-                            Cancelar
+                            {transferenciaPorConfirmar(order) ? 'Rechazar pago' : 'Cancelar'}
                         </button>
-                        {config.next && (
+                        {paso && (
                             <button
-                                onClick={() => onStatusChange(order.id, config.next)}
+                                onClick={() => onStatusChange(order.id, paso.status)}
                                 disabled={dirty}
                                 title={dirty ? 'Guarda los cambios primero' : ''}
-                                className="flex-1 py-2.5 rounded-lg text-xs font-bold btn-primary flex items-center justify-center gap-1.5 disabled:opacity-40"
+                                className="flex-1 py-3 rounded-lg text-sm font-bold btn-primary flex items-center justify-center gap-1.5 disabled:opacity-40"
                             >
-                                <ArrowRight size={14} /> {finalLabel}
+                                <ArrowRight size={15} /> {paso.label}
                             </button>
                         )}
                     </div>
@@ -480,14 +493,23 @@ function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems,
 export default function StoreOrders() {
     const navigate = useNavigate();
     const {
-        preorders, fetchPreorders, updatePreorderStatus, addPreorderPayment,
+        preorders, fetchPreorders, updatePreorderStatus,
         editPreorderItems, _registerPreorderCash, currentCurrency,
-        orderBadges, fetchOrderBadges,
+        orderBadges, fetchOrderBadges, hasModule,
     } = useStore();
+    // Con Delivery, el pedido a domicilio que queda listo aparece en Envíos.
+    const canDelivery = hasModule('delivery');
     const [statusFilter, setStatusFilter] = useState('all');
     const [loading, setLoading] = useState(true);
     const [selectedId, setSelectedId] = useState(null);
     const [codOrder, setCodOrder] = useState(null);
+    // Transferencia que se está confirmando (ahí nace la venta).
+    const [pagoOrder, setPagoOrder] = useState(null);
+    // Pagado con Mercado Pago: se está haciendo su boleta o factura.
+    const [docOrder, setDocOrder] = useState(null);
+    // Documento de una venta para imprimir o descargar (reimpresión o entrega).
+    const [documentoDe, setDocumentoDe] = useState(null);
+    const [entregado, setEntregado] = useState(null);
     const [refundOrder, setRefundOrder] = useState(null);
     // Pedido de tienda esperando el motivo de la cancelación.
     const [cancelandoOrden, setCancelandoOrden] = useState(null);
@@ -526,25 +548,27 @@ export default function StoreOrders() {
         }
         const order = preorders.find(p => p.id === orderId);
         const remaining = Number(order?.remaining_amount) || 0;
+        // Transferencia: se confirma el pago (nace la venta) y pasa a Preparando.
+        if (newStatus === 'preparing' && transferenciaPorConfirmar(order)) { setPagoOrder(order); return; }
+        // Mercado Pago: se hace la boleta o la factura (nace la venta).
+        if (newStatus === '__documento') { setDocOrder(order); return; }
+        // Se paga al recibir: se entrega cobrando (nace la venta con su documento).
         if (newStatus === 'delivered' && remaining > 0) { setRefundOrder(null); setCodOrder(order); return; }
         if (newStatus === 'delivered' && remaining < 0) { setCodOrder(null); setRefundOrder(order); return; }
-        const result = await updatePreorderStatus(orderId, newStatus, reason, getListFilters(), 'tienda');
+        const crearEnvio = newStatus === 'ready' && canDelivery && order?.delivery_type === 'delivery';
+        const result = await updatePreorderStatus(orderId, newStatus, reason, getListFilters(), 'tienda', { crearEnvio });
         // Efectivo que no llegó a ninguna caja: aviso que hay que cerrar, para que
         // no se descubra recién al cuadrar el turno.
         if (result.cashWarning) alert('⚠️ ' + result.cashWarning);
         if (!result.success) { alert('Error al actualizar: ' + (result.error || '')); return; }
+        if (result.envioId) toast('Listo: el pedido ya aparece en Delivery para los repartidores.', 'success');
+        // Entregado un pedido que ya estaba pagado: su documento queda a mano.
+        if (newStatus === 'delivered' && order?.sale_id) setEntregado({ titulo: `Pedido #${order.external_public_code || order.id}`, saleId: order.sale_id });
+        if (result.envioError) toast(`El pedido quedó listo, pero no se pudo pasar a Delivery: ${result.envioError}`, 'error');
     };
 
     const handleEditItems = async (orderId, items) => {
         return await editPreorderItems(orderId, items, getListFilters());
-    };
-
-    const handleCodCharge = async (order, amount, method, { terminalId, bankAccountId }) => {
-        const pay = await addPreorderPayment(order.id, amount, method, 'final', { terminalId, bankAccountId });
-        if (pay.cashWarning) alert('⚠️ ' + pay.cashWarning);
-        if (!pay.success) { alert('Error al registrar el cobro: ' + (pay.error || '')); return false; }
-        await updatePreorderStatus(order.id, 'delivered', null, getListFilters());
-        return true;
     };
 
     const handleRefund = async (order, amount) => {
@@ -587,9 +611,9 @@ export default function StoreOrders() {
                     {[
                         { key: 'all', label: 'Todos' },
                         { key: 'pending', label: '⏳ Pendientes' },
-                        { key: 'confirmed', label: '👍 Confirmados' },
                         { key: 'preparing', label: '📦 Preparando' },
-                        { key: 'ready', label: '✅ Listos' },
+                        { key: 'ready', label: '✅ Listos para retiro' },
+                        { key: 'out_for_delivery', label: '🛵 En reparto' },
                         { key: 'delivered', label: '🚚 Entregados' },
                         { key: 'canceled', label: '❌ Cancelados' },
                     ].map(s => (
@@ -642,7 +666,7 @@ export default function StoreOrders() {
                                         <div className="text-right shrink-0">
                                             <p className="text-sm font-bold text-[var(--color-text)]">{formatCurrency(order.total_amount, currentCurrency)}</p>
                                             <p className={cn('text-[10px] font-bold', Number(order.remaining_amount) > 0 ? 'text-orange-400' : 'text-green-400')}>
-                                                {order.delivery_type === 'delivery' ? '🛵' : '🏪'} {Number(order.remaining_amount) > 0 ? 'Por cobrar' : '✓ Pagado'}
+                                                {order.delivery_type === 'delivery' ? '🛵' : '🏪'} {transferenciaPorConfirmar(order) ? 'Pago pendiente' : Number(order.remaining_amount) > 0 ? 'Por cobrar' : pagadoSinDocumento(order) ? '✓ Pagado · sin boleta' : '✓ Pagado'}
                                             </p>
                                         </div>
                                     </div>
@@ -662,6 +686,7 @@ export default function StoreOrders() {
                                 currentCurrency={currentCurrency}
                                 onStatusChange={handleStatusChange}
                                 onEditItems={handleEditItems}
+                                onDocumento={(o) => setDocumentoDe({ titulo: `Pedido #${o.external_public_code || o.id}`, saleId: o.sale_id })}
                                 embedded
                             />
                         ) : (
@@ -684,6 +709,7 @@ export default function StoreOrders() {
                             currentCurrency={currentCurrency}
                             onStatusChange={handleStatusChange}
                             onEditItems={handleEditItems}
+                            onDocumento={(o) => setDocumentoDe({ titulo: `Pedido #${o.external_public_code || o.id}`, saleId: o.sale_id })}
                             onClose={() => setSelectedId(null)}
                             embedded
                         />
@@ -694,6 +720,11 @@ export default function StoreOrders() {
             {cancelandoOrden && (
                 <CancelarEncargoModal
                     encargo={cancelandoOrden}
+                    {...(transferenciaPorConfirmar(cancelandoOrden) ? {
+                        titulo: `Rechazar pago #${cancelandoOrden.external_public_code || cancelandoOrden.id}`,
+                        motivos: ['La transferencia no llegó', 'El comprobante no es válido', 'El monto no coincide', 'El cliente se arrepintió'],
+                        textoBoton: 'Rechazar y cancelar',
+                    } : {})}
                     onCancel={() => setCancelandoOrden(null)}
                     onConfirm={async (motivo) => {
                         const id = cancelandoOrden.id;
@@ -704,8 +735,27 @@ export default function StoreOrders() {
                 />
             )}
 
+            {docOrder && (
+                <CobrarEnvioModal pedido={docOrder} documento
+                    onClose={() => { setDocOrder(null); fetchPreorders(getListFilters()); }}
+                    onDone={() => fetchPreorders(getListFilters())} />
+            )}
+            {documentoDe && (
+                <EntregaExitosaModal encabezado="Documento de la venta" titulo={documentoDe.titulo}
+                    saleId={documentoDe.saleId} onClose={() => setDocumentoDe(null)} />
+            )}
+            {entregado && (
+                <EntregaExitosaModal titulo={entregado.titulo} saleId={entregado.saleId} onClose={() => setEntregado(null)} />
+            )}
+            {pagoOrder && (
+                <CobrarEnvioModal pedido={pagoOrder} confirmarPago
+                    onClose={() => { setPagoOrder(null); fetchPreorders(getListFilters()); }}
+                    onDone={() => fetchPreorders(getListFilters())} />
+            )}
             {codOrder && (
-                <CodChargeModal order={codOrder} onClose={() => setCodOrder(null)} onCharged={handleCodCharge} currentCurrency={currentCurrency} />
+                <CobrarEnvioModal pedido={codOrder}
+                    onClose={() => { setCodOrder(null); fetchPreorders(getListFilters()); }}
+                    onDone={() => fetchPreorders(getListFilters())} />
             )}
             {refundOrder && (
                 <RefundModal order={refundOrder} amount={Math.abs(Number(refundOrder.remaining_amount) || 0)} onClose={() => setRefundOrder(null)} onConfirm={handleRefund} currentCurrency={currentCurrency} />

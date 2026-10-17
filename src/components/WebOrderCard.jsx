@@ -86,13 +86,25 @@ const WebOrderCard = ({ order, currency = 'CLP', onAccept, onReject, onView, onC
                 >
                     <X size={14} /> Rechazar
                 </button>
-                <button
-                    onClick={() => run(onAccept)}
-                    disabled={busy}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[var(--color-primary)] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
-                >
-                    <Check size={14} /> Aceptar
-                </button>
+                {/* El pedido de la tienda llega "Preparando" con su stock separado: no
+                    se acepta, se abre. El encargo de amasandería sí se acepta. */}
+                {isStore ? (
+                    <button
+                        onClick={() => run(onView)}
+                        disabled={busy}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[var(--color-primary)] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                        <Store size={14} /> Abrir pedido
+                    </button>
+                ) : (
+                    <button
+                        onClick={() => run(onAccept)}
+                        disabled={busy}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[var(--color-primary)] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                        <Check size={14} /> Aceptar
+                    </button>
+                )}
             </div>
         </div>
     );

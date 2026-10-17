@@ -247,6 +247,9 @@ export default async function handler(req, res) {
             case 'preorderReportsRaw':
             case 'preorderAnalyticsRaw':
             case 'preorderableProducts':
+            case 'storeOrderRelease':      // pedido de la tienda web que se paga al recibir (migración 0034)
+            case 'storeOrderReserve':
+            case 'storeOrderComplete':
                 return res.status(200).json(await preorderActions[action](turso, companyId, session, body));
             // App Delivery (migración 0013)
             case 'courierList':
@@ -265,6 +268,10 @@ export default async function handler(req, res) {
             case 'settlementCreate':
             case 'settlementList':
             case 'deliverySettingsSave':
+            case 'deliveryOrderCreate':     // pedido con pago al recibir (migración 0032)
+            case 'deliveryOrderRelease':
+            case 'deliveryOrderReserve':
+            case 'deliveryOrderComplete':
                 return res.status(200).json(await deliveryActions[action](turso, companyId, session, body));
             // Reportes generales (catálogo whitelisteado — Fase 1 · Paso 18)
             case 'report':

@@ -9,6 +9,9 @@ import {
     turso,
 } from './_common.js';
 import { broadcastPreorderEvent } from '../events/preorders-stream.js';
+import { separarStockPedido, liberarStockPedido, empujarStockATienda } from '../_lib/tiendaPedidos.js';
+import { avisarEstadoTienda } from '../_lib/avisoTienda.js';
+import { deliveryActions, envioActivoDePedido } from '../_lib/deliveryActions.js';
 
 const ALLOWED_INCOMING_STATUSES = new Set(['canceled']);
 const COMPANY_TIMEZONE = process.env.EXTERNAL_COMPANY_TIMEZONE || 'America/Santiago';
@@ -40,15 +43,37 @@ function splitScheduledFor(iso) {
     };
 }
 
+// Datos de factura que el cliente dejó en el checkout ("Quiero factura"). Sin RUT
+// o sin razón social no sirven para facturar: se ignoran y el pedido va con boleta.
+function datosDeFactura(inv) {
+    if (!inv || typeof inv !== 'object') return null;
+    const t = (v, max = 120) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+    const datos = {
+        rut: t(inv.rut, 12),
+        razon_social: t(inv.razon_social),
+        giro: t(inv.giro, 80),
+        direccion: t(inv.direccion),
+        comuna: t(inv.comuna, 60),
+        ciudad: t(inv.ciudad, 60),
+        email: t(inv.email, 120),
+    };
+    return datos.rut && datos.razon_social ? JSON.stringify(datos) : null;
+}
+
+// El producto del POS: miniveci.cl manda nuestro id (posProductId) o, si no lo
+// tiene, el SKU. Antes la consulta preguntaba también por `external_id`, columna
+// que products no tiene: la consulta fallaba, el catch devolvía 0 y TODOS los
+// pedidos de la tienda quedaban sin producto (product_id = 0, visto el 8-oct-2026).
 async function resolveProductId(externalProductId, productName, companyId) {
     if (!externalProductId) return 0;
     try {
+        const ext = String(externalProductId);
         const r = await turso.execute({
             sql: `SELECT id FROM products
-                  WHERE company_id = ?
-                    AND (CAST(id AS TEXT) = ? OR sku = ? OR external_id = ?)
+                  WHERE company_id = ? AND (CAST(id AS TEXT) = ? OR sku = ?)
+                  ORDER BY CASE WHEN CAST(id AS TEXT) = ? THEN 0 ELSE 1 END
                   LIMIT 1`,
-            args: [companyId, String(externalProductId), String(externalProductId), String(externalProductId)],
+            args: [companyId, ext, ext, ext],
         });
         return r.rows?.[0]?.id || 0;
     } catch {
@@ -129,12 +154,25 @@ async function createPreorder(req, res, companyId) {
     }
 
     // Pedidos de tienda pagados online: depósito = total, saldo = 0 (sin fila en
-    // preorder_payments; cancelar no mueve caja). Contra entrega ('contra_entrega')
-    // queda con saldo = total, igual que un encargo: se cobra al entregar.
-    const paidOnline = orderKind === 'store'
-        && String(payload.payment_method || 'online').toLowerCase() !== 'contra_entrega';
+    // preorder_payments; cancelar no mueve caja). Lo que se paga al recibir queda
+    // con saldo = total: se cobra al entregar, y ahí nace la venta.
+    //
+    // Quién está pagado lo dice miniveci.cl con `payment_status` (oct-2026): una
+    // transferencia sin confirmar NO está pagada. Sin ese campo (versión vieja de
+    // la tienda) vale la regla de antes: todo lo que no es contra entrega.
+    const paymentStatus = ['paid', 'pending'].includes(payload.payment_status) ? payload.payment_status : null;
+    const paidOnline = orderKind === 'store' && (paymentStatus
+        ? paymentStatus === 'paid'
+        : String(payload.payment_method || 'online').toLowerCase() !== 'contra_entrega');
     const depositAmount = paidOnline ? total : 0;
     const remainingAmount = paidOnline ? 0 : total;
+    // El pedido de la tienda llega "Preparando": no hay que aceptarlo, su stock ya
+    // queda separado. Salvo la transferencia sin revisar: llega "Pendiente" hasta
+    // que el local confirma que la plata llegó (9-oct-2026). El encargo de
+    // amasandería sigue entrando "Pendiente".
+    const transferenciaPorRevisar = orderKind === 'store' && !paidOnline
+        && String(payload.payment_method || '').toLowerCase() === 'transferencia';
+    const estadoInicial = orderKind === 'store' && !transferenciaPorRevisar ? 'preparing' : 'pending';
 
     // Insert preorder (todas las columnas ya garantizadas por ensurePreordersSyncColumns)
     const insertRes = await turso.execute({
@@ -146,7 +184,7 @@ async function createPreorder(req, res, companyId) {
                external_order_id, external_public_code, external_source,
                client_email, client_rut, client_external_id,
                delivery_fee, payment_method, order_kind)
-              VALUES (?, ?, ?, ?, ?, ?, 'pending',
+              VALUES (?, ?, ?, ?, ?, ?, ?,
                       ?, ?, ?, ?,
                       ?, ?, ?, ?, ?, ?,
                       ?, ?, 'miniveci',
@@ -160,6 +198,7 @@ async function createPreorder(req, res, companyId) {
             displayPhone,
             due_date,
             due_time,
+            estadoInicial,
             total,
             total,
             depositAmount,
@@ -220,7 +259,7 @@ async function createPreorder(req, res, companyId) {
         id: preorderId,
         external_order_id: preorder.external_order_id,
         public_code: preorder.external_public_code,
-        status: 'pending',
+        status: estadoInicial,
         order_kind: orderKind,
         due_date,
         due_time,
@@ -274,6 +313,11 @@ async function cancelPreorder(req, res, companyId) {
     if (row.status === 'delivered') {
         return res.status(409).json({ success: false, error: 'Preorder already delivered' });
     }
+    // Ya tiene su venta (transferencia confirmada): se resuelve en el local,
+    // anulando la venta. Cancelarlo acá dejaría la venta y su stock colgando.
+    if (row.order_kind === 'store' && row.sale_id) {
+        return res.status(409).json({ success: false, error: 'Preorder already paid (sale registered in POS)' });
+    }
 
     await turso.execute({
         sql: `UPDATE preorders
@@ -283,6 +327,23 @@ async function cancelPreorder(req, res, companyId) {
               WHERE id = ?`,
         args: [payload.reason || '', row.id],
     });
+
+    // Pedido de la tienda: lo separado vuelve al stock (y la tienda recibe el
+    // número nuevo), y el envío que tuviera queda anulado.
+    if (row.order_kind === 'store' && row.status !== 'canceled') {
+        try {
+            const { liberados } = await liberarStockPedido(turso, companyId, row.id);
+            const envio = await envioActivoDePedido(turso, companyId, row.id);
+            if (envio) {
+                await deliveryActions.deliveryStatus(turso, companyId, null, {
+                    id: envio.id, status: 'canceled', reason: payload.reason || 'El cliente canceló en la tienda web',
+                });
+            }
+            if (liberados.length) await empujarStockATienda(turso, companyId, liberados.map(x => x.productId));
+        } catch (e) {
+            console.error(`❌ [preorders] cancelación #${row.id}: no se pudo devolver el stock`, e?.message || e);
+        }
+    }
 
     // Historial (migración 0028): que la línea de tiempo distinga una
     // cancelación hecha por el cliente en la tienda web de una hecha en la

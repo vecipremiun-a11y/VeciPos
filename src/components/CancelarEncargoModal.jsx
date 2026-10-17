@@ -26,7 +26,9 @@ const MOTIVOS = [
     'El cliente no lo retiró',
 ];
 
-export default function CancelarEncargoModal({ encargo, onCancel, onConfirm }) {
+// `titulo`, `motivos` y `textoBoton` cambian la ventana para otro caso (la
+// pestaña Tienda la usa para rechazar una transferencia); sin ellos, es la de siempre.
+export default function CancelarEncargoModal({ encargo, onCancel, onConfirm, titulo = null, motivos = MOTIVOS, textoBoton = 'Cancelar encargo' }) {
     const [motivo, setMotivo] = useState('');
     const [detalle, setDetalle] = useState('');
     const [error, setError] = useState(null);
@@ -78,7 +80,7 @@ export default function CancelarEncargoModal({ encargo, onCancel, onConfirm }) {
 
                 <h2 className="text-lg font-bold flex items-center gap-2 text-[var(--color-text)] pr-8">
                     <Ban className="text-red-400 shrink-0" size={20} />
-                    Cancelar encargo #{encargo.id}
+                    {titulo || `Cancelar encargo #${encargo.id}`}
                 </h2>
 
                 <div className="mt-3 rounded-lg border border-[var(--glass-border)] bg-[var(--color-surface-hover)] p-3 text-xs">
@@ -109,7 +111,7 @@ export default function CancelarEncargoModal({ encargo, onCancel, onConfirm }) {
                             Motivo <span className="text-red-400">(obligatorio)</span>
                         </label>
                         <div className="flex flex-wrap gap-1.5">
-                            {MOTIVOS.map(m => (
+                            {motivos.map(m => (
                                 <button
                                     type="button"
                                     key={m}
@@ -166,7 +168,7 @@ export default function CancelarEncargoModal({ encargo, onCancel, onConfirm }) {
                             className="flex-1 py-2.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2"
                         >
                             {enviando && <Loader2 size={14} className="animate-spin" />}
-                            Cancelar encargo
+                            {textoBoton}
                         </button>
                     </div>
                 </form>
