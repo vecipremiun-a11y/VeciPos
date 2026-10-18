@@ -5,6 +5,7 @@
 import { mirrorPurchaseItems } from '../../src/lib/itemNormalization.js';
 import { presentationActions } from './presentationActions.js';
 import { guardarReglasOferta, estabaEnOferta } from './offerActions.js';
+import { syncPresentationsToStoreSinEsperar } from '../integration/client.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -535,6 +536,7 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
             try {
                 const res = await presentationActions.presentationSave(turso, companyId, session, {
                     presentation: { product_id: item.id, name: n.name, units: n.units, barcode: n.barcode, price: n.price },
+                    sinTienda: true,
                 });
                 if (res.success) presentacionesCreadas.push(res.presentation);
                 else preciosNoAplicados.push({ producto: item.name, presentacion: n.name || 'Caja', precio: Number(n.price) || 0, motivo: res.error });
@@ -543,6 +545,18 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
                 preciosNoAplicados.push({ producto: item.name, presentacion: n?.name || 'Caja', precio: Number(n?.price) || 0, motivo: 'no se pudo crear' });
             }
         }
+    }
+
+    // ── La tienda online: cajas con precio nuevo o recién creadas ────────
+    //
+    // Una vez por producto, con su lista completa ya actualizada. En paralelo y
+    // con tope de espera (6 s): la compra ya quedó guardada y no espera más que eso.
+    const conCajasTocadas = seAplican
+        .filter(i => (i?.cambiosPrecios?.presentaciones || []).length || (i?.cambiosPrecios?.nuevas || []).length)
+        .map(i => i.id);
+    if (conCajasTocadas.length) {
+        await Promise.allSettled([...new Set(conCajasTocadas.map(String))]
+            .map(productId => syncPresentationsToStoreSinEsperar({ companyId, productId })));
     }
 
     // 3. Espejo purchase_items (post-commit; nunca hace fallar la compra).

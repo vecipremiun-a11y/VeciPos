@@ -9,7 +9,7 @@ import { deliveryActions, envioActivoDePedido, marcarRetiradoDesdeTienda, cerrar
 import {
     pedidoTienda, liberarStockPedido, volverASepararPedido, rehacerReservaPedido,
     cerrarPedidoTienda, ventaDelPedido, esTransferenciaPorConfirmar, confirmarPagoPedido,
-    pagadoSinDocumento, anotarDocumento,
+    pagadoSinDocumento, anotarDocumento, cajaParaGuardar,
 } from './tiendaPedidos.js';
 
 const nowIso = () => new Date().toISOString();
@@ -319,6 +319,9 @@ async function preorderItemsEdit(turso, companyId, session, { preorderId, items 
             price_per_kg: Number(it.price_per_kg) || 0,
             gram_per_unit: Number(it.gram_per_unit) || 0,
             external_product_id: it.external_product_id || null,
+            // Caja, bandeja o pack (migración 0035): se mueve por cajas en la
+            // pestaña Tienda y no puede perderse al guardar la edición.
+            presentation: cajaParaGuardar(it.presentation, qty),
         };
     });
 
@@ -329,16 +332,17 @@ async function preorderItemsEdit(turso, companyId, session, { preorderId, items 
     const remaining = total - deposit;
 
     // Reemplazo atómico de items + recálculo de totales.
-    const queries = [
+    const reemplazo = (conCaja) => [
         { sql: 'DELETE FROM preorder_items WHERE preorder_id = ?', args: [preorderId] },
         ...norm.map(it => ({
             sql: `INSERT INTO preorder_items
                   (preorder_id, product_id, product_name, qty, unit, unit_price, line_total, note,
-                   billing_unit, price_per_kg, gram_per_unit, estimated_total, external_product_id)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                   billing_unit, price_per_kg, gram_per_unit, estimated_total, external_product_id${conCaja ? ', presentation' : ''})
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${conCaja ? ', ?' : ''})`,
             args: [preorderId, it.product_id, it.product_name, it.qty, it.unit, it.unit_price,
                 it.line_total, it.note, it.billing_unit, it.price_per_kg, it.gram_per_unit,
-                it.line_total, it.external_product_id],
+                it.line_total, it.external_product_id,
+                ...(conCaja ? [it.presentation ? JSON.stringify(it.presentation) : null] : [])],
         })),
         {
             sql: `UPDATE preorders SET total_amount = ?, estimated_total = ?, remaining_amount = ?, updated_at = datetime('now')
@@ -346,7 +350,23 @@ async function preorderItemsEdit(turso, companyId, session, { preorderId, items 
             args: [total, total, remaining, preorderId, companyId],
         },
     ];
-    await turso.batch(queries);
+    const hayCajas = norm.some(it => it.presentation);
+    try {
+        await turso.batch(reemplazo(hayCajas));
+    } catch (err) {
+        // Base sin la migración 0035: el batch no aplicó nada; va sin las cajas.
+        if (!hayCajas || !/no such column/i.test(String(err?.message))) throw err;
+        await turso.batch(reemplazo(false));
+    }
+
+    let liberados = [], reservados = [];
+    if (pr.order_kind === 'store') {
+        try {
+            ({ liberados, reservados } = await rehacerReservaPedido(turso, companyId, preorderId));
+        } catch (e) {
+            console.error('[tienda] no se pudo rehacer lo separado del pedido', preorderId, e?.message || e);
+        }
+    }
 
     return { success: true, total, remaining, deposit, liberados, reservados };
 }

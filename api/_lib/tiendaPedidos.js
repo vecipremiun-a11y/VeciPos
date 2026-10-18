@@ -273,21 +273,66 @@ export async function volverAListo(turso, companyId, preorderId, { session = nul
     return { cambiado: true };
 }
 
+// Caja, bandeja o pack de un renglón de pedido web, lista para guardar en
+// preorder_items.presentation (migración 0035): { pos_presentation_id, name,
+// units, quantity, price }. El renglón igual va en UNIDADES, que es lo que se
+// separa y se cobra; esto es para mostrarlo como caja y para que no cuente en el
+// cupo de la oferta. Si no cuadra con la cantidad del renglón: null (va por unidad).
+// Acepta el objeto de la tienda o el JSON ya guardado.
+export function cajaParaGuardar(json, qty) {
+    let p = json;
+    if (!p) return null;
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch { return null; } }
+    if (typeof p !== 'object') return null;
+    const units = Number(p.units);
+    const cantidad = Number(p.quantity);
+    const precio = Number(p.price);
+    const nombre = String(p.name || '').trim().slice(0, 40);
+    if (!nombre || !Number.isInteger(units) || units < 2 || !Number.isInteger(cantidad) || cantidad < 1 || !(precio > 0)) return null;
+    if (Math.abs(cantidad * units - Number(qty)) > 0.001) return null;
+    const idPos = p.pos_presentation_id ?? p.posPresentationId;
+    return {
+        pos_presentation_id: idPos === null || idPos === undefined || idPos === '' ? null : String(idPos),
+        name: nombre, units, quantity: cantidad, price: Math.round(precio),
+    };
+}
+
+// La caja de un renglón (el JSON que mandó la tienda, migración 0035) en la forma
+// del carrito del POS: { id, nombre, unidades, precio, cantidad }. null si no hay
+// o si ya no cuadra con la cantidad del renglón.
+export function cajaDelRenglon(json, qty) {
+    if (!json) return null;
+    let c;
+    try { c = typeof json === 'string' ? JSON.parse(json) : json; } catch { return null; }
+    const unidades = Number(c?.units);
+    const cantidad = Number(c?.quantity);
+    if (!(unidades >= 2) || !(cantidad >= 1) || Math.abs(unidades * cantidad - Number(qty)) > 0.001) return null;
+    return { id: c.pos_presentation_id ?? null, nombre: c.name || 'Caja', unidades, precio: Number(c.price) || 0, cantidad };
+}
+
 /**
  * Lo que se vende al cobrar: los renglones del pedido con costo e impuesto del
  * POS, a los precios que pagó el cliente. Si la tienda aplicó un descuento
  * (cupón), se reparte entre los renglones para que la venta sume lo cobrado.
  */
 export async function ventaDelPedido(turso, companyId, p) {
-    const r = await turso.execute({
+    const leer = (conCaja) => turso.execute({
         sql: `SELECT x.*, pr.cost, pr.tax_rate
               FROM (SELECT pi.id, ${PRODUCTO_DEL_RENGLON} AS product_id, pi.product_name, pi.qty, pi.unit,
-                           pi.unit_price, pi.line_total
+                           pi.unit_price, pi.line_total${conCaja ? ', pi.presentation' : ''}
                     FROM preorder_items pi WHERE pi.preorder_id = ?) x
               LEFT JOIN products pr ON pr.id = x.product_id AND pr.company_id = ?
               ORDER BY x.id`,
         args: [companyId, companyId, p.id, companyId],
     });
+    let r;
+    try {
+        r = await leer(true);
+    } catch (err) {
+        // Base sin la migración 0035: se vende igual, sin mostrar cajas.
+        if (!/no such column/i.test(String(err?.message))) throw err;
+        r = await leer(false);
+    }
     const renglones = r.rows.map(it => {
         const qty = Number(it.qty) || 0;
         const unit = Number(it.unit_price) || 0;
@@ -302,12 +347,19 @@ export async function ventaDelPedido(turso, companyId, p) {
             cost: Number(it.cost) || 0,
             tax_rate: it.tax_rate == null ? 19 : Number(it.tax_rate),
             unit: it.unit || 'Und',
+            caja: cajaDelRenglon(it.presentation, qty),
         };
     });
     const suma = renglones.reduce((a, it) => a + it.price * it.quantity, 0);
     const productos = Math.max(0, (Number(p.total_amount) || 0) - (Number(p.delivery_fee) || 0));
     const factor = suma > 0 && productos > 0 && productos < suma - 0.5 ? productos / suma : 1;
-    const items = renglones.map(it => ({ ...it, price: Math.round(it.price * factor * 100) / 100 }));
+    // La caja va al ticket como una venta de caja del POS: "2 Caja (30 und) × $7.500".
+    // Solo sin descuento repartido: con cupón la caja ya no vale lo que dice.
+    const items = renglones.map(({ caja, ...it }) => ({
+        ...it,
+        price: Math.round(it.price * factor * 100) / 100,
+        ...(caja && factor === 1 ? { presentacion: caja } : {}),
+    }));
     const total = factor === 1 ? Math.round(suma) : Math.round(productos);
     const cliente = p.client_id ? { id: Number(p.client_id), name: p.client_name || null } : null;
     return { items, total, client: cliente, clientName: p.client_name || null, fee: Number(p.delivery_fee) || 0 };

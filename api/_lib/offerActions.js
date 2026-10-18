@@ -113,37 +113,54 @@ export async function ofertasRevisar(turso, companyId) {
         let vendidas = Number(p.offer_units_sold) || 0;
         const limite = Number(p.offer_units_limit) || 0;
         if (limite > 0) {
-            const r = await turso.execute({
+            // Una caja pedida en la tienda (migración 0035) no se vende a precio de
+            // oferta y no gasta el cupo, aunque repartida en unidades ($7.500 ÷ 30)
+            // quede por debajo del precio de oferta: misma regla del POS y de la
+            // tienda. Ya cobrada, su renglón está en sale_items: se reconoce por
+            // el pedido que la originó (sale_id, migración 0034).
+            const idTexto = String(Math.trunc(Number(p.id)));
+            const local = (sinCajasWeb) => turso.execute({
                 sql: `SELECT COALESCE(SUM(si.quantity), 0) AS n
                       FROM sale_items si
                       JOIN sales s ON s.id = si.sale_id AND s.company_id = si.company_id
                       WHERE si.company_id = ? AND si.product_id = ?
                         AND si.sale_date >= ?
                         AND si.price <= ? + 0.5
-                        AND COALESCE(s.status, '') NOT IN ('cancelled', 'canceled')`,
-                args: [companyId, p.id, p.offer_started_at || '1970-01-01', Number(p.offer_price) || 0],
+                        AND COALESCE(s.status, '') NOT IN ('cancelled', 'canceled')
+                        ${sinCajasWeb ? `AND NOT EXISTS (
+                            SELECT 1 FROM preorders po JOIN preorder_items pi ON pi.preorder_id = po.id
+                            WHERE po.company_id = si.company_id AND po.sale_id = si.sale_id
+                              AND pi.presentation IS NOT NULL
+                              AND (pi.product_id = si.product_id OR pi.external_product_id = ?)
+                              AND ABS(pi.unit_price - si.price) < 0.5)` : ''}`,
+                args: [companyId, p.id, p.offer_started_at || '1970-01-01', Number(p.offer_price) || 0, ...(sinCajasWeb ? [idTexto] : [])],
             });
+            let r;
+            try { r = await local(true); } catch { r = await local(false); }   // base sin la 0034/0035
             // Pedidos web: el producto viene en external_product_id (el id del
             // POS como texto), y la fecha con otro formato: se comparan con datetime().
             let web = 0;
             // Un pedido que ya se cobró tiene su venta (sale_id, migración 0034):
             // esas unidades ya están en sale_items y no se cuentan dos veces.
-            const pedidosWeb = (sinVenta) => turso.execute({
+            const pedidosWeb = (sinVenta, sinCajas) => turso.execute({
                 sql: `SELECT COALESCE(SUM(pi.qty), 0) AS n
                       FROM preorder_items pi
                       JOIN preorders po ON po.id = pi.preorder_id AND po.company_id = ?
                       WHERE po.order_kind = 'store' AND COALESCE(po.status, '') NOT IN ('canceled', 'cancelled')
                         ${sinVenta ? 'AND po.sale_id IS NULL' : ''}
+                        ${sinCajas ? 'AND pi.presentation IS NULL' : ''}
                         AND datetime(po.created_at) >= datetime(?)
                         AND (pi.product_id = ? OR pi.external_product_id = ?)
                         AND pi.unit_price <= ? + 0.5`,
                 // El id como TEXTO tal cual ("5840"): un número como parámetro llega como
                 // decimal ("5840.0") y no coincide con external_product_id.
-                args: [companyId, p.offer_started_at || '1970-01-01', p.id, String(Math.trunc(Number(p.id))), Number(p.offer_price) || 0],
+                args: [companyId, p.offer_started_at || '1970-01-01', p.id, idTexto, Number(p.offer_price) || 0],
             });
             try {
                 let w;
-                try { w = await pedidosWeb(true); } catch { w = await pedidosWeb(false); }   // base sin la 0034
+                try { w = await pedidosWeb(true, true); } catch {
+                    try { w = await pedidosWeb(true, false); } catch { w = await pedidosWeb(false, false); }   // base sin la 0035 / 0034
+                }
                 web = Number(w.rows[0]?.n) || 0;
             } catch { /* sin pedidos web: cuenta solo el local */ }
             vendidas = Math.round(((Number(r.rows[0]?.n) || 0) + web) * 1000) / 1000;

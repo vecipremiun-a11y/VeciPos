@@ -10,6 +10,7 @@ import { cn } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
 import { toast } from '../lib/toast';
 import OrderTabBadge from '../components/OrderTabBadge';
+import SelectorUnidadCarrito from '../components/SelectorUnidadCarrito';
 import CancelarEncargoModal from '../components/CancelarEncargoModal';
 import CobrarEnvioModal from '../components/delivery/CobrarEnvioModal';
 import { EntregaExitosaModal } from '../components/delivery/DocumentoVenta';
@@ -73,6 +74,19 @@ const waLink = (phone) => {
     return `https://wa.me/56${digits.slice(-9)}`;
 };
 
+// Caja, bandeja o pack de un renglón (migración 0035), como objeto. El renglón
+// siempre va en UNIDADES (2 cajas de 30 = 60): esto dice que fueron cajas. Si ya
+// no cuadra con la cantidad, el renglón se lee por unidad.
+const leerCaja = (presentation, qty) => {
+    let c = presentation;
+    if (!c) return null;
+    try { if (typeof c === 'string') c = JSON.parse(c); } catch { return null; }
+    const units = Number(c?.units);
+    const quantity = Number(c?.quantity);
+    if (!(units >= 2) || !(quantity >= 1) || Math.abs(units * quantity - Number(qty)) > 0.001) return null;
+    return { pos_presentation_id: c.pos_presentation_id ?? null, name: c.name || 'Caja', units, quantity, price: Number(c.price) || 0 };
+};
+
 const normalizeItem = (it) => ({
     product_id: it.product_id || 0,
     product_name: it.product_name,
@@ -82,9 +96,22 @@ const normalizeItem = (it) => ({
     line_total: Number(it.line_total) || 0,
     note: it.note || '',
     external_product_id: it.external_product_id || null,
+    // Se guardan de vuelta tal cual: sin ellos, editar un pedido por kilo lo
+    // dejaba sin precio por kilo (ver preorderItemsEdit).
+    billing_unit: it.billing_unit || 'unit',
+    price_per_kg: Number(it.price_per_kg) || 0,
+    gram_per_unit: Number(it.gram_per_unit) || 0,
+    presentation: leerCaja(it.presentation, it.qty),
 });
 
+// Lo que se muestra de una caja en el renglón (o null si va por unidad).
+const cajaDe = (item) => {
+    const c = leerCaja(item?.presentation, item?.qty);
+    return c ? { nombre: c.name, units: c.units, cantidad: c.quantity, precio: c.price } : null;
+};
 
+// Id de la caja para el selector: el del POS, o "web" si es una que creó la tienda.
+const idCaja = (c) => (c?.pos_presentation_id ? String(c.pos_presentation_id) : 'web');
 
 // Devolución al entregar (cuando el pedido se editó a la baja y quedó saldo a favor).
 function RefundModal({ order, amount, onClose, onConfirm, currentCurrency }) {
@@ -212,7 +239,7 @@ function AddProductModal({ onAdd, onClose, currentCurrency }) {
 // Detalle del pedido (panel derecho en desktop / modal en móvil). Cliente,
 // WhatsApp, edición directa de productos (± / quitar / añadir) y acciones.
 function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems, onDocumento, onClose, embedded = false }) {
-    const { getPreorderDetails } = useStore();
+    const { getPreorderDetails, presentacionesDe, getProductForPresentation } = useStore();
     const [items, setItems] = useState([]);
     const [draft, setDraft] = useState([]);
     const [dirty, setDirty] = useState(false);
@@ -240,12 +267,70 @@ function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems,
     useEffect(() => { loadItems(); }, [loadItems]);
 
     const recalcLine = (it) => ({ ...it, line_total: Math.round((Number(it.qty) || 0) * (Number(it.unit_price) || 0)) });
-    const setQty = (idx, qty) => { setDraft(d => d.map((it, i) => i === idx ? recalcLine({ ...it, qty: Math.max(1, qty) }) : it)); setDirty(true); };
+    // Un renglón por caja guarda la cantidad en UNIDADES y el precio de la caja
+    // repartido (igual que el carrito del POS): 2 cajas de 30 a $7.500 = 60 × $250.
+    const conCajas = (it, caja, cajas) => ({
+        ...it,
+        qty: cajas * caja.units,
+        unit_price: caja.price / caja.units,
+        line_total: cajas * caja.price,
+        presentation: { ...caja, quantity: cajas },
+    });
+    // + y −: un renglón por caja suma y resta cajas enteras; uno por unidad, unidades.
+    const setQty = (idx, qty) => {
+        setDraft(d => d.map((it, i) => {
+            if (i !== idx) return it;
+            const caja = leerCaja(it.presentation, it.qty);
+            return caja ? conCajas(it, caja, Math.max(1, qty)) : recalcLine({ ...it, qty: Math.max(1, qty) });
+        }));
+        setDirty(true);
+    };
+
+    // Las cajas que se pueden elegir en un renglón: las del producto en el POS
+    // (como en el carrito), más la que trae el pedido si la creó la tienda o ya no
+    // está en el POS. Solo productos por unidad.
+    const cajasDelRenglon = (it) => {
+        if (!it.product_id || (it.unit && it.unit !== 'Und')) return [];
+        const delPos = (presentacionesDe(it.product_id) || []).map(p => ({
+            id: String(p.id), pos_presentation_id: String(p.id), name: p.name, units: Number(p.units), price: Number(p.price),
+        }));
+        const actual = leerCaja(it.presentation, it.qty);
+        if (actual && !delPos.some(p => p.id === idCaja(actual))) delPos.push({ ...actual, id: idCaja(actual) });
+        return delPos;
+    };
+
+    // Pasar un renglón a caja (con el precio de la caja) o de vuelta a unidad (con
+    // el precio de la unidad del producto, como al agregarlo con "Agregar producto").
+    const elegirCaja = async (idx, p) => {
+        const it = draft[idx];
+        if (!it) return;
+        if (p) {
+            const caja = { pos_presentation_id: p.pos_presentation_id ?? null, name: p.name, units: Number(p.units), price: Number(p.price) };
+            // Si las unidades del renglón son cajas justas, esas cajas; si no, una.
+            const justas = it.qty >= caja.units && Number.isInteger(it.qty / caja.units) ? it.qty / caja.units : 1;
+            setDraft(d => d.map((x, i) => (i === idx ? conCajas(x, caja, justas) : x)));
+            setDirty(true);
+            return;
+        }
+        const producto = await getProductForPresentation({ product_id: it.product_id }).catch(() => null);
+        const precio = Number((producto?.is_offer && producto?.offer_price) ? producto.offer_price : producto?.price) || 0;
+        if (!precio) { alert('No se encontró el precio por unidad de este producto.'); return; }
+        const caja = leerCaja(it.presentation, it.qty);
+        setDraft(d => d.map((x, i) => (i === idx
+            ? recalcLine({ ...x, qty: caja ? caja.quantity * caja.units : x.qty, unit_price: precio, presentation: null })
+            : x)));
+        setDirty(true);
+    };
     const removeItem = (idx) => { setDraft(d => d.filter((_, i) => i !== idx)); setDirty(true); };
     const addItem = (item) => {
         setDraft(d => {
             const existing = d.findIndex(x => x.product_id && x.product_id === item.product_id);
-            if (existing >= 0) return d.map((it, i) => i === existing ? recalcLine({ ...it, qty: (Number(it.qty) || 0) + 1 }) : it);
+            // Ya estaba: suma uno de lo que es ese renglón (una caja si va por caja).
+            if (existing >= 0) return d.map((it, i) => {
+                if (i !== existing) return it;
+                const caja = leerCaja(it.presentation, it.qty);
+                return caja ? conCajas(it, caja, caja.quantity + 1) : recalcLine({ ...it, qty: (Number(it.qty) || 0) + 1 });
+            });
             return [...d, normalizeItem(item)];
         });
         setDirty(true);
@@ -361,21 +446,39 @@ function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems,
                             <p className="p-4 text-center text-sm text-[var(--color-text-muted)]">Sin productos</p>
                         ) : (
                             <div className="divide-y divide-[var(--glass-border)]">
-                                {list.map((item, idx) => (
+                                {list.map((item, idx) => {
+                                    const caja = cajaDe(item);
+                                    // Lo que mueven + y −: cajas en un renglón por caja, unidades en uno por unidad.
+                                    const cuenta = caja ? caja.cantidad : (Number(item.qty) || 1);
+                                    const opciones = editable ? cajasDelRenglon(item) : [];
+                                    return (
                                     <div key={item.id ?? `${item.product_id}-${idx}`} className="p-3 flex justify-between items-center gap-3 text-sm">
                                         <div className="min-w-0 flex-1">
                                             <p className="text-[var(--color-text)] font-medium truncate">{item.product_name}</p>
                                             <p className="text-xs text-[var(--color-text-muted)]">
-                                                {item.qty} {item.unit || 'Und'} × {formatCurrency(item.unit_price, currentCurrency)} = {formatCurrency(item.line_total, currentCurrency)}
+                                                {caja
+                                                    ? <>{caja.cantidad} {caja.nombre} ({caja.units} und) × {formatCurrency(caja.precio, currentCurrency)} = {formatCurrency(item.line_total, currentCurrency)}</>
+                                                    : <>{item.qty} {item.unit || 'Und'} × {formatCurrency(item.unit_price, currentCurrency)} = {formatCurrency(item.line_total, currentCurrency)}</>}
                                             </p>
+                                            {/* Und | Caja (30) | Bandeja (15): como en el carrito del POS. */}
+                                            {opciones.length > 0 && (
+                                                <SelectorUnidadCarrito
+                                                    item={{ presentacion: caja ? { id: idCaja(leerCaja(item.presentation, item.qty)) } : null }}
+                                                    presentaciones={opciones}
+                                                    onElegir={(p) => elegirCaja(idx, p)}
+                                                />
+                                            )}
                                             {item.note && <p className="text-xs text-amber-400">{item.note}</p>}
                                         </div>
                                         {editable ? (
                                             <div className="flex items-center gap-1.5 shrink-0">
-                                                <button onClick={() => setQty(idx, (Number(item.qty) || 1) - 1)}
+                                                <button onClick={() => setQty(idx, cuenta - 1)} aria-label="Uno menos"
                                                     className="w-7 h-7 rounded-md bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)] flex items-center justify-center hover:border-[var(--color-primary)]/50"><Minus size={13} /></button>
-                                                <span className="w-7 text-center text-sm font-bold text-[var(--color-text)]">{item.qty}</span>
-                                                <button onClick={() => setQty(idx, (Number(item.qty) || 1) + 1)}
+                                                <span className="min-w-7 text-center text-sm font-bold text-[var(--color-text)]">
+                                                    {cuenta}
+                                                    {caja && <span className="block text-[9px] font-medium text-[var(--color-text-muted)] leading-tight">{caja.nombre.toLowerCase()}</span>}
+                                                </span>
+                                                <button onClick={() => setQty(idx, cuenta + 1)} aria-label="Uno más"
                                                     className="w-7 h-7 rounded-md bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)] flex items-center justify-center hover:border-[var(--color-primary)]/50"><Plus size={13} /></button>
                                                 <button onClick={() => removeItem(idx)}
                                                     className="w-7 h-7 rounded-md bg-red-500/15 border border-red-500/30 text-red-400 flex items-center justify-center ml-1 hover:bg-red-500/25"><Trash2 size={13} /></button>
@@ -384,7 +487,8 @@ function StoreOrderDetail({ order, currentCurrency, onStatusChange, onEditItems,
                                             <strong className="text-[var(--color-text)] shrink-0">{formatCurrency(item.line_total, currentCurrency)}</strong>
                                         )}
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>

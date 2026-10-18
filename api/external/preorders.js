@@ -9,7 +9,7 @@ import {
     turso,
 } from './_common.js';
 import { broadcastPreorderEvent } from '../events/preorders-stream.js';
-import { separarStockPedido, liberarStockPedido, empujarStockATienda } from '../_lib/tiendaPedidos.js';
+import { separarStockPedido, liberarStockPedido, empujarStockATienda, cajaParaGuardar } from '../_lib/tiendaPedidos.js';
 import { avisarEstadoTienda } from '../_lib/avisoTienda.js';
 import { deliveryActions, envioActivoDePedido } from '../_lib/deliveryActions.js';
 
@@ -231,28 +231,66 @@ async function createPreorder(req, res, companyId) {
         const lineSubtotal = toNumber(item.line_subtotal, qty * unitPrice);
         const pricingMode = item.pricing_mode === 'kg' ? 'kg' : 'unit';
         const gramsPerUnit = toNumber(item.grams_per_unit, 0);
+        // Caja, bandeja o pack que eligió el cliente (contrato POSVECI-UNIDADES.md).
+        const presentacion = pricingMode === 'unit' ? cajaParaGuardar(item.presentation, qty) : null;
 
-        await turso.execute({
-            sql: `INSERT INTO preorder_items
-                  (preorder_id, product_id, product_name, qty, unit, unit_price, line_total, note,
-                   billing_unit, price_per_kg, gram_per_unit, estimated_total, external_product_id)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            args: [
-                preorderId,
-                productId,
-                item.product_name || 'Producto',
-                qty,
-                item.unit || (pricingMode === 'kg' ? 'kg' : 'Und'),
-                unitPrice,
-                lineSubtotal,
-                item.note || '',
-                pricingMode,
-                pricingMode === 'kg' ? unitPrice : 0,
-                gramsPerUnit,
-                lineSubtotal,
-                item.product_external_id || null,
-            ],
+        const columnas = `preorder_id, product_id, product_name, qty, unit, unit_price, line_total, note,
+                   billing_unit, price_per_kg, gram_per_unit, estimated_total, external_product_id`;
+        const valores = [
+            preorderId,
+            productId,
+            item.product_name || 'Producto',
+            qty,
+            item.unit || (pricingMode === 'kg' ? 'kg' : 'Und'),
+            unitPrice,
+            lineSubtotal,
+            item.note || '',
+            pricingMode,
+            pricingMode === 'kg' ? unitPrice : 0,
+            gramsPerUnit,
+            lineSubtotal,
+            item.product_external_id || null,
+        ];
+        const sinCaja = () => turso.execute({
+            sql: `INSERT INTO preorder_items (${columnas}) VALUES (${valores.map(() => '?').join(', ')})`,
+            args: valores,
         });
+        if (!presentacion) {
+            await sinCaja();
+        } else {
+            try {
+                await turso.execute({
+                    sql: `INSERT INTO preorder_items (${columnas}, presentation) VALUES (${valores.map(() => '?').join(', ')}, ?)`,
+                    args: [...valores, JSON.stringify(presentacion)],
+                });
+            } catch (err) {
+                // Base sin la migración 0035: el renglón entra igual, por unidad.
+                if (!/no such column/i.test(String(err?.message))) throw err;
+                await sinCaja();
+            }
+        }
+    }
+
+    // Pedido de la tienda: se separa su stock y miniveci.cl se entera de que está
+    // "Preparando". Si algo de esto falla, el pedido igual queda creado.
+    if (orderKind === 'store') {
+        try {
+            // El comprobante de la transferencia (lo sube el cliente en la tienda).
+            const comprobante = typeof payload.payment_proof_url === 'string' && /^https?:\/\//.test(payload.payment_proof_url)
+                ? payload.payment_proof_url.slice(0, 500) : null;
+            await turso.execute({
+                sql: 'UPDATE preorders SET payment_status = ?, payment_proof_url = ?, invoice_data = ? WHERE id = ?',
+                args: [paidOnline ? 'paid' : 'pending', comprobante, datosDeFactura(payload.invoice), preorderId],
+            });
+            // El stock se separa igual en la transferencia sin revisar: si se
+            // rechaza, vuelve.
+            await separarStockPedido(turso, companyId, preorderId);
+        } catch (e) {
+            console.error(`❌ [preorders] no se pudo separar el stock del pedido #${preorderId}:`, e?.message || e);
+        }
+        if (estadoInicial === 'preparing') {
+            await avisarEstadoTienda(companyId, preorder.external_public_code, 'preparing', { via: 'pedido recibido', esperaMs: 2500 });
+        }
     }
 
     const out = {

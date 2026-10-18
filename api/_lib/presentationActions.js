@@ -3,6 +3,12 @@
 // El stock vive SIEMPRE en unidades: una presentación solo dice cuántas unidades
 // trae y a cuánto se vende entera. Por eso acá no se toca stock ni ventas — eso
 // lo resuelve el carrito, que manda la caja como unidades.
+//
+// Cada cambio (crear, editar, borrar) se manda a la tienda online con la lista
+// completa del producto: allá se venden con las mismas reglas (ver
+// syncPresentationsToStore en api/integration/client.js).
+
+import { syncPresentationsToStoreSinEsperar } from '../integration/client.js';
 
 const limpio = (v) => (v === undefined || v === null ? '' : String(v).trim());
 
@@ -12,8 +18,11 @@ const limpio = (v) => (v === undefined || v === null ? '' : String(v).trim());
  * El código de barras no puede chocar con nada que la pistola ya reconozca: ni
  * con el SKU de un producto, ni con otra presentación. Si chocara, escanear daría
  * una cosa u otra según quién responda primero.
+ *
+ * `sinTienda`: la compra crea varias de una vez y avisa a la tienda una sola vez
+ * al final, con la lista ya completa.
  */
-async function presentationSave(turso, companyId, session, { presentation = {} }) {
+async function presentationSave(turso, companyId, session, { presentation = {}, sinTienda = false }) {
     const productId = Number(presentation.product_id ?? presentation.productId);
     const nombre = limpio(presentation.name);
     const codigo = limpio(presentation.barcode);
@@ -111,6 +120,7 @@ async function presentationSave(turso, companyId, session, { presentation = {} }
             JSON.stringify({ productId, nombre, unidades, precio, codigo: codigo || null }), new Date().toISOString()],
     });
 
+    if (!sinTienda) await avisarTienda(companyId, productId);
     return { success: true, presentation: fila };
 }
 
@@ -126,7 +136,18 @@ async function presentationDelete(turso, companyId, session, { id }) {
         args: [companyId, session?.uid ?? null, 'DELETE', 'PRODUCT_PRESENTATION',
             JSON.stringify({ id, productId: r.rows[0].product_id, nombre: r.rows[0].name }), new Date().toISOString()],
     });
+    await avisarTienda(companyId, r.rows[0].product_id);
     return { success: true };
+}
+
+// La tienda se entera en el momento, con la lista completa. Si no contesta, lo
+// guardado igual queda guardado: el envío queda en el log de integración.
+async function avisarTienda(companyId, productId) {
+    try {
+        await syncPresentationsToStoreSinEsperar({ companyId, productId });
+    } catch (err) {
+        console.warn('[unidades de medida] no se pudo avisar a la tienda', productId, err?.message);
+    }
 }
 
 export const presentationActions = { presentationSave, presentationDelete };

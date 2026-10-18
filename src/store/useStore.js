@@ -2452,7 +2452,7 @@ export const useStore = create(persist((set, get) => ({
                     const sku = updatedProduct.sku ?? actual.sku;
                     const CAMPOS = ['name', 'category', 'stock', 'price', 'cost', 'unit', 'tax_rate', 'is_offer', 'offer_price',
                         'price_ranges', 'sale_mode', 'preorder_unit', 'preorder_billing_unit', 'preorder_price_per_kg',
-                        'preorder_gram_per_unit', 'preorder_use_base_price', 'units_per_box'];
+                        'preorder_gram_per_unit', 'preorder_use_base_price', 'units_per_box', 'scale_group_id'];
                     const syncPayload = { id, sku };
                     for (const k of CAMPOS) if (updatedProduct[k] !== undefined) syncPayload[k] = updatedProduct[k];
                     // El stock se redondea según la unidad: sin ella, uno por kilo se redondearía a entero.

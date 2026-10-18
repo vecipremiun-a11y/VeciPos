@@ -107,6 +107,93 @@ async function reglaDeOferta(companyId, product) {
     }
 }
 
+// Unidades de medida del producto (Caja, Bandeja…, migración 0030) como las pide
+// la tienda: la lista COMPLETA, inactivas incluidas (omitir una = borrarla allá).
+// Contrato: POSVECI-UNIDADES.md del repo de miniveci. Solo productos por unidad:
+// para los de peso no se manda nada (undefined = la tienda no toca las suyas).
+async function presentacionesParaTienda(companyId, productId, unit) {
+    if (unit && unit !== 'Und') return undefined;
+    try {
+        const r = await turso.execute({
+            sql: `SELECT id, name, units, price, barcode, is_active FROM product_presentations
+                  WHERE company_id = ? AND product_id = ? ORDER BY units, id`,
+            args: [companyId, productId],
+        });
+        return r.rows.map(p => ({
+            pos_presentation_id: String(p.id),
+            name: p.name,
+            units: Number(p.units),
+            price: Number(p.price),
+            barcode: p.barcode || null,
+            is_active: Number(p.is_active) !== 0,
+        }));
+    } catch {
+        // Sin la tabla (migración 0030) no hay unidades de medida que mandar.
+        return undefined;
+    }
+}
+
+/**
+ * Manda a la tienda las unidades de medida de UN producto, después de crear,
+ * editar o borrar una (o de que una compra le cambie el precio).
+ *
+ * Va con nombre, categoría, precio y unidad leídos de la base, no solo con la
+ * lista: si el producto todavía no existiera en la tienda, ella lo crearía con
+ * lo que llegue, y sin nombre ni precio quedaría "Producto 123" a $0. El stock no
+ * va: tiene su propio camino y su protección de pedidos en vuelo.
+ */
+export async function syncPresentationsToStore({ companyId, productId }) {
+    let p;
+    try {
+        p = (await turso.execute({
+            sql: 'SELECT id, sku, name, category, price, unit FROM products WHERE id = ? AND company_id = ? LIMIT 1',
+            args: [productId, companyId],
+        })).rows[0];
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+    if (!p || !normalizeSku(p.sku)) return { success: false, skipped: true, error: 'Producto sin SKU' };
+    if ((p.unit || 'Und') !== 'Und') return { success: true, skipped: true };
+    const result = await syncProductToStore({
+        companyId,
+        product: { id: p.id, sku: p.sku, name: p.name, category: p.category, price: p.price, unit: p.unit || 'Und', conPresentaciones: true },
+    });
+    // La tienda salta (y borra allá) las que no cumplen sus reglas. Con las
+    // validaciones del POS no debería pasar nunca: si pasa, que quede a la vista.
+    try {
+        const saltadas = JSON.parse(result?.body || '{}')?.presentations?.skipped;
+        if (Array.isArray(saltadas) && saltadas.length) {
+            await logSync({
+                company_id: companyId,
+                direction: 'pos_to_store',
+                event: 'product.presentations_skipped',
+                status: 'error',
+                message: `La tienda no aceptó ${saltadas.length} unidad(es) de medida de "${p.name}"`,
+                payload: { pos_product_id: p.id, sku: p.sku },
+                response: { skipped: saltadas },
+            });
+        }
+    } catch { /* respuesta sin JSON: ya quedó en el log del envío */ }
+    return result;
+}
+
+/**
+ * Lo mismo, sin hacer esperar más de `ms` a quien guardó. Si la tienda tarda,
+ * el envío sigue solo y queda en el log; el guardado ya está hecho.
+ */
+export async function syncPresentationsToStoreSinEsperar({ companyId, productId, ms = 6000 }) {
+    let timer;
+    const tope = new Promise(resolve => { timer = setTimeout(() => resolve({ success: false, timeout: true }), ms); });
+    try {
+        return await Promise.race([
+            syncPresentationsToStore({ companyId, productId }).catch(error => ({ success: false, error: error.message })),
+            tope,
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 export async function syncPriceToStore({ companyId, product }) {
     const config = await getTiendaConfig(companyId);
 
@@ -238,6 +325,20 @@ export async function syncProductToStore({ companyId, product }) {
     if (product.preorder_gram_per_unit !== undefined) payload.preorder_gram_per_unit = Number(product.preorder_gram_per_unit || 0);
     if (product.preorder_use_base_price !== undefined) payload.preorder_use_base_price = Boolean(product.preorder_use_base_price);
     if (product.units_per_box !== undefined) payload.units_per_box = Number(product.units_per_box || 0);
+
+    // Grupo de escala (los productos del mismo grupo suman para el mayoreo). Solo
+    // si viene: hoy lo manda la ficha cuando se cambia. Vacío = sin grupo. En la
+    // tienda pueden tener grupos puestos a mano: un producto que no lo trae no los toca.
+    if (product.scale_group_id !== undefined) {
+        payload.tier_group = product.scale_group_id ? String(product.scale_group_id).trim() || null : null;
+    }
+
+    // Unidades de medida: la lista completa leída de la base, solo cuando se pide
+    // (al crear, editar o borrar una, o cuando una compra les cambia el precio).
+    if (product.conPresentaciones && product.id !== undefined && product.id !== null) {
+        const lista = await presentacionesParaTienda(companyId, product.id, product.unit || 'Und');
+        if (lista !== undefined) payload.presentations = lista;
+    }
 
     if (product.image && typeof product.image === 'string') {
         if (product.image.startsWith('http')) {
