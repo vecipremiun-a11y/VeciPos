@@ -21,24 +21,75 @@ function BotonPreciosRenglon({ item, contexto, cajas, onAbrir }) {
     if (!tieneEscala && !tieneCajas && !revisado) return null;
     const costoCambio = contexto?.costoAnterior > 0 && Math.abs(Number(item.cost) - Number(contexto.costoAnterior)) >= 0.5;
     const etiqueta = [tieneEscala && 'escala', tieneCajas && `${cajas.length} ${cajas.length === 1 ? 'caja' : 'cajas'}`].filter(Boolean).join(' · ');
+    // Lo que de verdad se va a aplicar al guardar, no un "Revisado" genérico: en la
+    // compra #1788 un renglón decía "Revisado" con solo la oferta adentro, y la
+    // escala que se creía borrada siguió viva. Así se ve antes de guardar.
+    const cp = item.cambiosPrecios || {};
+    const nCajas = (cp.presentaciones?.length || 0) + (cp.nuevas?.length || 0);
+    const aplicara = [
+        cp.oferta && (cp.oferta.activa ? `oferta ${formatCurrency(cp.oferta.precio, useStore.getState().currentCurrency)}` : 'sin oferta'),
+        Array.isArray(cp.priceRanges) && (cp.priceRanges.length ? `escala ${cp.priceRanges.length} ${cp.priceRanges.length === 1 ? 'tramo' : 'tramos'}` : 'escala borrada'),
+        nCajas > 0 && `${nCajas} ${nCajas === 1 ? 'caja' : 'cajas'}`,
+    ].filter(Boolean).join(' · ');
     return (
         <button
             type="button"
             onClick={onAbrir}
-            title={revisado ? 'Precios revisados: se aplican al guardar la compra' : 'Revisar escala y cajas con el costo nuevo'}
+            title={revisado ? `Al guardar la compra se aplica: ${aplicara || 'nada'}${tieneEscala && !Array.isArray(cp.priceRanges) ? ' (la escala queda como está)' : ''}` : 'Revisar escala y cajas con el costo nuevo'}
             className={`px-2 py-1 rounded-md text-[11px] font-bold border flex items-center gap-1 whitespace-nowrap ${revisado
                 ? 'bg-green-500/15 border-green-500/40 text-green-400'
                 : costoCambio
                     ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
                     : 'bg-[var(--glass-bg)] border-[var(--glass-border)] text-[var(--color-text-muted)]'}`}
         >
-            <Layers size={13} /> {revisado ? 'Revisado' : etiqueta}
+            <Layers size={13} /> {revisado ? (aplicara || 'Revisado') : etiqueta}
         </button>
     );
 }
 
+// ── Borrador de la compra ────────────────────────────────────────────────
+//
+// Una factura larga se carga de a poco, y salir a otro menú a mitad de camino
+// la perdía entera: al volver, Compras arrancaba vacía. Ahora lo que se está
+// cargando (renglones, proveedor, número, el producto a medio cargar) se guarda
+// solo en este equipo mientras se escribe, y vuelve al entrar de nuevo —
+// también tras recargar o cerrar la app—. Se borra al guardar la compra o con
+// "Descartar".
+//
+// Es por equipo y por usuario/empresa: no viaja al servidor ni lo ve otra caja.
+// Las fotos no se guardan (pesan y localStorage es chico); el comprobante
+// adjunto tampoco.
+const claveDeBorrador = (companyId, userId) => `posveci:borradorCompra:${companyId || 'sin'}:${userId || 'sin'}`;
+const nuevaClaveCompra = () => ((typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.floor(Math.random() * 1e9)}`);
+const sinFoto = (o) => {
+    if (!o || typeof o !== 'object') return o;
+    const { image, ...resto } = o;
+    return typeof image === 'string' && image.startsWith('http') ? o : resto;
+};
+function leerBorrador(clave) {
+    try {
+        // "Pasar a Compra" desde un pedido manda: el usuario eligió cargar ese.
+        if (sessionStorage.getItem('compraDesdePedido')) return null;
+        const b = JSON.parse(localStorage.getItem(clave) || 'null');
+        return b && b.v === 1 ? b : null;
+    } catch {
+        return null;
+    }
+}
+const ENTRADA_VACIA = { cost: '', price: '', quantity: '1', total: '', margin: '', sku: '', tax: 0, expiryDate: '', batchNumber: '' };
+const cabeceraVacia = () => ({
+    supplierId: '', invoiceNumber: '', date: new Date().toISOString().split('T')[0],
+    isCredit: false, creditDays: '', expiryDate: '', deposit: '', paymentMethod: 'Efectivo', observation: '', document: null,
+});
+
 const Purchases = () => {
-    const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown, fetchProductImage, activeCompanyId, setSupplierOrderStatus, productPresentations, reglasOferta } = useStore();
+    const { products, suppliers, addPurchase, addProduct, searchProductsForDropdown, fetchProductImage, activeCompanyId, setSupplierOrderStatus, productPresentations, currentUser, reglasOferta } = useStore();
+    const claveBorrador = claveDeBorrador(activeCompanyId, currentUser?.id);
+    const [borrador] = useState(() => leerBorrador(claveBorrador));
+    // Aviso de "se recuperó la compra": solo si de verdad había algo cargado.
+    const [recuperada, setRecuperada] = useState(() => !!(borrador?.invoiceItems?.length || borrador?.selectedProduct));
 
     // Lo que hace falta para revisar los precios de cada renglón: la escala de
     // mayoreo actual, el costo de antes de esta compra y los códigos con que el
@@ -76,47 +127,44 @@ const Purchases = () => {
     }, [showCameraScanner]);
 
     // Left Column: Product Entry
-    const [searchTerm, setSearchTerm] = useState('');
-    const [selectedProduct, setSelectedProduct] = useState(null);
+    const [searchTerm, setSearchTerm] = useState(() => borrador?.searchTerm || '');
+    const [selectedProduct, setSelectedProduct] = useState(() => borrador?.selectedProduct || null);
     // Escala y cajas revisadas para el renglón que se está cargando en el panel.
     // Viajan con el renglón al agregarlo y se aplican al guardar la compra.
-    const [cambiosForm, setCambiosForm] = useState(null);
+    const [cambiosForm, setCambiosForm] = useState(() => borrador?.cambiosForm || null);
     // Cada vez que se elige (o se vuelve a elegir) un producto, el editor de
     // escala arranca de cero: sin esto, elegir el mismo producto otra vez
     // conservaba los tramos a medio cargar de antes.
     const [sesionEditor, setSesionEditor] = useState(0);
+    // Esta pantalla arma DOS vistas (celular y escritorio) y esconde una con CSS.
+    // Los campos controlados no sufren, pero el editor de escala guarda su propio
+    // estado: montado en las dos, la copia escondida —que no vio los cambios—
+    // avisaba "sin cambios" cada vez que se tocaba el costo, y la compra salía sin
+    // la escala editada. Se encontró revisando la compra #1788 (16-oct-2026) y se
+    // reprodujo en la vista celular. Ahora el editor vive en una sola vista.
+    // 64rem = el `lg` de Tailwind, el mismo corte que esconde una u otra.
+    const [esEscritorio, setEsEscritorio] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(min-width: 64rem)').matches);
+    useEffect(() => {
+        const mq = window.matchMedia?.('(min-width: 64rem)');
+        if (!mq) return undefined;
+        const h = (e) => setEsEscritorio(e.matches);
+        mq.addEventListener('change', h);
+        return () => mq.removeEventListener('change', h);
+    }, []);
     // Oferta del producto puesta desde la compra: { activa, precio }, o null si
     // no se tocó. Como la escala, se aplica recién al guardar la compra.
-    const [ofertaForm, setOfertaForm] = useState(null);
-    // Clave de la compra que se está guardando: se crea al primer "Guardar" y se
-    // reutiliza en los reintentos, hasta que la compra entra (migración 0031).
-    const claveCompra = useRef(null);
-    const [entryForm, setEntryForm] = useState({
-        cost: '',
-        price: '',
-        quantity: '1',
-        total: '',
-        margin: '',
-        sku: '',
-        tax: 0,
-        expiryDate: '',
-        batchNumber: ''
-    });
+    const [ofertaForm, setOfertaForm] = useState(() => borrador?.ofertaForm || null);
+    // Clave de la compra (migración 0031): una por compra en curso, guardada con
+    // el borrador. Los reintentos —también después de salir y volver— mandan la
+    // misma, y el servidor no la duplica. Se renueva al guardar o descartar.
+    const claveCompra = useRef(borrador?.claveCompra || nuevaClaveCompra());
+    const [entryForm, setEntryForm] = useState(() => borrador?.entryForm || ENTRADA_VACIA);
 
     // Right Column: Invoice Details
-    const [invoiceData, setInvoiceData] = useState({
-        supplierId: '',
-        invoiceNumber: '',
-        date: new Date().toISOString().split('T')[0],
-        isCredit: false,
-        creditDays: '',
-        expiryDate: '',
-        deposit: '',
-        paymentMethod: 'Efectivo',
-        observation: '',
-        document: null
-    });
-    const [invoiceItems, setInvoiceItems] = useState([]);
+    const [invoiceData, setInvoiceData] = useState(() => (borrador?.invoiceData
+        ? { ...cabeceraVacia(), ...borrador.invoiceData, document: null }
+        : cabeceraVacia()));
+    const [invoiceItems, setInvoiceItems] = useState(() => (Array.isArray(borrador?.invoiceItems) ? borrador.invoiceItems : []));
 
     // Contexto de precios de los productos nuevos en la factura (escala, costo
     // anterior, códigos del proveedor). Una consulta por tanda, no por renglón.
@@ -157,7 +205,55 @@ const Purchases = () => {
     // Precarga desde "Pasar a Compra" (Pedidos Realizados). Trae proveedor,
     // productos, cantidades y costos ya cargados: al recibir la mercadería solo
     // hay que revisar precios y guardar, en vez de tipear la factura entera.
-    const [desdePedido, setDesdePedido] = useState(null);
+    const [desdePedido, setDesdePedido] = useState(() => borrador?.desdePedido || null);
+
+    // Guardado automático del borrador (ver arriba). Sin nada cargado, se borra.
+    // Si cambió la empresa o el usuario con la pantalla abierta, lo que hay en
+    // pantalla es de la anterior: no se escribe en la clave de la nueva.
+    const claveInicial = useRef(claveBorrador);
+    useEffect(() => {
+        if (claveBorrador !== claveInicial.current) return;
+        try {
+            if (!invoiceItems.length && !selectedProduct) {
+                localStorage.removeItem(claveBorrador);
+                return;
+            }
+            localStorage.setItem(claveBorrador, JSON.stringify({
+                v: 1,
+                guardado: Date.now(),
+                invoiceItems: invoiceItems.map(sinFoto),
+                invoiceData: { ...invoiceData, document: null },
+                desdePedido,
+                selectedProduct: sinFoto(selectedProduct),
+                searchTerm: selectedProduct ? searchTerm : '',
+                entryForm, cambiosForm, ofertaForm,
+                claveCompra: claveCompra.current,
+            }));
+        } catch { /* sin espacio o almacenamiento bloqueado: se sigue sin borrador */ }
+    }, [claveBorrador, invoiceItems, invoiceData, desdePedido, selectedProduct, searchTerm, entryForm, cambiosForm, ofertaForm]);
+
+    const descartarBorrador = () => {
+        if (invoiceItems.length && !window.confirm(`¿Descartar la compra en curso (${invoiceItems.length} ${invoiceItems.length === 1 ? 'producto' : 'productos'})?`)) return;
+        setInvoiceItems([]);
+        setInvoiceData(cabeceraVacia());
+        setDesdePedido(null);
+        setSelectedProduct(null);
+        setSearchTerm('');
+        setEntryForm(ENTRADA_VACIA);
+        setCambiosForm(null);
+        setOfertaForm(null);
+        claveCompra.current = nuevaClaveCompra();
+        setRecuperada(false);
+    };
+    const avisoRecuperada = recuperada && (invoiceItems.length > 0 || selectedProduct) ? (
+        <div className="mb-4 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-xs text-amber-400 flex flex-wrap items-center gap-2">
+            <span className="flex-1 min-w-[12rem]">
+                Se recuperó la compra que estabas cargando{invoiceItems.length ? ` (${invoiceItems.length} ${invoiceItems.length === 1 ? 'producto' : 'productos'})` : ''}.
+            </span>
+            <button type="button" onClick={() => setRecuperada(false)} className="px-2 py-1 rounded-md font-bold border border-amber-500/40">Seguir</button>
+            <button type="button" onClick={descartarBorrador} className="px-2 py-1 rounded-md font-bold border border-red-500/40 text-red-400">Descartar</button>
+        </div>
+    ) : null;
     // Renglones de la factura que no llegaron al inventario. Se muestran en un
     // cuadro que hay que cerrar a mano: es mercadería pagada que el sistema no
     // contó, y antes eso pasaba sin un solo aviso.
@@ -535,9 +631,7 @@ const Purchases = () => {
             document: documentBase64,
             // La misma clave en cada reintento de ESTA compra: si un intento
             // anterior sí entró, el servidor contesta con esa y no la duplica.
-            claveCliente: claveCompra.current || (claveCompra.current = (typeof crypto !== 'undefined' && crypto.randomUUID)
-                ? crypto.randomUUID()
-                : `${Date.now()}-${Math.floor(Math.random() * 1e9)}`),
+            claveCliente: claveCompra.current,
         };
 
         // `addPurchase` devuelve un OBJETO, siempre. Acá se leía como si fuera
@@ -547,7 +641,8 @@ const Purchases = () => {
         const res = await addPurchase(purchase);
         if (res?.success) {
             // La compra quedó: la próxima empieza con clave nueva.
-            claveCompra.current = null;
+            claveCompra.current = nuevaClaveCompra();
+            setRecuperada(false);
             if (res.repetida) {
                 toast(`Esta compra ya se había guardado (#${res.purchaseId}) en el intento anterior: no se duplicó.`, 'success');
             }
@@ -756,6 +851,7 @@ const Purchases = () => {
                 <div className="flex items-center gap-3 mb-4">
                     <h1 className="text-xl font-bold text-[var(--color-text)]">Compras</h1>
                 </div>
+                {avisoRecuperada}
 
                 {/* Mobile Product Entry */}
                 <div className="glass-card">
@@ -857,7 +953,7 @@ const Purchases = () => {
                             </div>
 
                             {campoOferta}
-                            {seccionPreciosCompra}
+                            {!esEscritorio && seccionPreciosCompra}
 
                             {/* Quantity */}
                             <div>
@@ -1220,7 +1316,7 @@ const Purchases = () => {
                                 </div>
 
                                 {campoOferta}
-                                {seccionPreciosCompra}
+                                {esEscritorio && seccionPreciosCompra}
 
                                 <div>
                                     <label className="block text-xs text-[var(--color-text-muted)] mb-1">Cantidad a ingresar<ChipTrio campo="quantity" /></label>
@@ -1316,6 +1412,7 @@ const Purchases = () => {
                             <ShoppingCart size={20} className="text-[var(--color-primary)]" />
                             Detalles de la Compra
                         </h2>
+                        {avisoRecuperada}
                         {desdePedido && (
                             <div className="mb-4 px-3 py-2 rounded-lg bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/40 text-xs text-[var(--color-primary)] flex items-center gap-2">
                                 <PackagePlus size={14} />
