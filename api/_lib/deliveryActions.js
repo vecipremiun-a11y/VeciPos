@@ -574,8 +574,11 @@ async function deliveryStatus(turso, companyId, session, { id, status, collected
     // Un pedido sin venta se entrega COBRANDO (deliveryOrderComplete), que es
     // donde nace la venta con su boleta. Marcarlo entregado sin eso lo dejaría
     // entregado y sin vender.
+    // El mensaje dice dónde está el botón y qué hacer si no aparece: la app del
+    // repartidor anterior a la 2.7 solo tiene "Entregar", y sin esto el
+    // repartidor quedaba con un "usá Cobrar" que no podía cumplir.
     if (d.source_type === 'pedido' && status === 'delivered' && !d.sale_id) {
-        return { success: false, error: 'Este pedido se entrega cobrando: usá "Cobrar y entregar".' };
+        return { success: false, error: 'Este pedido se entrega cobrando: tocá "Cobrar" (app del repartidor) o "Cobrar y entregar" (Delivery → Envíos). Si solo ves "Entregar", la app está desactualizada: instalá la versión 2.7 o más nueva.' };
     }
     // Pedido de la tienda web que se paga al recibir: igual, se entrega cobrando.
     let tienda = null;
@@ -584,7 +587,7 @@ async function deliveryStatus(turso, companyId, session, { id, status, collected
     }
     if (tienda && status === 'delivered' && !d.sale_id && tienda.status !== 'delivered'
         && Number(tienda.remaining_amount) > 0) {
-        return { success: false, error: 'Este pedido se paga al recibir: se entrega con "Cobrar".' };
+        return { success: false, error: 'Este pedido se paga al recibir: se entrega con "Cobrar". Si solo ves "Entregar", la app está desactualizada: instalá la versión 2.7 o más nueva.' };
     }
 
     // No se pueden saltar etapas: asignado → retirado → en ruta → entregado.
@@ -979,6 +982,24 @@ async function deliveryDetail(turso, companyId, session, { id } = {}) {
                 unit_price: i.price, total: (Number(i.price) || 0) * (Number(i.quantity) || 0),
             }));
         } catch { items = []; }
+    } else if (d.source_type === 'pedido' && d.order_data) {
+        // Pedido a domicilio con pago al recibir (migración 0032): no hay venta
+        // todavía, los productos viven en el envío. Sin esto el repartidor veía
+        // "Sin detalle de productos" en todos los pedidos desde la 2.7.
+        let pedido = null;
+        try { pedido = typeof d.order_data === 'string' ? JSON.parse(d.order_data) : d.order_data; } catch { pedido = null; }
+        items = (pedido?.items || []).map(i => {
+            // Vendido por caja: "1 Caja (30 und)" a precio de la caja, como en el ticket.
+            const caja = i.presentacion && Number(i.presentacion.cantidad) > 0 ? i.presentacion : null;
+            return {
+                name: i.name,
+                qty: caja ? Number(caja.cantidad) : i.quantity,
+                unit: caja ? `${caja.nombre} (${caja.unidades} und)` : (i.unit || 'Und'),
+                unit_price: caja ? Number(caja.precio) : i.price,
+                total: (Number(i.price) || 0) * (Number(i.quantity) || 0),
+                note: i.note || null,
+            };
+        });
     }
 
     const local = await pickupAddressOf(turso, companyId);

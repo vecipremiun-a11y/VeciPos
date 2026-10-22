@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import {
     Bike, MapPin, Phone, Check, X, Navigation, Package, Loader2, Camera,
     Banknote, AlertTriangle, Hand, ChevronLeft, Inbox, CheckCircle2, XCircle, Truck,
-    Info, Store, Route, Clock, ShoppingBag,
+    Info, Store, Route, Clock, ShoppingBag, Printer, Download,
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -10,7 +10,7 @@ import { toast } from '../../lib/toast';
 import { cn } from '../../lib/utils';
 import CobrarEnvioModal from '../../components/delivery/CobrarEnvioModal';
 import { EntregaExitosaModal } from '../../components/delivery/DocumentoVenta';
-import { textoEntrega } from '../../lib/comprobanteEnvio';
+import { textoEntrega, imprimirComprobanteEnvio, descargarComprobanteEnvio } from '../../lib/comprobanteEnvio';
 
 // Modo Repartidor. Menú con 4 tarjetas y, dentro de cada una, los envíos del día
 // en ese estado. La ubicación se comparte SOLO mientras hay envíos en curso, cada
@@ -679,6 +679,9 @@ function DetailModal({ d, currency, fetchDetail, onClose, onAccept, onNavigate }
                             )}
                             {d.notes && <p className="text-[11px] text-[var(--color-text-muted)] italic">{d.notes}</p>}
                         </div>
+
+                        {/* Comprobante del paquete: el mismo de Envíos y del POS al despachar. */}
+                        <ComprobantePaquete d={d} currency={currency} />
                     </div>
                 )}
 
@@ -693,6 +696,44 @@ function DetailModal({ d, currency, fetchDetail, onClose, onAccept, onNavigate }
                         </button>
                     )}
                 </div>
+            </div>
+        </div>
+    );
+}
+
+// ── Comprobante del paquete (imprimir o descargar) ───────────────────────────
+// Lo mismo que hay en Delivery → Envíos: cliente, dirección, entrega, productos
+// y cuánto se cobra. En la app imprime por la térmica Bluetooth configurada.
+function ComprobantePaquete({ d, currency }) {
+    const activeCompanyId = useStore((s) => s.activeCompanyId);
+    const [trabajando, setTrabajando] = useState(null);
+    const hacer = async (que, fn) => {
+        setTrabajando(que);
+        try {
+            const r = await fn(d, { companyId: activeCompanyId, currency });
+            if (!r?.ok) {
+                toast(r?.error === 'NO_PRINTER' ? 'Configurá la impresora en Configuración → General → Impresora térmica.'
+                    : r?.error === 'POPUP_BLOCKED' ? 'El navegador bloqueó la ventana de impresión.'
+                        : `No se pudo: ${r?.error || ''}`, 'error');
+            }
+        } catch (e) {
+            toast(`No se pudo: ${e?.message || e}`, 'error');
+        } finally {
+            setTrabajando(null);
+        }
+    };
+    return (
+        <div className="rounded-xl border border-[var(--glass-border)] p-3 space-y-2">
+            <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Comprobante del paquete</p>
+            <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => hacer('imprimir', imprimirComprobanteEnvio)} disabled={!!trabajando}
+                    className="py-3 rounded-xl font-bold border border-[var(--glass-border)] text-[var(--color-text)] flex items-center justify-center gap-2 disabled:opacity-50">
+                    <Printer size={16} /> {trabajando === 'imprimir' ? 'Imprimiendo…' : 'Imprimir'}
+                </button>
+                <button onClick={() => hacer('descargar', descargarComprobanteEnvio)} disabled={!!trabajando}
+                    className="py-3 rounded-xl font-bold border border-[var(--glass-border)] text-[var(--color-text)] flex items-center justify-center gap-2 disabled:opacity-50">
+                    <Download size={16} /> {trabajando === 'descargar' ? 'Generando…' : 'Descargar'}
+                </button>
             </div>
         </div>
     );
