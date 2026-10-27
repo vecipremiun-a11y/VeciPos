@@ -42,6 +42,7 @@ import dataActionsHandler from './api/data/actions.js';
 import pingHandler from './api/ping.js';
 import aiConsultarHandler from './api/ai/consultar.js';
 import aiFacturaPedidoHandler from './api/ai/factura-pedido.js';
+import aiPublicidadHandler from './api/ai/publicidad.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -92,6 +93,12 @@ app.all('/api/ai/consultar', async (req, res) => {
 // Foto de factura → pedido, desde el botón de Pedidos Realizados.
 app.all('/api/ai/factura-pedido', async (req, res) => {
     try { return await aiFacturaPedidoHandler(req, res); }
+    catch (error) { return res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Publicidad con IA (fondos + productos reales). En Vercel tiene su propio maxDuration.
+app.all('/api/ai/publicidad', async (req, res) => {
+    try { return await aiPublicidadHandler(req, res); }
     catch (error) { return res.status(500).json({ success: false, error: error.message }); }
 });
 

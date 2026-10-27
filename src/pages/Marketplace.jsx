@@ -10,10 +10,10 @@ import PlanCheckoutModal from '../components/settings/PlanCheckoutModal';
 import {
     Store, Crown, Check, Clock, Lock, Sparkles, ArrowRight,
     ChefHat, Plug, Scale, Globe, Bike, Gift, MessageCircle, Utensils, Scissors,
-    MonitorPlay, UsersRound, Calculator, Code, BarChart3, Package, Tags,
+    MonitorPlay, UsersRound, Calculator, Code, BarChart3, Package, Tags, Megaphone,
 } from 'lucide-react';
 
-const ICONS = { ChefHat, Plug, Scale, Globe, Bike, Gift, MessageCircle, Utensils, Scissors, MonitorPlay, UsersRound, Calculator, Code, Sparkles, BarChart3, Tags };
+const ICONS = { ChefHat, Plug, Scale, Globe, Bike, Gift, MessageCircle, Utensils, Scissors, MonitorPlay, UsersRound, Calculator, Code, Sparkles, BarChart3, Tags, Megaphone };
 
 const daysLeft = (iso) => {
     if (!iso) return null;

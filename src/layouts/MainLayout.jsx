@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Tags, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store, Bike, MapPin, Navigation, Sparkles } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Tags, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store, Bike, MapPin, Navigation, Sparkles, Megaphone } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -289,6 +289,8 @@ const MainLayout = () => {
         { icon: Briefcase, label: 'Personal', path: '/personal', permission: 'personal.view', moduleKey: 'personal' },
         { icon: WalletCards, label: 'Administración', path: '/administration', permission: 'finance.view', moduleKey: 'finance' },
         { icon: Trophy, label: 'Sorteos', path: '/sorteos', permission: 'sorteos.view', moduleKey: 'sorteos' },
+        // Publicidad con IA (App del Marketplace): fondos con IA + productos reales.
+        { icon: Megaphone, label: 'Publicidad', path: '/publicidad', permission: 'ads.use', moduleKey: 'ads' },
         { icon: Store, label: 'Marketplace', path: '/marketplace', permission: 'settings.company', ownerOnly: true },
         { icon: Users, label: 'Usuarios', path: '/users', permission: 'users.view', moduleKey: 'users' },
         {

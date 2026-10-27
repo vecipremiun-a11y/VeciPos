@@ -16,6 +16,8 @@ const AVAILABLE_APPS = {
     etiquetas: { scope: 'branch', priceClp: 5000, priceUsd: 5 },
     delivery: { scope: 'branch', priceClp: 10000, priceUsd: 10 },
     ia: { scope: 'branch', priceClp: 9500, priceUsd: 10 },
+    // 7.990 al mes con 200 imágenes (Kevin, 25-oct-2026): ~US$0,011 por fondo medido.
+    publicidad: { scope: 'branch', priceClp: 7990, priceUsd: 8 },
 };
 
 async function isProfessional(turso, companyId) {

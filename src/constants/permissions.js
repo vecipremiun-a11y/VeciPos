@@ -203,6 +203,8 @@ export const ALL_PERMISSIONS = [
             // propósito, porque el asistente ve márgenes, costos, sueldos,
             // liquidaciones y descuadres de caja.
             { id: 'ai.use', label: 'Usar el Asistente IA', desc: 'Preguntar por el negocio y cargar facturas por foto. Da acceso a márgenes, costos y sueldos (dato sensible)' },
+            // Apagado por defecto: cada fondo generado gasta del cupo de imágenes del mes.
+            { id: 'ads.use', label: 'Usar Publicidad IA', desc: 'Crear publicidades con los productos y generar fondos con IA (descuenta del cupo de imágenes del mes)' },
         ]
     },
     {

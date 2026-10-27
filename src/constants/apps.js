@@ -87,6 +87,19 @@ export const ALL_APPS = [
         moduleKeys: ['ai'],
         icon: 'Sparkles',
     },
+    // Publicidad con IA: como el Asistente, gasta plata real por uso (cada fondo
+    // generado), así que el gate de verdad es server-side (api/ai/publicidad.js).
+    // Precio PROVISORIO hasta confirmarlo con Kevin.
+    {
+        key: 'publicidad',
+        name: 'Publicidad IA',
+        description: 'Creá publicidades para redes y carteles con tus productos y precios reales, con fondos hechos por IA. Incluye 200 imágenes al mes.',
+        priceClp: 7990, priceUsd: 8,
+        scope: 'branch',
+        status: 'available',
+        moduleKeys: ['ads'],
+        icon: 'Megaphone',
+    },
 
     // ── Próximamente · por sucursal ───────────────────────────────────
     { key: 'fidelizacion', name: 'Fidelización', description: 'Puntos y recompensas para tus clientes.', scope: 'branch', status: 'coming_soon', icon: 'Gift' },

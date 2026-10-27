@@ -278,6 +278,15 @@ export const ALL_MODULES = [
         minLevel: 2,
         appKey: 'ia',
     },
+    {
+        key: 'ads',
+        label: 'Publicidad IA (App)',
+        description: 'Publicidades para redes sociales y carteles con los productos y precios reales, con fondos generados por IA.',
+        defaultEnabled: false,
+        plan: 'professional',
+        minLevel: 2,
+        appKey: 'publicidad',
+    },
 ];
 
 // Helper: obtener módulo por key

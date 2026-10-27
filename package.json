@@ -22,6 +22,7 @@
     "@devlas/dte-sii": "^2.5.14",
     "@libsql/client": "^0.17.0",
     "@tailwindcss/vite": "^4.1.18",
+    "@vercel/blob": "2.8.1",
     "bcryptjs": "^3.0.3",
     "bwip-js": "^4.8.0",
     "clsx": "^2.1.1",

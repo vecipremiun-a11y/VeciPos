@@ -60,6 +60,7 @@ const InventoryControl = lazy(() => import('./pages/InventoryControl'));
 const ProductCombos = lazy(() => import('./pages/ProductCombos'));
 const LabelPrinting = lazy(() => import('./pages/LabelPrinting'));
 const Asistente = lazy(() => import('./pages/Asistente'));
+const Publicidad = lazy(() => import('./pages/Publicidad'));
 const DeliveryCouriers = lazy(() => import('./pages/delivery/Couriers'));
 const DeliveryShipments = lazy(() => import('./pages/delivery/Shipments'));
 const DeliveryTracking = lazy(() => import('./pages/delivery/Tracking'));
@@ -432,6 +433,8 @@ function App() {
               tienen sin configurar nada, y cualquier otro rol solo si el dueño se
               lo activó en Permisos. */}
           <Route path="asistente" element={<ProtectedPage permission="ai.use"><FeatureGatePage moduleKey="ai"><Asistente /></FeatureGatePage></ProtectedPage>} />
+          {/* Publicidad con IA (App del Marketplace). Como el Asistente, el gate de gasto real es server-side. */}
+          <Route path="publicidad" element={<ProtectedPage permission="ads.use"><FeatureGatePage moduleKey="ads"><Publicidad /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/labels" element={<ProtectedPage permission="products.view"><FeatureGatePage moduleKey="labels"><LabelPrinting /></FeatureGatePage></ProtectedPage>} />
           {/* App Delivery */}
           <Route path="delivery/shipments" element={<ProtectedPage permission="delivery.view"><FeatureGatePage moduleKey="delivery"><DeliveryShipments /></FeatureGatePage></ProtectedPage>} />
