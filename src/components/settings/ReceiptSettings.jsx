@@ -2,6 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../../store/useStore';
 import { dataApiCall } from '../../lib/dataApi';
 import { FileText, Eye, Save, Building2, Package } from 'lucide-react';
+import { boletaA4Html } from '../../lib/boletaA4';
+import { buildSaleReceiptModel } from '../../lib/saleReceipt';
+
+// Venta de ejemplo para la vista previa de la hoja A4 (los mismos productos del ticket).
+const VENTA_DE_MUESTRA = {
+    id: 1234, date: new Date().toISOString(), total: 5200, paymentMethod: 'Efectivo',
+    paymentDetails: { amount: 10000, change: 4800 },
+    items: [{ name: 'Coca Cola 1.5L', quantity: 2, price: 1500 }, { name: 'Pan Molde', quantity: 1, price: 2200 }],
+};
 
 const ReceiptSettings = ({ companyInfo }) => {
     const { activeCompanyId } = useStore();
@@ -165,7 +174,10 @@ const ReceiptSettings = ({ companyInfo }) => {
 
             {/* Selector de formato */}
             <div className="mb-6">
-                <label className="block text-sm font-medium text-[var(--color-text)] mb-2">Formato de impresión</label>
+                <label className="block text-sm font-medium text-[var(--color-text)] mb-1">Formato de impresión</label>
+                <p className="text-xs text-[var(--color-text-muted)] mb-2">
+                    Es el de la empresa. Cada usuario puede elegir el suyo en el POS, con el botón de formato junto a "Buscar cliente".
+                </p>
                 <div className="flex gap-2">
                     {[{ value: '58mm', label: '58mm', desc: 'Térmica angosta' }, { value: '80mm', label: '80mm', desc: 'Térmica ancha' }, { value: 'a4', label: 'A4', desc: 'Carta / Hoja completa' }].map(opt => (
                         <button
@@ -346,8 +358,22 @@ const ReceiptSettings = ({ companyInfo }) => {
                     </button>
                 </div>
 
-                {/* VISTA PREVIA */}
-                {showPreview && (
+                {/* VISTA PREVIA — A4: la hoja tal cual se imprime (mismo HTML), achicada. */}
+                {showPreview && receiptConfig.format === 'a4' && (
+                    <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg p-4">
+                        <div className="mx-auto overflow-hidden rounded shadow-lg bg-white" style={{ width: 794 * 0.42, height: 1123 * 0.42 }}>
+                            <iframe
+                                title="Vista previa A4"
+                                srcDoc={boletaA4Html(buildSaleReceiptModel(VENTA_DE_MUESTRA, { sellerName: 'Vendedor', receiptConfig }), { imprimir: false })}
+                                style={{ width: 794, height: 1123, border: 0, transform: 'scale(0.42)', transformOrigin: 'top left', background: '#fff' }}
+                            />
+                        </div>
+                        <p className="text-center text-xs text-[var(--color-text-muted)] mt-4">
+                            Vista previa • Hoja A4 (con boleta o factura electrónica lleva además el timbre del SII)
+                        </p>
+                    </div>
+                )}
+                {showPreview && receiptConfig.format !== 'a4' && (
                     <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg p-4">
                         <div className="bg-white text-black p-4 rounded font-mono text-xs max-w-[240px] mx-auto shadow-lg">
                             {/* Simulación de boleta 58mm */}

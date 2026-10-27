@@ -5,6 +5,7 @@ import { useStore } from '../../store/useStore';
 import { reportCall } from '../../lib/dataApi';
 import { printSaleReceipt } from '../../lib/saleReceipt';
 import { configBoleta, descargarBoletaPdf } from '../../lib/comprobanteEnvio';
+import { formatoAImprimir } from '../../lib/formatoImpresion';
 import { cn } from '../../lib/utils';
 import { toast } from '../../lib/toast';
 
@@ -16,7 +17,7 @@ const NOMBRE_DOC = { 39: 'Boleta', 33: 'Factura', 34: 'Factura exenta' };
  * documento no iba en el paquete, se imprime o se manda en el momento.
  */
 export default function DocumentoVenta({ saleId }) {
-    const { activeCompanyId, currentCurrency, fetchSaleDetails, users } = useStore();
+    const { activeCompanyId, currentCurrency, fetchSaleDetails, users, currentUser } = useStore();
     const [venta, setVenta] = useState(null);
     const [dte, setDte] = useState(null);
     const [cargando, setCargando] = useState(true);
@@ -51,11 +52,13 @@ export default function DocumentoVenta({ saleId }) {
     const imprimir = async () => {
         setTrabajando('imprimir');
         try {
+            const receiptConfig = await configBoleta(activeCompanyId);
             const r = await printSaleReceipt(doc, {
                 sellerName: vendedor,
-                receiptConfig: await configBoleta(activeCompanyId),
+                receiptConfig,
                 currency: currentCurrency,
                 dteInfo: dte, tedXml: dte?.xml_firmado || null,
+                formato: formatoAImprimir(receiptConfig, activeCompanyId, currentUser?.id),
             });
             if (!r?.ok) {
                 toast(r?.error === 'NO_PRINTER' ? 'Configurá la impresora en Configuración → General → Impresora térmica.'

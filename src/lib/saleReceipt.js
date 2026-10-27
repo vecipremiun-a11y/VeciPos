@@ -11,6 +11,7 @@
 
 import { formatCurrency } from '../utils/formatCurrency';
 import { isThermalAvailable, getSavedPrinter, printThermalReceipt, buildTimbreRaster } from './thermalPrint';
+import { boletaA4Html, timbreComoImagen } from './boletaA4';
 
 /**
  * Cómo se lee la cantidad de un renglón en el ticket.
@@ -58,6 +59,18 @@ export function buildSaleReceiptModel(sale, { sellerName, receiptConfig = {}, cu
     return {
         companyName: receiptConfig.business_name || 'POSVECI',
         companyLines: lines,
+        // Por separado, para la hoja A4 (boletaA4.js), que los ubica cada uno en su lugar.
+        empresa: {
+            nombre: receiptConfig.business_name || 'POSVECI',
+            direccion: receiptConfig.address || null,
+            rut: receiptConfig.tax_id || null,
+            mostrarRut: !!(receiptConfig.show_tax_id && receiptConfig.tax_id),
+            telefono: receiptConfig.show_phone ? (receiptConfig.phone || null) : null,
+            email: receiptConfig.show_email ? (receiptConfig.email || null) : null,
+            mensaje: receiptConfig.header_message || null,
+        },
+        folio,
+        tipoDte,
         docLabel,
         code: folio ? undefined : ticketId,
         docLine: folio ? `Folio: ${folio}` : null,
@@ -85,8 +98,13 @@ export function buildSaleReceiptModel(sale, { sellerName, receiptConfig = {}, cu
 const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 /** HTML de la boleta para imprimir en el navegador (mismo orden/etiquetas que la térmica). */
-export function receiptModelToHtml(model, { currency = 'CLP' } = {}) {
+export function receiptModelToHtml(model, { currency = 'CLP', formato = null } = {}) {
     const money = (n) => formatCurrency(n, currency);
+    // Ancho del papel: el del formato elegido (58mm / 80mm), como la boleta de la
+    // venta recién hecha. Sin formato, el ancho fijo de antes (280px).
+    const papel = formato === '58mm' || formato === '80mm' ? formato : null;
+    const pagina = papel ? `@page { size: ${papel} auto; margin: 0; }` : '@page { margin: 0; }';
+    const ancho = papel ? `width: ${papel}; box-sizing: border-box; margin: 0;` : 'width: 280px; margin: 0 auto;';
     const itemsHtml = (model.items || []).map(it => `
         <div style="margin:4px 0;">
             <div>${esc(it.name)}</div>
@@ -103,8 +121,10 @@ export function receiptModelToHtml(model, { currency = 'CLP' } = {}) {
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Boleta</title>
         <style>
-            @page { margin: 0; }
-            body { font-family: 'Courier New', monospace; font-size: 12px; color:#000; width: 280px; margin: 0 auto; padding: 8px; }
+            ${pagina}
+            /* Gruesa y en negrita, como la boleta del POS: Courier New salía finita en la térmica. */
+            body { font-family: Arial, Helvetica, sans-serif; font-weight: bold; font-size: 12px; color:#000; ${ancho} padding: 8px;
+                   -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             .sep { border-top: 1px dashed #000; margin: 6px 0; }
             .row { display:flex; justify-content:space-between; }
             .b { font-weight: bold; }
@@ -138,7 +158,9 @@ export function receiptModelToHtml(model, { currency = 'CLP' } = {}) {
  * en el navegador abre la ventana de impresión de siempre.
  * Devuelve { ok, error }. error === 'NO_PRINTER' si falta configurar la impresora.
  */
-export async function printSaleReceipt(sale, { sellerName, receiptConfig, currency = 'CLP', dteInfo = null, tedXml = null } = {}) {
+// `formato`: '58mm' | '80mm' | 'a4' — el que eligió el usuario en el POS
+// (formatoAImprimir). Sin él, el de Configuración → Boleta.
+export async function printSaleReceipt(sale, { sellerName, receiptConfig, currency = 'CLP', dteInfo = null, tedXml = null, formato = null } = {}) {
     const model = buildSaleReceiptModel(sale, { sellerName, receiptConfig, currency, dteInfo });
 
     if (isThermalAvailable()) {
@@ -149,9 +171,13 @@ export async function printSaleReceipt(sale, { sellerName, receiptConfig, curren
         return printThermalReceipt(model, { money: (n) => formatCurrency(n, currency) });
     }
 
-    // Web: comportamiento de siempre (ventana de impresión del navegador).
-    const html = receiptModelToHtml(model, { currency });
-    const w = window.open('', '', 'width=400,height=700');
+    // Web: ventana de impresión del navegador. En A4, la hoja completa (con su
+    // timbre); si no, el ticket del ancho elegido.
+    const fmt = formato || receiptConfig?.format || null;
+    const html = fmt === 'a4'
+        ? boletaA4Html(model, { currency, xml: tedXml, timbreImg: timbreComoImagen(tedXml) })
+        : receiptModelToHtml(model, { currency, formato: fmt });
+    const w = window.open('', '', fmt === 'a4' ? 'width=900,height=1000' : 'width=400,height=700');
     if (!w) return { ok: false, error: 'POPUP_BLOCKED' };
     w.document.write(html);
     w.document.close();

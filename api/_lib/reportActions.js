@@ -554,7 +554,10 @@ const REPORTS = {
         sql: `SELECT receipt_business_name as business_name, receipt_address as address, receipt_tax_id as tax_id,
                 receipt_phone as phone, receipt_email as email, receipt_header_message as header_message,
                 receipt_footer_message as footer_message, receipt_show_tax_id as show_tax_id,
-                receipt_show_phone as show_phone, receipt_show_email as show_email
+                receipt_show_phone as show_phone, receipt_show_email as show_email,
+                -- El formato (58mm / 80mm / A4): sin él, reimprimir desde el Historial
+                -- salía siempre en ticket aunque se hubiera elegido A4.
+                receipt_format as format
               FROM companies WHERE id = ?`,
         args: (cid) => [cid],
     }],

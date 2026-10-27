@@ -6,6 +6,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { reportCall } from '../../lib/dataApi';
 import { printSaleReceipt } from '../../lib/saleReceipt';
 import { configBoleta, descargarBoletaPdf } from '../../lib/comprobanteEnvio';
+import { formatoAImprimir } from '../../lib/formatoImpresion';
 import { cn } from '../../lib/utils';
 import { toast } from '../../lib/toast';
 
@@ -174,11 +175,13 @@ export default function CobrarEnvioModal({ envio = null, pedido = null, confirma
     const imprimir = async () => {
         setTrabajando('imprimir');
         try {
+            const receiptConfig = await configBoleta(activeCompanyId);
             const r = await printSaleReceipt(ventaParaDoc(), {
                 sellerName: currentUser?.name || currentUser?.username,
-                receiptConfig: await configBoleta(activeCompanyId),
+                receiptConfig,
                 currency: currentCurrency,
                 dteInfo: dte, tedXml: dte?.xml_firmado || null,
+                formato: formatoAImprimir(receiptConfig, activeCompanyId, currentUser?.id),
             });
             if (!r?.ok) {
                 toast(r?.error === 'NO_PRINTER' ? 'Configurá la impresora en Configuración → General → Impresora térmica.'

@@ -9,6 +9,7 @@ import { formatInCompanyTime } from '../lib/dateHelpers';
 import { usePermissions } from '../hooks/usePermissions';
 import ReturnModal from '../components/ReturnModal';
 import { printSaleReceipt } from '../lib/saleReceipt';
+import { formatoAImprimir } from '../lib/formatoImpresion';
 
 // Delivery de un pedido a domicilio cobrado al entregar: va aparte de los productos.
 const deliveryDeLaVenta = (sale) => Math.round(Number(sale?.paymentDetails?.deliveryFee) || 0);
@@ -281,6 +282,8 @@ const SalesHistory = () => {
                 currency: currentCurrency,
                 dteInfo,
                 tedXml,
+                // El formato que eligió este usuario en el POS (58mm, 80mm o A4).
+                formato: formatoAImprimir(receiptConfig, activeCompanyId, currentUser?.id),
             });
             if (!r.ok) {
                 if (r.error === 'NO_PRINTER') alert('Configura tu impresora en Configuración → General → Impresora térmica.');

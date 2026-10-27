@@ -10,6 +10,8 @@ import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
 import { isThermalAvailable, getSavedPrinter, printThermalReceipt, buildTimbreRaster } from '../lib/thermalPrint';
 import { buildSaleReceiptModel, cantidadTicket } from '../lib/saleReceipt';
+import { boletaA4Html } from '../lib/boletaA4';
+import { formatoAImprimir } from '../lib/formatoImpresion';
 
 // Extraer TED XML del DTE firmado
 function extractTED(xmlFirmado) {
@@ -39,7 +41,7 @@ async function generateTimbreImage(tedXml) {
 }
 
 const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) => {
-    const { activeCompanyId, currentCurrency } = useStore();
+    const { activeCompanyId, currentCurrency, currentUser } = useStore();
     const [phoneNumber, setPhoneNumber] = useState('');
     const receiptRef = useRef(null);
     const [receiptConfig, setReceiptConfig] = useState({
@@ -401,6 +403,22 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
             return;
         }
 
+        // Hoja A4 (Configuración → Boleta → A4): documento completo con el recuadro
+        // del RUT y el número, tabla de productos y el timbre. Antes salía el mismo
+        // ticket angosto, estirado, y se pasaba del margen de la hoja.
+        // El formato que eligió este usuario en el POS (botón junto a "Buscar
+        // cliente"); si no eligió, el de Configuración → Boleta.
+        const formato = formatoAImprimir(receiptConfig, activeCompanyId, currentUser?.id);
+        if (formato === 'a4') {
+            const hoja = window.open('', '', 'width=900,height=1000');
+            if (!hoja) { alert('El navegador bloqueó la ventana de impresión. Permite las ventanas emergentes.'); return; }
+            hoja.document.write(boletaA4Html(buildThermalReceipt(), {
+                currency: currentCurrency, xml: dteInfo?.xml_firmado || null, timbreImg,
+            }));
+            hoja.document.close();
+            return;
+        }
+
         const printWindow = window.open('', '', 'width=400,height=700');
         const sellerName = seller?.name || 'Vendedor';
         const date = new Date().toLocaleString('es-CL');
@@ -413,7 +431,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         const isCash = ['cash', 'efectivo', 'Efectivo'].includes(saleDetails.paymentMethod);
         const paymentLabel = isCash ? 'Efectivo' : saleDetails.paymentMethod;
 
-        const fmt = receiptConfig.format || '58mm';
+        const fmt = formato;
         const isA4 = fmt === 'a4';
         const is80 = fmt === '80mm';
         const pageSize = isA4 ? 'A4' : `${fmt} auto`;
@@ -434,9 +452,16 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                     <title>Ticket de Venta</title>
                     <style>
                         @page { size: ${pageSize}; margin: ${pageMargin}; }
-                        body { 
-                            font-family: 'Courier New', monospace; 
-                            width: ${bodyWidth}; 
+                        /* Letra gruesa y en negrita: con Courier New (trazo de 1 punto)
+                           la térmica la imprimía finita y se leía mal (Kevin, 23-oct-2026).
+                           El tamaño es el mismo de antes. */
+                        body {
+                            font-family: Arial, Helvetica, sans-serif;
+                            font-weight: bold;
+                            color: #000;
+                            -webkit-print-color-adjust: exact;
+                            print-color-adjust: exact;
+                            width: ${bodyWidth};
                             ${isA4 ? 'max-width: 190mm; margin: 0 auto; padding: 10mm;' : 'margin: 0; padding: 5px;'}
                             font-size: ${bodyFont};
                             line-height: 1.2;

@@ -12,6 +12,7 @@ import CashOpeningModal from '../components/CashOpeningModal';
 import CashStatusWidget from '../components/CashStatusWidget';
 import SaleSuccessModal from '../components/SaleSuccessModal';
 import ClientSearchWidget from '../components/ClientSearchWidget';
+import FormatoBoletaButton from '../components/FormatoBoletaButton';
 import OptimizedImage from '../components/OptimizedImage';
 import SuspendedSalesModal from '../components/SuspendedSalesModal';
 import DispatchModal from '../components/DispatchModal';
@@ -1274,8 +1275,12 @@ const POS = () => {
             {/* Right Side: Cart (Desktop Only) */}
             <div className="hidden lg:flex w-full lg:w-[449px] flex-col glass-card p-0 overflow-hidden">
                 <div className="p-4 border-b border-[var(--glass-border)] bg-[var(--glass-bg)] space-y-3">
-                    <div className="w-full">
-                        <ClientSearchWidget />
+                    <div className="w-full flex items-stretch gap-2">
+                        <div className="flex-1 min-w-0">
+                            <ClientSearchWidget />
+                        </div>
+                        {/* Formato de la boleta de este usuario: 58mm, 80mm o A4. */}
+                        <FormatoBoletaButton />
                     </div>
                     {/* Tabs de carritos (Nuevo Diseño) */}
                     <div className="mb-4">
@@ -1756,12 +1761,15 @@ const POS = () => {
                                         </span>
                                     )}
                                 </h2>
-                                <button
-                                    onClick={() => setIsMobileCartOpen(false)}
-                                    className="p-2 text-gray-400 hover:text-white"
-                                >
-                                    <X size={20} />
-                                </button>
+                                <div className="flex items-center gap-1">
+                                    <FormatoBoletaButton />
+                                    <button
+                                        onClick={() => setIsMobileCartOpen(false)}
+                                        className="p-2 text-gray-400 hover:text-white"
+                                    >
+                                        <X size={20} />
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Cart Items */}

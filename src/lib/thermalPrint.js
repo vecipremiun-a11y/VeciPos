@@ -194,7 +194,8 @@ class EscPos {
     init() { return this.push(0x1B, 0x40); }        // reset (sin codepage: máxima compatibilidad)
     codepage() { return this.push(0x1B, 0x74, 16); } // WPC1252 (para ñ/acentos)
     align(n) { return this.push(0x1B, 0x61, n); }                  // 0 izq · 1 centro · 2 der
-    bold(on) { return this.push(0x1B, 0x45, on ? 1 : 0); }
+    // `siempreNegrita`: todo el ticket en negrita (ESC E 1), y apagarla no la apaga.
+    bold(on) { return this.push(0x1B, 0x45, (on || this.siempreNegrita) ? 1 : 0); }
     size(n) { return this.push(0x1D, 0x21, n); }                   // 0 normal · 0x11 doble
     // Avance + corte. Usamos GS V 0 (corte, función A): el argumento es 0x00 (no
     // imprimible). Antes usábamos GS V 66 (66 = 'B'); las impresoras sin esa función
@@ -225,7 +226,12 @@ class EscPos {
 // (Boleta/Fecha/Vendedor/Cliente), columnas DESCRIPCION/TOTAL, ítems, TOTAL,
 // medio de pago y pie configurable.
 function buildReceiptBytes(receipt, width, money) {
-    const p = new EscPos().wake().init().codepage();
+    const p = new EscPos();
+    // Toda la boleta en negrita: con la letra normal la térmica la imprimía finita
+    // y se leía mal (Kevin, 23-oct-2026). La negrita no cambia el ancho de los
+    // caracteres, así que el formato queda igual. Va después del init, que la apaga.
+    p.siempreNegrita = true;
+    p.wake().init().codepage().bold(true);
 
     // Encabezado (empresa): nombre GRANDE (doble ancho y alto) y CENTRADO. Muchas
     // térmicas de 58mm centran mal el doble ancho con ESC a 1 (lo corren a la
