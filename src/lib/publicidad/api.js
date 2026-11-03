@@ -56,12 +56,14 @@ const ImprimirImagen = registerPlugin('ImprimirImagen');
 const HOJA = 'posveci-hoja-impresion';
 
 /**
- * Imprime la imagen sola en una hoja A4 (el cartel). En la app va por el plugin
- * nativo, porque el WebView de Android no imprime: window.print() no hace nada.
- * En el navegador la imagen se pone en la misma página, que al imprimir esconde
- * todo lo demás: una ventana aparte la frena el bloqueador de ventanas y la PWA
- * del iPhone no la abre. La hoja va sin márgenes (así el navegador no le agrega
- * la fecha ni la dirección) y con 5 mm de borde blanco para la impresora.
+ * Imprime la imagen sola en una hoja A4, entera y centrada (cualquier formato,
+ * no solo el cartel). En la app va por el plugin nativo, porque el WebView de
+ * Android no imprime: window.print() no hace nada. En el navegador la imagen se
+ * pone en la misma página, que al imprimir esconde todo lo demás: una ventana
+ * aparte la frena el bloqueador de ventanas y la PWA del iPhone no la abre. La
+ * hoja va sin márgenes (así el navegador no le agrega la fecha ni la dirección)
+ * y con 5 mm de borde blanco para la impresora. Una imagen apaisada va en la
+ * hoja acostada: parada, la de 1,91:1 ocuparía un tercio de la hoja.
  */
 export async function imprimirImagen(dataUrl, nombre) {
     if (Capacitor.isNativePlatform()) {
@@ -74,31 +76,32 @@ export async function imprimirImagen(dataUrl, nombre) {
         }
     }
     document.getElementById(HOJA)?.remove();
+    const img = new Image();
+    img.alt = nombre;
+    img.src = dataUrl;
+    try {
+        await img.decode();
+    } catch {
+        return { ok: false, mensaje: 'No se pudo preparar la hoja para imprimir.' };
+    }
+    const acostada = img.naturalWidth > img.naturalHeight;
     const hoja = document.createElement('div');
     hoja.id = HOJA;
     const estilo = document.createElement('style');
+    // Un milímetro menos de alto que la hoja: justo al borde, algunos navegadores sacan una segunda hoja en blanco.
     estilo.textContent = `
         #${HOJA} { display: none; }
-        @page { size: A4 portrait; margin: 0; }
+        @page { size: A4 ${acostada ? 'landscape' : 'portrait'}; margin: 0; }
         @media print {
             html, body { margin: 0 !important; padding: 0 !important; background: #fff !important;
                          height: auto !important; min-height: 0 !important; overflow: visible !important; }
             body > :not(#${HOJA}) { display: none !important; }
             #${HOJA} { display: flex !important; align-items: center; justify-content: center;
-                       box-sizing: border-box; width: 210mm; height: 296mm; padding: 5mm; overflow: hidden; }
+                       box-sizing: border-box; width: ${acostada ? '297mm' : '210mm'}; height: ${acostada ? '209mm' : '296mm'}; padding: 5mm; overflow: hidden; }
             #${HOJA} img { display: block; max-width: 100%; max-height: 100%; }
         }`;
-    const img = new Image();
-    img.alt = nombre;
-    img.src = dataUrl;
     hoja.append(estilo, img);
     document.body.appendChild(hoja);
-    try {
-        await img.decode();
-    } catch {
-        hoja.remove();
-        return { ok: false, mensaje: 'No se pudo preparar la hoja para imprimir.' };
-    }
     const limpiar = () => { hoja.remove(); window.removeEventListener('afterprint', limpiar); };
     window.addEventListener('afterprint', limpiar);
     window.print();

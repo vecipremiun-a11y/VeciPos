@@ -32,8 +32,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * Android (impresoras Wi-Fi, Mopria, guardar como PDF).
  *
  * Por qué existe: dentro de la app, el WebView no imprime (window.print() no
- * hace nada). La usa Publicidad para el cartel A4: la imagen va centrada y
- * entera, con 5 mm de borde como en la web.
+ * hace nada). La usa Publicidad para imprimir cualquier formato: la imagen va
+ * centrada y entera, con 5 mm de borde como en la web.
  */
 @CapacitorPlugin(name = "ImprimirImagen")
 public class ImprimirImagenPlugin extends Plugin {
@@ -63,8 +63,11 @@ public class ImprimirImagenPlugin extends Plugin {
             call.reject("Este teléfono no tiene impresión");
             return;
         }
+        // Una imagen apaisada arranca con la hoja acostada (en el diálogo se puede cambiar).
+        PrintAttributes.MediaSize a4 = imagen.getWidth() > imagen.getHeight()
+                ? PrintAttributes.MediaSize.ISO_A4.asLandscape() : PrintAttributes.MediaSize.ISO_A4;
         PrintAttributes atributos = new PrintAttributes.Builder()
-                .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                .setMediaSize(a4)
                 .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
                 .build();
         // El diálogo se abre desde el hilo de la pantalla.
@@ -98,7 +101,7 @@ public class ImprimirImagenPlugin extends Plugin {
                 listo.onLayoutCancelled();
                 return;
             }
-            PrintDocumentInfo info = new PrintDocumentInfo.Builder("cartel-posveci.pdf")
+            PrintDocumentInfo info = new PrintDocumentInfo.Builder("publicidad-posveci.pdf")
                     .setContentType(PrintDocumentInfo.CONTENT_TYPE_PHOTO)
                     .setPageCount(1)
                     .build();
