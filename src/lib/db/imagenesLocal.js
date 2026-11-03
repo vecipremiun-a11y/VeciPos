@@ -53,6 +53,22 @@ export async function guardarImagenes(companyId, mapa) {
     return nuevas.length;
 }
 
+/**
+ * Cambia la foto guardada de UN producto, porque se le acaba de poner otra
+ * (guardarImagenes no pisa las que ya están). Una que pasa del tope se borra:
+ * así no queda la vieja.
+ */
+export async function reemplazarImagen(companyId, id, image) {
+    const n = Number(id);
+    if (!companyId || !Number.isFinite(n)) return;
+    if (typeof image !== 'string' || !image || image.length > MAX_LARGO_IMAGEN) {
+        await localDb.productImages.delete(n);
+        return;
+    }
+    await localDb.productImages.put({ id: n, companyId, image, ts: Date.now() });
+    await recortar(companyId);
+}
+
 /** Deja como mucho TOPE_POR_EMPRESA fotos, borrando primero las más viejas. */
 async function recortar(companyId) {
     const total = await localDb.productImages.where('companyId').equals(companyId).count();

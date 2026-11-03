@@ -10,7 +10,7 @@ import { createClient } from '@libsql/client';
 import OpenAI from 'openai';
 import { getSession, isCompanyMember } from '../_lib/guard.js';
 import {
-    generarFondo, guardarDiseno, listarDisenos, obtenerDiseno, duplicarDiseno, eliminarDiseno,
+    generarFondo, generarChat, generarRecorte, asignarFotoProducto, guardarDiseno, listarDisenos, obtenerDiseno, duplicarDiseno, eliminarDiseno,
     imagenDeLaEmpresa, estadoPublicidad, puedeUsarPublicidad, tieneAppPublicidad, cupoPublicidad,
     ritmoPublicidadExcedido, ofertasParaPublicidad, CUPO_IMAGENES_MES,
 } from '../_lib/publicidadActions.js';
@@ -63,17 +63,21 @@ export default async function handler(req, res) {
         }
 
         switch (action) {
-            case 'generarFondo': {
+            case 'generarFondo':
+            case 'generarChat':
+            case 'recortar': {
                 // Lo único que gasta: ritmo y cupo antes de llamar a la IA.
                 if (await ritmoPublicidadExcedido(turso, companyId)) {
-                    return res.status(429).json({ success: false, error: 'RITMO', message: 'Muchos fondos seguidos. Esperá un minuto.' });
+                    return res.status(429).json({ success: false, error: 'RITMO', message: 'Muchas imágenes seguidas. Esperá un minuto.' });
                 }
                 const cupo = await cupoPublicidad(turso, companyId);
                 if (cupo.agotado) {
                     return res.status(200).json({ success: false, error: 'CUPO', message: `Llegaste a las ${CUPO_IMAGENES_MES} imágenes del mes. Se renueva el 1°.` });
                 }
-                return res.status(200).json(await generarFondo(turso, getOpenAI(), companyId, session, body));
+                const generar = action === 'generarChat' ? generarChat : action === 'recortar' ? generarRecorte : generarFondo;
+                return res.status(200).json(await generar(turso, getOpenAI(), companyId, session, body));
             }
+            case 'asignarFoto': return res.status(200).json(await asignarFotoProducto(turso, companyId, session, body));
             case 'guardar': return res.status(200).json(await guardarDiseno(turso, companyId, session, body));
             case 'listar': return res.status(200).json(await listarDisenos(turso, companyId, body));
             case 'obtener': return res.status(200).json(await obtenerDiseno(turso, companyId, body));

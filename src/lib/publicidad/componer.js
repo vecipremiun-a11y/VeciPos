@@ -207,12 +207,42 @@ function dibujarFondo(ctx, img, W, H, { x = 0, y = 0, zoom = 1 } = {}) {
     // Se mueve lo recortado y, si es poco, hasta un 20 % del lado.
     const correr = (v, sobra, lado) => Math.max(Math.abs(sobra) / 2, lado * 0.2) * Math.min(1, Math.max(-1, Number(v) || 0));
     const dx = (W - dw) / 2 + correr(x, W - dw, W), dy = (H - dh) / 2 - correr(y, H - dh, H);
-    const hueco = dx > 0.5 || dy > 0.5 || dy + dh < H - 0.5;
+    const hueco = dx > 0.5 || dy > 0.5 || dx + dw < W - 0.5 || dy + dh < H - 0.5;
     if (hueco) ctx.drawImage(difuminado(img, W, H), 0, 0);
     ctx.save();
     if (hueco) { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = Math.min(W, H) * 0.03; }
     ctx.drawImage(img, dx, dy, dw, dh);
     ctx.restore();
+}
+
+/**
+ * El tamaño con el que la imagen entra entera en la medida (lo que sobra se
+ * rellena difuminado). La IA trae los textos pegados a los bordes aunque se le
+ * pida margen (prueba real del 27-oct-2026: al recortar a 4:5 se cortaba el
+ * título): por eso la del chat se muestra entera si no se eligió otro tamaño.
+ */
+export function zoomEntera(img, W, H) {
+    const iw = anchoDe(img), ih = altoDe(img);
+    if (!iw || !ih) return 1;
+    const a = W / iw, b = H / ih;
+    const z = Math.min(a, b) / Math.max(a, b);
+    // Hecha a la medida del formato (desde el 27-oct-2026, sizeChat), solo difiere
+    // por el redondeo a 16 px: llena todo, sin una rayita de relleno al borde.
+    return z > 0.97 ? 1 : Math.max(0.6, z);
+}
+
+/**
+ * La publicidad hecha con chat: la imagen de la IA tal cual (ya trae los textos),
+ * en la medida del formato con su encuadre. `zoom` null = entera.
+ */
+export function dibujarImagen(canvas, img, W, H, encuadre = {}) {
+    canvas.width = Math.round(W); canvas.height = Math.round(H);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#111827';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!img) return;
+    const zoom = encuadre.zoom ?? zoomEntera(img, canvas.width, canvas.height);
+    dibujarFondo(ctx, img, canvas.width, canvas.height, { ...encuadre, zoom });
 }
 
 /** Dibuja la imagen entera dentro del rectángulo, centrada (sin deformar). */
@@ -286,6 +316,7 @@ function etiquetaInclinada(ctx, texto, x, y, tam, colores, rol, pz = null) {
  *   ancho, alto, formatoId,
  *   fondo: Image|Canvas|null,
  *   productos: [{ nombre, precio, precioAntes, unidadTexto, etiqueta, foto }],
+ *   imagenes: [{ id: 'img-…', img }],      // las agregadas encima (logo, sello…), ya recortadas
  *   textos: { titulo, mensaje, extra, negocio },
  *   colores: { principal, acento, texto },
  *   ajustes: { escala, posX, posY },
@@ -394,6 +425,20 @@ export function dibujarPublicidad(canvas, d) {
     if (productos.length === 1) dibujarUno(ctx, productos[0], zona, { W, H, u, m, col, L, pz, dinero, ajustes: d.ajustes || {}, mayorista: d.formatoId === 'mayorista' });
     else if (productos.length > 1) dibujarVarios(ctx, productos, zona, { W, H, u, col, L, dinero, mayorista: d.formatoId === 'mayorista' });
     for (const dibujar of encima) dibujar();
+
+    // Las imágenes agregadas (Kevin, 29-oct-2026: un logo, un sello…): encima de
+    // todo, en el orden en que se agregaron. Arrancan al centro, con el lado mayor
+    // en un 35 % del lado corto, y se mueven y agrandan como los textos.
+    for (const im of d.imagenes || []) {
+        const iw = anchoDe(im?.img), ih = altoDe(im?.img);
+        if (!iw || !ih) continue;
+        const f = (u * 0.35) / Math.max(iw, ih);
+        const w = iw * f, h = ih * f, x = (W - w) / 2, y = (H - h) / 2;
+        ctx.save();
+        colocar(ctx, pieza(pz, im.id, x, y, w, h));
+        ctx.drawImage(im.img, x, y, w, h);
+        ctx.restore();
+    }
 
     // La pieza elegida: marco y esquinas para agrandarla. Solo en la vista previa
     // (lo que se guarda o se descarga se dibuja sin `seleccion`).
@@ -518,7 +563,8 @@ function dibujarUno(ctx, p, zona, { W, H, u, col, L, pz, dinero, ajustes, mayori
 function dibujarVarios(ctx, productos, zona, { W, H, u, col, L, dinero, mayorista }) {
     const n = productos.length;
     const horizontal = W > H * 1.2;
-    const cols = horizontal ? Math.min(n, 4) : (n <= 2 && H / W > 1.5 ? 1 : 2);
+    // Acostada: hasta 4 en una fila; 5 o 6 en dos filas parejas (3 + 2, 3 + 3), no 4 + 1.
+    const cols = horizontal ? (n > 4 ? Math.ceil(n / 2) : n) : (n <= 2 && H / W > 1.5 ? 1 : 2);
     const filas = Math.ceil(n / cols);
     const sep = u * 0.025;
     const cw = (zona.w - sep * (cols - 1)) / cols;

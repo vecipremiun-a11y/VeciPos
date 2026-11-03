@@ -2,14 +2,20 @@
 // el servidor (api/_lib/publicidadActions.js). Las medidas son las de la imagen
 // final que se descarga; el fondo de la IA se pide en su tamaño nativo más
 // cercano y se recorta (nunca se estira).
+// `hoja`: es para imprimir (el botón Imprimir pasa a ser el principal). La hoja
+// horizontal y las pantallas del local las pidió Kevin el 28-oct-2026; las
+// pantallas van en Full HD, que es lo que muestran los televisores de 32".
 
 export const FORMATOS = [
     { id: 'post_vertical', nombre: 'Publicación vertical', corto: '4:5', detalle: 'Instagram y Facebook · 4:5', ancho: 1080, alto: 1350, max: 6 },
     { id: 'historia', nombre: 'Historia / estado', corto: '9:16', detalle: 'Instagram y WhatsApp · 9:16', ancho: 1080, alto: 1920, max: 6 },
     { id: 'cuadrado', nombre: 'Publicación cuadrada', corto: '1:1', detalle: '1:1', ancho: 1080, alto: 1080, max: 4 },
     { id: 'horizontal', nombre: 'Horizontal', corto: '1,91:1', detalle: 'Facebook y web · 1,91:1', ancho: 1200, alto: 628, max: 4 },
-    { id: 'cartel', nombre: 'Cartel para imprimir', corto: 'A4', detalle: 'Hoja A4 vertical', ancho: 1240, alto: 1754, max: 6 },
     { id: 'mayorista', nombre: 'Publicidad mayorista', corto: 'Mayorista', detalle: 'Precio por caja o display · 4:5', ancho: 1080, alto: 1350, max: 6 },
+    { id: 'cartel', nombre: 'Cartel A4 vertical', corto: 'A4', detalle: 'Hoja para imprimir, parada', ancho: 1240, alto: 1754, max: 6, hoja: true },
+    { id: 'cartel_horizontal', nombre: 'Cartel A4 horizontal', corto: 'A4 horiz.', detalle: 'Hoja para imprimir, acostada', ancho: 1754, alto: 1240, max: 6, hoja: true },
+    { id: 'pantalla', nombre: 'Pantalla horizontal', corto: 'TV 16:9', detalle: 'Televisor del local (32") · 16:9', ancho: 1920, alto: 1080, max: 6 },
+    { id: 'pantalla_vertical', nombre: 'Pantalla vertical', corto: 'TV 9:16', detalle: 'Televisor parado (32") · 9:16', ancho: 1080, alto: 1920, max: 6 },
     { id: 'personalizado', nombre: 'Personalizado', corto: 'Libre', detalle: 'Ancho y alto a elección', ancho: 1080, alto: 1080, max: 6 },
 ];
 
@@ -70,6 +76,14 @@ export const LETRAS = [
 ];
 // Las fuentes de LETRAS (Google Fonts; la PWA ya las guarda para usarlas sin internet).
 export const LETRAS_URL = 'https://fonts.googleapis.com/css2?family=Anton&family=Baloo+2:wght@700;800&family=Bangers&family=Montserrat:wght@700;800;900&family=Pacifico&family=Playfair+Display:wght@700;900&display=swap';
+
+// Ejemplos para el chat (Kevin, 27-oct-2026): un toque los copia en la caja.
+export const IDEAS_CHAT = [
+    'Bebidas energéticas a $1.300 cada una, fondo de neón y estilo gamer',
+    'Cartel de oferta 2x1 en pan amasado, estilo pizarra de almacén',
+    'Promo del fin de semana para el asado: carbón, longanizas y bebidas',
+    'Aviso de que abrimos todos los días hasta las 23:00, con colores alegres',
+];
 
 // Combinaciones de colores listas (el menú Colores de la vista previa): un toque
 // cambia los tres. `acento` es el fondo de la etiqueta, que lleva letra oscura.
