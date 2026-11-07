@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, ArrowLeft, Trash2, Plus, Bell, ScanBarcode, Truck, Sparkles, Package } from 'lucide-react';
 import PresentacionModal from './PresentacionModal';
+import OtrosImpuestos from './OtrosImpuestos';
+import { impuestosExtra, costoBase, costoConImpuestos, precioDesdeMargen, margenDesdePrecio } from '../lib/impuestosProducto';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { usePermissions } from '../hooks/usePermissions';
@@ -80,6 +82,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         cost: '',
         supplier: '',
         tax_rate: 0,
+        extra_taxes: [],
         is_offer: false,
         offer_price: '',
         price_ranges: [],
@@ -109,6 +112,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
             const viva = regla && !regla.apagada;
             const inicial = {
                 ...productToEdit,
+                extra_taxes: impuestosExtra(productToEdit.extra_taxes),
                 unit: productToEdit.unit || 'Und',
                 price_ranges: productToEdit.price_ranges || [],
                 preorder_billing_unit: productToEdit.preorder_billing_unit || 'unit',
@@ -129,17 +133,12 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
             // Calculate initial margin %
             if (productToEdit.price && productToEdit.cost) {
-                const taxRate = parseFloat(productToEdit.tax_rate) || 0;
-                const netPrice = parseFloat(productToEdit.price) / (1 + taxRate / 100);
-                const cost = parseFloat(productToEdit.cost);
-                if (cost > 0) {
-                    const margin = ((netPrice - cost) / cost) * 100;
-                    setMarginPercentage(margin.toFixed(2));
-                }
+                const margin = margenDesdePrecio(productToEdit.price, productToEdit.cost, productToEdit.tax_rate, productToEdit.extra_taxes);
+                if (margin !== null) setMarginPercentage(margin.toFixed(2));
             }
         } else {
             inicialRef.current = null;
-            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0, is_offer: false, offer_price: '', sale_mode: 'sale_only', allow_item_notes: false, preorder_unit: '', preorder_billing_unit: 'unit', preorder_price_per_kg: '', preorder_gram_per_unit: '', preorder_use_base_price: true, units_per_box: '' });
+            setFormData({ name: '', price: '', stock: '', unit: 'Und', category: '', sku: '', image: '', cost: '', supplier: '', tax_rate: 0, extra_taxes: [], is_offer: false, offer_price: '', sale_mode: 'sale_only', allow_item_notes: false, preorder_unit: '', preorder_billing_unit: 'unit', preorder_price_per_kg: '', preorder_gram_per_unit: '', preorder_use_base_price: true, units_per_box: '' });
             setMarginPercentage('');
             setAlertConfig({ is_active: false, min_stock: 5, critical_stock: 2, priority: 'normal', notify_system: true, notify_whatsapp: false, cooldown_hours: 6 });
         }
@@ -185,11 +184,9 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         if (name === 'price') {
             const price = parseFloat(value);
             const cost = parseFloat(formData.cost); // Use current state cost
-            const taxRate = parseFloat(formData.tax_rate) || 0;
 
             if (!isNaN(price) && !isNaN(cost) && cost > 0) {
-                const netPrice = price / (1 + taxRate / 100);
-                const margin = ((netPrice - cost) / cost) * 100;
+                const margin = margenDesdePrecio(price, cost, formData.tax_rate, formData.extra_taxes);
                 setMarginPercentage(margin.toFixed(2));
             }
         }
@@ -208,11 +205,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                 // Let's rely on cost and existing margin logic.
                 // If we have cost and a valid margin, we recalculate price.
                 if (cost > 0 && marginPercentage && !isNaN(parseFloat(marginPercentage))) {
-                    const margin = parseFloat(marginPercentage);
-                    const basicPrice = cost * (1 + margin / 100);
-                    const newTax = parseFloat(value) || 0;
-                    const finalPrice = basicPrice * (1 + newTax / 100);
-                    newData.price = finalPrice.toFixed(2);
+                    newData.price = precioDesdeMargen(cost, marginPercentage, value, prev.extra_taxes).toFixed(2);
                 }
             }
             return newData;
@@ -225,13 +218,22 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
         const cost = parseFloat(formData.cost);
         if (cost > 0 && margin !== '') {
-            const marginVal = parseFloat(margin);
-            const basicPrice = cost * (1 + marginVal / 100);
-            const taxRate = parseFloat(formData.tax_rate) || 0;
-            const finalPrice = basicPrice * (1 + taxRate / 100);
+            const finalPrice = precioDesdeMargen(cost, margin, formData.tax_rate, formData.extra_taxes);
 
             setFormData(prev => ({ ...prev, price: finalPrice.toFixed(2) }));
         }
+    };
+
+    // Igual que al cambiar el IVA: se mantiene la utilidad y se mueve el precio.
+    const cambiarOtrosImpuestos = (lista) => {
+        setFormData(prev => {
+            const next = { ...prev, extra_taxes: lista };
+            const cost = parseFloat(prev.cost);
+            if (cost > 0 && marginPercentage && !isNaN(parseFloat(marginPercentage))) {
+                next.price = precioDesdeMargen(cost, marginPercentage, prev.tax_rate, lista).toFixed(2);
+            }
+            return next;
+        });
     };
 
     const toNum = (v) => parseFloat(String(v).replace(',', '.')) || 0;
@@ -273,6 +275,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
             cost: toNum(fd.cost),
             stock: Math.round(toNum(fd.stock) * 1000) / 1000,
             tax_rate: toNum(fd.tax_rate),
+            extra_taxes: impuestosExtra(fd.extra_taxes),
             offer_price: toNum(fd.offer_price),
             units_per_box: parseInt(fd.units_per_box) || 0,
             is_offer: !!fd.is_offer,
@@ -343,6 +346,10 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
         onSave(dataToSave);
     };
     const erroresTramos = erroresEscala(formData.price_ranges || []);
+    const otrosImpuestos = impuestosExtra(formData.extra_taxes);
+    const ivaProducto = toNum(formData.tax_rate);
+    const hayCosto = toNum(formData.cost) > 0;
+    const tasaEnLista = (taxRates || []).some(t => t && toNum(t.rate) === ivaProducto);
 
     if (!isOpen && !isInline) return null;
 
@@ -661,6 +668,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                             name: formData.name,
                             cost: formData.cost,
                             tax_rate: formData.tax_rate,
+                            extra_taxes: otrosImpuestos,
                             stock: formData.stock,
                             price: formData.price,
                         } : null}
@@ -766,7 +774,8 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    {/* items-end: en un celular el rótulo de la derecha puede ocupar dos renglones. */}
+                    <div className="grid grid-cols-2 gap-4 items-end">
                         <div>
                             <label className="block text-sm text-[var(--color-text-muted)] mb-1">Impuesto / IVA</label>
                             <select
@@ -775,7 +784,15 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 onChange={handleChange}
                                 className="glass-input w-full"
                             >
-                                {taxRates && taxRates.length > 0 ? (
+                                {/* Si la tasa del producto no está en la lista, el navegador
+                                    mostraría la primera opción (IVA 19%) mientras por debajo se
+                                    calcula y se guarda otra: un producto nuevo quedaba con 0%. */}
+                                {!tasaEnLista && (
+                                    <option value={ivaProducto} className="bg-gray-900">
+                                        {ivaProducto > 0 ? `Otra tasa (${ivaProducto}%)` : 'Sin impuesto (0%)'}
+                                    </option>
+                                )}
+                                {taxRates && taxRates.length > 0 && (
                                     taxRates.map((tax, index) => {
                                         if (!tax) return null;
                                         const rate = tax.rate !== undefined && tax.rate !== null ? tax.rate : 0;
@@ -786,17 +803,31 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                             </option>
                                         );
                                     })
-                                ) : (
-                                    <option value={0} className="bg-gray-900">Sin impuestos configurados</option>
                                 )}
                             </select>
                         </div>
+                        <div>
+                            <label className="block text-sm text-[var(--color-text-muted)] mb-1">Costo + IVA ({ivaProducto}%)</label>
+                            <div data-prueba="costo-con-iva" className="min-h-[42px] flex items-center rounded-lg border border-dashed border-[var(--glass-border)] px-3 py-2 font-mono font-bold text-[var(--color-text)]">
+                                {hayCosto ? formatCurrency(costoConImpuestos(formData.cost, ivaProducto), currentCurrency) : '—'}
+                            </div>
+                        </div>
                     </div>
 
-                    <div className="text-right">
-                        <label className="block text-xs text-gray-500 mb-1">Precio Neto Calc.</label>
-                        <div className="text-lg font-mono text-[var(--color-text-soft)]">
-                            {formatCurrency(parseFloat(formData.cost || 0) * (1 + (parseFloat(marginPercentage || 0)) / 100), currentCurrency)}
+                    <OtrosImpuestos
+                        extras={otrosImpuestos}
+                        costo={formData.cost}
+                        iva={ivaProducto}
+                        onChange={cambiarOtrosImpuestos}
+                    />
+
+                    {/* El costo con todos los impuestos ya está en la última fila de impuestos. */}
+                    <div className="text-right space-y-2">
+                        <div>
+                            <label className="block text-xs text-gray-500 mb-1">Precio Neto Calc.</label>
+                            <div data-prueba="precio-neto" className="text-lg font-mono text-[var(--color-text-soft)]">
+                                {formatCurrency(costoBase(formData.cost, otrosImpuestos) * (1 + (parseFloat(marginPercentage || 0)) / 100), currentCurrency)}
+                            </div>
                         </div>
                     </div>
 
@@ -817,7 +848,7 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                 required
                             />
                         </div>
-                        <p className="text-center text-xs text-gray-500 mt-2">IVA Incluido</p>
+                        <p className="text-center text-xs text-gray-500 mt-2">{otrosImpuestos.length > 0 ? 'IVA y otros impuestos incluidos' : 'IVA Incluido'}</p>
                     </div>
 
                     {/* OFFER SECTION */}
@@ -1252,13 +1283,10 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                                     const val = e.target.value;
                                                     const newRanges = [...(formData.price_ranges || [])];
                                                     const cost = parseFloat(formData.cost);
-                                                    const taxRate = parseFloat(formData.tax_rate) || 0;
 
                                                     let price = '';
                                                     if (cost > 0 && val !== '') {
-                                                        const marginVal = parseFloat(val);
-                                                        const basicPrice = cost * (1 + marginVal / 100);
-                                                        price = (basicPrice * (1 + taxRate / 100)).toFixed(2);
+                                                        price = precioDesdeMargen(cost, val, formData.tax_rate, otrosImpuestos).toFixed(2);
                                                     }
 
                                                     newRanges[index] = { ...newRanges[index], margin: val, price: price };
@@ -1284,13 +1312,10 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                                                     const val = e.target.value;
                                                     const newRanges = [...(formData.price_ranges || [])];
                                                     const cost = parseFloat(formData.cost);
-                                                    const taxRate = parseFloat(formData.tax_rate) || 0;
 
                                                     let margin = '';
                                                     if (cost > 0 && val !== '') {
-                                                        const priceVal = parseFloat(val);
-                                                        const netPrice = priceVal / (1 + taxRate / 100);
-                                                        margin = (((netPrice - cost) / cost) * 100).toFixed(2);
+                                                        margin = margenDesdePrecio(val, cost, formData.tax_rate, otrosImpuestos).toFixed(2);
                                                     }
 
                                                     newRanges[index] = { ...newRanges[index], price: val, margin: margin };

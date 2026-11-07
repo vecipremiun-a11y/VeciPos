@@ -44,6 +44,7 @@ const buscar = async (termino) => {
 
 try {
     await db.executeMultiple(readFileSync('migrations/0000_base_schema.sql', 'utf8'));
+    await db.executeMultiple(readFileSync('migrations/0037_product_extra_taxes.sql', 'utf8'));
     await db.execute("INSERT INTO companies (id, name) VALUES ('acme', 'Acme')");
     const productos = [
         'Carozzi Cabello Ángel Corto 400g',   // el caso real de producción

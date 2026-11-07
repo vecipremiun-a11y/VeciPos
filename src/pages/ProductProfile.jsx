@@ -1,3 +1,4 @@
+import { impuestosExtra, tasaExtra, utilidadPorUnidad } from '../lib/impuestosProducto';
 import React, { useState, useEffect } from 'react';
 
 import { Search, Package, ArrowDownCircle, ArrowUpCircle, RefreshCw, Truck, ShoppingCart, RotateCcw, Globe, Smartphone, FileText, User, Calendar, Hash, Eye, AlertTriangle } from 'lucide-react';
@@ -437,6 +438,15 @@ const ProductProfile = () => {
                                     </p>
                                 </div>
 
+                                {tasaExtra(selectedProduct.extra_taxes) > 0 && (
+                                    <div>
+                                        <p className="text-xs text-[var(--color-text-muted)]">Otros impuestos:</p>
+                                        <p className="text-[var(--color-text)] font-medium">
+                                            {impuestosExtra(selectedProduct.extra_taxes).map(i => `${i.name} ${i.rate}%`).join(' · ')}
+                                        </p>
+                                    </div>
+                                )}
+
                                 {/* Tax Amount */}
                                 {selectedProduct.tax_rate > 0 && (
                                     <div>
@@ -464,7 +474,7 @@ const ProductProfile = () => {
                                     <p className="text-xs text-[var(--color-text-muted)]">Utilidad Neta:</p>
                                     <p className="text-green-400 font-bold text-lg">
                                         {formatCurrency(
-                                            (selectedProduct.price / (1 + ((selectedProduct.tax_rate || 0) / 100))) - (selectedProduct.cost || 0),
+                                            utilidadPorUnidad(selectedProduct.price, selectedProduct.cost, selectedProduct.tax_rate, selectedProduct.extra_taxes),
                                             currentCurrency
                                         )}
                                     </p>

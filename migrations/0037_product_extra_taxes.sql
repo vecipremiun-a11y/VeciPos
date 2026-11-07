@@ -1,0 +1,21 @@
+-- Otros impuestos del producto, además del IVA.
+--
+-- EL PROBLEMA. Un producto tenía un solo impuesto (`tax_rate`), pero al comprar
+-- algunos llegan con otro más encima: Kevin (4-nov-2026) puso de ejemplo el cerdo
+-- y la carne, con 19% de IVA y además un 5%.
+--
+-- CÓMO SE RESUELVE. `tax_rate` sigue siendo SOLO el IVA: lo leen el SII, el POS,
+-- las boletas y los reportes, y a ellos no les cambia nada. Lo demás va aparte:
+--
+--   extra_taxes   JSON: [{"name":"Impuesto cerdo","rate":5}]. NULL = no tiene.
+--                 Se guarda el nombre y la tasa, igual que `tax_rate` guarda la
+--                 tasa y no el id: cambiar el catálogo no le mueve el precio a
+--                 ningún producto.
+--
+-- OJO AL DESPLEGAR: esta migración va ANTES del push. El código nuevo pide la
+-- columna en la lista de productos y en el catálogo del POS; sin ella, esas
+-- consultas fallan.
+--
+-- Aditivo puro. Rollback: revertir el commit; la columna queda sin usar.
+
+ALTER TABLE products ADD COLUMN extra_taxes TEXT;

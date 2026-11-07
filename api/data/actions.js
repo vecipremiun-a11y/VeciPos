@@ -529,7 +529,9 @@ async function fetchSales(turso, companyId, body) {
 // el código que mira `has_image` trabaja sobre filas de las consultas online
 // (productsSearch, categoryProducts), que sí lo traen. Lo que guarda el sync en el
 // equipo nunca se consultaba — las fotos offline se buscan por id (imagenesLocal.js).
-const PRODUCT_COLS = PRODUCT_COLS_SIN_IMAGEN;
+// `extra_taxes` va solo acá y en la lista del inventario, no en la constante
+// compartida: esa la usa también la venta, y la venta no los necesita.
+const PRODUCT_COLS = `${PRODUCT_COLS_SIN_IMAGEN}, extra_taxes`;
 
 // Cuántas filas como máximo por respuesta.
 //
@@ -753,8 +755,8 @@ async function productCreate(turso, companyId, session, product) {
         sql: `INSERT INTO products (name, price, stock, category, sku, image, cost, tax_rate, unit, supplier,
                 is_offer, offer_price, price_ranges, scale_group_id, company_id, sale_mode, allow_item_notes,
                 preorder_unit, preorder_billing_unit, preorder_price_per_kg, preorder_gram_per_unit,
-                preorder_use_base_price, units_per_box, created_at, category_id)
-              VALUES (?, ?, ROUND(?, 3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                preorder_use_base_price, units_per_box, created_at, extra_taxes, category_id)
+              VALUES (?, ?, ROUND(?, 3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 -- El nombre se sigue guardando (lo usan 19 consultas y 12 pantallas),
                 -- pero la verdad pasa a ser el id: es lo que permite que "Granel"
                 -- exista colgando de Mascotas y de Abarrotes a la vez.
@@ -770,6 +772,7 @@ async function productCreate(turso, companyId, session, product) {
             product.preorder_use_base_price !== undefined ? (product.preorder_use_base_price ? 1 : 0) : 1,
             product.units_per_box || 0,
             new Date().toISOString(),
+            limpiarImpuestosExtra(product.extra_taxes),
             companyId, product.category,
         ],
     });
@@ -866,6 +869,21 @@ async function productPriceUpdate(turso, companyId, session, { id, price, cost, 
 // el stock volvía al número viejo (y quedaba como "ajuste manual"). Kevin lo
 // detectó el 7-oct-2026. Ahora la ficha manda solo los campos que tocó; los
 // demás, empezando por el stock, quedan como están en la base.
+// Otros impuestos del producto (migración 0037). Solo se escriben desde la ficha,
+// así que el guardado completo de las pantallas viejas no los puede borrar.
+function limpiarImpuestosExtra(valor) {
+    let lista = valor;
+    if (typeof valor === 'string') {
+        try { lista = JSON.parse(valor); } catch { return null; }
+    }
+    if (!Array.isArray(lista)) return null;
+    const limpia = lista
+        .map((i) => ({ name: String(i?.name ?? '').trim().slice(0, 60), rate: Number(i?.rate) }))
+        .filter((i) => i.name && i.rate > 0 && i.rate <= 100)
+        .slice(0, 10);
+    return limpia.length ? JSON.stringify(limpia) : null;
+}
+
 const CAMPOS_PARCIALES = {
     name: (v) => v, price: (v) => Number(v) || 0, category: (v) => v, sku: (v) => v,
     cost: (v) => Number(v) || 0, tax_rate: (v) => Number(v) || 0, unit: (v) => v || 'Und',
@@ -875,6 +893,7 @@ const CAMPOS_PARCIALES = {
     preorder_unit: (v) => v || null, preorder_billing_unit: (v) => v || 'unit',
     preorder_price_per_kg: (v) => Number(v) || 0, preorder_gram_per_unit: (v) => Number(v) || 0,
     preorder_use_base_price: (v) => (v ? 1 : 0), units_per_box: (v) => Number(v) || 0,
+    extra_taxes: limpiarImpuestosExtra,
 };
 
 async function productUpdateParcial(turso, companyId, session, id, cambios) {

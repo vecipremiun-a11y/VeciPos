@@ -1,3 +1,4 @@
+import { costoConImpuestos, margenDesdePrecio } from '../lib/impuestosProducto';
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Package, Check, AlertCircle, ScanBarcode } from 'lucide-react';
@@ -42,9 +43,8 @@ export default function PresentacionModal({ isOpen, onClose, product, presentati
     // Mismas cuentas que la ventana de Combo (ProductCombos.jsx): el margen va
     // del precio neto contra el costo neto.
     const costoNeto = costoUnidad * u;
-    const costoConIva = costoNeto * (1 + tasa / 100);
-    const precioNeto = tasa > 0 ? p / (1 + tasa / 100) : p;
-    const margen = costoNeto > 0 && p > 0 ? ((precioNeto - costoNeto) / costoNeto) * 100 : null;
+    const costoConIva = costoConImpuestos(costoNeto, tasa, product.extra_taxes);
+    const margen = costoNeto > 0 && p > 0 ? margenDesdePrecio(p, costoNeto, tasa, product.extra_taxes) : null;
     const stock = Number(product.stock) || 0;
     const armadas = u > 0 ? Math.floor(stock / u) : 0;
     const precioUnidadEnCaja = u > 0 ? p / u : 0;

@@ -100,6 +100,7 @@ const dir = mkdtempSync(join(tmpdir(), 'cats-'));
 const db = createClient({ url: `file:${join(dir, 't.db').split(String.fromCharCode(92)).join('/')}` });
 try {
     await db.executeMultiple(readFileSync('migrations/0000_base_schema.sql', 'utf8'));
+    await db.executeMultiple(readFileSync('migrations/0037_product_extra_taxes.sql', 'utf8'));
     await db.execute("INSERT INTO companies (id, name) VALUES ('acme','Acme')");
     await db.executeMultiple(readFileSync('migrations/0024_categorias_jerarquia.sql', 'utf8'));
     // El snapshot 0000 quedó atrás respecto de producción: allá `products` tiene

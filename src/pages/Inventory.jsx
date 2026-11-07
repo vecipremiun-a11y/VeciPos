@@ -1,4 +1,5 @@
 
+import { impuestosExtra } from '../lib/impuestosProducto';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, Plus, Edit, Trash2, Filter, Loader, ScanBarcode, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
@@ -194,7 +195,8 @@ const Inventory = () => {
             if (filterTax !== 'Todos') {
                 const tax = parseFloat(product.tax_rate) || 0;
                 const targetTax = parseFloat(filterTax);
-                matchesTax = Math.abs(tax - targetTax) < 0.01;
+                matchesTax = Math.abs(tax - targetTax) < 0.01
+                    || impuestosExtra(product.extra_taxes).some(i => Math.abs(i.rate - targetTax) < 0.01);
             }
 
             let matchesStock = true;

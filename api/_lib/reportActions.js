@@ -75,7 +75,7 @@ const SPECIAL = {
         // pantalla quedaba en "No se encontraron productos" sin decir por qué.
         // Las fotos llegan después (loadProductImages). `created_at` e
         // `is_active` van sueltos porque no están en la lista compartida.
-        const COLS = `${PRODUCT_COLS_SIN_IMAGEN}, created_at, is_active,
+        const COLS = `${PRODUCT_COLS_SIN_IMAGEN}, extra_taxes, created_at, is_active,
                       CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image`;
         const ORDEN = 'ORDER BY is_offer DESC, name COLLATE NOCASE ASC LIMIT ? OFFSET ?';
 
@@ -284,7 +284,7 @@ const REPORTS = {
         // acá solo busca cuando hay algo escrito.
         if (!f) return [{ sql: 'SELECT 1 WHERE 0', args: () => [] }];
         return [{
-            sql: `SELECT ${PRODUCT_COLS_SIN_IMAGEN},
+            sql: `SELECT ${PRODUCT_COLS_SIN_IMAGEN}, extra_taxes,
                     CASE WHEN image IS NOT NULL AND image != '' THEN 1 ELSE 0 END AS has_image
                   FROM products WHERE company_id = ? AND ${f.sql} LIMIT ?`,
             args: (cid) => [cid, ...f.args, lim],

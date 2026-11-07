@@ -1,3 +1,4 @@
+import { tasaExtra, margenDesdePrecio, utilidadPorUnidad } from '../../lib/impuestosProducto';
 import React from 'react';
 import { Edit, Trash2 } from 'lucide-react';
 import OptimizedImage from '../OptimizedImage';
@@ -158,16 +159,15 @@ const InventoryProductList = ({
                                 <td className="px-6 py-5 text-[var(--color-text-muted)] text-lg">{formatCurrency(product.cost || 0, currentCurrency)}</td>
                                 <td className="px-6 py-5 text-[var(--color-text-muted)] text-sm">
                                     {product.tax_rate > 0 ? `IVA(${product.tax_rate} %)` : 'Exento (0%)'}
+                                    {tasaExtra(product.extra_taxes) > 0 && ` + ${tasaExtra(product.extra_taxes)}%`}
                                 </td>
                                 <td className="px-6 py-5">
                                     {(() => {
-                                        const taxRate = parseFloat(product.tax_rate) || 0;
-                                        const netPrice = parseFloat(product.price) / (1 + taxRate / 100);
                                         const cost = parseFloat(product.cost) || 0;
                                         if (cost <= 0) return <span className="text-[var(--color-text-muted)] text-lg">-</span>;
 
-                                        const margin = ((netPrice - cost) / cost) * 100;
-                                        const marginValue = netPrice - cost;
+                                        const margin = margenDesdePrecio(product.price, cost, product.tax_rate, product.extra_taxes);
+                                        const marginValue = utilidadPorUnidad(product.price, cost, product.tax_rate, product.extra_taxes);
 
                                         return (
                                             <div className="flex flex-col">

@@ -65,6 +65,7 @@ async function probar(nombre, buscar) {
 
 try {
     await db.executeMultiple(readFileSync('migrations/0000_base_schema.sql', 'utf8'));
+    await db.executeMultiple(readFileSync('migrations/0037_product_extra_taxes.sql', 'utf8'));
     await db.execute("INSERT INTO companies (id, name) VALUES ('acme', 'Acme')");
     await db.execute("INSERT INTO users (id, username, password, name, role, company_id) VALUES (1,'jefe','x','Jefe','Administrador','acme')");
 
