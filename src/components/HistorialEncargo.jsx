@@ -28,7 +28,7 @@ const ESTADOS = {
 // panadería), así que ahí la pantalla ES la respuesta.
 const FUENTES = {
     encargos: 'Encargos',
-    produccion: 'Producción',
+    produccion: 'Cocina',
     kds: 'Panadería (KDS)',
     tienda: 'Tienda web',
     sistema: 'Sistema',

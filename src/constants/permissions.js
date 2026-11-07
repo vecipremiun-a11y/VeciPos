@@ -151,10 +151,10 @@ export const ALL_PERMISSIONS = [
     },
     {
         id: 'production',
-        label: 'Producción',
+        label: 'Cocina',
         permissions: [
-            { id: 'production.view', label: 'Ver Pantalla de Producción', desc: 'Permite ver los pedidos en cola de producción' },
-            { id: 'production.manage', label: 'Gestionar Estados de Producción', desc: 'Permite cambiar estados: en preparación, listo, entregado' },
+            { id: 'production.view', label: 'Ver pantalla de Cocina', desc: 'Permite ver los pedidos del día en cola de cocina' },
+            { id: 'production.manage', label: 'Gestionar estados en Cocina', desc: 'Permite cambiar estados: en preparación, listo, entregado' },
         ]
     },
     {

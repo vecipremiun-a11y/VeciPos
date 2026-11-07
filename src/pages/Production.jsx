@@ -609,7 +609,7 @@ const Production = () => {
                         <ChefHat size={22} className="text-white" />
                     </div>
                     <div>
-                        <h1 className="text-xl font-bold text-[var(--color-text)]">Producción</h1>
+                        <h1 className="text-xl font-bold text-[var(--color-text)]">Cocina</h1>
                         <p className="text-xs text-[var(--color-text-muted)]">Pantalla de cocina · Tiempo real</p>
                     </div>
                 </div>

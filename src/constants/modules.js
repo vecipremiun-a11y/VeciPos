@@ -217,8 +217,8 @@ export const ALL_MODULES = [
     },
     {
         key: 'production',
-        label: 'Producción (App Cocina)',
-        description: 'Pantalla de producción para gestión de encargos.',
+        label: 'Cocina (App Cocina)',
+        description: 'Pantalla de cocina para gestión de encargos.',
         defaultEnabled: false,
         plan: 'professional',
         minLevel: 2,

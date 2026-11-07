@@ -357,7 +357,7 @@ const Settings = () => {
                                             <Volume2 size={18} className="text-[var(--color-primary)]" />
                                         </h2>
                                         <p className="text-sm text-[var(--color-text-muted)]">
-                                            Sonido que se reproducirá en la pantalla de Producción y en la pantalla de Cocina (TV) cuando ingrese un nuevo pedido del día.
+                                            Sonido que se reproducirá en la pantalla de Cocina y en la de la panadería (TV) cuando ingrese un nuevo pedido del día.
                                         </p>
                                     </div>
                                 </div>
