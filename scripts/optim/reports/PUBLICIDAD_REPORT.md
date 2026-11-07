@@ -402,6 +402,111 @@ Menú **Publicidad** (App del Marketplace "Publicidad IA", permiso `ads.use`):
       lista «Sin foto»: se busca el producto, y el buscador dice si tiene.
     - **Rollback:** revertir el commit. No hay migración (`ad_backgrounds.mode`
       es texto libre).
+13. **Capas y texto que se acomoda, como en Photoroom** (Kevin, 3-nov-2026:
+    "ponerlo detrás o sacar al frente"; "cambiar el tamaño de letras y alargar
+    el alto o el ancho… la oración se contrae o se expande o sube a unirse con la
+    fila de arriba"). En la Rápida.
+    - **Capas:** la barra de la pieza elegida trae «Al frente» y «Atrás».
+      `componer.js` arma una lista de capas, de atrás hacia adelante, y las
+      dibuja en el orden de `d.orden` (se guarda en `layout.orden`). Un id que ya
+      no está se ignora, lo que falta cae junto al que tiene antes en el orden de
+      siempre, y una imagen nueva va arriba. Con varios productos, las tarjetas
+      son una sola capa (`tarjetas`): no se eligen, pero una imagen puede ir
+      detrás de ellas.
+    - **Llegar a una pieza tapada:** un toque elige lo de adelante; otro toque en
+      el mismo lugar, la de abajo (da la vuelta). La pieza elegida se puede
+      arrastrar aunque tenga otra encima.
+    - **Letra:** en los textos (título, mensaje, nombre, precio, etiqueta y pie)
+      la barra cambia el tamaño de la letra (`mover[id].letra`, de 40 % a 300 %),
+      no el de la pieza: la oración se reacomoda dentro de su ancho. Las esquinas
+      siguen agrandando toda la pieza (`escala`).
+    - **Ancho y alto de la caja:** título, mensaje, nombre y precio tienen puntos
+      en los cuatro lados (`mover[id].ancho` y `alto`, en fracciones del lienzo).
+      Con más ancho, las palabras suben a la fila de arriba; con menos, bajan. El
+      lado de enfrente queda quieto. Una caja nunca es más angosta que la palabra
+      más larga (el número, en el precio) ni más baja que su texto. Si estaba
+      agrandada por las esquinas, ese tamaño pasa a su letra y a su caja al tirar
+      de un lado.
+    - **No deforma las letras:** "alargar" cambia la caja, no el dibujo de la
+      letra (ni la estira ni la aplasta). Así se entendió el pedido.
+    - **Lo guardado no cambia:** sin `letra`, `ancho`, `alto` ni `orden`, todo se
+      dibuja igual. Comprobado píxel por píxel contra el `componer.js` de la v3.0
+      en 12 casos (formatos, varios productos, sin foto, piezas ya movidas).
+    - **Fuera de la imagen** (Kevin, 3-nov-2026: "que la mitad esté adentro y la
+      otra afuera del cuadro"): lo que se arrastra (textos, foto e imágenes) puede
+      salirse. Siempre queda adentro la cuarta parte de la pieza, y no menos del 6 %
+      del lado corto, para poder volver a tomarla con el dedo. Lo de afuera no se
+      ve ni sale en lo que se guarda, se baja o se imprime. Un texto queda marcado
+      con `mover[id].fuera` al arrastrarlo; sin esa marca sigue adentro, como todo
+      lo guardado antes y al agrandarlo sin moverlo. La foto ya no tiene el tope
+      de 15 % a 85 %. Los puntos que queden afuera no se pueden tomar: para esos,
+      A−/A+ o traerla un poco de vuelta.
+    - **La imagen saltaba bajo el dedo:** en el celular, la primera vez que se movía
+      una pieza aparecía «Textos a su lugar», la fila de arriba pasaba a dos
+      líneas y la imagen bajaba 42 px en pleno arrastre. Ahora ese botón siempre
+      ocupa su lugar y en el celular la fila no se parte.
+    - **«Textos a su lugar»** vuelve también las capas al orden de siempre. «A su
+      lugar» de una pieza deja su capa.
+    - **Rollback:** revertir el commit. No hay migración: va en el JSON de `layout`.
+14. **Descargas e impresión que avisan, en todo el sistema** (Kevin, 4-nov-2026:
+    "no sale ningún mensaje que se descargó… la boleta no se puede descargar…
+    un mensaje visible que se note que esa acción se hizo").
+    - **Causa 1, no había descarga:** en la app, el WebView ignora `<a download>`,
+      así que `doc.save()`, `XLSX.writeFile()` y los enlaces no guardaban nada, sin
+      error. Capacitor 8 no maneja descargas. Pasaba con la boleta del pedido
+      entregado, la del Historial, el comprobante del paquete y los reportes.
+    - **Causa 2, no se veía el aviso:** Publicidad avisaba en una franja arriba de
+      la página, fuera de la vista en el celular cuando se aprieta Descargar.
+      Ahora todos sus avisos van a los del sistema (`avisar` → `toast`).
+    - **`src/lib/descargas.js`** (nuevo): por ahí pasa todo lo que se baja, y avisa.
+      En la app, al plugin nativo: archivos a **Descargas/POSVECI**
+      (`GuardarImagen.guardarArchivo`, MediaStore.Downloads, Android 10 o más) e
+      imágenes a la galería, como antes. En el navegador, el enlace de siempre.
+      Lo usan los 15 lugares que armaban la descarga (PDF, Excel y CSV). Queda
+      afuera el enlace al comprobante de pago del panel de administración. La
+      boleta de la venta recién hecha (checkout, zona protegida) tampoco se tocó.
+    - **Aviso:** `avisoHecho` en `toast.js`: verde lleno, letra más grande, 6 s,
+      encima de los modales y debajo de la barra del teléfono.
+    - **Imprimir:** `printSaleReceipt`, `printThermalReceipt` e
+      `imprimirComprobanteEnvio` **no se tocaron**. Se agregó el aviso según lo que
+      devuelven (`avisarImpresion`). Sin impresora en la app, lo dice y ofrece
+      Descargar. El contenido de los PDF tampoco cambió: solo cómo se guardan.
+    - **Rollback:** revertir el commit. Sin migración. Una APK sin el plugin nuevo
+      recibe UNIMPLEMENTED y pide actualizarla.
+    - **Probado:** 39 OK con Chrome, Vite y Capacitor simulado: los bytes que
+      llegan al plugin, los PDF de verdad, el aviso en pantalla y encima del modal,
+      y las fallas. El Java solo se compiló (`compileReleaseJavaWithJavac`):
+      **falta guardar de verdad en un teléfono**. El Historial de ventas y los
+      reportes no se abrieron en esa prueba: cambian solo la línea que baja el
+      archivo. Un iPhone tampoco se probó.
+
+15. **Recortar: girar el producto** (Kevin, 7-nov-2026: "que se pueda rotar para
+    ponerlo parado, acostado o en otro ángulo… un producto que no está bien parejo").
+    - **En pantalla:** debajo de «Tamaño del producto» hay dos controles más.
+      - **↺ 90°** y **↻ 90°** giran de a cuarto de vuelta.
+      - **Enderezar** va de −45° a 45°, de a medio grado.
+      - **Como vino** lo deja como lo devolvió la IA.
+    - **Sin IA:** no gasta imágenes del cupo.
+    - **Dónde aplica el giro:** en la vista, en lo que se baja y en lo que se guarda en el Historial.
+      - También en la foto que se pone en un producto: sigue siendo cuadrada y sobre blanco, pero derecha.
+      - Va en `layout.giro` y `layout.inclinacion`. Al abrirla desde el Historial vuelve girada.
+      - Las guardadas antes no tienen esos campos y vuelven derechas.
+    - **Cómo:** el tamaño se mide sobre el producto ya girado, así que un 88 % sigue siendo un 88 %.
+      - Los cuartos de vuelta giran la foto sin fondo entera, una vez por clic.
+      - Si el producto tocaba un borde (un busto cortado abajo), el borde gira con él y el corte sigue pegado al lado que le toca.
+      - Enderezar dibuja el producto inclinado directo en cada paso del deslizador. Lo que ocupa sale del contorno del producto (el primer y el último punto de cada fila), calculado una sola vez.
+      - Inclinado, el producto queda siempre centrado.
+    - **Medido (Chrome, foto de 1024 px):**
+      - Girar la foto y recorrerla de nuevo le sumaba ~76 ms a cada paso del deslizador.
+      - Dibujándolo directo, un paso de Enderezar tarda lo mismo que uno de Tamaño: 33 ms contra 34 ms en la prueba, contando los dos cuadros de pantalla.
+    - **Probado (Puppeteer, PC y celular de 360 px):** 25/25.
+      - Un paquete inclinado 12° queda derecho y llena su rectángulo, a 88 % del ancho.
+      - El cuarto de vuelta lo pone parado.
+      - Se guardan el giro y la inclinación, y el archivo guardado sale derecho.
+      - «Como vino» lo deja exacto.
+      - Sin scroll a lo ancho y sin errores.
+      - **Falta:** un teléfono real.
+    - **Rollback:** revertir el commit. No hay migración: va en el JSON de `layout`.
 
 La IA nunca escribe precios ni nombres: el prompt le prohíbe texto, y lo
 comercial lo pone `src/lib/publicidad/componer.js`.
@@ -640,6 +745,13 @@ Asistente) con tokens y costo.
   producto intacta, la foto a 800 px, la pregunta antes de reemplazar, la
   lista del buscador encima de la otra tarjeta y el Historial.
   **Falta:** la IA real (sin autorización todavía) y la cámara en el APK.
+- **Capas, texto que se acomoda y fuera de la imagen (3-nov-2026):** 89 OK con
+  Chrome (Vite, servidor simulado): 12 casos idénticos píxel por píxel a la v3.0,
+  capas, reflujo, mínimos, doble tamaño para imprimir y, en la pantalla real en PC
+  y con el dedo en celular, A+, tirar de los cuatro lados, Al frente, Atrás, el
+  toque repetido, sacar un texto y la foto, el pedazo que queda, traerlo de vuelta,
+  que la imagen no salte y abrir del Historial. Siguen bien las pruebas anteriores de la pantalla (arrastre, imágenes,
+  guardar, formatos, recorte) y `test-publicidad.mjs`. **Falta:** un teléfono real.
 
 ## Cómo probar después de desplegar
 

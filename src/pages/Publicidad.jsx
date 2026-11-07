@@ -4,7 +4,7 @@ import {
     Megaphone, Search, Loader2, X, Sparkles, Download, Save, Copy, Trash2, Pencil, Plus, Upload,
     History, AlertTriangle, CheckCircle2, Palette, Image as ImageIcon, Wand2, Lightbulb, Move, Printer,
     CircleHelp, ChevronDown, Type, RotateCcw, Zap, MessageSquare, Send, Paperclip, ShoppingBag, ImageOff,
-    Scissors, Camera, PackageCheck,
+    Scissors, Camera, PackageCheck, BringToFront, SendToBack, RotateCw,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -18,9 +18,10 @@ import {
     formatoPorId, campanaPorId, estiloPorId, letrasPorId, sugerirEstilo, medidas, textoUnidad,
 } from '../lib/publicidad/catalogo';
 import {
-    cargarImagen, dibujarPublicidad, dibujarImagen, zoomEntera, quitarFondoBlanco, pedirLetras, prepararLetras, esquinas, ESCALA_PIEZA,
+    cargarImagen, dibujarPublicidad, dibujarImagen, zoomEntera, quitarFondoBlanco, pedirLetras, prepararLetras, esquinas, lados, pedazoVisible, ESCALA_PIEZA, LETRA_PIEZA,
 } from '../lib/publicidad/componer';
 import { publicidad, descargarImagen, imprimirImagen, achicarFoto } from '../lib/publicidad/api';
+import { avisoHecho, toast } from '../lib/toast';
 
 // Publicidad IA: se eligen productos del inventario, la IA hace SOLO el fondo y
 // el nombre, el precio y los textos los dibuja el sistema encima
@@ -44,6 +45,7 @@ const DISENO_VACIO = {
     encuadre: { x: 0, y: 0, zoom: 1 }, // del fondo: correrlo y alejarlo/acercarlo (componer.js)
     letras: 'clasica',
     mover: {}, // lo que se corrió y agrandó cada texto; una nueva arranca con todo en su lugar
+    orden: [], // las capas, de atrás hacia adelante; vacío: el orden de siempre
 };
 
 // La publicidad hecha con chat. `mensajes`: cada pedido con la imagen que salió
@@ -65,16 +67,22 @@ const CHAT_VACIO = {
 // `asignada`: los productos que ya la tienen. `formato`, `tamano` (del producto,
 // 0,88 = el 88 % del lado que manda) y `fondo` (null = sin fondo, PNG): cómo sale
 // la foto que se baja o se guarda; se arma sin IA, así que se cambia antes o después.
+// `giro` (0, 90, 180 o 270, de a cuarto de vuelta) e `inclinacion` (−45° a 45°,
+// para enderezar una foto chueca): cuánto se gira el producto (Kevin, 7-nov-2026).
 const RECORTE_VACIO = {
     id: null, title: '', guardado: null, producto: null, original: null, deInventario: false, nota: '',
     fondoId: null, url: null, dataUrl: null, asignada: [],
     formato: 'cuadrado', personalizado: { ancho: 800, alto: 800 }, tamano: 0.88, fondo: '#ffffff',
+    giro: 0, inclinacion: 0,
 };
 
-/** Cómo sale un recorte: guardado así, no se guarda de nuevo; con otra medida, tamaño o fondo, queda otro. */
+/** Cuánto está girado el producto en total, en grados. */
+const anguloRecorte = (r) => (Number(r.giro) || 0) + (Number(r.inclinacion) || 0);
+
+/** Cómo sale un recorte: guardado así, no se guarda de nuevo; con otra medida, tamaño, fondo o giro, queda otro. */
 function firmaRecorte(r) {
     const { ancho, alto } = medidas(r.formato, r.personalizado);
-    return `${ancho}x${alto}|${Number(r.tamano).toFixed(2)}|${r.fondo || 'sin'}`;
+    return `${ancho}x${alto}|${Number(r.tamano).toFixed(2)}|${r.fondo || 'sin'}|${anguloRecorte(r)}`;
 }
 
 // Lo que se ve en la publicidad, para saber si cambió desde que se guardó o se
@@ -112,20 +120,36 @@ function puntoEnLienzo(c, e) {
     const r = c.getBoundingClientRect();
     return { x: (e.clientX - r.left) * c.width / r.width, y: (e.clientY - r.top) * c.height / r.height, escala: c.width / r.width };
 }
-function piezaEn(piezas, p) {
+const contiene = (c, p) => {
     const tol = 8 * p.escala;
+    return p.x >= c.x - tol && p.x <= c.x + c.w + tol && p.y >= c.y - tol && p.y <= c.y + c.h + tol;
+};
+function piezaEn(piezas, p) {
     for (let i = piezas.length - 1; i >= 0; i--) {
-        const c = piezas[i];
-        if (p.x >= c.x - tol && p.x <= c.x + c.w + tol && p.y >= c.y - tol && p.y <= c.y + c.h + tol) return c;
+        if (contiene(piezas[i], p)) return piezas[i];
     }
     return null;
 }
-/** Primero las esquinas de la pieza elegida (para agrandarla), después cualquier pieza (para moverla). */
+/**
+ * Primero las esquinas y los lados de la pieza elegida (el punto más cercano),
+ * después la elegida misma: se agarra aunque tenga otra encima, si no, una que
+ * quedó atrás no se podría mover. Si no, la que esté más adelante en ese punto.
+ */
 function tomar(piezas, seleccion, p) {
     const sel = seleccion && piezas.find(k => k.id === seleccion);
-    if (sel && esquinas(sel).some(([x, y]) => Math.hypot(p.x - x, p.y - y) <= 14 * p.escala)) return { pieza: sel, esquina: true };
+    if (sel) {
+        let cerca = null;
+        const probar = (x, y, punto) => {
+            const dist = Math.hypot(p.x - x, p.y - y);
+            if (dist <= 14 * p.escala && (!cerca || dist < cerca.dist)) cerca = { dist, ...punto };
+        };
+        for (const [x, y] of esquinas(sel)) probar(x, y, { esquina: true, lado: null });
+        for (const [lado, x, y] of lados(sel)) probar(x, y, { esquina: false, lado });
+        if (cerca) return { pieza: sel, esquina: cerca.esquina, lado: cerca.lado };
+        if (contiene(sel, p)) return { pieza: sel, esquina: false, lado: null };
+    }
     const pieza = piezaEn(piezas, p);
-    return pieza ? { pieza, esquina: false } : null;
+    return pieza ? { pieza, esquina: false, lado: null } : null;
 }
 const limitar = (v, min, max) => Math.min(max, Math.max(min, v));
 
@@ -184,7 +208,6 @@ export default function Publicidad() {
     const [guardando, setGuardando] = useState(false);
     const [imprimiendo, setImprimiendo] = useState(false);
     const [abriendo, setAbriendo] = useState(false);
-    const [aviso, setAviso] = useState(null); // { tipo: 'ok'|'error', texto }
     const [version, setVersion] = useState(0);
     const [fuente, setFuente] = useState(''); // '' = buscador · OFERTAS · nombre de una categoría
     const [conIdea, setConIdea] = useState(false);
@@ -202,8 +225,9 @@ export default function Publicidad() {
     const clave = useRef(null);      // { clave, firma }: un reintento tras un corte no vuelve a cobrar
     const guardado = useRef({ id: null, firma: null }); // cómo estaba al guardarla o abrirla (ver firmaDiseno)
     const piezas = useRef([]);       // dónde quedó cada texto en el último dibujo
-    const arrastre = useRef(null);   // { modo: 'mover' | 'tamano', pieza, inicio, ... }
+    const arrastre = useRef(null);   // { modo: 'mover' | 'tamano' | 'lado', pieza, inicio, ... }
     const tocarVacio = useRef(null); // un toque fuera de los textos: si no se arrastra, suelta la elegida
+    const ultimoToque = useRef(null); // dónde fue el último toque sobre una pieza: otro ahí elige la de abajo
     const archivoImagen = useRef(null); // «Agregar imagen»: un logo u otra imagen encima
     const porElegir = useRef(null);     // la imagen recién agregada: se elige apenas esté recortada
 
@@ -246,7 +270,9 @@ export default function Publicidad() {
 
     useEffect(() => { refrescarEstado(); }, [refrescarEstado]);
 
-    const avisar = (tipo, texto) => setAviso({ tipo, texto });
+    // Kevin, 4-nov-2026: en el celular una franja arriba de la página queda fuera de
+    // la vista cuando se aprieta Descargar o Guardar. Estos avisos se ven siempre.
+    const avisar = (tipo, texto) => (tipo === 'ok' ? avisoHecho(texto) : toast(texto, 'error', { ms: 7000 }));
     const cambiar = (campos) => setD(prev => ({ ...prev, ...campos }));
     const cambiarItem = (productId, campos) => setItems(prev => prev.map(it => it.productId === productId ? { ...it, ...campos } : it));
 
@@ -298,7 +324,7 @@ export default function Publicidad() {
         const integradoDe = escenaIntegrada ? fondo.productId : null;
         return {
             ancho, alto, formatoId: d.formato, fondo: fondoImg, colores, ajustes: d.ajustes, encuadre: d.encuadre, dinero,
-            letras, mover: d.mover, seleccion,
+            letras, mover: d.mover, orden: d.orden, seleccion,
             textos: {
                 titulo: d.titulo ?? campana.titulo, mensaje: d.mensaje, extra: d.extra,
                 negocio: d.mostrarNegocio ? (d.negocio ?? nombreEmpresa) : '',
@@ -358,15 +384,19 @@ export default function Publicidad() {
         ? { x: pieza.posX, y: pieza.posY }
         : { x: pieza.dx / lienzo.current.width, y: pieza.dy / lienzo.current.height });
 
-    /** Corre la pieza `dxPx`, `dyPx` desde `inicio`, hasta el borde de la imagen y no más (así volver no tiene un tramo muerto). */
+    /**
+     * Corre la pieza `dxPx`, `dyPx` desde `inicio`. Puede salirse de la imagen hasta
+     * que quede solo un pedazo adentro, y no más (así volver no tiene un tramo muerto).
+     */
     const correrPieza = (pieza, inicio, dxPx, dyPx) => {
         const c = lienzo.current;
-        const dx = limitar(dxPx, -pieza.x, c.width - pieza.w - pieza.x);
-        const dy = limitar(dyPx, -pieza.y, c.height - pieza.h - pieza.y);
+        const visibleX = pedazoVisible(pieza.w, c.width, c.height), visibleY = pedazoVisible(pieza.h, c.width, c.height);
+        const dx = limitar(dxPx, visibleX - pieza.w - pieza.x, c.width - visibleX - pieza.x);
+        const dy = limitar(dyPx, visibleY - pieza.h - pieza.y, c.height - visibleY - pieza.y);
         if (pieza.id === 'foto') {
-            setD(prev => ({ ...prev, ajustes: { ...prev.ajustes, posX: limitar(inicio.x + dx / c.width, 0.15, 0.85), posY: limitar(inicio.y + dy / pieza.libre, 0.1, 0.9) } }));
+            setD(prev => ({ ...prev, ajustes: { ...prev.ajustes, posX: inicio.x + dx / c.width, posY: inicio.y + dy / pieza.libre } }));
         } else {
-            setD(prev => ({ ...prev, mover: { ...prev.mover, [pieza.id]: { ...prev.mover[pieza.id], x: inicio.x + dx / c.width, y: inicio.y + dy / c.height } } }));
+            setD(prev => ({ ...prev, mover: { ...prev.mover, [pieza.id]: { ...prev.mover[pieza.id], x: inicio.x + dx / c.width, y: inicio.y + dy / c.height, fuera: true } } }));
         }
     };
 
@@ -388,21 +418,83 @@ export default function Publicidad() {
         });
     };
 
+    // La barra de un texto cambia su letra (la oración se acomoda en la caja); la
+    // de la foto y las imágenes, su tamaño. Las esquinas agrandan toda la pieza.
+    const esTexto = (id) => id !== 'foto' && !esImagen(id);
+    const letraDe = (id) => Number(d.mover[id]?.letra) || 1;
+    const cambiarLetra = (id, valor) => {
+        const letra = limitar(valor, LETRA_PIEZA.min, LETRA_PIEZA.max);
+        setD(prev => ({ ...prev, mover: { ...prev.mover, [id]: { ...prev.mover[id], letra } } }));
+    };
+
+    // Kevin, 3-nov-2026: "ponerlo detrás o sacar al frente".
+    const aLaCapa = (id, adonde) => {
+        const resto = (piezas.current.capas || []).filter(x => x !== id);
+        cambiar({ orden: adonde === 'frente' ? [...resto, id] : [id, ...resto] });
+    };
+
+    /**
+     * Tirar del punto de un lado de un texto cambia el ancho o el alto de su caja, y
+     * el lado de enfrente queda quieto. Si estaba agrandado por las esquinas, ese
+     * tamaño pasa a su letra y a su caja (se ve igual): así la cuenta es en px.
+     */
+    const empezarLado = (pieza, lado, desde) => {
+        const c = lienzo.current;
+        const s = pieza.escala || 1;
+        const altoLocal = pieza.h / s;
+        const x0 = pieza.dx / c.width;
+        // La caja crece hacia abajo desde arriba: el lado de arriba tiene que quedar donde está.
+        const y0 = (pieza.dy + (altoLocal * (1 - s)) / 2) / c.height;
+        if (s !== 1) {
+            setD(prev => {
+                const m = prev.mover[pieza.id] || {};
+                return {
+                    ...prev,
+                    mover: {
+                        ...prev.mover,
+                        [pieza.id]: {
+                            ...m, escala: 1, y: y0, letra: limitar((Number(m.letra) || 1) * s, LETRA_PIEZA.min, LETRA_PIEZA.max), ancho: pieza.w / c.width,
+                            ...(m.alto ? { alto: m.alto * s } : {}),
+                        },
+                    },
+                };
+            });
+        }
+        return { modo: 'lado', pieza, lado, desde, x0, y0, w0: pieza.w, h0: pieza.h, minW: pieza.fluida.minW * s, minH: pieza.fluida.minH * s };
+    };
+    const tirarDelLado = (a, p) => {
+        const c = lienzo.current;
+        let cambios;
+        if (a.lado === 'e' || a.lado === 'o') {
+            const signo = a.lado === 'e' ? 1 : -1;
+            const w = limitar(a.w0 + signo * (p.x - a.desde.x), a.minW, c.width);
+            cambios = { ancho: w / c.width, x: a.x0 + (signo * (w - a.w0)) / 2 / c.width, y: a.y0, fuera: true };
+        } else {
+            const abajo = a.lado === 's';
+            const h = limitar(a.h0 + (abajo ? 1 : -1) * (p.y - a.desde.y), a.minH, c.height);
+            // Del tamaño justo del texto: sin alto propio, así crece y se achica con él.
+            cambios = { alto: h > a.minH + 1 ? h / c.height : undefined, x: a.x0, y: abajo ? a.y0 : a.y0 - (h - a.h0) / c.height, fuera: true };
+        }
+        setD(prev => ({ ...prev, mover: { ...prev.mover, [a.pieza.id]: { ...prev.mover[a.pieza.id], ...cambios } } }));
+    };
+
     const empezarArrastre = (e) => {
         const c = lienzo.current;
         const p = puntoEnLienzo(c, e);
         const toma = generando ? null : tomar(piezas.current, seleccion, p);
-        if (!toma) { tocarVacio.current = p; return; }
-        const { pieza, esquina } = toma;
+        if (!toma) { tocarVacio.current = p; ultimoToque.current = null; return; }
+        const { pieza, esquina, lado } = toma;
         e.preventDefault();
         // preventDefault deja el foco donde estaba: si era el buscador, las flechas y
         // Supr irían a sus letras y no a la pieza elegida.
         if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) document.activeElement.blur();
         c.setPointerCapture?.(e.pointerId);
         const centro = { x: pieza.x + pieza.w / 2, y: pieza.y + pieza.h / 2 };
-        arrastre.current = esquina
-            ? { modo: 'tamano', pieza, centro, distancia: Math.max(1, Math.hypot(p.x - centro.x, p.y - centro.y)), inicio: tamanoDe(pieza.id) }
-            : { modo: 'mover', pieza, desde: p, inicio: inicioDe(pieza) };
+        arrastre.current = lado
+            ? empezarLado(pieza, lado, p)
+            : esquina
+                ? { modo: 'tamano', pieza, centro, distancia: Math.max(1, Math.hypot(p.x - centro.x, p.y - centro.y)), inicio: tamanoDe(pieza.id) }
+                : { modo: 'mover', pieza, desde: p, inicio: inicioDe(pieza) };
         setSeleccion(pieza.id);
     };
     const moverArrastre = (e) => {
@@ -411,15 +503,32 @@ export default function Publicidad() {
         const a = arrastre.current;
         if (!a) {
             const toma = tomar(piezas.current, seleccion, p);
-            c.style.cursor = !toma ? '' : toma.esquina ? 'nwse-resize' : 'move';
+            c.style.cursor = !toma ? '' : toma.lado ? (toma.lado === 'e' || toma.lado === 'o' ? 'ew-resize' : 'ns-resize') : toma.esquina ? 'nwse-resize' : 'move';
             return;
         }
         // Tirar de una esquina agranda o achica desde el centro, en proporción.
         if (a.modo === 'tamano') cambiarTamano(a.pieza.id, a.inicio * Math.hypot(p.x - a.centro.x, p.y - a.centro.y) / a.distancia);
+        else if (a.modo === 'lado') tirarDelLado(a, p);
         else correrPieza(a.pieza, a.inicio, p.x - a.desde.x, p.y - a.desde.y);
     };
     const soltarArrastre = (e) => {
-        if (arrastre.current) { arrastre.current = null; return; }
+        const a = arrastre.current;
+        if (a) {
+            arrastre.current = null;
+            if (a.modo !== 'mover' || e.type !== 'pointerup') return;
+            const p = puntoEnLienzo(lienzo.current, e);
+            if (Math.hypot(p.x - a.desde.x, p.y - a.desde.y) >= 10 * p.escala) { ultimoToque.current = null; return; }
+            // Un toque sin arrastrar elige lo que está más adelante en ese punto.
+            // Otro toque en el mismo lugar elige la de abajo: así se llega a una tapada.
+            const aqui = piezas.current.filter(k => contiene(k, p));
+            const antes = ultimoToque.current;
+            const mismoLugar = antes && Math.hypot(p.x - antes.x, p.y - antes.y) < 10 * p.escala;
+            ultimoToque.current = p;
+            if (!aqui.length) return;
+            const i = aqui.findIndex(k => k.id === a.pieza.id);
+            setSeleccion(mismoLugar ? aqui[(i - 1 + aqui.length) % aqui.length].id : aqui[aqui.length - 1].id);
+            return;
+        }
         // Un toque (sin arrastrar) en la imagen fuera de los textos suelta la elegida.
         const v = tocarVacio.current;
         tocarVacio.current = null;
@@ -541,7 +650,6 @@ export default function Publicidad() {
         const ajuste = modo === 'ajuste';
         const pedido = cambio.trim();
         if (generando || !visibles.length || (ajuste && (!fondo || !pedido))) return;
-        setAviso(null);
         const firma = JSON.stringify(ajuste
             ? [modo, fondo.id, pedido]
             : [d.formato, d.campana, estiloId, d.idea.trim(), modo, visibles.map(it => it.productId), ancho, alto]);
@@ -613,7 +721,7 @@ export default function Publicidad() {
 
     const guardar = async (status) => {
         if (!hayAlgo || guardando) return;
-        setGuardando(true); setAviso(null);
+        setGuardando(true);
         const conArchivo = !!estado?.almacenamiento;
         const limpia = imagenLimpia();
         const otra = conCambios;
@@ -630,7 +738,7 @@ export default function Publicidad() {
             textos: { titulo: d.titulo ?? campana.titulo, mensaje: d.mensaje, extra: d.extra, mostrarNegocio: d.mostrarNegocio },
             layout: {
                 personalizado: d.personalizado, colores: d.colores, ajustes: d.ajustes, encuadre: d.encuadre, negocio: d.negocio, idea: d.idea.trim(),
-                letras: d.letras, mover: d.mover,
+                letras: d.letras, mover: d.mover, orden: d.orden,
                 productos: Object.fromEntries(visibles.map(it => [it.productId, {
                     mostrarAntes: it.mostrarAntes, quitarFondo: it.quitarFondo, etiquetaPropia: it.etiqueta !== null,
                 }])),
@@ -661,8 +769,7 @@ export default function Publicidad() {
 
     const descargar = async () => {
         if (!lienzo.current || !hayAlgo) return;
-        const r = await descargarImagen(imagenLimpia().toDataURL('image/jpeg', 0.92), nombreArchivo());
-        if (r.mensaje) avisar(r.ok ? 'ok' : 'error', r.mensaje);
+        await descargarImagen(imagenLimpia().toDataURL('image/jpeg', 0.92), nombreArchivo());
     };
 
     // Kevin, 26-oct-2026: el cartel A4 se imprime directo, sin bajarlo antes; el
@@ -670,7 +777,7 @@ export default function Publicidad() {
     // hoja) para que las letras salgan nítidas en papel.
     const imprimir = async () => {
         if (!lienzo.current || !hayAlgo || imprimiendo) return;
-        setImprimiendo(true); setAviso(null);
+        setImprimiendo(true);
         await new Promise(r => setTimeout(r, 30)); // que se vea "Preparando" antes del trabajo pesado
         let datos = imagenLimpia(2).toDataURL('image/jpeg', 0.92);
         // Un lienzo más grande que lo que aguanta el equipo sale vacío ("data:,"): va al tamaño normal.
@@ -681,7 +788,7 @@ export default function Publicidad() {
     };
 
     const nueva = () => {
-        setD(DISENO_VACIO); setItems([]); setImagenes([]); setFondos([]); setFondoId(null); setAviso(null); clave.current = null;
+        setD(DISENO_VACIO); setItems([]); setImagenes([]); setFondos([]); setFondoId(null); clave.current = null;
         setCambio(''); setConIdea(false); setSeleccion(null); setMenu(null); setPanelFondo(null);
         guardado.current = { id: null, firma: null };
     };
@@ -690,7 +797,7 @@ export default function Publicidad() {
     // `comoNueva` («Duplicar»): se abre igual pero sin guardar; al guardarla queda
     // otra publicidad, numerada si tiene el mismo nombre.
     const abrir = async (id, { comoNueva = false } = {}) => {
-        setAbriendo(true); setAviso(null);
+        setAbriendo(true);
         const r = await publicidad(activeCompanyId, 'obtener', { id });
         setAbriendo(false);
         if (!r.success) { avisar('error', r.message); return; }
@@ -717,6 +824,8 @@ export default function Publicidad() {
                 formato: g.format, personalizado: lay.personalizado || RECORTE_VACIO.personalizado,
                 tamano: Number(lay.tamano) > 0 ? Number(lay.tamano) : RECORTE_VACIO.tamano,
                 fondo: lay.fondo === undefined ? RECORTE_VACIO.fondo : lay.fondo,
+                // Los guardados antes del 7-nov-2026 no tienen giro: quedan derechos.
+                giro: Number(lay.giro) || 0, inclinacion: Number(lay.inclinacion) || 0,
             };
             setRecorte({
                 ...RECORTE_VACIO, ...abierto, id: idAbierta, title: g.title || '', nota: lay.nota || '',
@@ -735,7 +844,7 @@ export default function Publicidad() {
             mostrarNegocio: g.textos?.mostrarNegocio !== false, negocio: lay.negocio ?? null,
             colores: lay.colores || null, ajustes: { ...DISENO_VACIO.ajustes, ...(lay.ajustes || {}) },
             encuadre: { ...DISENO_VACIO.encuadre, ...(lay.encuadre || {}) },
-            letras: lay.letras || DISENO_VACIO.letras, mover: lay.mover || {},
+            letras: lay.letras || DISENO_VACIO.letras, mover: lay.mover || {}, orden: Array.isArray(lay.orden) ? lay.orden : [],
         };
         setD(abierta);
         const nuevos = (g.productos || []).map(p => {
@@ -879,18 +988,17 @@ export default function Publicidad() {
             {estado?.success && estado.app && !estado.almacenamiento && (
                 <Banner tipo="error">Falta configurar el almacenamiento de imágenes (Vercel Blob): por ahora no se pueden generar fondos con IA ni guardar la imagen final. El fondo de color y la descarga funcionan.</Banner>
             )}
-            {aviso && <Banner tipo={aviso.tipo} onClose={() => setAviso(null)}>{aviso.texto}</Banner>}
 
             {pestana === 'historial' ? (
                 <Historial companyId={activeCompanyId} dinero={dinero} onAbrir={abrir} abriendo={abriendo} avisar={avisar} />
             ) : pestana === 'chat' ? (
                 <ChatPublicidad companyId={activeCompanyId} chat={chat} setChat={setChat} dinero={dinero} moneda={currentCurrency}
                     cupo={cupo} iaApagada={iaApagada} motivoSinIA={motivoSinIAChat} buscar={searchProductsForDropdown}
-                    avisar={avisar} limpiarAviso={() => setAviso(null)} refrescarEstado={refrescarEstado} estado={estado} />
+                    avisar={avisar} refrescarEstado={refrescarEstado} estado={estado} />
             ) : pestana === 'recorte' ? (
                 <RecortePublicidad companyId={activeCompanyId} recorte={recorte} setRecorte={setRecorte} dinero={dinero}
                     cupo={cupo} iaApagada={iaApagada} motivoSinIA={motivoSinIAChat} buscar={searchProductsForDropdown}
-                    avisar={avisar} limpiarAviso={() => setAviso(null)} refrescarEstado={refrescarEstado} estado={estado} />
+                    avisar={avisar} refrescarEstado={refrescarEstado} estado={estado} />
             ) : (
                 <>
                     {/* Productos: lo primero y a todo el ancho */}
@@ -922,25 +1030,27 @@ export default function Publicidad() {
                         <div className="lg:order-2 lg:flex-1 min-w-0">
                             <div className="glass-card p-3 relative z-20 lg:sticky lg:top-0">
                                 {/* Formato, letras y colores: se ven cambiar en la imagen al instante */}
-                                <div ref={barraMenus} className="relative flex flex-wrap items-center gap-1.5 mb-2">
-                                    <BotonMenu abierto={menu === 'formato'} onClick={() => alternarMenu('formato')} etiqueta={`Formato · ${ancho}×${alto}`}
+                                {/* Esta fila no puede cambiar de alto mientras se arrastra: si «Textos a su lugar» la hiciera
+                                    pasar a dos filas, la imagen saltaría debajo del dedo. Por eso ese botón siempre ocupa su lugar y,
+                                    en el celular, la fila no se parte (los nombres se acortan). */}
+                                <div ref={barraMenus} className="relative flex flex-nowrap sm:flex-wrap items-center gap-1.5 mb-2">
+                                    <BotonMenu className="min-w-0" abierto={menu === 'formato'} onClick={() => alternarMenu('formato')} etiqueta={`Formato · ${ancho}×${alto}`}
                                         icono={<FormaFormato ancho={ancho} alto={alto} />}>
                                         <span className="sm:hidden">{formato.corto}</span><span className="hidden sm:inline">{formato.nombre}</span>
                                     </BotonMenu>
-                                    <BotonMenu abierto={menu === 'letras'} onClick={() => alternarMenu('letras')} etiqueta="Tipo de letra" icono={<Type size={15} className="shrink-0" />}>
+                                    <BotonMenu className="min-w-0" abierto={menu === 'letras'} onClick={() => alternarMenu('letras')} etiqueta="Tipo de letra" icono={<Type size={15} className="hidden sm:block shrink-0" />}>
                                         {letras.nombre}
                                     </BotonMenu>
-                                    <BotonMenu abierto={menu === 'colores'} onClick={() => alternarMenu('colores')} etiqueta="Colores" icono={<Muestras colores={colores} />}>
+                                    <BotonMenu className="shrink-0" abierto={menu === 'colores'} onClick={() => alternarMenu('colores')} etiqueta="Colores" icono={<Muestras colores={colores} />}>
                                         <span className="hidden sm:inline">Colores</span>
                                     </BotonMenu>
-                                    <div className="ml-auto flex items-center gap-1">
-                                        {Object.keys(d.mover).some(k => !esImagen(k)) && (
-                                            <button type="button" title="Volver todos los textos a su lugar"
-                                                onClick={() => cambiar({ mover: Object.fromEntries(Object.entries(d.mover).filter(([k]) => esImagen(k))) })}
-                                                className="min-h-[36px] px-2 rounded-lg text-xs font-bold text-[var(--color-primary)] flex items-center gap-1 hover:bg-white/5">
-                                                <RotateCcw size={14} /> <span className="hidden sm:inline">Textos a su lugar</span>
-                                            </button>
-                                        )}
+                                    <div className="ml-auto shrink-0 flex items-center gap-1">
+                                        <button type="button" title="Volver todos los textos a su lugar y las capas a su orden"
+                                            onClick={() => cambiar({ mover: Object.fromEntries(Object.entries(d.mover).filter(([k]) => esImagen(k))), orden: [] })}
+                                            disabled={!(Object.keys(d.mover).some(k => !esImagen(k)) || d.orden.length > 0)}
+                                            className="min-h-[36px] px-1.5 sm:px-2 rounded-lg text-xs font-bold text-[var(--color-primary)] flex items-center gap-1 hover:bg-white/5 disabled:invisible">
+                                            <RotateCcw size={14} /> <span className="hidden sm:inline">Textos a su lugar</span>
+                                        </button>
                                         {d.id && (
                                             <span className="hidden sm:inline text-[11px] font-bold text-[var(--color-text-muted)] px-1">
                                                 #{d.id} · {d.status === 'final' ? 'Final' : 'Borrador'}
@@ -948,8 +1058,9 @@ export default function Publicidad() {
                                         )}
                                         <Ayuda titulo="Cómo editar la imagen">
                                             Tocá un texto{visibles.length === 1 && !escenaIntegrada ? ', la foto' : ''} o una imagen agregada para elegirlo: arrastralo para moverlo y
-                                            tirá de sus esquinas para agrandarlo o achicarlo. En la PC, las flechas lo corren y Esc lo suelta; Supr borra una imagen elegida.
-                                            Lo que se guarda, se descarga o se imprime sale sin el marco.
+                                            tirá de sus esquinas para agrandarlo o achicarlo. En un texto, los puntos de los lados cambian el ancho y el alto de su caja, y la barra de abajo el tamaño
+                                            de la letra: la oración se acomoda sola. «Al frente» y «Atrás» ordenan lo que se tapa; si una pieza quedó tapada, tocá de nuevo en el mismo lugar para
+                                            elegir la de abajo. En la PC, las flechas lo corren y Esc lo suelta; Supr borra una imagen elegida. Lo que se guarda, se descarga o se imprime sale sin el marco.
                                         </Ayuda>
                                     </div>
 
@@ -1031,9 +1142,13 @@ export default function Publicidad() {
                                     )}
                                 </div>
                                 {seleccion && (
-                                    <BarraPieza nombre={nombrePieza(seleccion)} tamano={tamanoDe(seleccion)} tope={topeTamano(seleccion)}
-                                        nota={seleccion === 'pie' && tamanoDe('pie') >= 1 ? 'Ocupa todo el ancho: achicalo para moverlo a los lados.' : null}
-                                        onTamano={(v) => cambiarTamano(seleccion, v)} onASuLugar={() => piezaASuLugar(seleccion)} onListo={() => setSeleccion(null)}
+                                    <BarraPieza nombre={nombrePieza(seleccion)} deLetra={esTexto(seleccion)}
+                                        tamano={esTexto(seleccion) ? letraDe(seleccion) : tamanoDe(seleccion)} tope={esTexto(seleccion) ? LETRA_PIEZA : topeTamano(seleccion)}
+                                        nota={seleccion === 'pie' && tamanoDe('pie') >= 1 ? 'Ocupa todo el ancho: achicalo desde las esquinas para moverlo a los lados.'
+                                            : ['titulo', 'mensaje', 'nombre', 'precio'].includes(seleccion) ? 'Tirá de los puntos de los lados para cambiar el ancho o el alto: el texto se acomoda solo.' : null}
+                                        onTamano={(v) => (esTexto(seleccion) ? cambiarLetra(seleccion, v) : cambiarTamano(seleccion, v))}
+                                        onFrente={() => aLaCapa(seleccion, 'frente')} onAtras={() => aLaCapa(seleccion, 'atras')}
+                                        onASuLugar={() => piezaASuLugar(seleccion)} onListo={() => setSeleccion(null)}
                                         onQuitar={esImagen(seleccion) ? () => quitarImagen(seleccion) : null} />
                                 )}
                                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 2xl:grid-cols-4 gap-2 mt-3">
@@ -1392,10 +1507,10 @@ function Ayuda({ titulo, chica, children }) {
 }
 
 /** Un botón de la barra de la vista previa que abre su menú (formato, letras, colores). */
-function BotonMenu({ abierto, onClick, etiqueta, icono, children }) {
+function BotonMenu({ abierto, onClick, etiqueta, icono, className = '', children }) {
     return (
         <button type="button" onClick={onClick} aria-expanded={abierto} aria-haspopup="true" title={etiqueta}
-            className={`min-h-[36px] px-2.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-colors ${abierto
+            className={`${className} min-h-[36px] px-2.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-colors ${abierto
                 ? 'border-[var(--color-primary)] text-[var(--color-primary)] bg-[var(--color-primary)]/10'
                 : 'border-[var(--glass-border)] text-[var(--color-text)] bg-[var(--glass-bg)] hover:border-[var(--color-primary)]/60'}`}>
             {icono}
@@ -1469,21 +1584,25 @@ function Muestras({ colores }) {
     );
 }
 
-/** La barra de la pieza elegida en la vista previa: su tamaño, volverla a su lugar y soltarla. */
+/** La barra de la pieza elegida en la vista previa: su tamaño (o su letra, si es un texto), su capa, volverla a su lugar y soltarla. */
 /** `onQuitar`: solo las imágenes agregadas se borran desde acá; su "lugar" es el centro. */
-function BarraPieza({ nombre, tamano, tope, nota, onTamano, onASuLugar, onListo, onQuitar }) {
+function BarraPieza({ nombre, deLetra, tamano, tope, nota, onTamano, onFrente, onAtras, onASuLugar, onListo, onQuitar }) {
     const boton = 'shrink-0 w-11 h-11 rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] text-[var(--color-text)] font-black text-sm disabled:opacity-40';
+    const botonCapa = 'min-h-[44px] px-2.5 rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] text-xs font-bold text-[var(--color-text)] flex items-center gap-1.5';
+    const que = deLetra ? 'letra' : 'tamaño';
     return (
         <div className="mt-2 rounded-lg border border-[var(--color-primary)] p-2 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold text-[var(--color-text)] w-full sm:w-auto">{nombre}</span>
+            <span className="text-xs font-bold text-[var(--color-text)] w-full sm:w-auto">{nombre}{deLetra ? ' · tamaño de letra' : ''}</span>
             <div className="flex items-center gap-2 flex-1 min-w-[220px]">
-                <button type="button" onClick={() => onTamano(tamano / 1.1)} disabled={tamano <= tope.min} className={boton} aria-label="Achicar">A−</button>
+                <button type="button" onClick={() => onTamano(tamano / 1.1)} disabled={tamano <= tope.min} className={boton} aria-label={`Achicar ${que}`}>A−</button>
                 <input type="range" min={tope.min} max={tope.max} step={0.05} value={tamano} onChange={e => onTamano(Number(e.target.value))}
-                    className="flex-1 min-w-0" aria-label={`Tamaño: ${nombre}`} />
-                <button type="button" onClick={() => onTamano(tamano * 1.1)} disabled={tamano >= tope.max} className={boton} aria-label="Agrandar">A+</button>
+                    className="flex-1 min-w-0" aria-label={`Tamaño de ${que}: ${nombre}`} />
+                <button type="button" onClick={() => onTamano(tamano * 1.1)} disabled={tamano >= tope.max} className={boton} aria-label={`Agrandar ${que}`}>A+</button>
                 <span className="shrink-0 w-11 text-right text-[11px] font-bold tabular-nums text-[var(--color-text-muted)]">{Math.round(tamano * 100)}%</span>
             </div>
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
+                <button type="button" onClick={onFrente} title="Poner delante de todo" className={botonCapa}><BringToFront size={15} /> Al frente</button>
+                <button type="button" onClick={onAtras} title="Poner detrás de todo" className={botonCapa}><SendToBack size={15} /> Atrás</button>
                 {onQuitar && (
                     <button type="button" onClick={onQuitar} className="min-h-[44px] px-2 text-xs font-bold text-red-400 flex items-center gap-1">
                         <Trash2 size={14} /> Quitar
@@ -1820,7 +1939,7 @@ function noLlenaElFormato(img, ancho, alto) {
     return Math.abs((w / h) / posible - 1) > 0.03;
 }
 
-function ChatPublicidad({ companyId, chat, setChat, dinero, moneda, cupo, iaApagada, motivoSinIA, buscar, avisar, limpiarAviso, refrescarEstado, estado }) {
+function ChatPublicidad({ companyId, chat, setChat, dinero, moneda, cupo, iaApagada, motivoSinIA, buscar, avisar, refrescarEstado, estado }) {
     const [texto, setTexto] = useState('');
     const [productos, setProductos] = useState([]); // los que van con el próximo pedido
     const [imagenes, setImagenes] = useState([]);   // lo que subió (data URL), con el próximo pedido
@@ -1908,7 +2027,7 @@ function ChatPublicidad({ companyId, chat, setChat, dinero, moneda, cupo, iaApag
         };
         const firma = JSON.stringify({ ...datos, imagenes: imagenes.map(i => i.length) });
         if (!clave.current || clave.current.firma !== firma) clave.current = { clave: nuevaClave(), firma };
-        setGenerando(true); setMenu(null); limpiarAviso();
+        setGenerando(true); setMenu(null);
         const r = await publicidad(companyId, 'generarChat', { ...datos, clave: clave.current.clave }, 70000);
         setGenerando(false);
         if (!r.success) {
@@ -1969,7 +2088,7 @@ function ChatPublicidad({ companyId, chat, setChat, dinero, moneda, cupo, iaApag
 
     const guardar = async () => {
         if (!img || guardando) return;
-        setGuardando(true); limpiarAviso();
+        setGuardando(true);
         const otra = conCambios;
         const c = imagenFinal();
         const m = document.createElement('canvas');
@@ -2000,13 +2119,12 @@ function ChatPublicidad({ companyId, chat, setChat, dinero, moneda, cupo, iaApag
 
     const descargar = async () => {
         if (!img) return;
-        const r = await descargarImagen(imagenFinal().toDataURL('image/jpeg', 0.92), `${nombreArchivo()}.jpg`);
-        if (r.mensaje) avisar(r.ok ? 'ok' : 'error', r.mensaje);
+        await descargarImagen(imagenFinal().toDataURL('image/jpeg', 0.92), `${nombreArchivo()}.jpg`);
     };
 
     const imprimir = async () => {
         if (!img || imprimiendo) return;
-        setImprimiendo(true); limpiarAviso();
+        setImprimiendo(true);
         await new Promise(r => setTimeout(r, 30));
         const r = await imprimirImagen(imagenFinal().toDataURL('image/jpeg', 0.92), nombreArchivo());
         setImprimiendo(false);
@@ -2015,7 +2133,7 @@ function ChatPublicidad({ companyId, chat, setChat, dinero, moneda, cupo, iaApag
 
     const nueva = () => {
         setChat({ ...CHAT_VACIO, formato: chat.formato, personalizado: chat.personalizado });
-        setTexto(''); setProductos([]); setImagenes([]); setConEncuadre(false); clave.current = null; limpiarAviso();
+        setTexto(''); setProductos([]); setImagenes([]); setConEncuadre(false); clave.current = null;
     };
 
     const adjunto = 'max-w-full p-1.5 pr-1 rounded-lg flex items-center gap-2 border border-[var(--glass-border)] bg-[var(--glass-bg)]';
@@ -2308,22 +2426,36 @@ async function fotoParaInventario(dataUrl) {
     return compressImage(blob, 150, 800, 800);
 }
 
-/** El rectángulo que ocupa el producto en el recorte: lo que no es transparente. */
+/**
+ * El rectángulo que ocupa el producto en el recorte (lo que no es transparente)
+ * y su contorno: el primer y el último punto con producto de cada fila. Con el
+ * contorno se sabe cuánto ocupa el producto inclinado a cualquier ángulo sin
+ * volver a recorrer la foto (lo más ancho de una figura girada siempre cae en
+ * uno de esos puntos).
+ */
 function cajaDelProducto(lienzo) {
     const w = lienzo.width, h = lienzo.height;
     const p = lienzo.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
     let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    const contorno = [];
     for (let y = 0; y < h; y++) {
+        let a = -1, b = -1;
         for (let x = 0; x < w; x++) {
             if (p[(y * w + x) * 4 + 3] > 20) {
-                if (x < x0) x0 = x;
-                if (x > x1) x1 = x;
-                if (y < y0) y0 = y;
-                if (y > y1) y1 = y;
+                if (a < 0) a = x;
+                b = x;
             }
         }
+        if (a < 0) continue;
+        if (a < x0) x0 = a;
+        if (b > x1) x1 = b;
+        if (y < y0) y0 = y;
+        y1 = y;
+        // Las esquinas del píxel: así el borde girado no se come medio píxel.
+        contorno.push(a, y, a, y + 1, b + 1, y, b + 1, y + 1);
     }
-    return x1 < 0 ? { x: 0, y: 0, w, h } : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+    const caja = x1 < 0 ? { x: 0, y: 0, w, h } : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+    return { caja, contorno };
 }
 
 // Kevin, 31-oct-2026: "pasarlo a otras medidas", "agrandar y achicar" y
@@ -2332,8 +2464,12 @@ function cajaDelProducto(lienzo) {
 // transparente), a `tamano` del lado que manda (0,88 de entrada) y centrado.
 // Si el producto llega a un borde de la foto (un busto cortado abajo), queda
 // pegado a ese borde de la medida, para que no flote con el corte a la vista.
+//
+// `inclinacion` (grados): el producto se dibuja inclinado directo en la medida.
+// Lo que ocupa inclinado sale del contorno, sin rehacer la foto: así el
+// deslizador de Enderezar responde al instante. Inclinado va siempre centrado.
 const AIRE_RECORTE = 0.88;
-function recorteAMedida({ lienzo, caja }, ancho, alto, { tamano = AIRE_RECORTE, fondo = '#ffffff' } = {}, destino = null) {
+function recorteAMedida({ lienzo, caja, contorno }, ancho, alto, { tamano = AIRE_RECORTE, fondo = '#ffffff', inclinacion = 0 } = {}, destino = null) {
     const c = destino || document.createElement('canvas');
     c.width = ancho; c.height = alto;
     const ctx = c.getContext('2d');
@@ -2342,6 +2478,28 @@ function recorteAMedida({ lienzo, caja }, ancho, alto, { tamano = AIRE_RECORTE, 
         ctx.fillStyle = fondo;
         ctx.fillRect(0, 0, ancho, alto);
     }
+    ctx.imageSmoothingQuality = 'high';
+    const rad = ((Number(inclinacion) || 0) * Math.PI) / 180;
+    if (rad && contorno?.length) {
+        const cx = lienzo.width / 2, cy = lienzo.height / 2;
+        const cos = Math.cos(rad), sin = Math.sin(rad);
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (let i = 0; i < contorno.length; i += 2) {
+            const dx = contorno[i] - cx, dy = contorno[i + 1] - cy;
+            const rx = dx * cos - dy * sin, ry = dx * sin + dy * cos;
+            if (rx < x0) x0 = rx;
+            if (rx > x1) x1 = rx;
+            if (ry < y0) y0 = ry;
+            if (ry > y1) y1 = ry;
+        }
+        const f = Math.min((ancho * tamano) / (x1 - x0), (alto * tamano) / (y1 - y0));
+        ctx.translate(ancho / 2 - ((x0 + x1) / 2) * f, alto / 2 - ((y0 + y1) / 2) * f);
+        ctx.scale(f, f);
+        ctx.rotate(rad);
+        ctx.drawImage(lienzo, -cx, -cy);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        return c;
+    }
     const f = Math.min((ancho * tamano) / caja.w, (alto * tamano) / caja.h);
     const w = caja.w * f, h = caja.h * f;
     const pegado = (desde, hasta, lado) => (desde <= 1 && hasta < lado - 1 ? 'inicio' : hasta >= lado - 1 && desde > 1 ? 'fin' : 'centro');
@@ -2349,9 +2507,48 @@ function recorteAMedida({ lienzo, caja }, ancho, alto, { tamano = AIRE_RECORTE, 
     const enY = pegado(caja.y, caja.y + caja.h, lienzo.height);
     const x = enX === 'inicio' ? 0 : enX === 'fin' ? ancho - w : (ancho - w) / 2;
     const y = enY === 'inicio' ? 0 : enY === 'fin' ? alto - h : (alto - h) / 2;
-    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(lienzo, caja.x, caja.y, caja.w, caja.h, x, y, w, h);
     return c;
+}
+
+// Kevin, 7-nov-2026: "poder rotar para ponerlo parado, acostado o en otro ángulo",
+// para un producto que en la foto no quedó parejo. Dos partes:
+//  - De a cuarto de vuelta (acá): se gira la foto sin fondo entera, que es exacto,
+//    y se vuelve a buscar dónde quedó el producto. Si tocaba un borde de la foto
+//    (un busto cortado abajo), el borde gira con él y el corte sigue pegado al
+//    lado que le toca. Se hace una vez por clic.
+//  - Enderezar unos grados: lo dibuja recorteAMedida directo, en cada paso del
+//    deslizador. Medido (Chrome, foto de 1024 px): girar la foto y recorrerla de
+//    nuevo le sumaba ~76 ms a cada paso; dibujándolo directo, un paso tarda lo
+//    mismo que uno del deslizador de Tamaño (~45 ms contra ~60, contando los dos
+//    cuadros de pantalla que se esperan).
+function girarBase(base, grados) {
+    const g = ((Number(grados) % 360) + 360) % 360;
+    if (!base || !g) return base;
+    const { lienzo } = base;
+    const rad = (g * Math.PI) / 180;
+    const cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+    const W = lienzo.width, H = lienzo.height;
+    const c = document.createElement('canvas');
+    c.width = Math.round(W * cos + H * sin);
+    c.height = Math.round(W * sin + H * cos);
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.imageSmoothingQuality = 'high';
+    ctx.translate(c.width / 2, c.height / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(lienzo, -W / 2, -H / 2);
+    return { lienzo: c, ...cajaDelProducto(c) };
+}
+
+/** 0, 90, 180 o 270, sumándole o restándole un cuarto de vuelta. */
+const cuartoDeVuelta = (giro, mas) => ((((Number(giro) || 0) + mas) % 360) + 360) % 360;
+
+/** "15°", "−5°", "90° + 3°" */
+function textoGiro(giro, inclinacion) {
+    const i = Number(inclinacion) || 0;
+    const fino = `${i < 0 ? '−' : ''}${String(Math.abs(i)).replace('.', ',')}°`;
+    if (!giro) return fino;
+    return i ? `${giro}° ${i < 0 ? '−' : '+'} ${String(Math.abs(i)).replace('.', ',')}°` : `${giro}°`;
 }
 
 // Los fondos de un toque; "Otro color" abre el selector y "Sin fondo" deja la transparencia.
@@ -2395,7 +2592,7 @@ function MedidaRecorte({ recorte, onCambiar }) {
     );
 }
 
-function RecortePublicidad({ companyId, recorte, setRecorte, dinero, cupo, iaApagada, motivoSinIA, buscar, avisar, limpiarAviso, refrescarEstado, estado }) {
+function RecortePublicidad({ companyId, recorte, setRecorte, dinero, cupo, iaApagada, motivoSinIA, buscar, avisar, refrescarEstado, estado }) {
     const [generando, setGenerando] = useState(false);
     const [guardando, setGuardando] = useState(false);
     const [asignando, setAsignando] = useState(null); // id del producto al que se le está poniendo
@@ -2433,19 +2630,26 @@ function RecortePublicidad({ companyId, recorte, setRecorte, dinero, cupo, iaApa
         cargarImagen(recorte.dataUrl).then(img => {
             if (!vivo || !img) return;
             const lienzo = sinFondo(img);
-            setBase({ lienzo, caja: cajaDelProducto(lienzo) });
+            setBase({ lienzo, ...cajaDelProducto(lienzo) });
         }).catch(() => {});
         return () => { vivo = false; };
     }, [recorte.dataUrl]);
 
+    // El producto girado como se eligió: los cuartos de vuelta en la foto (una vez
+    // por clic) y lo de enderezar al dibujar (`como.inclinacion`). Todo lo que se
+    // dibuja (vista, archivo, Historial, foto del producto) sale de acá y de `como`,
+    // así que sale igual de girado.
+    const angulo = anguloRecorte(recorte);
+    const girada = useMemo(() => girarBase(base, recorte.giro), [base, recorte.giro]);
+
     // La vista previa se dibuja en un lienzo (al mover el tamaño no se arma un
     // archivo en cada paso); el archivo se arma solo al bajar o guardar.
     const { ancho, alto } = medidas(recorte.formato, recorte.personalizado);
-    const como = { tamano: recorte.tamano, fondo: recorte.fondo };
+    const como = { tamano: recorte.tamano, fondo: recorte.fondo, inclinacion: Number(recorte.inclinacion) || 0 };
     const vista = useRef(null);
     useEffect(() => {
-        if (base && vista.current) recorteAMedida(base, ancho, alto, como, vista.current);
-    }, [base, ancho, alto, recorte.tamano, recorte.fondo]); // eslint-disable-line react-hooks/exhaustive-deps
+        if (girada && vista.current) recorteAMedida(girada, ancho, alto, como, vista.current);
+    }, [girada, ancho, alto, recorte.tamano, recorte.fondo, recorte.inclinacion]); // eslint-disable-line react-hooks/exhaustive-deps
     // Sin fondo va en PNG (la transparencia); con fondo, en JPG, que pesa mucho menos.
     const archivoFinal = (lienzo) => (recorte.fondo ? lienzo.toDataURL('image/jpeg', 0.92) : lienzo.toDataURL('image/png'));
     const guardadaAsi = !!recorte.id && recorte.guardado === firmaRecorte(recorte);
@@ -2468,7 +2672,7 @@ function RecortePublicidad({ companyId, recorte, setRecorte, dinero, cupo, iaApa
         const datos = recorte.deInventario ? { productId: producto.id } : { foto: recorte.original };
         const firma = JSON.stringify([recorte.deInventario ? producto.id : recorte.original.length, recorte.nota]);
         if (!clave.current || clave.current.firma !== firma) clave.current = { clave: nuevaClave(), firma };
-        setGenerando(true); setEligiendo(false); limpiarAviso();
+        setGenerando(true); setEligiendo(false);
         const r = await publicidad(companyId, 'recortar', { ...datos, nota: recorte.nota, clave: clave.current.clave }, 70000);
         setGenerando(false);
         if (!r.success) {
@@ -2480,8 +2684,9 @@ function RecortePublicidad({ companyId, recorte, setRecorte, dinero, cupo, iaApa
             return;
         }
         clave.current = null;
-        // Otro recorte: todavía no está en el Historial ni en ningún producto.
-        cambiar({ id: null, title: '', fondoId: r.fondo.id, url: r.fondo.url, dataUrl: r.dataUrl || null, final: null, asignada: [] });
+        // Otro recorte: todavía no está en el Historial ni en ningún producto. Y
+        // viene derecho: el giro era para la foto anterior.
+        cambiar({ id: null, title: '', fondoId: r.fondo.id, url: r.fondo.url, dataUrl: r.dataUrl || null, final: null, asignada: [], giro: 0, inclinacion: 0 });
         refrescarEstado();
     };
 
@@ -2491,11 +2696,12 @@ function RecortePublicidad({ companyId, recorte, setRecorte, dinero, cupo, iaApa
         const id = Number(p.id);
         const tiene = typeof fotosCache.get(`${companyId}:${id}`) === 'string' || Number(p.has_image) === 1;
         if (tiene && !yaPuesta(id) && !window.confirm(`«${p.name}» ya tiene foto. ¿Reemplazarla por la recortada?`)) return;
-        setAsignando(id); limpiarAviso();
+        setAsignando(id);
         let foto;
         try {
             // Siempre igual que las de la tienda: cuadrada, sobre blanco y al tamaño de siempre.
-            foto = await fotoParaInventario(recorteAMedida(base, 800, 800).toDataURL('image/jpeg', 0.92));
+            // El giro sí va: es para que el producto quede derecho.
+            foto = await fotoParaInventario(recorteAMedida(girada, 800, 800, { inclinacion: como.inclinacion }).toDataURL('image/jpeg', 0.92));
         } catch {
             setAsignando(null);
             avisar('error', 'No se pudo preparar la foto.');
@@ -2524,20 +2730,21 @@ function RecortePublicidad({ companyId, recorte, setRecorte, dinero, cupo, iaApa
     // fondo). Cambiado algo desde que se guardó, queda otra (como en la Rápida).
     const guardar = async () => {
         if (!base || guardando || guardadaAsi) return;
-        setGuardando(true); limpiarAviso();
+        setGuardando(true);
         const otra = !!recorte.id;
-        const lienzo = recorteAMedida(base, ancho, alto, como);
+        const lienzo = recorteAMedida(girada, ancho, alto, como);
         let final = archivoFinal(lienzo);
         // Un PNG grande (una pantalla sin fondo) puede no entrar en el pedido: va en WebP, que guarda la transparencia.
         if (final.length > 3_800_000) final = lienzo.toDataURL('image/webp', 0.95);
         // La miniatura es JPG: lo transparente se ve blanco.
-        const m = recorteAMedida(base, Math.round(260 * Math.min(1, ancho / alto)), Math.round(260 * Math.min(1, alto / ancho)), { ...como, fondo: recorte.fondo || '#ffffff' });
+        const m = recorteAMedida(girada, Math.round(260 * Math.min(1, ancho / alto)), Math.round(260 * Math.min(1, alto / ancho)), { ...como, fondo: recorte.fondo || '#ffffff' });
         const r = await publicidad(companyId, 'guardar', {
             id: null, title: producto?.name || recorte.asignada[0]?.nombre || '', status: 'final', formato: recorte.formato,
             productos: [], textos: {}, backgroundId: recorte.fondoId,
             layout: {
                 modo: 'recorte', producto: producto ? { id: producto.id, nombre: producto.name } : null, nota: recorte.nota || '',
                 tamano: Number(recorte.tamano.toFixed(2)), fondo: recorte.fondo,
+                giro: Number(recorte.giro) || 0, inclinacion: Number(recorte.inclinacion) || 0,
                 ...(recorte.formato === 'personalizado' ? { personalizado: { ancho, alto } } : {}),
             },
             finalJpeg: final, miniatura: m.toDataURL('image/jpeg', 0.7),
@@ -2550,14 +2757,13 @@ function RecortePublicidad({ companyId, recorte, setRecorte, dinero, cupo, iaApa
 
     const descargar = async () => {
         if (!base) return;
-        const r = await descargarImagen(archivoFinal(recorteAMedida(base, ancho, alto, como)), nombreArchivo());
-        if (r.mensaje) avisar(r.ok ? 'ok' : 'error', r.mensaje);
+        await descargarImagen(archivoFinal(recorteAMedida(girada, ancho, alto, como)), nombreArchivo());
     };
 
-    // La medida y el fondo elegidos quedan para el próximo recorte; el tamaño vuelve al de siempre.
+    // La medida y el fondo elegidos quedan para el próximo recorte; el tamaño y el giro vuelven a como vienen.
     const nueva = () => {
         setRecorte({ ...RECORTE_VACIO, formato: recorte.formato, personalizado: recorte.personalizado, fondo: recorte.fondo });
-        setEligiendo(false); clave.current = null; limpiarAviso();
+        setEligiendo(false); clave.current = null;
     };
     const fondoPropio = !!recorte.fondo && !FONDOS_RECORTE.some(([c]) => c === recorte.fondo);
 
@@ -2600,6 +2806,35 @@ function RecortePublicidad({ companyId, recorte, setRecorte, dinero, cupo, iaApa
                         <div className="mt-3 rounded-lg border border-[var(--glass-border)] p-3 flex flex-col gap-3">
                             <Deslizador etiqueta={`Tamaño del producto · ${Math.round(recorte.tamano * 100)} %`} extremos={['Achicar', 'Agrandar']}
                                 min={0.3} max={1.2} paso={0.01} valor={recorte.tamano} onChange={v => cambiar({ tamano: v })} />
+                            {/* Girar (Kevin, 7-nov-2026): de a cuarto de vuelta para pararlo o
+                                acostarlo, y de a poco para enderezar una foto chueca. Sin IA. */}
+                            <div data-prueba="girar" className="flex flex-col gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="mr-auto flex flex-wrap items-center gap-x-1">
+                                        <span className="text-[11px] font-bold text-[var(--color-text-muted)]">
+                                            Girar{angulo ? ` · ${textoGiro(recorte.giro, recorte.inclinacion)}` : ''}
+                                        </span>
+                                        {angulo !== 0 && (
+                                            <button type="button" onClick={() => cambiar({ giro: 0, inclinacion: 0 })}
+                                                className="min-h-[32px] px-1.5 rounded text-[11px] font-bold text-[var(--color-primary)] hover:bg-white/10">
+                                                Como vino
+                                            </button>
+                                        )}
+                                    </span>
+                                    <button type="button" onClick={() => cambiar({ giro: cuartoDeVuelta(recorte.giro, -90) })}
+                                        aria-label="Girar un cuarto de vuelta a la izquierda" title="Un cuarto de vuelta a la izquierda"
+                                        className="min-h-[40px] px-3 rounded-lg border border-[var(--glass-border)] text-xs font-bold text-[var(--color-text)] inline-flex items-center gap-1.5 hover:bg-white/10">
+                                        <RotateCcw size={16} /> 90°
+                                    </button>
+                                    <button type="button" onClick={() => cambiar({ giro: cuartoDeVuelta(recorte.giro, 90) })}
+                                        aria-label="Girar un cuarto de vuelta a la derecha" title="Un cuarto de vuelta a la derecha"
+                                        className="min-h-[40px] px-3 rounded-lg border border-[var(--glass-border)] text-xs font-bold text-[var(--color-text)] inline-flex items-center gap-1.5 hover:bg-white/10">
+                                        <RotateCw size={16} /> 90°
+                                    </button>
+                                </div>
+                                <Deslizador etiqueta="Enderezar (si la foto salió chueca)" extremos={['↺ 45°', '45° ↻']}
+                                    min={-45} max={45} paso={0.5} valor={Number(recorte.inclinacion) || 0} onChange={v => cambiar({ inclinacion: v })} />
+                            </div>
                             <div>
                                 <p className="text-[11px] font-bold text-[var(--color-text-muted)] mb-1.5">Fondo</p>
                                 <div className="flex flex-wrap items-center gap-2">
@@ -2818,8 +3053,7 @@ function Historial({ companyId, dinero, onAbrir, abriendo, avisar }) {
         if (!dataUrl) return;
         // Un recorte sin fondo está guardado en PNG (o WebP si era muy grande): se baja con su extensión.
         const ext = /^data:image\/png/.test(dataUrl) ? 'png' : /^data:image\/webp/.test(dataUrl) ? 'webp' : 'jpg';
-        const res = await descargarImagen(dataUrl, `${nombreDe(x)}.${ext}`);
-        if (res.mensaje) avisar(res.ok ? 'ok' : 'error', res.mensaje);
+        await descargarImagen(dataUrl, `${nombreDe(x)}.${ext}`);
     };
 
     const imprimir = async (x) => {

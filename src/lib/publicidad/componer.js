@@ -245,15 +245,20 @@ export function dibujarImagen(canvas, img, W, H, encuadre = {}) {
     dibujarFondo(ctx, img, canvas.width, canvas.height, { ...encuadre, zoom });
 }
 
-/** Dibuja la imagen entera dentro del rectángulo, centrada (sin deformar). */
-function contener(ctx, img, x, y, w, h) {
+/** Dónde queda la imagen entera dentro del rectángulo, centrada (sin deformar). */
+function rectContener(img, x, y, w, h) {
     const iw = anchoDe(img), ih = altoDe(img);
     if (!iw || !ih) return { x, y, w: 0, h: 0 };
     const escala = Math.min(w / iw, h / ih);
     const dw = iw * escala, dh = ih * escala;
-    const dx = x + (w - dw) / 2, dy = y + (h - dh) / 2;
-    ctx.drawImage(img, dx, dy, dw, dh);
-    return { x: dx, y: dy, w: dw, h: dh };
+    return { x: x + (w - dw) / 2, y: y + (h - dh) / 2, w: dw, h: dh };
+}
+
+/** Dibuja la imagen entera dentro del rectángulo, centrada (sin deformar). */
+function contener(ctx, img, x, y, w, h) {
+    const r = rectContener(img, x, y, w, h);
+    if (r.w) ctx.drawImage(img, r.x, r.y, r.w, r.h);
+    return r;
 }
 
 function aclarar(hex, cuanto) {
@@ -270,15 +275,78 @@ function aclarar(hex, cuanto) {
 const entre = (v, min, max) => Math.min(Math.max(v, min), Math.max(min, max));
 export const ESCALA_PIEZA = { min: 0.4, max: 2.5 };
 
-function pieza(pz, id, x, y, w, h) {
+// Kevin, 3-nov-2026: como en Photoroom, el tamaño de la letra y el de la caja de
+// un texto se cambian por separado, y la oración se acomoda: con la caja más ancha
+// o la letra más chica, las palabras suben a la fila de arriba si caben.
+// `mover[id].letra`: multiplica la letra de siempre. `ancho` y `alto`: la caja, en
+// fracciones del lienzo. Sin ellos, el texto sale exactamente como antes.
+export const LETRA_PIEZA = { min: 0.4, max: 3 };
+const letraDe = (pz, id) => entre(Number(pz.mover[id]?.letra) || 1, LETRA_PIEZA.min, LETRA_PIEZA.max);
+
+/**
+ * La letra, las líneas y la caja de un texto. `ancho`, `alto` y `lineas` son los
+ * de siempre, ya medidos. Una palabra sola nunca se corta: es el ancho mínimo.
+ */
+function cajaDeTexto(ctx, pz, id, texto, { tam, peso, rol, ancho, alto, lineas, padX, padY, interlinea }) {
+    const mov = pz.mover[id] || {};
+    const letra = letraDe(pz, id);
+    const tamFinal = tam * letra;
+    fuente(ctx, tamFinal, peso, rol);
+    const palabras = String(texto || '').split(/\s+/).filter(Boolean);
+    const minW = Math.max(0, ...palabras.map(p => ctx.measureText(p).width)) + padX * 2;
+    const anchoPropio = Number(mov.ancho) > 0 ? mov.ancho * pz.W : null;
+    const altoPropio = Number(mov.alto) > 0 ? mov.alto * pz.H : null;
+    if (letra === 1 && anchoPropio === null && altoPropio === null) {
+        return { tam, lineas, w: ancho, h: alto, altoTexto: alto, fluida: { minW: Math.min(minW, ancho), minH: alto } };
+    }
+    const w = Math.max(anchoPropio ?? ancho, minW);
+    const nuevas = envolver(ctx, texto, w - padX * 2 + 0.5, 20);
+    const minH = nuevas.length * tamFinal * interlinea + padY * 2;
+    return { tam: tamFinal, lineas: nuevas, w, h: Math.max(minH, altoPropio ?? 0), altoTexto: minH, fluida: { minW, minH } };
+}
+
+/**
+ * Kevin, 3-nov-2026: "que la mitad esté adentro y la otra afuera del cuadro". Lo
+ * que se arrastra puede salirse de la imagen, pero siempre queda este pedazo
+ * adentro (la cuarta parte de la pieza, y no menos del 6 % del lado corto): si no,
+ * no se podría volver a tomar con el dedo sin agarrar el punto de su lado.
+ */
+export const pedazoVisible = (lado, W, H) => Math.min(lado, Math.max(lado * 0.25, Math.min(W, H) * 0.06));
+
+/**
+ * `extra`: lo que se anota en la caja de la pieza (`fluida`: el texto se acomoda a
+ * su ancho). `mov.fuera`: ya se arrastró y puede salirse. Sin eso queda adentro de
+ * la imagen, como en todo lo guardado antes y al agrandar un texto sin moverlo.
+ */
+function pieza(pz, id, x, y, w, h, extra = null) {
     const mov = pz.mover[id];
     const s = mov ? entre(Number(mov.escala) || 1, ESCALA_PIEZA.min, ESCALA_PIEZA.max) : 1;
     const sw = w * s, sh = h * s;
     const x0 = x + (w - sw) / 2, y0 = y + (h - sh) / 2;
-    const dx = mov ? entre((Number(mov.x) || 0) * pz.W, -x0, pz.W - sw - x0) : 0;
-    const dy = mov ? entre((Number(mov.y) || 0) * pz.H, -y0, pz.H - sh - y0) : 0;
-    pz.cajas.push({ id, x: x0 + dx, y: y0 + dy, w: sw, h: sh, dx, dy, escala: s });
+    const afueraX = mov?.fuera ? sw - pedazoVisible(sw, pz.W, pz.H) : 0;
+    const afueraY = mov?.fuera ? sh - pedazoVisible(sh, pz.W, pz.H) : 0;
+    const dx = mov ? entre((Number(mov.x) || 0) * pz.W, -x0 - afueraX, pz.W - sw - x0 + afueraX) : 0;
+    const dy = mov ? entre((Number(mov.y) || 0) * pz.H, -y0 - afueraY, pz.H - sh - y0 + afueraY) : 0;
+    pz.cajas.push({ id, x: x0 + dx, y: y0 + dy, w: sw, h: sh, dx, dy, escala: s, ...extra });
     return { dx, dy, s, cx: x + w / 2, cy: y + h / 2 };
+}
+
+/**
+ * El orden de las capas (Kevin, 3-nov-2026: "ponerlo detrás o sacar al frente").
+ * `orden`: los id de atrás hacia adelante, lo que dejó el usuario. Lo que no esté
+ * (un producto o un texto nuevo) va al lado del que tiene antes en el orden de
+ * siempre, y una imagen recién agregada, encima de todo.
+ */
+function ordenarCapas(capas, orden) {
+    if (!Array.isArray(orden) || !orden.length) return capas;
+    const porId = new Map(capas.map(c => [c.id, c]));
+    const lista = [...new Set(orden)].filter(id => porId.has(id)).map(id => porId.get(id));
+    capas.forEach((c, i) => {
+        if (lista.includes(c)) return;
+        if (String(c.id).startsWith('img-')) { lista.push(c); return; }
+        lista.splice(i > 0 ? lista.indexOf(capas[i - 1]) + 1 : 0, 0, c);
+    });
+    return lista;
 }
 
 /** Lo que se dibuje después queda corrido y agrandado como la pieza (desde su centro). */
@@ -289,8 +357,9 @@ function colocar(ctx, t) {
 }
 
 /** La etiqueta ("OFERTA"). Con `pz` es una pieza que se arrastra; en las tarjetas, no. */
-function etiquetaInclinada(ctx, texto, x, y, tam, colores, rol, pz = null) {
+function etiquetaInclinada(ctx, texto, x, y, tamBase, colores, rol, pz = null) {
     if (!texto) return;
+    const tam = pz ? tamBase * letraDe(pz, 'etiqueta') : tamBase;
     ctx.save();
     fuente(ctx, tam, 900, rol);
     const w = ctx.measureText(texto).width + tam * 1.1;
@@ -322,12 +391,14 @@ function etiquetaInclinada(ctx, texto, x, y, tam, colores, rol, pz = null) {
  *   ajustes: { escala, posX, posY },
  *   encuadre: { x, y, zoom },
  *   letras: { titulo, precio, texto },   // un diseño de LETRAS (catalogo.js)
- *   mover: { titulo: { x, y, escala }, ... }, // lo que se corrió y agrandó cada pieza
+ *   mover: { titulo: { x, y, escala, letra, ancho, alto }, ... }, // lo que se corrió y agrandó cada pieza
+ *   orden: ['foto', 'titulo', ...],      // las capas, de atrás hacia adelante (ordenarCapas)
  *   seleccion: 'precio',                 // la pieza elegida en la vista previa
  *   dinero: (n) => '$1.450',
  * }
  * Devuelve las cajas de las piezas que se pueden arrastrar, en el orden en que
- * se dibujaron (la última queda encima).
+ * se dibujaron (la última queda encima). En `.capas`, los id de todas las capas
+ * en ese orden, también las que no se arrastran (las tarjetas de varios productos).
  */
 export function dibujarPublicidad(canvas, d) {
     const W = Math.round(d.ancho), H = Math.round(d.alto);
@@ -351,32 +422,36 @@ export function dibujarPublicidad(canvas, d) {
         ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     }
 
-    // El pie, el título y el mensaje se miden primero (el lugar de los productos
-    // se calcula con ellos en su lugar de siempre: moverlos no corre a nadie) y se
-    // dibujan al final, para que queden encima si se los arrastra sobre un producto.
+    // Todo se mide primero (el lugar de los productos se calcula con los textos en
+    // su lugar de siempre: moverlos o agrandarlos no corre a nadie) y se dibuja
+    // después, capa por capa, en el orden que dejó el usuario. El orden de siempre:
+    // el producto, después el pie, el título y el mensaje (quedan encima si se los
+    // arrastra sobre él), y arriba de todo las imágenes agregadas.
     const encima = [];
 
     // Pie: nombre del negocio y texto extra
     const altoPie = (t.negocio || t.extra) ? u * 0.075 : 0;
     // Ocupa todo el ancho: a los lados se mueve recién cuando se lo achica.
-    if (altoPie) encima.push(() => {
+    if (altoPie) encima.push({ id: 'pie', dibujar: () => {
+        const letra = letraDe(pz, 'pie');
+        const alto = altoPie * letra;
         ctx.save();
-        colocar(ctx, pieza(pz, 'pie', 0, H - altoPie, W, altoPie));
+        colocar(ctx, pieza(pz, 'pie', 0, H - alto, W, alto));
         ctx.fillStyle = 'rgba(0,0,0,0.62)';
-        ctx.fillRect(0, H - altoPie, W, altoPie);
+        ctx.fillRect(0, H - alto, W, alto);
         ctx.fillStyle = '#FFFFFF'; ctx.textBaseline = 'middle';
         if (t.negocio) {
-            ajustar(ctx, t.negocio, W * (t.extra ? 0.45 : 0.9), u * 0.034, u * 0.018, 800, L.texto);
+            ajustar(ctx, t.negocio, W * (t.extra ? 0.45 : 0.9), u * 0.034 * letra, u * 0.018, 800, L.texto);
             ctx.textAlign = t.extra ? 'left' : 'center';
-            ctx.fillText(t.negocio, t.extra ? m : W / 2, H - altoPie / 2);
+            ctx.fillText(t.negocio, t.extra ? m : W / 2, H - alto / 2);
         }
         if (t.extra) {
-            ajustar(ctx, t.extra, W * (t.negocio ? 0.45 : 0.9), u * 0.03, u * 0.016, 700, L.texto);
+            ajustar(ctx, t.extra, W * (t.negocio ? 0.45 : 0.9), u * 0.03 * letra, u * 0.016, 700, L.texto);
             ctx.textAlign = t.negocio ? 'right' : 'center';
-            ctx.fillText(t.extra, t.negocio ? W - m : W / 2, H - altoPie / 2);
+            ctx.fillText(t.extra, t.negocio ? W - m : W / 2, H - alto / 2);
         }
         ctx.restore();
-    });
+    } });
 
     // Encabezado: título en su banda y mensaje
     let y = m;
@@ -386,19 +461,25 @@ export function dibujarPublicidad(canvas, d) {
         const anchoBanda = Math.min(W - m * 2, ctx.measureText(t.titulo).width + u * 0.08);
         const altoBanda = tam * 1.45;
         const yBanda = y;
-        encima.push(() => {
+        encima.push({ id: 'titulo', dibujar: () => {
+            const c = cajaDeTexto(ctx, pz, 'titulo', t.titulo, {
+                tam, peso: 900, rol: L.titulo, ancho: anchoBanda, alto: altoBanda, lineas: [t.titulo],
+                padX: u * 0.04, padY: tam * 0.125, interlinea: 1.2,
+            });
+            const xBanda = (W - c.w) / 2;
             ctx.save();
-            colocar(ctx, pieza(pz, 'titulo', (W - anchoBanda) / 2, yBanda, anchoBanda, altoBanda));
+            colocar(ctx, pieza(pz, 'titulo', xBanda, yBanda, c.w, c.h, { fluida: c.fluida }));
             ctx.save();
             ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = u * 0.02; ctx.shadowOffsetY = u * 0.006;
-            rectRedondo(ctx, (W - anchoBanda) / 2, yBanda, anchoBanda, altoBanda, altoBanda * 0.25);
+            rectRedondo(ctx, xBanda, yBanda, c.w, c.h, altoBanda * 0.25);
             ctx.fillStyle = col.principal; ctx.fill();
             ctx.restore();
-            fuente(ctx, tam, 900, L.titulo);
+            fuente(ctx, c.tam, 900, L.titulo);
             ctx.fillStyle = col.texto; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText(t.titulo, W / 2, yBanda + altoBanda / 2 + tam * 0.03);
+            const primera = yBanda + (c.h - c.lineas.length * c.tam * 1.2) / 2 + c.tam * 0.63;
+            c.lineas.forEach((l, i) => ctx.fillText(l, W / 2, primera + i * c.tam * 1.2));
             ctx.restore();
-        });
+        } });
         y += altoBanda + u * 0.02;
     }
     if (t.mensaje?.trim()) {
@@ -407,24 +488,35 @@ export function dibujarPublicidad(canvas, d) {
         const lineas = envolver(ctx, t.mensaje, W - m * 2, 2);
         const ancho = Math.max(...lineas.map(l => ctx.measureText(l).width));
         const yMensaje = y;
-        encima.push(() => {
+        encima.push({ id: 'mensaje', dibujar: () => {
+            const c = cajaDeTexto(ctx, pz, 'mensaje', t.mensaje, {
+                tam, peso: 800, rol: L.texto, ancho, alto: lineas.length * tam * 1.25, lineas, padX: 0, padY: 0, interlinea: 1.25,
+            });
             ctx.save();
-            colocar(ctx, pieza(pz, 'mensaje', (W - ancho) / 2, yMensaje, ancho, lineas.length * tam * 1.25));
-            fuente(ctx, tam, 800, L.texto);
+            colocar(ctx, pieza(pz, 'mensaje', (W - c.w) / 2, yMensaje, c.w, c.h, { fluida: c.fluida }));
+            fuente(ctx, c.tam, 800, L.texto);
             ctx.textAlign = 'center';
             ctx.shadowColor = 'rgba(0,0,0,0.75)'; ctx.shadowBlur = u * 0.012;
             ctx.fillStyle = '#FFFFFF';
-            lineas.forEach((l, i) => ctx.fillText(l, W / 2, yMensaje + tam + i * tam * 1.25));
+            const sobra = (c.h - c.altoTexto) / 2;
+            c.lineas.forEach((l, i) => ctx.fillText(l, W / 2, yMensaje + sobra + c.tam + i * c.tam * 1.25));
             ctx.restore();
-        });
+        } });
         y += lineas.length * tam * 1.25 + u * 0.01;
     }
 
     const productos = (d.productos || []).filter(Boolean);
     const zona = { x: m, y: y + u * 0.01, w: W - m * 2, h: H - altoPie - m - (y + u * 0.01) };
-    if (productos.length === 1) dibujarUno(ctx, productos[0], zona, { W, H, u, m, col, L, pz, dinero, ajustes: d.ajustes || {}, mayorista: d.formatoId === 'mayorista' });
-    else if (productos.length > 1) dibujarVarios(ctx, productos, zona, { W, H, u, col, L, dinero, mayorista: d.formatoId === 'mayorista' });
-    for (const dibujar of encima) dibujar();
+    const capas = [];
+    if (productos.length === 1) capas.push(...capasDeUno(ctx, productos[0], zona, { W, H, u, col, L, pz, dinero, ajustes: d.ajustes || {}, mayorista: d.formatoId === 'mayorista' }));
+    else if (productos.length > 1) {
+        capas.push({ id: 'tarjetas', dibujar: () => {
+            ctx.save();
+            dibujarVarios(ctx, productos, zona, { W, H, u, col, L, dinero, mayorista: d.formatoId === 'mayorista' });
+            ctx.restore();
+        } });
+    }
+    capas.push(...encima);
 
     // Las imágenes agregadas (Kevin, 29-oct-2026: un logo, un sello…): encima de
     // todo, en el orden en que se agregaron. Arrancan al centro, con el lado mayor
@@ -433,15 +525,21 @@ export function dibujarPublicidad(canvas, d) {
         const iw = anchoDe(im?.img), ih = altoDe(im?.img);
         if (!iw || !ih) continue;
         const f = (u * 0.35) / Math.max(iw, ih);
-        const w = iw * f, h = ih * f, x = (W - w) / 2, y = (H - h) / 2;
-        ctx.save();
-        colocar(ctx, pieza(pz, im.id, x, y, w, h));
-        ctx.drawImage(im.img, x, y, w, h);
-        ctx.restore();
+        const w = iw * f, h = ih * f, x = (W - w) / 2, yIm = (H - h) / 2;
+        capas.push({ id: im.id, dibujar: () => {
+            ctx.save();
+            colocar(ctx, pieza(pz, im.id, x, yIm, w, h));
+            ctx.drawImage(im.img, x, yIm, w, h);
+            ctx.restore();
+        } });
     }
 
-    // La pieza elegida: marco y esquinas para agrandarla. Solo en la vista previa
-    // (lo que se guarda o se descarga se dibuja sin `seleccion`).
+    const enOrden = ordenarCapas(capas, d.orden);
+    for (const capa of enOrden) capa.dibujar();
+
+    // La pieza elegida: marco, esquinas para agrandarla y, en un texto, los puntos
+    // de los lados para cambiarle el ancho y el alto. Solo en la vista previa (lo
+    // que se guarda o se descarga se dibuja sin `seleccion`).
     const sel = d.seleccion && pz.cajas.find(c => c.id === d.seleccion);
     if (sel) {
         ctx.save();
@@ -457,14 +555,28 @@ export function dibujarPublicidad(canvas, d) {
             ctx.arc(ex, ey, u * 0.016, 0, Math.PI * 2);
             ctx.fillStyle = '#FFFFFF'; ctx.fill(); ctx.stroke();
         }
+        for (const [lado, lx, ly] of lados(sel)) {
+            const largo = u * 0.05, grueso = u * 0.018;
+            const parado = lado === 'e' || lado === 'o';
+            const lw = parado ? grueso : largo, lh = parado ? largo : grueso;
+            rectRedondo(ctx, lx - lw / 2, ly - lh / 2, lw, lh, grueso / 2);
+            ctx.fillStyle = '#FFFFFF'; ctx.fill(); ctx.stroke();
+        }
         ctx.restore();
     }
+    pz.cajas.capas = enOrden.map(c => c.id);
     return pz.cajas;
 }
 
 /** Las cuatro esquinas de una caja (de donde se agranda o achica una pieza). */
 export function esquinas(c) {
     return [[c.x, c.y], [c.x + c.w, c.y], [c.x, c.y + c.h], [c.x + c.w, c.y + c.h]];
+}
+
+/** Los puntos de los lados de un texto (este, oeste, norte y sur): cambian el ancho y el alto de su caja. */
+export function lados(c) {
+    if (!c.fluida) return [];
+    return [['e', c.x + c.w, c.y + c.h / 2], ['o', c.x, c.y + c.h / 2], ['n', c.x + c.w / 2, c.y], ['s', c.x + c.w / 2, c.y + c.h]];
 }
 
 /** Las líneas del globo del precio y su alto, sin dibujar (para reservarle lugar). */
@@ -479,13 +591,31 @@ function medirPrecio(ctx, p, w, { u, L, dinero, mayorista }) {
     return { lineas, alto: lineas.reduce((s, l) => s + l.tam * 1.18, 0) + u * 0.035 };
 }
 
-function bloquePrecio(ctx, x, y, w, { lineas, alto }, { u, col }) {
+/** El precio, con su letra (`mover.precio.letra`) y su caja: nunca más angosta que el número. */
+function cajaDePrecio(ctx, pz, precio, ancho, { u }) {
+    const mov = pz.mover.precio || {};
+    const letra = letraDe(pz, 'precio');
+    const lineas = letra === 1 ? precio.lineas : precio.lineas.map(l => ({ ...l, tam: l.tam * letra }));
+    const altoTexto = letra === 1 ? precio.alto : lineas.reduce((s, l) => s + l.tam * 1.18, 0) + u * 0.035;
+    const mayor = Math.max(...lineas.map(l => {
+        fuente(ctx, l.tam, l.peso, l.rol);
+        return ctx.measureText(l.texto).width;
+    }));
+    const minW = mayor / 0.86;
+    const anchoPropio = Number(mov.ancho) > 0 ? mov.ancho * pz.W : null;
+    const altoPropio = Number(mov.alto) > 0 ? mov.alto * pz.H : 0;
+    // Sin tocarlo, el ancho de siempre: `medirPrecio` ya lo hizo entrar.
+    const w = letra === 1 && anchoPropio === null ? ancho : Math.max(anchoPropio ?? ancho, minW);
+    return { lineas, altoTexto, alto: Math.max(altoTexto, altoPropio), w, fluida: { minW: Math.min(minW, w), minH: altoTexto } };
+}
+
+function bloquePrecio(ctx, x, y, w, { lineas, alto, altoTexto = alto }, { u, col }) {
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = u * 0.025; ctx.shadowOffsetY = u * 0.008;
     rectRedondo(ctx, x, y - alto, w, alto, u * 0.03);
     ctx.fillStyle = col.principal; ctx.fill();
     ctx.restore();
-    let cy = y - alto + u * 0.0175;
+    let cy = y - alto + u * 0.0175 + (alto - altoTexto) / 2;
     ctx.textAlign = 'center'; ctx.fillStyle = col.texto;
     for (const l of lineas) {
         fuente(ctx, l.tam, l.peso, l.rol);
@@ -502,7 +632,9 @@ function bloquePrecio(ctx, x, y, w, { lineas, alto }, { u, col }) {
     return alto;
 }
 
-function dibujarUno(ctx, p, zona, { W, H, u, col, L, pz, dinero, ajustes, mayorista }) {
+/** Las capas de una publicidad de un solo producto: su foto, la etiqueta, el precio y el nombre. */
+function capasDeUno(ctx, p, zona, { W, H, u, col, L, pz, dinero, ajustes, mayorista }) {
+    const capas = [];
     const horizontal = W > H * 1.2;
     const escala = Math.min(1.8, Math.max(0.4, Number(ajustes.escala) || 1));
     // Precio: abajo a la derecha (vertical) o a la derecha al medio (horizontal).
@@ -532,32 +664,48 @@ function dibujarUno(ctx, p, zona, { W, H, u, col, L, pz, dinero, ajustes, mayori
         const posY = ajustes.posY ?? 0.5;
         const cx = W * posX;
         const cy = zona.y + libre * posY;
-        ctx.save();
-        ctx.shadowColor = 'rgba(0,0,0,0.38)'; ctx.shadowBlur = u * 0.035; ctx.shadowOffsetY = u * 0.015;
-        const caja = contener(ctx, p.foto, cx - cw / 2, cy - ch / 2, cw, ch);
-        ctx.restore();
-        // La foto se arrastra y agranda con su posición y tamaño (los mismos deslizadores): `libre` pasa px a posY.
-        pz.cajas.push({ id: 'foto', ...caja, posX, posY, libre, escala });
-        if (p.etiqueta) etiquetaInclinada(ctx, p.etiqueta, caja.x + caja.w * 0.02, caja.y + caja.h * 0.02, u * 0.04, col, L.titulo, pz);
+        const caja = rectContener(p.foto, cx - cw / 2, cy - ch / 2, cw, ch);
+        capas.push({ id: 'foto', dibujar: () => {
+            ctx.save();
+            ctx.shadowColor = 'rgba(0,0,0,0.38)'; ctx.shadowBlur = u * 0.035; ctx.shadowOffsetY = u * 0.015;
+            if (caja.w) ctx.drawImage(p.foto, caja.x, caja.y, caja.w, caja.h);
+            ctx.restore();
+            // La foto se arrastra y agranda con su posición y tamaño (los mismos deslizadores): `libre` pasa px a posY.
+            pz.cajas.push({ id: 'foto', ...caja, posX, posY, libre, escala });
+        } });
+        if (p.etiqueta) capas.push({ id: 'etiqueta', dibujar: () => etiquetaInclinada(ctx, p.etiqueta, caja.x + caja.w * 0.02, caja.y + caja.h * 0.02, u * 0.04, col, L.titulo, pz) });
     } else if (p.etiqueta) {
-        etiquetaInclinada(ctx, p.etiqueta, zona.x, zona.y + u * 0.02, u * 0.04, col, L.titulo, pz);
+        capas.push({ id: 'etiqueta', dibujar: () => etiquetaInclinada(ctx, p.etiqueta, zona.x, zona.y + u * 0.02, u * 0.04, col, L.titulo, pz) });
     }
 
-    ctx.save();
-    colocar(ctx, pieza(pz, 'precio', xPrecio, yPrecio - precio.alto, anchoPrecio, precio.alto));
-    bloquePrecio(ctx, xPrecio, yPrecio, anchoPrecio, precio, { u, col });
-    ctx.restore();
+    capas.push({ id: 'precio', dibujar: () => {
+        const c = cajaDePrecio(ctx, pz, precio, anchoPrecio, { u });
+        const x = xPrecio + (anchoPrecio - c.w) / 2;
+        const arriba = yPrecio - precio.alto;
+        ctx.save();
+        colocar(ctx, pieza(pz, 'precio', x, arriba, c.w, c.alto, { fluida: c.fluida }));
+        bloquePrecio(ctx, x, arriba + c.alto, c.w, c, { u, col });
+        ctx.restore();
+    } });
 
-    ctx.save();
-    colocar(ctx, pieza(pz, 'nombre', xNombre, yNombre, anchoNombre, altoNombre));
-    ctx.save();
-    rectRedondo(ctx, xNombre, yNombre, anchoNombre, altoNombre, u * 0.02);
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fill();
-    ctx.restore();
-    fuente(ctx, tam, 900, L.texto);
-    ctx.fillStyle = '#FFFFFF'; ctx.textAlign = 'left';
-    lineas.forEach((l, i) => ctx.fillText(l, xNombre + u * 0.02, yNombre + u * 0.015 + tam * (i + 0.95) * 1.2 - tam * 0.2));
-    ctx.restore();
+    capas.push({ id: 'nombre', dibujar: () => {
+        const c = cajaDeTexto(ctx, pz, 'nombre', p.nombre, {
+            tam, peso: 900, rol: L.texto, ancho: anchoNombre, alto: altoNombre, lineas, padX: u * 0.02, padY: u * 0.015, interlinea: 1.2,
+        });
+        const x = xNombre + (anchoNombre - c.w) / 2;
+        ctx.save();
+        colocar(ctx, pieza(pz, 'nombre', x, yNombre, c.w, c.h, { fluida: c.fluida }));
+        ctx.save();
+        rectRedondo(ctx, x, yNombre, c.w, c.h, u * 0.02);
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fill();
+        ctx.restore();
+        fuente(ctx, c.tam, 900, L.texto);
+        ctx.fillStyle = '#FFFFFF'; ctx.textAlign = 'left';
+        const sobra = (c.h - c.altoTexto) / 2;
+        c.lineas.forEach((l, i) => ctx.fillText(l, x + u * 0.02, yNombre + sobra + u * 0.015 + c.tam * (i + 0.95) * 1.2 - c.tam * 0.2));
+        ctx.restore();
+    } });
+    return capas;
 }
 
 function dibujarVarios(ctx, productos, zona, { W, H, u, col, L, dinero, mayorista }) {
