@@ -11,6 +11,7 @@ import { cn } from '../../lib/utils';
 import CobrarEnvioModal from '../../components/delivery/CobrarEnvioModal';
 import { EntregaExitosaModal } from '../../components/delivery/DocumentoVenta';
 import { textoEntrega, imprimirComprobanteEnvio, descargarComprobanteEnvio } from '../../lib/comprobanteEnvio';
+import { avisarImpresion } from '../../lib/descargas';
 
 // Modo Repartidor. Menú con 4 tarjetas y, dentro de cada una, los envíos del día
 // en ese estado. La ubicación se comparte SOLO mientras hay envíos en curso, cada
@@ -711,11 +712,7 @@ function ComprobantePaquete({ d, currency }) {
         setTrabajando(que);
         try {
             const r = await fn(d, { companyId: activeCompanyId, currency });
-            if (!r?.ok) {
-                toast(r?.error === 'NO_PRINTER' ? 'Configurá la impresora en Configuración → General → Impresora térmica.'
-                    : r?.error === 'POPUP_BLOCKED' ? 'El navegador bloqueó la ventana de impresión.'
-                        : `No se pudo: ${r?.error || ''}`, 'error');
-            }
+            if (que === 'imprimir') avisarImpresion(r, 'el comprobante');
         } catch (e) {
             toast(`No se pudo: ${e?.message || e}`, 'error');
         } finally {

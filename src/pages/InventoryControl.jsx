@@ -11,6 +11,7 @@ import {
     Hash, Eye, Download, Share2, Camera, Truck
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
+import { guardarPdf } from '../lib/descargas';
 
 // ─── Tiny beep via Web Audio API ───
 const audioCtx = typeof window !== 'undefined' ? new (window.AudioContext || window.webkitAudioContext)() : null;
@@ -478,7 +479,7 @@ const InventoryControl = () => {
             doc.text(`Página ${i} de ${pages}`, pageW - 30, doc.internal.pageSize.getHeight() - 8);
         }
 
-        doc.save(`control-inventario-${ctrl.name.replace(/\s+/g, '-').toLowerCase()}-${date}.pdf`);
+        guardarPdf(doc, `control-inventario-${ctrl.name.replace(/\s+/g, '-').toLowerCase()}-${date}.pdf`);
     };
 
     // ─── WhatsApp Share ───

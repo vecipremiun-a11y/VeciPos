@@ -13,6 +13,7 @@ import { es } from 'date-fns/locale';
 import { formatCurrency } from '../utils/formatCurrency';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { guardarPdf } from '../lib/descargas';
 
 /**
  * El neto de un renglón: la plata sin IVA, que es la que la factura muestra en
@@ -150,7 +151,7 @@ const SupplierOrders = () => {
         doc.text(`Total: ${formatCurrency(totalPdf, currentCurrency)}`, 14, finalY + 12);
 
         // Save
-        doc.save(`Pedido_${order.id}_${order.supplier_name}.pdf`);
+        guardarPdf(doc, `Pedido_${order.id}_${order.supplier_name}.pdf`);
     };
 
     // Pasa el pedido a la pantalla de Compras con todo cargado: proveedor,

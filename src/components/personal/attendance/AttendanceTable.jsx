@@ -3,6 +3,7 @@ import { useStore } from '../../../store/useStore';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { Search, Calendar, ChevronLeft, ChevronRight, Download, Filter } from 'lucide-react';
 import { cn } from '../../../lib/utils';
+import { guardarArchivo } from '../../../lib/descargas';
 
 const AttendanceTable = () => {
     const { fetchAttendanceByRange, staffMembers, fetchStaffMembers } = useStore();
@@ -55,11 +56,7 @@ const AttendanceTable = () => {
         }
         // BOM para que Excel en español respete los acentos.
         const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `asistencia_${startDate}_${endDate}.csv`;
-        a.click();
-        URL.revokeObjectURL(a.href);
+        guardarArchivo(blob, `asistencia_${startDate}_${endDate}.csv`);
     };
 
     return (

@@ -9,6 +9,7 @@ import { cn } from '../../lib/utils';
 import * as XLSX from 'xlsx';
 import { formatInCompanyTime, getNowInCompanyTime } from '../../lib/dateHelpers';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { guardarExcel } from '../../lib/descargas';
 
 const PreorderReports = () => {
     const { getPreorderReports, currentCompanyTimezone, currentCurrency } = useStore();
@@ -92,7 +93,7 @@ const PreorderReports = () => {
         })));
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Reporte de Encargos");
-        XLSX.writeFile(wb, `reporte_encargos_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+        guardarExcel(XLSX, wb, `reporte_encargos_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
     };
 
     // Ventas por día (a partir de los entregados ya filtrados por delivered_at).

@@ -10,6 +10,7 @@ import { toast } from '../../lib/toast';
 import { cn } from '../../lib/utils';
 import CobrarEnvioModal from '../../components/delivery/CobrarEnvioModal';
 import { textoEntrega, imprimirComprobanteEnvio, descargarComprobanteEnvio } from '../../lib/comprobanteEnvio';
+import { avisarImpresion } from '../../lib/descargas';
 
 // Columnas del tablero (mismo orden que el flujo del envío).
 const COLS = [
@@ -106,11 +107,7 @@ export default function Shipments() {
 
     const comprobante = async (d, fn) => {
         const r = await fn(d, { companyId: activeCompanyId, currency: currentCurrency });
-        if (!r?.ok) {
-            toast(r?.error === 'NO_PRINTER' ? 'Configurá la impresora en Configuración → General → Impresora térmica.'
-                : r?.error === 'POPUP_BLOCKED' ? 'El navegador bloqueó la ventana de impresión.'
-                    : `No se pudo: ${r?.error || ''}`, 'error');
-        }
+        if (fn === imprimirComprobanteEnvio) avisarImpresion(r, 'el comprobante');
     };
 
     // Anular un pedido sin venta: la mercadería no sale y su stock vuelve.

@@ -4,6 +4,7 @@ import { formatInCompanyTime } from '../lib/dateHelpers';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { filtroDe } from '../lib/busquedaProductos';
+import { guardarPdf } from '../lib/descargas';
 import {
     AlertTriangle,
     CheckCircle,
@@ -286,7 +287,7 @@ const ExpiringProductsReport = () => {
             doc.text(`Página ${i} de ${pageCount}`, pageW - 30, doc.internal.pageSize.getHeight() - 8);
         }
 
-        doc.save(`reporte-vencimientos-${startDate}-a-${endDate}.pdf`);
+        guardarPdf(doc, `reporte-vencimientos-${startDate}-a-${endDate}.pdf`);
     };
 
     // Write-off handlers

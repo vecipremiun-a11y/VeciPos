@@ -7,6 +7,7 @@ import { useStore } from '../store/useStore';
 import { dataApiCall } from '../lib/dataApi';
 import { cn } from '../lib/utils';
 import { compressImage, validateImage } from '../lib/imageCompression';
+import { guardarArchivo } from '../lib/descargas';
 
 // Campos opcionales que la empresa puede pedir en la inscripción.
 const FIELD_DEFS = [
@@ -210,12 +211,7 @@ const Sorteos = () => {
         }
         // BOM UTF-8 (BOM) → tildes y ñ se muestran bien en Excel.
         const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `sorteo_${(form.name || 'participantes').replace(/\s+/g, '_').toLowerCase()}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
+        guardarArchivo(blob, `sorteo_${(form.name || 'participantes').replace(/\s+/g, '_').toLowerCase()}.csv`);
     };
 
     const clearParticipants = async () => {

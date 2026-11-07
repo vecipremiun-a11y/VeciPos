@@ -10,6 +10,7 @@ import { cn } from '../../../lib/utils';
 import { formatRut } from '../../../utils/rutValidation';
 import { summarizeDay, weeklyReport, buildAlerts, LEGAL_DEFAULTS } from '../../../utils/laborHours';
 import AttendanceReceipt from './AttendanceReceipt';
+import { guardarArchivo } from '../../../lib/descargas';
 
 /**
  * Libro de Asistencia.
@@ -151,11 +152,7 @@ const AttendanceBook = () => {
         }
         // BOM para que Excel en español no rompa los acentos.
         const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `libro-asistencia_${startDate}_${endDate}.csv`;
-        a.click();
-        URL.revokeObjectURL(a.href);
+        guardarArchivo(blob, `libro-asistencia_${startDate}_${endDate}.csv`);
     };
 
     const handlePrint = () => {

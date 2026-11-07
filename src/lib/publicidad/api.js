@@ -1,6 +1,7 @@
 // Llamadas a /api/ai/publicidad y la descarga de la imagen terminada.
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { fetchConLimite } from '../conectividad';
+import { avisoHecho } from '../toast';
 
 /**
  * Una acción del servidor de Publicidad. Generar un fondo tarda 10-20 s (la IA
@@ -25,32 +26,8 @@ export async function publicidad(companyId, action, datos = {}, ms = 30000) {
     }
 }
 
-const GuardarImagen = registerPlugin('GuardarImagen');
-
-/**
- * Baja la imagen: en el navegador (web y PWA) como archivo; en la app la guarda
- * en la galería, porque el WebView ignora los enlaces de descarga.
- */
-export async function descargarImagen(dataUrl, nombre) {
-    if (Capacitor.isNativePlatform()) {
-        const [cabeza, base64] = String(dataUrl).split(',');
-        const tipo = /image\/png/.test(cabeza) ? 'image/png' : 'image/jpeg';
-        try {
-            await GuardarImagen.guardar({ base64, nombre, tipo });
-            return { ok: true, mensaje: 'Imagen guardada en la galería (Imágenes › POSVECI).' };
-        } catch (e) {
-            if (String(e?.message).includes('ANDROID_VIEJO')) return { ok: false, mensaje: 'Este teléfono tiene un Android anterior al 10: abrí POSVECI en el navegador para descargar la imagen.' };
-            return { ok: false, mensaje: e?.message || 'No se pudo guardar la imagen.' };
-        }
-    }
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = nombre;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    return { ok: true };
-}
+/** Baja la imagen y avisa: en la app va a la galería; en el navegador, como archivo. */
+export { guardarImagen as descargarImagen } from '../descargas';
 
 const ImprimirImagen = registerPlugin('ImprimirImagen');
 const HOJA = 'posveci-hoja-impresion';
@@ -69,6 +46,7 @@ export async function imprimirImagen(dataUrl, nombre) {
     if (Capacitor.isNativePlatform()) {
         try {
             await ImprimirImagen.imprimir({ base64: String(dataUrl).split(',')[1], nombre });
+            avisoHecho('Se abrió la ventana para imprimir la imagen.');
             return { ok: true };
         } catch (e) {
             if (e?.code === 'UNIMPLEMENTED') return { ok: false, mensaje: 'Esta versión de la app todavía no imprime: actualizala, o abrí POSVECI en el navegador.' };
@@ -104,6 +82,7 @@ export async function imprimirImagen(dataUrl, nombre) {
     document.body.appendChild(hoja);
     const limpiar = () => { hoja.remove(); window.removeEventListener('afterprint', limpiar); };
     window.addEventListener('afterprint', limpiar);
+    avisoHecho('Se abrió la ventana para imprimir la imagen.');
     window.print();
     return { ok: true };
 }

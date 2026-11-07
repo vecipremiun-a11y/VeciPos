@@ -17,11 +17,12 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 /**
- * Guarda una imagen en la galería del teléfono (Imágenes/POSVECI).
+ * Guarda archivos en el teléfono: las imágenes en la galería (Imágenes/POSVECI) y
+ * lo demás, como una boleta en PDF o un Excel, en Descargas/POSVECI.
  *
  * Por qué existe: dentro de la app, el WebView ignora los enlaces de descarga
- * (`<a download>`), así que "Descargar" no hacía nada. La usa Publicidad para
- * bajar la imagen terminada y compartirla desde la galería.
+ * (`<a download>`), así que "Descargar" no hacía nada y tampoco daba error. Lo usa
+ * src/lib/descargas.js.
  *
  * Android 10 o más nuevo: MediaStore, sin pedir permisos. En uno más viejo
  * contesta ANDROID_VIEJO y la pantalla lo avisa.
@@ -31,15 +32,28 @@ public class GuardarImagenPlugin extends Plugin {
 
     @PluginMethod
     public void guardar(PluginCall call) {
-        String datos = call.getString("base64");
-        String nombre = call.getString("nombre", "posveci.jpg");
-        String tipo = call.getString("tipo", "image/jpeg");
-        if (datos == null || datos.isEmpty()) {
-            call.reject("Falta la imagen");
-            return;
-        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             call.reject("ANDROID_VIEJO");
+            return;
+        }
+        escribir(call, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, Environment.DIRECTORY_PICTURES + "/POSVECI", "posveci.jpg", "image/jpeg");
+    }
+
+    @PluginMethod
+    public void guardarArchivo(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            call.reject("ANDROID_VIEJO");
+            return;
+        }
+        escribir(call, MediaStore.Downloads.EXTERNAL_CONTENT_URI, Environment.DIRECTORY_DOWNLOADS + "/POSVECI", "posveci.pdf", "application/octet-stream");
+    }
+
+    private void escribir(PluginCall call, Uri coleccion, String carpeta, String nombrePorDefecto, String tipoPorDefecto) {
+        String datos = call.getString("base64");
+        String nombre = call.getString("nombre", nombrePorDefecto);
+        String tipo = call.getString("tipo", tipoPorDefecto);
+        if (datos == null || datos.isEmpty()) {
+            call.reject("Falta el archivo");
             return;
         }
         ContentResolver cr = getContext().getContentResolver();
@@ -47,11 +61,11 @@ public class GuardarImagenPlugin extends Plugin {
         try {
             byte[] bytes = Base64.decode(datos, Base64.DEFAULT);
             ContentValues v = new ContentValues();
-            v.put(MediaStore.Images.Media.DISPLAY_NAME, nombre);
-            v.put(MediaStore.Images.Media.MIME_TYPE, tipo);
-            v.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/POSVECI");
-            v.put(MediaStore.Images.Media.IS_PENDING, 1);
-            uri = cr.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
+            v.put(MediaStore.MediaColumns.DISPLAY_NAME, nombre);
+            v.put(MediaStore.MediaColumns.MIME_TYPE, tipo);
+            v.put(MediaStore.MediaColumns.RELATIVE_PATH, carpeta);
+            v.put(MediaStore.MediaColumns.IS_PENDING, 1);
+            uri = cr.insert(coleccion, v);
             if (uri == null) {
                 call.reject("No se pudo crear el archivo");
                 return;
@@ -61,7 +75,7 @@ public class GuardarImagenPlugin extends Plugin {
                 out.write(bytes);
             }
             v.clear();
-            v.put(MediaStore.Images.Media.IS_PENDING, 0);
+            v.put(MediaStore.MediaColumns.IS_PENDING, 0);
             cr.update(uri, v, null, null);
             JSObject r = new JSObject();
             r.put("uri", uri.toString());
@@ -70,7 +84,7 @@ public class GuardarImagenPlugin extends Plugin {
             if (uri != null) {
                 try { cr.delete(uri, null, null); } catch (Exception ignorado) { /* nada que limpiar */ }
             }
-            call.reject("No se pudo guardar la imagen: " + e.getMessage());
+            call.reject("No se pudo guardar el archivo: " + e.getMessage());
         }
     }
 }

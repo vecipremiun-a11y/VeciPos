@@ -11,6 +11,7 @@ import { useStore } from '../store/useStore';
 import { dataApiCall } from '../lib/dataApi';
 import { formatCurrency } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
+import { guardarExcel } from '../lib/descargas';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const currentMonth = () => today().slice(0, 7);
@@ -238,7 +239,7 @@ export default function Administration() {
         const ws = XLSX.utils.json_to_sheet(rows);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Gastos');
-        XLSX.writeFile(wb, `Gastos_${month}.xlsx`);
+        guardarExcel(XLSX, wb, `Gastos_${month}.xlsx`);
     };
 
     const openRecurringPayment = (item) => {

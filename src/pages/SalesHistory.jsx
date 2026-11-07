@@ -10,6 +10,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import ReturnModal from '../components/ReturnModal';
 import { printSaleReceipt } from '../lib/saleReceipt';
 import { formatoAImprimir } from '../lib/formatoImpresion';
+import { avisarImpresion, guardarArchivo } from '../lib/descargas';
 
 // Delivery de un pedido a domicilio cobrado al entregar: va aparte de los productos.
 const deliveryDeLaVenta = (sale) => Math.round(Number(sale?.paymentDetails?.deliveryFee) || 0);
@@ -192,12 +193,7 @@ const SalesHistory = () => {
             }
 
             const pdfBlob = await generateReceiptPDF(selectedSale, seller, receiptConfig, currentCurrency, timbreImg);
-            const url = window.URL.createObjectURL(pdfBlob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `boleta_${selectedSale.id}.pdf`;
-            link.click();
-            window.URL.revokeObjectURL(url);
+            await guardarArchivo(pdfBlob, `boleta_${selectedSale.id}.pdf`);
         } catch (error) {
             console.error("Error generating PDF:", error);
             alert("Error al generar el PDF");
@@ -285,11 +281,7 @@ const SalesHistory = () => {
                 // El formato que eligió este usuario en el POS (58mm, 80mm o A4).
                 formato: formatoAImprimir(receiptConfig, activeCompanyId, currentUser?.id),
             });
-            if (!r.ok) {
-                if (r.error === 'NO_PRINTER') alert('Configura tu impresora en Configuración → General → Impresora térmica.');
-                else if (r.error === 'POPUP_BLOCKED') alert('El navegador bloqueó la ventana de impresión. Permite las ventanas emergentes.');
-                else alert('No se pudo imprimir: ' + (r.error || ''));
-            }
+            avisarImpresion(r, 'la boleta');
         } catch (e) {
             alert('No se pudo imprimir: ' + (e?.message || e));
         } finally {

@@ -4,6 +4,7 @@ import { CheckCircle2, Printer, Download, X, MapPin, Clock, Banknote } from 'luc
 import { useStore } from '../../store/useStore';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { imprimirComprobanteEnvio, descargarComprobanteEnvio, textoEntrega } from '../../lib/comprobanteEnvio';
+import { avisarImpresion } from '../../lib/descargas';
 import { toast } from '../../lib/toast';
 
 /**
@@ -24,13 +25,7 @@ export default function EnvioCreadoModal({ envio, onClose }) {
         setTrabajando(que);
         try {
             const r = await fn(envio, { companyId: activeCompanyId, currency: currentCurrency });
-            if (!r?.ok) {
-                toast(r?.error === 'NO_PRINTER'
-                    ? 'Configurá la impresora en Configuración → General → Impresora térmica.'
-                    : r?.error === 'POPUP_BLOCKED'
-                        ? 'El navegador bloqueó la ventana de impresión: permití las ventanas emergentes.'
-                        : `No se pudo: ${r?.error || ''}`, 'error');
-            }
+            if (que === 'imprimir') avisarImpresion(r, 'el comprobante');
         } catch (e) {
             toast(`No se pudo: ${e?.message || e}`, 'error');
         } finally {

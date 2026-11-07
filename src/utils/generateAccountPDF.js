@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { reportCall } from '../lib/dataApi';
+import { guardarPdf } from '../lib/descargas';
 
 export async function generateAccountStatementPDF({
     client,
@@ -290,7 +291,7 @@ export async function generateAccountStatementPDF({
 
     // Save
     const fileName = `Estado_Cuenta_${client.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
-    doc.save(fileName);
+    return guardarPdf(doc, fileName);
 }
 
 function fmtCurrency(amount, currency) {

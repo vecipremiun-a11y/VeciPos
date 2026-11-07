@@ -8,6 +8,7 @@ import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 import { formatInCompanyTime, getNowInCompanyTime } from '../lib/dateHelpers';
 import { formatCurrency } from '../utils/formatCurrency';
+import { guardarExcel } from '../lib/descargas';
 
 const SalesProfitReport = () => {
     const { fetchSalesForReport, currentCompanyTimezone, currentCurrency } = useStore();
@@ -169,7 +170,7 @@ const SalesProfitReport = () => {
         })));
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Reporte Utilidad");
-        XLSX.writeFile(wb, "Reporte_Utilidad.xlsx");
+        guardarExcel(XLSX, wb, "Reporte_Utilidad.xlsx");
     };
 
     const chartData = [

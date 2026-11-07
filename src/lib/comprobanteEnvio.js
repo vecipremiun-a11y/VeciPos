@@ -19,6 +19,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { isThermalAvailable, getSavedPrinter, printThermalReceipt } from './thermalPrint';
 import { buildSaleReceiptModel } from './saleReceipt';
 import { reportCall } from './dataApi';
+import { guardarPdf } from './descargas';
 
 const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
@@ -169,7 +170,7 @@ function pdf58(dibujar, archivo) {
     const alto = dibujar(medir, false) + 6;
     const doc = new jsPDF({ unit: 'mm', format: [ANCHO, Math.max(alto, 60)] });
     dibujar(doc, true);
-    doc.save(archivo);
+    return guardarPdf(doc, archivo);
 }
 
 function lineasDe(doc, texto, ancho) {
@@ -180,7 +181,7 @@ function lineasDe(doc, texto, ancho) {
 export async function descargarComprobanteEnvio(envio, { companyId, currency = 'CLP' } = {}) {
     const money = (n) => formatCurrency(n, currency);
     const m = modeloComprobanteEnvio(envio, await configBoleta(companyId));
-    pdf58((doc, dibuja) => {
+    await pdf58((doc, dibuja) => {
         const X = 3, W = 52, C = 29;
         let y = 6;
         const txt = (t, { size = 8, bold = false, align = 'left', gap = 3.6 } = {}) => {
@@ -242,7 +243,7 @@ export async function descargarBoletaPdf(venta, { companyId, currency = 'CLP', s
         } catch { timbre = null; }
     }
     const nombre = m.docLabel ? `Boleta_${dteInfo?.folio || venta.id}.pdf` : `NotaDeVenta_${venta.id}.pdf`;
-    pdf58((doc, dibuja) => {
+    await pdf58((doc, dibuja) => {
         const X = 3, W = 52, C = 29;
         let y = 6;
         const txt = (t, { size = 8, bold = false, align = 'left' } = {}) => {

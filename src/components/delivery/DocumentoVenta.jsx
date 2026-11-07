@@ -8,6 +8,7 @@ import { configBoleta, descargarBoletaPdf } from '../../lib/comprobanteEnvio';
 import { formatoAImprimir } from '../../lib/formatoImpresion';
 import { cn } from '../../lib/utils';
 import { toast } from '../../lib/toast';
+import { avisarImpresion } from '../../lib/descargas';
 
 const NOMBRE_DOC = { 39: 'Boleta', 33: 'Factura', 34: 'Factura exenta' };
 
@@ -60,11 +61,7 @@ export default function DocumentoVenta({ saleId }) {
                 dteInfo: dte, tedXml: dte?.xml_firmado || null,
                 formato: formatoAImprimir(receiptConfig, activeCompanyId, currentUser?.id),
             });
-            if (!r?.ok) {
-                toast(r?.error === 'NO_PRINTER' ? 'Configurá la impresora en Configuración → General → Impresora térmica.'
-                    : r?.error === 'POPUP_BLOCKED' ? 'El navegador bloqueó la ventana de impresión.'
-                        : `No se pudo imprimir: ${r?.error || ''}`, 'error');
-            }
+            avisarImpresion(r, 'el documento');
         } finally { setTrabajando(null); }
     };
     const descargar = async () => {

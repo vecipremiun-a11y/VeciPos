@@ -14,11 +14,21 @@ function inferType(msg) {
     return 'info';
 }
 
-export function toast(message, type) {
+// `ms`: cuánto se queda (sin él, lo de siempre). `fuerte`: tarjeta de color lleno.
+export function toast(message, type, { ms, fuerte = false } = {}) {
     const msg = String(message ?? '');
     if (!msg.trim()) return;
-    const item = { id: idSeq++, message: msg, type: type || inferType(msg) };
+    const item = { id: idSeq++, message: msg, type: type || inferType(msg), ms, fuerte };
     listeners.forEach(l => l(item));
+}
+
+/**
+ * Lo que el usuario tiene que ver que se hizo: se descargó, se mandó a imprimir,
+ * se guardó (Kevin, 4-nov-2026: "un mensaje visible que se note que esa acción se
+ * hizo"). Verde lleno y más tiempo en pantalla.
+ */
+export function avisoHecho(message) {
+    toast(message, 'success', { ms: 6000, fuerte: true });
 }
 
 export function subscribeToasts(fn) {
