@@ -492,7 +492,7 @@ const Purchases = () => {
         if (cambiosForm?.invalidas) {
             alert(typeof cambiosForm.invalidas === 'string'
                 ? cambiosForm.invalidas
-                : 'Hay una caja con un precio que no se divide exacto por sus unidades: elegí uno de los sugeridos.');
+                : 'Revisá las cajas: a una le falta el precio.');
             return;
         }
 
@@ -651,8 +651,8 @@ const Purchases = () => {
             // con un mensajito que se va solo: es mercadería que se pagó y que
             // el sistema no va a contar.
             if (res.itemsSinAplicar?.length) setAvisoSinAplicar(res.itemsSinAplicar);
-            // Cajas que no se aplicaron o no se pudieron crear (precio que no
-            // divide exacto, código de barras repetido…). La compra igual quedó
+            // Cajas que no se aplicaron o no se pudieron crear (sin precio,
+            // código de barras repetido…). La compra igual quedó
             // guardada; se avisa para corregirlas en la ficha.
             if (res.preciosNoAplicados?.length) {
                 toast(`Compra guardada, pero ${res.preciosNoAplicados.length} caja(s) no se aplicaron: ${res.preciosNoAplicados.map(n => `${n.producto} (${n.presentacion}: ${n.motivo})`).join(' · ')}. Revisalas en la ficha del producto.`, 'error');

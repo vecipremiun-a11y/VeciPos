@@ -50,14 +50,9 @@ export default function PresentacionModal({ isOpen, onClose, product, presentati
     const precioUnidadEnCaja = u > 0 ? p / u : 0;
     const precioSuelto = Number(product.price) || 0;
 
-    // El precio tiene que dividirse exacto por las unidades: la caja viaja a la
-    // boleta como unidades, y la boleta redondea el precio unitario antes de
-    // multiplicar (7.600 ÷ 30 = 253,33 → 253 × 30 = $7.590). Se avisa mientras
-    // se escribe y se ofrecen los dos precios más cercanos que sí dividen.
-    const unidadesEnteras = u >= 2 && Number.isInteger(u);
-    const divideExacto = !(unidadesEnteras && p > 0) || Number.isInteger(p / u);
-    const precioAbajo = unidadesEnteras && p > 0 ? Math.floor(p / u) * u : 0;
-    const precioArriba = unidadesEnteras && p > 0 ? Math.ceil(p / u) * u : 0;
+    // Desde el 6-nov-2026 el precio ya no tiene que dividirse exacto por las
+    // unidades: la boleta lleva el precio unitario con decimales
+    // (api/sii/_sii.js → precioSii) y una caja de 12 a $18.500 cuadra.
 
     const guardar = async () => {
         setError('');
@@ -118,23 +113,7 @@ export default function PresentacionModal({ isOpen, onClose, product, presentati
                         <label className="text-xs font-bold text-[var(--color-text-muted)]">Precio de venta {nombre ? `de la ${nombre.toLowerCase()}` : ''}</label>
                         <input className="glass-input w-full text-lg font-bold" type="number" inputMode="decimal" min="0"
                             value={precio} placeholder="IVA incluido" onChange={e => setPrecio(e.target.value)} />
-                        {!divideExacto && (
-                            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 space-y-2">
-                                <p className="text-[11px] text-amber-400 leading-snug">
-                                    {plata(p)} no se divide exacto en {u} unidades ({(p / u).toFixed(2)} c/u), y la boleta
-                                    electrónica no cuadraría con lo cobrado. Elegí uno que sí:
-                                </p>
-                                <div className="flex flex-wrap gap-2">
-                                    {[precioAbajo, precioArriba].filter(n => n > 0).map(n => (
-                                        <button key={n} type="button" onClick={() => setPrecio(String(n))}
-                                            className="px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold">
-                                            {plata(n)} <span className="font-normal">({plata(n / u)} c/u)</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                        {u > 0 && p > 0 && divideExacto && (
+                        {u > 0 && p > 0 && (
                             <p className="text-[11px] text-[var(--color-text-muted)]">
                                 Sale a {plata(precioUnidadEnCaja)} cada unidad
                                 {precioSuelto > 0 && ` · suelta: ${plata(precioSuelto)}`}
@@ -176,7 +155,6 @@ export default function PresentacionModal({ isOpen, onClose, product, presentati
                             Cancelar
                         </button>
                         <AsyncButton onClick={guardar} icon={<Check size={16} />} loadingText="Guardando…"
-                            disabled={!divideExacto}
                             className="flex-1 py-2.5 rounded-lg text-sm font-bold btn-primary flex items-center justify-center gap-1.5 disabled:opacity-50">
                             {presentation ? 'Guardar cambios' : 'Agregar'}
                         </AsyncButton>

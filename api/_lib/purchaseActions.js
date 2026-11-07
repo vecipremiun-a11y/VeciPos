@@ -432,8 +432,10 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
             const pres = presentacionesPorId.get(Number(cp.id));
             const precio = Math.round(Number(cp.price) || 0);
             if (!pres || String(pres.product_id) !== String(item.id)) continue;
-            if (!(precio > 0) || !Number.isInteger(precio / Number(pres.units))) {
-                preciosNoAplicados.push({ producto: item.name, presentacion: pres.name, precio, motivo: 'no se divide exacto por sus unidades' });
+            // Ya no tiene que dividirse exacto por sus unidades: la boleta lleva
+            // el precio unitario con decimales (api/sii/_sii.js → precioSii).
+            if (!(precio > 0)) {
+                preciosNoAplicados.push({ producto: item.name, presentacion: pres.name, precio, motivo: 'falta el precio' });
                 continue;
             }
             queries.push({
@@ -527,8 +529,8 @@ async function purchaseCreate(turso, companyId, session, { purchase }) {
     //
     // Un producto que se vendía solo por unidad puede estrenar su caja acá
     // mismo, sin ir a la ficha. Se crean con presentationSave para que valgan
-    // exactamente las mismas reglas (precio que divide exacto, código de
-    // barras que no choque con nada). Lo que no pasa vuelve avisado.
+    // exactamente las mismas reglas (unidades enteras, código de barras que
+    // no choque con nada). Lo que no pasa vuelve avisado.
     // Best-effort: la compra ya quedó guardada pase lo que pase acá.
     const presentacionesCreadas = [];
     for (const item of seAplican) {

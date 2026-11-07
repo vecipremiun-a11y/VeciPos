@@ -59,9 +59,10 @@ export function buildBoleta(saleData, siiConfig, folio, caf) {
         const qty = parseFloat(item.quantity) || 1;
         const priceWithTax = parseFloat(item.price) || 0;
         const discount = parseFloat(item.discountPercent) || 0;
-        const effectivePrice = discount > 0 ? Math.round(priceWithTax * (1 - discount / 100)) : Math.round(priceWithTax);
+        // Con decimales, no redondeado a peso: ver precioSii.
+        const effectivePrice = precioSii(discount > 0 ? priceWithTax * (1 - discount / 100) : priceWithTax);
         const itemTaxRate = parseFloat(item.tax_rate) || 0;
-        const montoItem = Math.round(effectivePrice * qty);
+        const montoItem = montoItemSii(effectivePrice, qty);
         montoTotal += montoItem;
 
         const detail = {
@@ -139,12 +140,13 @@ export function buildFactura(saleData, siiConfig, folio, caf) {
         const effectivePrice = discount > 0 ? priceWithTax * (1 - discount / 100) : priceWithTax;
         const itemTaxRate = parseFloat(item.tax_rate) || 0;
 
-        // Factura: precios netos
-        const priceNeto = itemTaxRate > 0
-            ? Math.round(effectivePrice / (1 + taxRate))
-            : Math.round(effectivePrice);
+        // Factura: precios netos, con decimales (ver precioSii). Redondeado a peso,
+        // 12 × $1.000 salía con neto 840 × 12 + IVA = $11.995 en vez de $12.000.
+        const priceNeto = precioSii(itemTaxRate > 0
+            ? effectivePrice / (1 + taxRate)
+            : effectivePrice);
 
-        const montoItem = Math.round(priceNeto * qty);
+        const montoItem = montoItemSii(priceNeto, qty);
 
         const detail = {
             NroLinDet: idx + 1,
@@ -232,8 +234,8 @@ export function buildFacturaExenta(saleData, siiConfig, folio, caf) {
         const qty = parseFloat(item.quantity) || 1;
         const rawPrice = parseFloat(item.price) || 0;
         const discount = parseFloat(item.discountPercent) || 0;
-        const price = discount > 0 ? Math.round(rawPrice * (1 - discount / 100)) : Math.round(rawPrice);
-        const montoItem = Math.round(price * qty);
+        const price = precioSii(discount > 0 ? rawPrice * (1 - discount / 100) : rawPrice);
+        const montoItem = montoItemSii(price, qty);
         montoTotal += montoItem;
 
         return {
@@ -444,6 +446,32 @@ export function generarRCOF(boletas, siiConfig, cert) {
 }
 
 // ─── Helpers ───
+
+// Precio unitario para el SII: hasta 6 decimales, que es lo que admiten
+// <PrcItem> (Formato Boletas Electrónicas v4.2: "Precio con 12 enteros y 6
+// decimales"; Formato DTE v2.5, igual para facturas).
+//
+// Antes se redondeaba a peso ANTES de multiplicar, y una caja de 12 a $18.500
+// —que la venta guarda como 12 × $1.541,666…— salía en la boleta como
+// 12 × $1.542 = $18.504. Por eso las cajas exigían un precio que dividiera
+// exacto. Un precio entero sale igual que siempre: 1990 sigue siendo 1990.
+function precioSii(n) {
+    const v = Number(n);
+    return Number.isFinite(v) ? Number(v.toFixed(6)) : 0;
+}
+
+// <MontoItem> = PrcItem × QtyItem redondeado a peso, que es como lo recalcula
+// el SII. Se multiplica en decimal exacto: los dos traen hasta 6 decimales y en
+// coma flotante 1,15 × 10 da 11,4999… (→ 11) cuando es 11,5 (→ 12).
+function montoItemSii(precio, cantidad) {
+    const escala = 1000000000000n; // 10^6 del precio × 10^6 de la cantidad
+    const producto = BigInt(Math.round(precio * 1e6)) * BigInt(Math.round(cantidad * 1e6));
+    const negativo = producto < 0n;
+    const abs = negativo ? -producto : producto;
+    let entero = abs / escala;
+    if ((abs % escala) * 2n >= escala) entero += 1n;
+    return Number(negativo ? -entero : entero);
+}
 
 // Fecha actual en zona horaria de la empresa
 function fechaEmpresa(tz) {

@@ -36,7 +36,10 @@ const normalizarEscala = (lista) => (lista || []).map(r => ({
 })).filter(r => r.min > 0 && r.price > 0);
 
 const NOMBRES_CAJA = ['Caja', 'Bandeja', 'Display', 'Pack'];
-const MSG_NO_DIVIDE = 'Hay una caja con un precio que no se divide exacto por sus unidades: elegí uno de los sugeridos.';
+// Desde el 6-nov-2026 el precio de una caja ya no tiene que dividirse exacto
+// por sus unidades: la boleta lleva el precio unitario con decimales
+// (api/sii/_sii.js → precioSii). Solo hace falta que tenga precio.
+const MSG_SIN_PRECIO = 'A una caja le falta el precio.';
 
 export default function EscalaCompraEditor({ costo, iva, contexto, presentaciones = [], valor, onChange, currentCurrency, permiteCajas = true, precioUnidad = 0 }) {
     const costoAnterior = Number(contexto?.costoAnterior) || 0;
@@ -81,13 +84,12 @@ export default function EscalaCompraEditor({ costo, iva, contexto, presentacione
         const nuevasLimpias = nuevas.map(n => ({ name: n.name.trim(), units: Number(n.units), barcode: n.barcode.trim(), price: Math.round(Number(n.price) || 0) }));
         // Un texto que dice qué falta, o false si todo está en orden.
         const incompleta = nuevasLimpias.some(n => !n.name || !(n.units >= 2) || !Number.isInteger(n.units) || !(n.price > 0));
-        const noDivide = cajas.some(c => !(c.price > 0) || !Number.isInteger(c.price / c.units))
-            || nuevasLimpias.some(n => n.units >= 2 && n.price > 0 && !Number.isInteger(n.price / n.units));
+        const sinPrecio = cajas.some(c => !(c.price > 0));
         const codigos = nuevasLimpias.map(n => n.barcode.toUpperCase()).filter(Boolean);
         const errorEscala = primerErrorEscala(escala);
         const invalidas = errorEscala || (incompleta
             ? 'Completá la caja nueva: nombre, unidades (2 o más, enteras) y precio.'
-            : noDivide ? MSG_NO_DIVIDE
+            : sinPrecio ? MSG_SIN_PRECIO
                 : new Set(codigos).size !== codigos.length ? 'Dos cajas nuevas tienen el mismo código de barras.' : false);
         const hay = !!(cambioEscala || cambiosCajas.length || nuevasLimpias.length);
         setHayCambios(hay);
@@ -108,7 +110,7 @@ export default function EscalaCompraEditor({ costo, iva, contexto, presentacione
     const margenCaja = (c) => utilidadDesdePrecio(costoCaja(c), c.price, iva);
     const margenCajaAnterior = (c) => utilidadDesdePrecio(costoAnterior * c.units, c.precioAnterior, iva);
     const mantenerCajas = () => setCajas(prev => prev.map(c => ({
-        ...c, price: Math.round(precioDesdeUtilidad(costoCaja(c), margenCajaAnterior(c), iva) / c.units) * c.units,
+        ...c, price: precioDesdeUtilidad(costoCaja(c), margenCajaAnterior(c), iva),
     })));
 
     // El aviso "Costo ±x% · revisar" es para la escala y las cajas que YA tiene
@@ -116,8 +118,7 @@ export default function EscalaCompraEditor({ costo, iva, contexto, presentacione
     // ninguna, no hay nada que revisar y el aviso solo confunde.
     const costoCambio = cambioCosto !== null && Math.abs(cambioCosto) >= 0.5
         && (escalaOriginal.length > 0 || cajas.length > 0);
-    const hayCajaInvalida = cajas.some(c => c.price > 0 && !Number.isInteger(c.price / c.units));
-    const hayNuevaInvalida = nuevas.some(n => Number(n.units) >= 2 && Number(n.price) > 0 && !Number.isInteger(Number(n.price) / Number(n.units)));
+    const hayCajaInvalida = cajas.some(c => !(c.price > 0));
     const errores = erroresEscala(escala);
     const sePuedeAgregarTramo = puedeAgregarTramo(escala);
     const tramosListos = escala.filter(r => Number(r.min) > 0 && Number(r.price) > 0).length;
@@ -135,8 +136,8 @@ export default function EscalaCompraEditor({ costo, iva, contexto, presentacione
         });
     };
 
-    // Precio sugerido de una caja nueva: el de la unidad por las unidades. Ya
-    // divide exacto; después se le baja lo que se quiera.
+    // Precio sugerido de una caja nueva: el de la unidad por las unidades;
+    // después se le pone el que se quiera.
     const precioSugerido = (units) => (Number(units) >= 2 && precioUnidad > 0 ? Math.round(precioUnidad) * Number(units) : 0);
     const tocarNueva = (key, campo, v) => setNuevas(prev => prev.map(n => {
         if (n.key !== key) return n;
@@ -180,7 +181,7 @@ export default function EscalaCompraEditor({ costo, iva, contexto, presentacione
     );
 
     return (
-        <div className={`rounded-xl border bg-[var(--glass-bg)] ${hayCajaInvalida || hayNuevaInvalida ? 'border-amber-500/50' : 'border-[var(--glass-border)]'}`}>
+        <div className={`rounded-xl border bg-[var(--glass-bg)] ${hayCajaInvalida ? 'border-amber-500/50' : 'border-[var(--glass-border)]'}`}>
             {/* Encabezado: siempre visible, abre y cierra */}
             <button type="button" onClick={abrirCerrar}
                 className="w-full flex items-center gap-2 p-3 text-left">
@@ -257,7 +258,6 @@ export default function EscalaCompraEditor({ costo, iva, contexto, presentacione
                         )}
                     </div>
                     {cajas.map((c, i) => {
-                        const divide = Number.isInteger(c.price / c.units);
                         return (
                             <div key={c.id} className="space-y-1">
                                 <div className="flex items-center gap-2">
@@ -266,19 +266,16 @@ export default function EscalaCompraEditor({ costo, iva, contexto, presentacione
                                         {c.price !== c.precioAnterior && <p className="text-[10px] text-[var(--color-text-muted)]">antes {plata(c.precioAnterior)}</p>}
                                     </div>
                                     <div className="w-28 shrink-0">
-                                        <input type="number" className="glass-input w-full !py-1.5 !px-2 text-sm font-bold" value={c.price}
+                                        {/* || '': borrado queda vacío, no "0" (y no se escribe "018500"). */}
+                                        <input type="number" className="glass-input w-full !py-1.5 !px-2 text-sm font-bold" value={c.price || ''}
                                             onChange={e => setCajas(prev => prev.map((x, k) => (k === i ? { ...x, price: Number(e.target.value) || 0 } : x)))} />
                                         <span className={`block text-[10px] ${margenCaja(c) >= 0 ? 'text-green-400' : 'text-red-400'}`}>margen {margenCaja(c).toFixed(1)}%</span>
                                     </div>
                                 </div>
-                                {!divide && c.price > 0 && (
-                                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-amber-400">
-                                        <AlertTriangle size={11} /> No divide exacto en {c.units}:
-                                        {[Math.floor(c.price / c.units) * c.units, Math.ceil(c.price / c.units) * c.units].filter(n => n > 0).map(n => (
-                                            <button key={n} type="button" onClick={() => setCajas(prev => prev.map((x, k) => (k === i ? { ...x, price: n } : x)))}
-                                                className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold">{plata(n)}</button>
-                                        ))}
-                                    </div>
+                                {!(c.price > 0) && (
+                                    <p className="flex items-center gap-1.5 text-[10px] text-amber-400">
+                                        <AlertTriangle size={11} /> Falta el precio de la {c.name.toLowerCase()}.
+                                    </p>
                                 )}
                             </div>
                         );
@@ -287,7 +284,6 @@ export default function EscalaCompraEditor({ costo, iva, contexto, presentacione
                     {nuevas.map(n => {
                         const units = Number(n.units);
                         const price = Number(n.price) || 0;
-                        const divide = units >= 2 && Number.isInteger(price / units);
                         const margen = units >= 2 ? utilidadDesdePrecio(costo * units, price, iva) : null;
                         return (
                             <div key={n.key} className="rounded-lg border border-dashed border-[var(--color-primary)]/40 p-2 space-y-2">
@@ -317,15 +313,6 @@ export default function EscalaCompraEditor({ costo, iva, contexto, presentacione
                                 </div>
                                 <input type="text" className="glass-input w-full !py-1.5 !px-2 text-sm font-mono" value={n.barcode} placeholder="Código de barras (opcional)"
                                     onChange={e => tocarNueva(n.key, 'barcode', e.target.value)} />
-                                {units >= 2 && price > 0 && !divide && (
-                                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-amber-400">
-                                        <AlertTriangle size={11} /> No divide exacto en {units}:
-                                        {[Math.floor(price / units) * units, Math.ceil(price / units) * units].filter(x => x > 0).map(x => (
-                                            <button key={x} type="button" onClick={() => tocarNueva(n.key, 'price', x)}
-                                                className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold">{plata(x)}</button>
-                                        ))}
-                                    </div>
-                                )}
                             </div>
                         );
                     })}

@@ -36,22 +36,13 @@ async function presentationSave(turso, companyId, session, { presentation = {}, 
     if (!Number.isInteger(unidades)) return { success: false, error: 'Las unidades van enteras: es un producto por unidad' };
     if (!(precio > 0)) return { success: false, error: 'Falta el precio de venta' };
 
-    // El precio tiene que dividirse exacto por las unidades.
+    // Cualquier precio sirve, aunque no se divida exacto por las unidades.
     //
-    // La caja viaja a la venta como unidades —30 × (7.600 ÷ 30)— y la boleta
-    // electrónica redondea el precio unitario ANTES de multiplicar
-    // (api/sii/_sii.js): 253,33 → 253 → 253 × 30 = $7.590. El cliente pagaría
-    // $7.600 y la boleta diría $7.590. Kevin eligió (2-oct-2026) no tocar el SII
-    // y exigir un precio que divida exacto: se ofrecen los dos más cercanos.
-    if (!Number.isInteger(precio / unidades)) {
-        const abajo = Math.floor(precio / unidades) * unidades;
-        const arriba = Math.ceil(precio / unidades) * unidades;
-        return {
-            success: false,
-            error: `El precio tiene que dividirse exacto por las ${unidades} unidades, para que la boleta cuadre. Probá con $${abajo.toLocaleString('es-CL')} o $${arriba.toLocaleString('es-CL')}.`,
-            sugerencias: [abajo, arriba].filter(n => n > 0),
-        };
-    }
+    // La caja viaja a la venta como unidades —12 × (18.500 ÷ 12)—. Hasta el
+    // 6-nov-2026 la boleta redondeaba ese precio unitario a peso ANTES de
+    // multiplicar (12 × 1.542 = $18.504) y por eso se exigía un precio que
+    // dividiera exacto. Ahora la boleta lo lleva con decimales, como permite el
+    // SII (api/sii/_sii.js → precioSii), y 12 × 1.541,666667 = $18.500.
 
     const prod = await turso.execute({
         sql: 'SELECT id, sku, units_per_box FROM products WHERE id = ? AND company_id = ?',
