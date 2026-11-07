@@ -158,6 +158,15 @@ export const ALL_PERMISSIONS = [
         ]
     },
     {
+        // Recetas y costo de fabricación (migración 0038). Clave `recetas` y no
+        // `production`, que ya es de Cocina.
+        id: 'recetas',
+        label: 'Producción',
+        permissions: [
+            { id: 'recetas.view', label: 'Ver y editar recetas', desc: 'Pestaña Producción y la parte de insumo y receta en la ficha del producto. Muestra costos y márgenes (dato sensible)' },
+        ]
+    },
+    {
         id: 'users',
         label: 'Usuarios',
         permissions: [

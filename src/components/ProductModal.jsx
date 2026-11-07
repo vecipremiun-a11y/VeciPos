@@ -2,6 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, ArrowLeft, Trash2, Plus, Bell, ScanBarcode, Truck, Sparkles, Package } from 'lucide-react';
 import PresentacionModal from './PresentacionModal';
 import OtrosImpuestos from './OtrosImpuestos';
+import ProduccionFicha from './produccion/ProduccionFicha';
+import { useProduccionFicha } from './produccion/useProduccionFicha';
+import { plataFina } from '../lib/produccion';
+import { toast } from '../lib/toast';
 import { impuestosExtra, costoBase, costoConImpuestos, precioDesdeMargen, margenDesdePrecio } from '../lib/impuestosProducto';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
@@ -12,7 +16,7 @@ import { desdeSiguiente, puedeAgregarTramo, encadenarHasta, erroresEscala, prime
 import { aInputLocal, deInputLocal, finDelDia, resumenOferta } from '../lib/ofertas';
 
 const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false }) => {
-    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, hasModule, fetchProductAliases, presentacionesDe, deletePresentation, productPresentations, reglasOferta } = useStore();
+    const { categories, suppliers, currentCurrency, taxRates, fetchAlertSettings, hasModule, fetchProductAliases, presentacionesDe, deletePresentation, productPresentations, reglasOferta, activeCompanyId } = useStore();
     // Unidades de medida (Caja, Display…): "nueva" o la presentación que se edita.
     // Se guardan al instante desde su propia ventana, no con el botón Guardar.
     const [presentacionEditando, setPresentacionEditando] = useState(null);
@@ -23,6 +27,11 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
     const canPreorders = hasModule('preorders');
     const { can } = usePermissions();
     const [showSkuScanner, setShowSkuScanner] = useState(false);
+
+    // Producción: insumo y receta (migración 0038). Se carga aparte y viaja con
+    // Guardar como `_produccion`, solo si cambió. Sin el permiso ni se pide.
+    const veProduccion = can('recetas.view');
+    const produccion = useProduccionFicha(productToEdit?.id || null, (isOpen || isInline) && veProduccion, activeCompanyId);
 
     // Códigos con los que el proveedor nombra este producto en sus facturas.
     // Se editan como el resto del formulario —nada se guarda hasta apretar
@@ -238,6 +247,30 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
 
     const toNum = (v) => parseFloat(String(v).replace(',', '.')) || 0;
 
+    // "Usar como costo" de la receta. `neto` ya viene sin el IVA de este producto:
+    // así la fila "Costo + IVA" muestra el costo de la receta tal cual.
+    //
+    // El precio de venta NO se mueve solo: un precio que cambia sin que nadie lo
+    // escriba se cobra desde la próxima venta. Se recalcula la utilidad contra el
+    // precio que ya había; si todavía no hay precio y sí utilidad, se calcula el precio.
+    const usarCostoReceta = (neto, porUnidad) => {
+        const costo = Math.round(neto * 100) / 100;
+        if (!(costo > 0)) return;
+        const precio = toNum(formData.price);
+        setFormData(prev => {
+            const next = { ...prev, cost: String(costo) };
+            if (!(precio > 0) && marginPercentage !== '' && !isNaN(parseFloat(marginPercentage))) {
+                next.price = precioDesdeMargen(costo, marginPercentage, prev.tax_rate, prev.extra_taxes).toFixed(2);
+            }
+            return next;
+        });
+        if (precio > 0) {
+            const margen = margenDesdePrecio(precio, costo, formData.tax_rate, formData.extra_taxes);
+            if (margen !== null) setMarginPercentage(margen.toFixed(2));
+        }
+        toast(`Costo actualizado a ${plataFina(costo, currentCurrency)} (con IVA, ${plataFina(porUnidad, currentCurrency)}). Se guarda con Guardar.`, 'success');
+    };
+
     const agregarCodigo = () => {
         const limpio = nuevoCodigo.trim();
         if (!limpio) return;
@@ -332,6 +365,10 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
             }
             dataToSave = { ...cambios, _parcial: true };
         }
+        // Insumo y receta: solo si cambiaron (el servidor los guarda en su tabla).
+        const prod = veProduccion ? produccion.paraGuardar() : undefined;
+        if (prod !== undefined) dataToSave._produccion = prod;
+
         // Save alert settings in background (needs product ID, so we pass alertConfig for the caller to handle)
         dataToSave._alertConfig = alertConfig;
 
@@ -674,6 +711,24 @@ const ProductModal = ({ isOpen, onClose, onSave, productToEdit, isInline = false
                         } : null}
                         presentation={presentacionEditando === 'nueva' ? null : presentacionEditando}
                     />
+
+                    {/* Producción: si es insumo (cuánto trae) y su receta si se fabrica.
+                        Va antes de Precios a propósito: la receta da el costo, y el
+                        costo da el precio. */}
+                    {veProduccion && (
+                        <ProduccionFicha
+                            productId={productToEdit?.id || null}
+                            nombre={formData.name}
+                            unidad={formData.unit}
+                            costo={toNum(formData.cost)}
+                            iva={ivaProducto}
+                            extras={otrosImpuestos}
+                            moneda={currentCurrency}
+                            produccion={produccion}
+                            onUsarCosto={usarCostoReceta}
+                            companyId={activeCompanyId}
+                        />
+                    )}
 
                     <div>
                         <label className="block text-sm text-[var(--color-text-muted)] mb-1">Imagen (URL o Archivo)</label>

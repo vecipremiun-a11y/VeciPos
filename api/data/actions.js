@@ -26,6 +26,7 @@ import { financeActions } from '../_lib/financeActions.js';
 import { appActions } from '../_lib/appActions.js';
 import { presentationActions } from '../_lib/presentationActions.js';
 import { offerActions, guardarReglasOferta } from '../_lib/offerActions.js';
+import { productionActions, guardarProduccionConAviso } from '../_lib/productionActions.js';
 
 // Endpoint de datos del app normal (Fase 1 · Paso 4).
 // Exige: sesión firmada + que el usuario sea MIEMBRO de la empresa (companyId).
@@ -111,6 +112,14 @@ export default async function handler(req, res) {
             const financeHandler = financeActions[action.slice('finance.'.length)];
             if (!financeHandler) return res.status(400).json({ success: false, error: 'Acción financiera no válida' });
             return res.status(200).json(await financeHandler(turso, companyId, session, body));
+        }
+
+        // Producción: insumos y recetas (migración 0038). 'production.<clave>'.
+        // No confundir con la pantalla /production, que es Cocina (encargos del día).
+        if (typeof action === 'string' && action.startsWith('production.')) {
+            const productionHandler = productionActions[action.slice('production.'.length)];
+            if (!productionHandler) return res.status(400).json({ success: false, error: 'Acción no válida' });
+            return res.status(200).json(await productionHandler(turso, companyId, session, body));
         }
 
         // 3) Despacho por acción (todas ya con companyId validado)
@@ -781,8 +790,14 @@ async function productCreate(turso, companyId, session, product) {
     // que el alta no dependa de la migración 0033.
     if (result.rows[0]?.id) await guardarReglasOferta(turso, companyId, result.rows[0].id, product, false);
 
+    // Insumo y receta (migración 0038): tabla aparte, después del alta, porque
+    // necesita el id. Si falla, el producto igual queda guardado y se avisa.
+    const avisoProduccion = result.rows[0]?.id && product._produccion
+        ? await guardarProduccionConAviso(turso, companyId, result.rows[0].id, product._produccion)
+        : null;
+
     await auditLog(turso, companyId, session, 'CREATE', 'PRODUCT', { name: product.name, sku: product.sku });
-    return { success: true, product: result.rows[0] };
+    return { success: true, product: result.rows[0], ...(avisoProduccion ? { avisoProduccion } : {}) };
 }
 
 // Cambio de precio/costo de UN producto, y nada más.
@@ -943,10 +958,20 @@ async function productUpdateParcial(turso, companyId, session, id, cambios) {
     // Reglas de la oferta: solo si se tocó la oferta (la ficha las manda entonces).
     await guardarReglasOferta(turso, companyId, id, cambios, estabaEnOferta);
 
+    // Insumo y receta: la ficha los manda solo si cambiaron (null = ya no tiene).
+    const tocaProduccion = cambios._produccion !== undefined;
+    const avisoProduccion = tocaProduccion
+        ? await guardarProduccionConAviso(turso, companyId, id, cambios._produccion)
+        : null;
+
     await auditLog(turso, companyId, session, 'UPDATE', 'PRODUCT', {
-        id, campos: [...Object.keys(cambios).filter(k => !k.startsWith('_') && k !== 'image'), ...(cambios.image !== undefined ? ['image'] : [])],
+        id, campos: [
+            ...Object.keys(cambios).filter(k => !k.startsWith('_') && k !== 'image'),
+            ...(cambios.image !== undefined ? ['image'] : []),
+            ...(tocaProduccion ? ['produccion'] : []),
+        ],
     });
-    return { success: true, parcial: true };
+    return { success: true, parcial: true, ...(avisoProduccion ? { avisoProduccion } : {}) };
 }
 
 async function productUpdate(turso, companyId, session, id, product) {
@@ -1017,8 +1042,12 @@ async function productUpdate(turso, companyId, session, id, product) {
 
     await guardarReglasOferta(turso, companyId, id, product, estabaEnOferta);
 
+    const avisoProduccion = product._produccion !== undefined
+        ? await guardarProduccionConAviso(turso, companyId, id, product._produccion)
+        : null;
+
     await auditLog(turso, companyId, session, 'UPDATE', 'PRODUCT', { id, name: product.name, sku: product.sku });
-    return { success: true };
+    return { success: true, ...(avisoProduccion ? { avisoProduccion } : {}) };
 }
 
 async function productDelete(turso, companyId, session, id) {
@@ -1027,6 +1056,16 @@ async function productDelete(turso, companyId, session, id) {
         sql: 'DELETE FROM products WHERE id = ? AND company_id = ?',
         args: [id, companyId],
     });
+    // Su fila de producción (migración 0038). Aparte y sin cortar el borrado: el
+    // producto ya no existe, y una receta que lo usaba lo muestra como borrado.
+    try {
+        await turso.execute({
+            sql: 'DELETE FROM product_production WHERE product_id = ? AND company_id = ?',
+            args: [id, companyId],
+        });
+    } catch (e) {
+        console.warn('[produccion] no se pudo borrar la fila del producto', id, e?.message);
+    }
     await auditLog(turso, companyId, session, 'DELETE', 'PRODUCT', { id });
     return { success: true };
 }
@@ -1446,4 +1485,4 @@ async function clientRegisterPayment(turso, companyId, session, body) {
 }
 
 // Exportadas para las pruebas del guardado de productos (no cambian el router).
-export { productCreate, productUpdate };
+export { productCreate, productUpdate, productDelete };

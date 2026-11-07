@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Tags, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store, Bike, MapPin, Navigation, Sparkles, Megaphone } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, Settings, LogOut, Menu, FileText, History, ChevronDown, ChevronRight, Box, Tag, Tags, Truck, ClipboardList, Clock, DollarSign, ArrowLeftRight, ShoppingBag, Receipt, Clipboard, TrendingUp, CakeSlice, Percent, ChefHat, Briefcase, ShieldCheck, ClipboardCheck, Gift, Stamp, PieChart as PieChartIcon, CloudOff, Trophy, CreditCard, Crown, Building2, Smartphone, Scale, Wrench, WalletCards, Store, Bike, MapPin, Navigation, Sparkles, Megaphone, Factory } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../lib/utils';
@@ -228,6 +228,8 @@ const MainLayout = () => {
             moduleKey: 'inventory',
             subItems: [
                 { icon: Box, label: 'Productos', path: '/inventory', permission: 'products.view' },
+                // Recetas y costo de fabricación. La de /production es Cocina.
+                { icon: Factory, label: 'Producción', path: '/recetas', permission: 'recetas.view' },
                 { icon: Tags, label: 'Etiquetas', path: '/inventory/labels', permission: 'products.view', moduleKey: 'labels' },
                 { icon: Tag, label: 'Categorías', path: '/categories', permission: 'categories.view' },
                 { icon: Truck, label: 'Proveedores', path: '/suppliers', permission: 'suppliers.view', moduleKey: 'purchases' },

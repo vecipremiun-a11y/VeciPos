@@ -54,6 +54,8 @@ const SupplierOrders = lazy(() => import('./pages/SupplierOrders'));
 const Preorders = lazy(() => import('./pages/Preorders'));
 const StoreOrders = lazy(() => import('./pages/StoreOrders'));
 const Production = lazy(() => import('./pages/Production'));
+// Producción (recetas y costos). No confundir con Production, que es Cocina.
+const Recetas = lazy(() => import('./pages/Recetas'));
 const PreorderHistory = lazy(() => import('./pages/PreorderHistory'));
 const InventoryReconciliation = lazy(() => import('./pages/InventoryReconciliation'));
 const InventoryControl = lazy(() => import('./pages/InventoryControl'));
@@ -424,6 +426,9 @@ function App() {
           <Route path="preorders/history" element={<ProtectedPage permission="preorders.view"><FeatureGatePage moduleKey="preorders"><PreorderHistory /></FeatureGatePage></ProtectedPage>} />
           <Route path="store-orders" element={<ProtectedPage permission="preorders.view"><FeatureGatePage moduleKey="web"><StoreOrders /></FeatureGatePage></ProtectedPage>} />
           <Route path="production" element={<ProtectedPage permission="production.view"><FeatureGatePage moduleKey="production"><Production /></FeatureGatePage></ProtectedPage>} />
+          {/* Producción: recetas y costo de fabricación (migración 0038). En todos
+              los planes, como Productos; lo que cuida el dato es el permiso. */}
+          <Route path="recetas" element={<ProtectedPage permission="recetas.view"><Recetas /></ProtectedPage>} />
           <Route path="inventory/reconciliation" element={<ProtectedPage permission="products.adjust_stock"><FeatureGatePage moduleKey="inventory_control"><InventoryReconciliation /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/control" element={<ProtectedPage permission="inventory_control.view"><FeatureGatePage moduleKey="inventory_control"><InventoryControl /></FeatureGatePage></ProtectedPage>} />
           <Route path="inventory/combos" element={<ProtectedPage permission="combos.view"><FeatureGatePage moduleKey="combos"><ProductCombos /></FeatureGatePage></ProtectedPage>} />

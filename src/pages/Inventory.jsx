@@ -261,6 +261,8 @@ const Inventory = () => {
         if (result && result.success) {
             setEditingProduct(null);
             setView('list');
+            // El producto quedó guardado, pero su receta no: que se sepa.
+            if (result.avisoProduccion) alert(result.avisoProduccion);
         } else {
             const friendlyMsg = result?.message || result?.error || 'Error desconocido';
             alert('Error al guardar el producto: ' + friendlyMsg);

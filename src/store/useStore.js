@@ -2422,7 +2422,8 @@ export const useStore = create(persist((set, get) => ({
                 avisosCodigos = await get().aplicarCodigosProveedor(newProduct.id, product._codigosProveedor);
             }
 
-            return { success: true, product: newProduct, avisosCodigos };
+            // avisoProduccion: el producto se guardó pero su receta no (ver productionActions).
+            return { success: true, product: newProduct, avisosCodigos, avisoProduccion: r.avisoProduccion || null };
         } catch (e) {
             console.error("Add product error", e);
             return { success: false, error: e.message };
@@ -2548,7 +2549,7 @@ export const useStore = create(persist((set, get) => ({
                 avisosCodigos = await get().aplicarCodigosProveedor(id, updatedProduct._codigosProveedor);
             }
 
-            return { success: true, avisosCodigos };
+            return { success: true, avisosCodigos, avisoProduccion: r.avisoProduccion || null };
         } catch (e) {
             console.error("Update product error", e);
             return { success: false, error: e.message };
