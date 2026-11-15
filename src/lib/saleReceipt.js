@@ -11,7 +11,7 @@
 
 import { formatCurrency } from '../utils/formatCurrency';
 import { isThermalAvailable, getSavedPrinter, printThermalReceipt, buildTimbreRaster } from './thermalPrint';
-import { boletaA4Html, timbreComoImagen } from './boletaA4';
+import { boletaA4Html, timbreComoImagen, datosDelDte, emisorParaImprimir } from './boletaA4';
 
 /**
  * Cómo se lee la cantidad de un renglón en el ticket.
@@ -30,11 +30,15 @@ export function cantidadTicket(item) {
     return { cantidad: item?.quantity, precio: item?.price };
 }
 
+// Un "Mostrar" de la config de la boleta: 1/true = sí, 0/false = no. Sin dato
+// (columna que todavía no existe, o config de antes) = el valor por defecto.
+const mostrarSi = (v, porDefecto) => (v == null ? porDefecto : (v === true || Number(v) === 1));
+
 /**
  * Normaliza una venta al modelo de boleta que consumen el generador térmico y el
  * HTML web. `receiptConfig` es la config editable de la boleta (nombre, RUT, pie…).
  */
-export function buildSaleReceiptModel(sale, { sellerName, receiptConfig = {}, currency = 'CLP', dteInfo = null } = {}) {
+export function buildSaleReceiptModel(sale, { sellerName, receiptConfig = {}, currency = 'CLP', dteInfo = null, xml = null } = {}) {
     const isCash = ['cash', 'efectivo', 'Efectivo'].includes(sale.paymentMethod);
     const paymentLabel = isCash ? 'Efectivo' : (sale.paymentMethod || 'Efectivo');
     const amountPaid = sale.paymentDetails?.amount ?? sale.total;
@@ -49,20 +53,87 @@ export function buildSaleReceiptModel(sale, { sellerName, receiptConfig = {}, cu
     const tipoDte = sale.tipoDte ?? sale.tipo_dte ?? null;
     const docLabel = folio ? (tipoDte === 33 ? 'FACTURA ELECTRONICA' : 'BOLETA ELECTRONICA') : null;
 
+    // Boleta o factura electrónica: lo que pide el SII impreso sale del DTE
+    // firmado, no de esta configuración, para que el papel diga lo mismo que
+    // recibió el SII. Formato Boletas Electrónicas v4.2 (8-sep-2025): el RUT del
+    // emisor y el IVA van impresos sí o sí. Antes el RUT salía solo si estaba
+    // escrito y marcado en Configuración → Boleta, y el IVA no salía nunca.
+    // Sin DTE (nota de venta) todo queda como estaba.
+    const dte = folio ? datosDelDte(xml || dteInfo?.xml_firmado || null) : null;
+    const nombreNegocio = receiptConfig.business_name || 'POSVECI';
+    // Razón social, giro y dirección son opcionales en la boleta: salen según los
+    // "Mostrar" de Configuración → Boleta (migración 0040). Por defecto (13-nov-2026):
+    // nombre de fantasía, RUT y dirección; razón social y giro, solo si se marcan.
+    // En la factura emisorParaImprimir los imprime igual (ahí son obligatorios).
+    const mostrar = {
+        razonSocial: mostrarSi(receiptConfig.show_razon_social, false),
+        giro: mostrarSi(receiptConfig.show_giro, false),
+        direccion: mostrarSi(receiptConfig.show_address, true),
+    };
+    // La dirección escrita en Configuración → Boleta manda; si está vacía, en la
+    // boleta electrónica va la del DTE.
+    const direccionConfig = mostrar.direccion ? (receiptConfig.address || null) : null;
+    const emisor = emisorParaImprimir(dte, nombreNegocio, mostrar);
+    const esFactura = dte ? (dte.tipo === 33 || dte.tipo === 34) : false;
+    const rutConfig = receiptConfig.show_tax_id && receiptConfig.tax_id ? `RUT: ${receiptConfig.tax_id}` : null;
+
     const lines = [];
-    if (receiptConfig.address) lines.push(receiptConfig.address);
-    if (receiptConfig.show_tax_id && receiptConfig.tax_id) lines.push(`RUT: ${receiptConfig.tax_id}`);
+    if (emisor) {
+        if (emisor.razonSocial) lines.push(emisor.razonSocial);
+        if (emisor.rut) lines.push(`RUT: ${emisor.rut}`);
+        else if (rutConfig) lines.push(rutConfig);
+        if (emisor.giro) lines.push(`Giro: ${emisor.giro}`);
+        const dir = direccionConfig || emisor.direccion;
+        if (dir) lines.push(dir);
+    } else {
+        if (direccionConfig) lines.push(direccionConfig);
+        if (rutConfig) lines.push(rutConfig);
+    }
+    const emisorLineas = emisor ? lines.slice() : null;
     if (receiptConfig.show_phone && receiptConfig.phone) lines.push(`Tel: ${receiptConfig.phone}`);
     if (receiptConfig.show_email && receiptConfig.email) lines.push(receiptConfig.email);
+    // Lo mismo sin el mensaje de cabecera, para el PDF del Historial, que lo dibuja aparte.
+    const datosLineas = lines.slice();
     if (receiptConfig.header_message) lines.push(receiptConfig.header_message);
 
+    // Cliente identificado en el DTE. El SII pide imprimir su RUT si no es el
+    // genérico 66.666.666-6 (datosDelDte ya lo descarta); en la factura, además,
+    // su razón social, giro y dirección.
+    const rec = dte?.receptor || null;
+    const clienteVenta = sale.clientName || sale.client_name || null;
+    const recNombre = rec?.razonSocial && rec.razonSocial !== 'CLIENTE' ? rec.razonSocial : null;
+    const clientLineas = rec ? [
+        rec.giro ? `Giro: ${rec.giro}` : null,
+        [rec.direccion, rec.comuna].filter(Boolean).join(', ') || null,
+    ].filter(Boolean) : [];
+
+    // IVA: obligatorio impreso en la boleta afecta. La boleta lleva el precio con
+    // IVA, así que va debajo del total como "IVA incluido". La factura, como
+    // siempre: neto, exento e IVA antes del total.
+    const desglose = !dte ? [] : esFactura
+        ? [
+            dte.neto != null ? ['Neto', dte.neto] : null,
+            dte.exento ? ['Exento', dte.exento] : null,
+            dte.iva != null ? [`IVA ${dte.tasaIva ?? 19}%`, dte.iva] : null,
+        ].filter(Boolean)
+        : (dte.iva != null ? [['IVA incluido', dte.iva]] : []);
+
     return {
-        companyName: receiptConfig.business_name || 'POSVECI',
+        companyName: nombreNegocio,
         companyLines: lines,
+        // Los datos del emisor sacados del DTE (o null si no es electrónica), por
+        // separado para la boleta HTML de SaleSuccessModal, que arma su propio encabezado.
+        emisorLineas,
+        datosLineas,
+        clientRut: rec?.rut || null,
+        clientLineas,
+        desglose,
+        desgloseAntesDelTotal: esFactura,
         // Por separado, para la hoja A4 (boletaA4.js), que los ubica cada uno en su lugar.
         empresa: {
             nombre: receiptConfig.business_name || 'POSVECI',
-            direccion: receiptConfig.address || null,
+            direccion: direccionConfig,
+            mostrar,
             rut: receiptConfig.tax_id || null,
             mostrarRut: !!(receiptConfig.show_tax_id && receiptConfig.tax_id),
             telefono: receiptConfig.show_phone ? (receiptConfig.phone || null) : null,
@@ -76,7 +147,8 @@ export function buildSaleReceiptModel(sale, { sellerName, receiptConfig = {}, cu
         docLine: folio ? `Folio: ${folio}` : null,
         datetime: new Date(sale.date || Date.now()).toLocaleString('es-CL'),
         seller: sellerName || 'Vendedor',
-        clientName: sale.clientName || sale.client_name || null,
+        // En la factura manda la razón social del receptor; en la boleta, el cliente de la venta.
+        clientName: (esFactura ? (recNombre || clienteVenta) : (clienteVenta || recNombre)) || null,
         items: (sale.items || []).map(it => {
             const c = cantidadTicket(it);
             return {
@@ -97,8 +169,13 @@ export function buildSaleReceiptModel(sale, { sellerName, receiptConfig = {}, cu
 
 const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
-/** HTML de la boleta para imprimir en el navegador (mismo orden/etiquetas que la térmica). */
-export function receiptModelToHtml(model, { currency = 'CLP', formato = null } = {}) {
+/**
+ * HTML de la boleta para imprimir en el navegador (mismo orden/etiquetas que la térmica).
+ * `timbreImg`: el timbre del SII como imagen, si la venta es boleta o factura
+ * electrónica (antes la reimpresión del Historial en 58/80 mm salía sin timbre).
+ * `imprimir`: abre el diálogo de impresión al cargar (false en la vista previa).
+ */
+export function receiptModelToHtml(model, { currency = 'CLP', formato = null, timbreImg = null, imprimir = true } = {}) {
     const money = (n) => formatCurrency(n, currency);
     // Ancho del papel: el del formato elegido (58mm / 80mm), como la boleta de la
     // venta recién hecha. Sin formato, el ancho fijo de antes (280px).
@@ -113,6 +190,9 @@ export function receiptModelToHtml(model, { currency = 'CLP', formato = null } =
                 <span>${money(it.lineTotal)}</span>
             </div>
         </div>`).join('');
+
+    // Neto/IVA del DTE (vacío si no es electrónica).
+    const desgloseHtml = (model.desglose || []).map(([k, v]) => `<div class="row"><span>${esc(k)}</span><span>${money(v)}</span></div>`).join('');
 
     const docHeader = model.docLabel
         ? `<div style="text-align:center;font-weight:bold;">${esc(model.docLabel)}</div>
@@ -129,7 +209,7 @@ export function receiptModelToHtml(model, { currency = 'CLP', formato = null } =
             .row { display:flex; justify-content:space-between; }
             .b { font-weight: bold; }
             .c { text-align:center; }
-        </style></head><body onload="window.print(); setTimeout(function(){window.close();}, 300);">
+        </style></head><body${imprimir ? ' onload="window.print(); setTimeout(function(){window.close();}, 300);"' : ''}>
         <div class="c b" style="font-size:15px;">${esc(model.companyName)}</div>
         ${(model.companyLines || []).map(l => `<div class="c">${esc(l)}</div>`).join('')}
         <div class="sep"></div>
@@ -137,6 +217,8 @@ export function receiptModelToHtml(model, { currency = 'CLP', formato = null } =
         <div>Fecha: ${esc(model.datetime)}</div>
         <div>Vend: ${esc(model.seller)}</div>
         ${model.clientName ? `<div>Cliente: ${esc(model.clientName)}</div>` : ''}
+        ${model.clientRut ? `<div>RUT: ${esc(model.clientRut)}</div>` : ''}
+        ${(model.clientLineas || []).map(l => `<div>${esc(l)}</div>`).join('')}
         <div class="sep"></div>
         <div class="row b"><span>DESCRIPCIÓN</span><span>TOTAL</span></div>
         <div class="sep"></div>
@@ -144,10 +226,16 @@ export function receiptModelToHtml(model, { currency = 'CLP', formato = null } =
         <div class="sep"></div>
         ${model.deliveryFee ? `<div class="row"><span>Subtotal</span><span>${money(model.subtotal)}</span></div>
         <div class="row"><span>${esc(model.deliveryLabel || 'Delivery')}</span><span>${money(model.deliveryFee)}</span></div>` : ''}
+        ${model.desgloseAntesDelTotal ? desgloseHtml : ''}
         <div class="row b"><span>TOTAL</span><span>${money(model.total)}</span></div>
+        ${model.desgloseAntesDelTotal ? '' : desgloseHtml}
         <div style="margin-top:6px;">Medio Pago: ${esc(model.paymentMethod)}</div>
         ${model.paidLabel ? `<div>${esc(model.paidLabel)}</div>` : ''}
         ${model.remainingLabel ? `<div>${esc(model.remainingLabel)}</div>` : ''}
+        ${timbreImg ? `<div class="sep"></div>
+        <div class="c" style="font-size:10px;">Timbre Electrónico SII</div>
+        <img src="${timbreImg}" alt="" style="display:block;width:100%;margin:4px 0;" />
+        <div class="c" style="font-size:10px;">Verifique documento: www.sii.cl</div>` : ''}
         <div class="sep"></div>
         <div class="c">${esc(model.footer).replace(/\n/g, '<br/>')}</div>
         </body></html>`;
@@ -161,7 +249,8 @@ export function receiptModelToHtml(model, { currency = 'CLP', formato = null } =
 // `formato`: '58mm' | '80mm' | 'a4' — el que eligió el usuario en el POS
 // (formatoAImprimir). Sin él, el de Configuración → Boleta.
 export async function printSaleReceipt(sale, { sellerName, receiptConfig, currency = 'CLP', dteInfo = null, tedXml = null, formato = null } = {}) {
-    const model = buildSaleReceiptModel(sale, { sellerName, receiptConfig, currency, dteInfo });
+    // `tedXml` es el DTE firmado entero (no solo el TED): de ahí salen RUT, giro e IVA.
+    const model = buildSaleReceiptModel(sale, { sellerName, receiptConfig, currency, dteInfo, xml: tedXml });
 
     if (isThermalAvailable()) {
         const saved = getSavedPrinter();
@@ -176,7 +265,7 @@ export async function printSaleReceipt(sale, { sellerName, receiptConfig, curren
     const fmt = formato || receiptConfig?.format || null;
     const html = fmt === 'a4'
         ? boletaA4Html(model, { currency, xml: tedXml, timbreImg: timbreComoImagen(tedXml) })
-        : receiptModelToHtml(model, { currency, formato: fmt });
+        : receiptModelToHtml(model, { currency, formato: fmt, timbreImg: timbreComoImagen(tedXml) });
     const w = window.open('', '', fmt === 'a4' ? 'width=900,height=1000' : 'width=400,height=700');
     if (!w) return { ok: false, error: 'POPUP_BLOCKED' };
     w.document.write(html);

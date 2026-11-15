@@ -89,8 +89,18 @@ const SiiSettings = () => {
     };
 
     const handleSave = async () => {
-        if (!form.rut_emisor || !form.razon_social || !form.giro) {
-            showMessage('RUT, Razón Social y Giro son obligatorios', 'error');
+        // Lo que firma cada boleta y factura, y lo que sale impreso (Kevin, 9-nov-2026:
+        // "para poder boletear, el RUT sí o sí, el giro y todo lo que pida el SII").
+        // Dirección y comuna: la factura las exige y la boleta las imprime.
+        const faltan = [
+            !String(form.rut_emisor || '').trim() && 'RUT',
+            !String(form.razon_social || '').trim() && 'Razón Social',
+            !String(form.giro || '').trim() && 'Giro',
+            !String(form.direccion || '').trim() && 'Dirección',
+            !String(form.comuna || '').trim() && 'Comuna',
+        ].filter(Boolean);
+        if (faltan.length) {
+            showMessage(`Falta completar: ${faltan.join(', ')}`, 'error');
             return;
         }
         setIsSaving(true);
@@ -276,7 +286,7 @@ const SiiSettings = () => {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm text-[var(--color-text-muted)] mb-1">Dirección</label>
+                        <label className="block text-sm text-[var(--color-text-muted)] mb-1">Dirección *</label>
                         <input
                             type="text"
                             className="w-full px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)]"
@@ -285,7 +295,7 @@ const SiiSettings = () => {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm text-[var(--color-text-muted)] mb-1">Comuna</label>
+                        <label className="block text-sm text-[var(--color-text-muted)] mb-1">Comuna *</label>
                         <input
                             type="text"
                             className="w-full px-3 py-2 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--color-text)]"

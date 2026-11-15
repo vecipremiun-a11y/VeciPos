@@ -46,7 +46,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
     const receiptRef = useRef(null);
     const [receiptConfig, setReceiptConfig] = useState({
         business_name: 'VECI',
-        address: 'Sotomayor 1460-A',
+        address: '',
         tax_id: null,
         phone: null,
         email: null,
@@ -109,7 +109,9 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                 if (data) {
                     setReceiptConfig({
                         business_name: data.business_name || 'VECI',
-                        address: data.address || 'Sotomayor 1460-A',
+                        // Sin dirección no se imprime ninguna (antes salía la de
+                        // Kevin, 'Sotomayor 1460-A', en la boleta de cualquier empresa).
+                        address: data.address || '',
                         tax_id: data.tax_id,
                         phone: data.phone,
                         email: data.email,
@@ -118,6 +120,11 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                         show_tax_id: data.show_tax_id === 1,
                         show_phone: data.show_phone === 1,
                         show_email: data.show_email === 1,
+                        // Migración 0040. Sin la columna (null), lo de por defecto:
+                        // razón social y giro no, dirección sí.
+                        show_razon_social: data.show_razon_social == null ? false : data.show_razon_social === 1,
+                        show_giro: data.show_giro == null ? false : data.show_giro === 1,
+                        show_address: data.show_address == null ? true : data.show_address === 1,
                         format: data.format || '58mm'
                     });
                 }
@@ -420,6 +427,14 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
         }
 
         const printWindow = window.open('', '', 'width=400,height=700');
+        // Lo que pide el SII impreso en la boleta/factura electrónica (RUT del
+        // emisor, razón social, giro, dirección, IVA y el cliente identificado)
+        // sale del DTE firmado, con el mismo modelo que la térmica y la A4. Sin DTE,
+        // este ticket queda exactamente como antes.
+        const sii = buildThermalReceipt();
+        const escH = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+        const filaH = ([k, v]) => `<div style="display: flex; justify-content: space-between;"><span>${escH(k)}</span><span>${formatCurrency(v, currentCurrency)}</span></div>`;
+        const desgloseH = (sii.desglose || []).map(filaH).join('');
         const sellerName = seller?.name || 'Vendedor';
         const date = new Date().toLocaleString('es-CL');
         const ticketId = saleDetails?.id ? `${saleDetails.id}` : `${Date.now().toString().slice(-6)}`;
@@ -490,8 +505,10 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                 <body>
                     <div class="header text-center">
                         <h1 style="margin: 0; font-size: ${headerFontSize}; font-weight: bold;">${receiptConfig.business_name}</h1>
-                        <p style="margin: 5px 0; font-size: ${addrFontSize};">${receiptConfig.address}</p>
-                        ${receiptConfig.show_tax_id && receiptConfig.tax_id ? `<p style="margin: 2px 0; font-size: ${metaFontSize};">RUT: ${receiptConfig.tax_id}</p>` : ''}
+                        ${sii.emisorLineas
+                            ? sii.emisorLineas.map(l => `<p style="margin: 2px 0; font-size: ${metaFontSize};">${escH(l)}</p>`).join('')
+                            : `${receiptConfig.show_address !== false && receiptConfig.address ? `<p style="margin: 5px 0; font-size: ${addrFontSize};">${receiptConfig.address}</p>` : ''}
+                        ${receiptConfig.show_tax_id && receiptConfig.tax_id ? `<p style="margin: 2px 0; font-size: ${metaFontSize};">RUT: ${receiptConfig.tax_id}</p>` : ''}`}
                         ${receiptConfig.show_phone && receiptConfig.phone ? `<p style="margin: 2px 0; font-size: ${metaFontSize};">Tel: ${receiptConfig.phone}</p>` : ''}
                         ${receiptConfig.show_email && receiptConfig.email ? `<p style="margin: 2px 0; font-size: ${metaFontSize};">${receiptConfig.email}</p>` : ''}
                         ${receiptConfig.header_message ? `<p style="margin: 10px 0; font-size: ${metaFontSize}; font-style: italic;">${receiptConfig.header_message}</p>` : ''}
@@ -503,7 +520,10 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                                 : `<div>Boleta: ${ticketId}</div>`
                             }
                             <div>Fecha: ${date}</div>
-                            <div>Vend: ${sellerName}</div> 
+                            <div>Vend: ${sellerName}</div>
+                            ${sii.clientRut ? `${sii.clientName ? `<div>Cliente: ${escH(sii.clientName)}</div>` : ''}
+                            <div>RUT: ${escH(sii.clientRut)}</div>
+                            ${(sii.clientLineas || []).map(l => `<div>${escH(l)}</div>`).join('')}` : ''}
                         </div>
                     </div>
 
@@ -528,10 +548,12 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                     <div class="separator"></div>
                     
                     <div class="totals">
+                        ${sii.desgloseAntesDelTotal ? desgloseH : ''}
                         <div style="display: flex; justify-content: space-between; font-size: ${totalFontSize};" class="bold">
                             <span>TOTAL</span>
                             <span>${formatCurrency(saleDetails.total, currentCurrency)}</span>
                         </div>
+                        ${sii.desgloseAntesDelTotal ? '' : desgloseH}
                         <br/>
                         <div style="display: flex; justify-content: space-between;">
                             <span>Medio Pago:</span>
@@ -558,7 +580,7 @@ const SaleSuccessModal = ({ isOpen, onClose, saleDetails, onNewSale, seller }) =
                     <div style="text-align:center; margin-top:15px; padding-top:10px; border-top:1px dashed #ccc;">
                         <div style="font-size:8px; font-weight:bold; margin-bottom:5px;">Timbre Electrónico SII</div>
                         <img src="${timbreImg}" style="width:100%; max-width:${isA4 ? '300px' : '220px'};" />
-                        <div style="font-size:7px; margin-top:3px;">Res. Ex. SII - Documento tributario electrónico</div>
+                        <div style="font-size:8px; margin-top:3px;">Verifique documento: www.sii.cl</div>
                     </div>
                     ` : ''}
                 </body>

@@ -267,6 +267,9 @@ function buildReceiptBytes(receipt, width, money) {
     if (receipt.datetime) p.line(`Fecha: ${receipt.datetime}`);
     if (receipt.seller) p.line(`Vend: ${receipt.seller}`);
     if (receipt.clientName) p.line(`Cliente: ${receipt.clientName}`);
+    // Boleta/factura electrónica con cliente identificado (ver buildSaleReceiptModel).
+    if (receipt.clientRut) p.line(`RUT: ${receipt.clientRut}`);
+    for (const l of (receipt.clientLineas || [])) for (const ln of wrapText(l, width)) p.line(ln);
     if (receipt.clientPhone) p.line(`Fono: ${receipt.clientPhone}`);
     if (receipt.address) p.line(`Dir: ${receipt.address}`);
     p.text(divider(width));
@@ -288,7 +291,12 @@ function buildReceiptBytes(receipt, width, money) {
         p.text(row('Subtotal', money(receipt.subtotal), width));
         p.text(row(receipt.deliveryLabel || 'Despacho', money(receipt.deliveryFee), width));
     }
+    // IVA de la boleta/factura electrónica (lo pide el SII impreso): la factura
+    // lo detalla antes del total; la boleta, "IVA incluido" debajo.
+    const desglose = (receipt.desglose || []).map(([k, v]) => row(k, money(v), width));
+    if (receipt.desgloseAntesDelTotal) desglose.forEach((r) => p.text(r));
     p.bold(true).size(0x01).text(row('TOTAL', money(receipt.total), width)).size(0).bold(false);
+    if (!receipt.desgloseAntesDelTotal) desglose.forEach((r) => p.text(r));
     p.push(0x0A);
     if (receipt.paymentMethod) p.line(`Medio Pago: ${receipt.paymentMethod}`);
     if (receipt.paidLabel) p.line(receipt.paidLabel);
@@ -313,6 +321,9 @@ function buildReceiptBytes(receipt, width, money) {
     }
     return p.feedCut().toBase64();
 }
+
+// Solo para las pruebas: los bytes del ticket sin pasar por la impresora.
+export const bytesDelTicket = buildReceiptBytes;
 
 /**
  * Imprime un recibo normalizado en la térmica Bluetooth vía socket nativo (SPP).

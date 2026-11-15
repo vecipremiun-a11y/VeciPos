@@ -232,7 +232,8 @@ export async function descargarComprobanteEnvio(envio, { companyId, currency = '
 /** Descarga la boleta (o nota de venta) de una venta en PDF 58mm, con su timbre si es DTE. */
 export async function descargarBoletaPdf(venta, { companyId, currency = 'CLP', sellerName, dteInfo = null, tedXml = null } = {}) {
     const money = (n) => formatCurrency(n, currency);
-    const m = buildSaleReceiptModel(venta, { sellerName, receiptConfig: await configBoleta(companyId), currency, dteInfo });
+    // `tedXml` es el DTE firmado entero: de ahí salen RUT, giro e IVA (ver buildSaleReceiptModel).
+    const m = buildSaleReceiptModel(venta, { sellerName, receiptConfig: await configBoleta(companyId), currency, dteInfo, xml: tedXml });
     let timbre = null;
     if (tedXml) {
         try {
@@ -270,6 +271,8 @@ export async function descargarBoletaPdf(venta, { companyId, currency = 'CLP', s
         txt(`Fecha: ${m.datetime}`, { size: 7 });
         txt(`Vend: ${m.seller}`, { size: 7 });
         if (m.clientName) txt(`Cliente: ${m.clientName}`, { size: 7 });
+        if (m.clientRut) txt(`RUT: ${m.clientRut}`, { size: 7 });
+        for (const l of (m.clientLineas || [])) txt(l, { size: 7 });
         sep();
         for (const it of m.items) {
             txt(it.name, { size: 7.5 });
@@ -280,7 +283,11 @@ export async function descargarBoletaPdf(venta, { companyId, currency = 'CLP', s
             fila('Subtotal', money(m.subtotal), { size: 7.5 });
             fila(m.deliveryLabel || 'Delivery', money(m.deliveryFee), { size: 7.5 });
         }
+        // IVA del DTE (lo pide el SII impreso): la factura antes del total, la boleta debajo.
+        const desglose = () => (m.desglose || []).forEach(([k, v]) => fila(k, money(v), { size: 7.5 }));
+        if (m.desgloseAntesDelTotal) desglose();
         fila('TOTAL', money(m.total), { size: 10, bold: true });
+        if (!m.desgloseAntesDelTotal) desglose();
         txt(`Medio Pago: ${m.paymentMethod}`, { size: 7.5 });
         if (timbre) {
             y += 2;

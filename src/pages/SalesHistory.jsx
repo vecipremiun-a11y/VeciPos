@@ -166,13 +166,15 @@ const SalesHistory = () => {
                 show_email: configResult.rows[0].show_email === 1
             } : null;
 
-            // Generar timbre PDF417 si hay DTE
+            // Generar timbre PDF417 si hay DTE. El XML firmado entero va además al
+            // PDF: de ahí salen el RUT del emisor, la razón social, el giro y el IVA.
             let timbreImg = null;
+            let xmlFirmado = null;
             if (activeCompanyId && selectedSale.id) {
                 try {
                     const dteResult = { rows: await reportCall(activeCompanyId, 'dteForSale', { saleId: selectedSale.id }) };
                     if (dteResult.rows.length > 0 && dteResult.rows[0].xml_firmado) {
-                        const xmlFirmado = dteResult.rows[0].xml_firmado;
+                        xmlFirmado = dteResult.rows[0].xml_firmado;
                         const tedMatch = xmlFirmado.match(/<TED[\s\S]*?<\/TED>/);
                         if (tedMatch) {
                             const canvas = document.createElement('canvas');
@@ -192,7 +194,7 @@ const SalesHistory = () => {
                 }
             }
 
-            const pdfBlob = await generateReceiptPDF(selectedSale, seller, receiptConfig, currentCurrency, timbreImg);
+            const pdfBlob = await generateReceiptPDF(selectedSale, seller, receiptConfig, currentCurrency, timbreImg, xmlFirmado);
             await guardarArchivo(pdfBlob, `boleta_${selectedSale.id}.pdf`);
         } catch (error) {
             console.error("Error generating PDF:", error);

@@ -8,6 +8,7 @@ import {
 } from '../../src/lib/analyticsQueries.js';
 import { billingSummary } from './billing.js';
 import { SIN_TILDES, filtroBusquedaProducto } from './busquedaProductos.js';
+import { leerConfigBoleta } from './companyActions.js';
 
 // Reportes con lógica (fallback normalizado→JSON, Fase 5) — módulo compartido
 // Columnas de la grilla del POS. Sin la foto: llega después, aparte.
@@ -48,6 +49,12 @@ async function ramaDeCategoria(turso, companyId, nombre) {
 const SPECIAL = {
     // Resumen de facturación (plan + Apps + total mensual + próximo cobro). Solo lectura.
     billingSummary: async (turso, companyId) => billingSummary(turso, companyId),
+    // Config de la boleta (reimpresión del Historial, PDF del repartidor). Misma
+    // lectura que Configuración → Boleta, con respaldo si falta la migración 0040.
+    receiptConfig: async (turso, companyId) => {
+        const fila = await leerConfigBoleta(turso, companyId);
+        return fila ? [fila] : [];
+    },
 
     /**
      * La grilla de Inventario. Es SPECIAL y no una consulta suelta porque
@@ -549,17 +556,6 @@ const REPORTS = {
     dteForSale: ({ saleId }) => [{
         sql: 'SELECT folio, tipo_dte AS tipo, estado AS status, track_id, created_at, xml_firmado FROM sii_dtes WHERE company_id = ? AND sale_id = ? LIMIT 1',
         args: (cid) => [cid, saleId],
-    }],
-    receiptConfig: () => [{
-        sql: `SELECT receipt_business_name as business_name, receipt_address as address, receipt_tax_id as tax_id,
-                receipt_phone as phone, receipt_email as email, receipt_header_message as header_message,
-                receipt_footer_message as footer_message, receipt_show_tax_id as show_tax_id,
-                receipt_show_phone as show_phone, receipt_show_email as show_email,
-                -- El formato (58mm / 80mm / A4): sin él, reimprimir desde el Historial
-                -- salía siempre en ticket aunque se hubiera elegido A4.
-                receipt_format as format
-              FROM companies WHERE id = ?`,
-        args: (cid) => [cid],
     }],
     // Último DTE emitido de un tipo (polling del modal de venta)
     latestDteByType: ({ tipoDte }) => [{

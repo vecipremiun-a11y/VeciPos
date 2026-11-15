@@ -193,17 +193,33 @@ async function ensureReceiptColumns(turso) {
     _receiptColsEnsured = true;
 }
 
-async function receiptSettingsLoad(turso, companyId) {
-    await ensureReceiptColumns(turso);
-    const r = await turso.execute({
-        sql: `SELECT receipt_business_name as business_name, receipt_address as address, receipt_tax_id as tax_id,
+// Config de la boleta de una empresa (la fila, o null). Los "Mostrar" de razón
+// social, giro y dirección vienen de la migración 0040: si la base todavía no
+// la tiene, se lee lo de antes y la boleta sale como hasta hoy. La usan
+// Configuración → Boleta, la venta recién hecha y el reporte `receiptConfig`
+// (reimpresión del Historial, PDF del repartidor).
+const COLS_BOLETA = `receipt_business_name as business_name, receipt_address as address, receipt_tax_id as tax_id,
                 receipt_phone as phone, receipt_email as email, receipt_header_message as header_message,
                 receipt_footer_message as footer_message, receipt_show_tax_id as show_tax_id,
-                receipt_show_phone as show_phone, receipt_show_email as show_email, receipt_format as format
-              FROM companies WHERE id = ?`,
-        args: [companyId],
-    });
-    return { success: true, config: r.rows[0] || null };
+                receipt_show_phone as show_phone, receipt_show_email as show_email, receipt_format as format`;
+const COLS_BOLETA_0040 = `receipt_show_razon_social as show_razon_social, receipt_show_giro as show_giro,
+                receipt_show_address as show_address`;
+const faltaColumna = (e) => /no such column|has no column/i.test(String(e?.message || e));
+
+export async function leerConfigBoleta(turso, companyId) {
+    try {
+        const r = await turso.execute({ sql: `SELECT ${COLS_BOLETA}, ${COLS_BOLETA_0040} FROM companies WHERE id = ?`, args: [companyId] });
+        return r.rows[0] || null;
+    } catch (e) {
+        if (!faltaColumna(e)) throw e;
+        const r = await turso.execute({ sql: `SELECT ${COLS_BOLETA} FROM companies WHERE id = ?`, args: [companyId] });
+        return r.rows[0] || null;
+    }
+}
+
+async function receiptSettingsLoad(turso, companyId) {
+    await ensureReceiptColumns(turso);
+    return { success: true, config: await leerConfigBoleta(turso, companyId) };
 }
 
 async function preventaSettingsLoad(turso, companyId) {
@@ -222,19 +238,27 @@ async function preventaSettingsLoad(turso, companyId) {
 async function receiptSettingsSave(turso, companyId, session, { config }) {
     await ensureReceiptColumns(turso);
     const c = config || {};
-    await turso.execute({
-        sql: `UPDATE companies SET
-                receipt_business_name = ?, receipt_address = ?, receipt_tax_id = ?, receipt_phone = ?,
+    const base = [
+        c.business_name ?? '', c.address ?? '', c.tax_id ?? '', c.phone ?? '', c.email ?? '',
+        c.header_message ?? '', c.footer_message ?? '',
+        c.show_tax_id ? 1 : 0, c.show_phone ? 1 : 0, c.show_email ? 1 : 0, c.format || '58mm',
+    ];
+    const SETS = `receipt_business_name = ?, receipt_address = ?, receipt_tax_id = ?, receipt_phone = ?,
                 receipt_email = ?, receipt_header_message = ?, receipt_footer_message = ?,
-                receipt_show_tax_id = ?, receipt_show_phone = ?, receipt_show_email = ?, receipt_format = ?
-              WHERE id = ?`,
-        args: [
-            c.business_name ?? '', c.address ?? '', c.tax_id ?? '', c.phone ?? '', c.email ?? '',
-            c.header_message ?? '', c.footer_message ?? '',
-            c.show_tax_id ? 1 : 0, c.show_phone ? 1 : 0, c.show_email ? 1 : 0, c.format || '58mm',
-            companyId,
-        ],
-    });
+                receipt_show_tax_id = ?, receipt_show_phone = ?, receipt_show_email = ?, receipt_format = ?`;
+    // Los "Mostrar" de razón social, giro y dirección (migración 0040). Si el
+    // cliente no los manda (versión vieja de la app), quedan como estaban.
+    const nuevos = [['show_razon_social', 'receipt_show_razon_social'], ['show_giro', 'receipt_show_giro'], ['show_address', 'receipt_show_address']]
+        .filter(([k]) => c[k] !== undefined);
+    try {
+        await turso.execute({
+            sql: `UPDATE companies SET ${SETS}${nuevos.map(([, col]) => `, ${col} = ?`).join('')} WHERE id = ?`,
+            args: [...base, ...nuevos.map(([k]) => (c[k] ? 1 : 0)), companyId],
+        });
+    } catch (e) {
+        if (!nuevos.length || !faltaColumna(e)) throw e;
+        await turso.execute({ sql: `UPDATE companies SET ${SETS} WHERE id = ?`, args: [...base, companyId] });
+    }
     return { success: true };
 }
 

@@ -1,19 +1,42 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useStore } from '../../store/useStore';
 import { dataApiCall } from '../../lib/dataApi';
 import { FileText, Eye, Save, Building2, Package } from 'lucide-react';
-import { boletaA4Html } from '../../lib/boletaA4';
-import { buildSaleReceiptModel } from '../../lib/saleReceipt';
+import { boletaA4Html, timbreComoImagen } from '../../lib/boletaA4';
+import { buildSaleReceiptModel, receiptModelToHtml } from '../../lib/saleReceipt';
 
-// Venta de ejemplo para la vista previa de la hoja A4 (los mismos productos del ticket).
+// Venta de ejemplo para la vista previa (2 × $1.500 + 1 × $2.200 = $5.200).
 const VENTA_DE_MUESTRA = {
     id: 1234, date: new Date().toISOString(), total: 5200, paymentMethod: 'Efectivo',
     paymentDetails: { amount: 10000, change: 4800 },
     items: [{ name: 'Coca Cola 1.5L', quantity: 2, price: 1500 }, { name: 'Pan Molde', quantity: 1, price: 2200 }],
 };
 
+// RUT con puntos: 76123456-7 → 76.123.456-7.
+const rutConPuntos = (rut) => {
+    const m = String(rut || '').replace(/\./g, '').match(/^(\d+)-([\dkK])$/);
+    return m ? `${m[1].replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${m[2].toUpperCase()}` : (rut || '');
+};
+const xmlEsc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// Boleta electrónica de muestra con los datos de Documentos SII → Configuración,
+// para que la vista previa salga como la boleta de verdad (lee el mismo XML).
+function boletaDeMuestra(sii) {
+    return `<DTE><Documento><Encabezado><IdDoc><TipoDTE>39</TipoDTE><Folio>1234</Folio></IdDoc>
+<Emisor><RUTEmisor>${xmlEsc(sii.rut_emisor)}</RUTEmisor><RznSocEmisor>${xmlEsc(sii.razon_social)}</RznSocEmisor>
+<GiroEmisor>${xmlEsc(sii.giro)}</GiroEmisor><DirOrigen>${xmlEsc(sii.direccion)}</DirOrigen><CmnaOrigen>${xmlEsc(sii.comuna)}</CmnaOrigen></Emisor>
+<Totales><MntNeto>4370</MntNeto><IVA>830</IVA><MntTotal>5200</MntTotal></Totales></Encabezado></Documento>
+<TED>muestra</TED></DTE>`;
+}
+
+// Un "Mostrar" leído del servidor. Sin la columna (migración 0040 pendiente), el
+// valor por defecto: nombre de fantasía, RUT y dirección sí; razón social y giro no.
+const mostrarSi = (v, porDefecto) => (v == null ? porDefecto : v === 1 || v === true);
+
 const ReceiptSettings = ({ companyInfo }) => {
     const { activeCompanyId } = useStore();
+    const nombreFantasia = useStore((s) => s.companyFantasyNames?.[s.activeCompanyId]);
     const [activeTab, setActiveTab] = useState('boleta');
     const [receiptConfig, setReceiptConfig] = useState({
         business_name: '',
@@ -26,8 +49,14 @@ const ReceiptSettings = ({ companyInfo }) => {
         show_tax_id: true,
         show_phone: true,
         show_email: true,
+        show_razon_social: false,
+        show_giro: false,
+        show_address: true,
         format: '58mm'
     });
+    // Datos de Documentos SII → Configuración (null si la empresa no emite boletas
+    // electrónicas). Razón social, RUT y giro se muestran de ahí, no se escriben acá.
+    const [sii, setSii] = useState(null);
     const [preventaConfig, setPreventaConfig] = useState({
         business_name: '',
         address: '',
@@ -60,11 +89,24 @@ const ReceiptSettings = ({ companyInfo }) => {
                         show_tax_id: data.show_tax_id === 1,
                         show_phone: data.show_phone === 1,
                         show_email: data.show_email === 1,
+                        show_razon_social: mostrarSi(data.show_razon_social, false),
+                        show_giro: mostrarSi(data.show_giro, false),
+                        show_address: mostrarSi(data.show_address, true),
                         format: data.format || '58mm'
                     });
                 }
             } catch (e) {
                 console.error('Error loading receipt config:', e);
+            }
+        };
+
+        const loadSii = async () => {
+            try {
+                const res = await fetch('/api/sii/config', { headers: { 'Content-Type': 'application/json', 'x-company-id': activeCompanyId } });
+                const data = res.ok ? await res.json() : null;
+                setSii(data?.config?.rut_emisor ? data.config : null);
+            } catch {
+                setSii(null);
             }
         };
 
@@ -93,13 +135,32 @@ const ReceiptSettings = ({ companyInfo }) => {
         if (activeCompanyId) {
             loadReceiptConfig();
             loadPreventaConfig();
+            loadSii();
         }
     }, [activeCompanyId]);
+
+    // Con boleta electrónica, el RUT es el del SII y sale siempre (es obligatorio
+    // impreso): se guarda ese también para las ventas sin boleta electrónica.
+    const rutSii = sii ? rutConPuntos(sii.rut_emisor) : null;
+    const configEfectiva = useMemo(
+        () => (rutSii ? { ...receiptConfig, tax_id: rutSii, show_tax_id: true } : receiptConfig),
+        [receiptConfig, rutSii],
+    );
+
+    // Vista previa: la boleta tal cual se imprime (mismo modelo y mismo HTML).
+    // Con Documentos SII configurado, una boleta electrónica de muestra.
+    const xmlMuestra = useMemo(() => (sii ? boletaDeMuestra(sii) : null), [sii]);
+    const timbreMuestra = useMemo(() => (showPreview && xmlMuestra ? timbreComoImagen(xmlMuestra) : null), [showPreview, xmlMuestra]);
+    const modeloMuestra = useMemo(() => buildSaleReceiptModel(
+        xmlMuestra ? { ...VENTA_DE_MUESTRA, tipoDte: 39 } : VENTA_DE_MUESTRA,
+        { sellerName: 'Vendedor', receiptConfig: configEfectiva, dteInfo: xmlMuestra ? { folio: 1234 } : null, xml: xmlMuestra },
+    ), [configEfectiva, xmlMuestra]);
+    const [altoVista, setAltoVista] = useState(480);
 
     const handleSaveReceiptConfig = async () => {
         setIsSavingReceipt(true);
         try {
-            const r = await dataApiCall('receiptSettingsSave', { companyId: activeCompanyId, config: receiptConfig });
+            const r = await dataApiCall('receiptSettingsSave', { companyId: activeCompanyId, config: configEfectiva });
             if (!r?.success) throw new Error(r?.error || 'Error');
             alert('✅ Configuración de boletas guardada correctamente');
         } catch (e) {
@@ -201,7 +262,9 @@ const ReceiptSettings = ({ companyInfo }) => {
                         onClick={() => {
                             setReceiptConfig({
                                 ...receiptConfig,
-                                business_name: companyInfo.legal_name || '',
+                                // El nombre del negocio es el de fantasía; la razón
+                                // social sale aparte, de Documentos SII.
+                                business_name: nombreFantasia || companyInfo.legal_name || '',
                                 address: companyInfo.full_address || '',
                                 tax_id: companyInfo.tax_id_legal || '',
                                 phone: companyInfo.phone_main || '',
@@ -236,29 +299,104 @@ const ReceiptSettings = ({ companyInfo }) => {
                         />
                     </div>
 
-                    {/* Dirección */}
-                    <div>
-                        <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
-                            Dirección *
+                    {/* Razón social (de Documentos SII) */}
+                    {sii && (
+                        <div data-prueba="boleta-razon-social">
+                            <label className="block text-sm font-medium text-[var(--color-text)] mb-2 flex items-center justify-between">
+                                <span>Razón Social</span>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={receiptConfig.show_razon_social}
+                                        onChange={(e) => setReceiptConfig({ ...receiptConfig, show_razon_social: e.target.checked })}
+                                        className="w-4 h-4"
+                                    />
+                                    <span className="text-xs text-[var(--color-text-muted)]">Mostrar</span>
+                                </label>
+                            </label>
+                            <input
+                                type="text"
+                                value={sii.razon_social || ''}
+                                readOnly
+                                className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text-muted)] cursor-default focus:outline-none"
+                            />
+                        </div>
+                    )}
+
+                    {/* RUT/NIT — con boleta electrónica, el del SII y siempre impreso */}
+                    <div data-prueba="boleta-rut">
+                        <label className="block text-sm font-medium text-[var(--color-text)] mb-2 flex items-center justify-between">
+                            <span>{sii ? 'RUT' : 'RUT / NIT / RFC'}</span>
+                            {sii ? (
+                                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                                    Obligatorio SII
+                                </span>
+                            ) : (
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={receiptConfig.show_tax_id}
+                                        onChange={(e) => setReceiptConfig({ ...receiptConfig, show_tax_id: e.target.checked })}
+                                        className="w-4 h-4"
+                                    />
+                                    <span className="text-xs text-[var(--color-text-muted)]">Mostrar</span>
+                                </label>
+                            )}
                         </label>
-                        <input
-                            type="text"
-                            value={receiptConfig.address}
-                            onChange={(e) => setReceiptConfig({ ...receiptConfig, address: e.target.value })}
-                            placeholder="Ej: Sotomayor 1460-A, Iquique"
-                            className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                        />
+                        {sii ? (
+                            <input
+                                type="text"
+                                value={rutSii}
+                                readOnly
+                                className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text-muted)] cursor-default focus:outline-none"
+                            />
+                        ) : (
+                            <input
+                                type="text"
+                                value={receiptConfig.tax_id}
+                                onChange={(e) => setReceiptConfig({ ...receiptConfig, tax_id: e.target.value })}
+                                placeholder="Ej: 76.XXX.XXX-X"
+                                className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                            />
+                        )}
                     </div>
 
-                    {/* RUT/NIT */}
-                    <div>
+                    {/* Giro (de Documentos SII) */}
+                    {sii && (
+                        <div data-prueba="boleta-giro">
+                            <label className="block text-sm font-medium text-[var(--color-text)] mb-2 flex items-center justify-between">
+                                <span>Giro</span>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={receiptConfig.show_giro}
+                                        onChange={(e) => setReceiptConfig({ ...receiptConfig, show_giro: e.target.checked })}
+                                        className="w-4 h-4"
+                                    />
+                                    <span className="text-xs text-[var(--color-text-muted)]">Mostrar</span>
+                                </label>
+                            </label>
+                            <input
+                                type="text"
+                                value={sii.giro || ''}
+                                readOnly
+                                className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text-muted)] cursor-default focus:outline-none"
+                            />
+                            <Link to="/settings/sii" className="inline-block mt-2 text-xs text-blue-400 hover:underline">
+                                Editar razón social, RUT y giro en Documentos SII
+                            </Link>
+                        </div>
+                    )}
+
+                    {/* Dirección — opcional para el SII */}
+                    <div data-prueba="boleta-direccion">
                         <label className="block text-sm font-medium text-[var(--color-text)] mb-2 flex items-center justify-between">
-                            <span>RUT / NIT / RFC</span>
+                            <span>Dirección</span>
                             <label className="flex items-center gap-2 cursor-pointer">
                                 <input
                                     type="checkbox"
-                                    checked={receiptConfig.show_tax_id}
-                                    onChange={(e) => setReceiptConfig({ ...receiptConfig, show_tax_id: e.target.checked })}
+                                    checked={receiptConfig.show_address}
+                                    onChange={(e) => setReceiptConfig({ ...receiptConfig, show_address: e.target.checked })}
                                     className="w-4 h-4"
                                 />
                                 <span className="text-xs text-[var(--color-text-muted)]">Mostrar</span>
@@ -266,9 +404,9 @@ const ReceiptSettings = ({ companyInfo }) => {
                         </label>
                         <input
                             type="text"
-                            value={receiptConfig.tax_id}
-                            onChange={(e) => setReceiptConfig({ ...receiptConfig, tax_id: e.target.value })}
-                            placeholder="Ej: 76.XXX.XXX-X"
+                            value={receiptConfig.address}
+                            onChange={(e) => setReceiptConfig({ ...receiptConfig, address: e.target.value })}
+                            placeholder="Ej: Sotomayor 1460-A, Iquique"
                             className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
                         />
                     </div>
@@ -350,7 +488,7 @@ const ReceiptSettings = ({ companyInfo }) => {
                     {/* Botón Guardar */}
                     <button
                         onClick={handleSaveReceiptConfig}
-                        disabled={isSavingReceipt || !receiptConfig.business_name || !receiptConfig.address}
+                        disabled={isSavingReceipt || !receiptConfig.business_name}
                         className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Save size={16} />
@@ -364,7 +502,7 @@ const ReceiptSettings = ({ companyInfo }) => {
                         <div className="mx-auto overflow-hidden rounded shadow-lg bg-white" style={{ width: 794 * 0.42, height: 1123 * 0.42 }}>
                             <iframe
                                 title="Vista previa A4"
-                                srcDoc={boletaA4Html(buildSaleReceiptModel(VENTA_DE_MUESTRA, { sellerName: 'Vendedor', receiptConfig }), { imprimir: false })}
+                                srcDoc={boletaA4Html(modeloMuestra, { imprimir: false, xml: xmlMuestra, timbreImg: timbreMuestra })}
                                 style={{ width: 794, height: 1123, border: 0, transform: 'scale(0.42)', transformOrigin: 'top left', background: '#fff' }}
                             />
                         </div>
@@ -375,83 +513,19 @@ const ReceiptSettings = ({ companyInfo }) => {
                 )}
                 {showPreview && receiptConfig.format !== 'a4' && (
                     <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg p-4">
-                        <div className="bg-white text-black p-4 rounded font-mono text-xs max-w-[240px] mx-auto shadow-lg">
-                            {/* Simulación de boleta 58mm */}
-                            <div className="text-center border-b border-dashed border-gray-400 pb-2 mb-2">
-                                <div className="font-bold text-sm">{receiptConfig.business_name || 'NOMBRE NEGOCIO'}</div>
-                                <div className="text-[10px] mt-1">{receiptConfig.address || 'Dirección del negocio'}</div>
-                                {receiptConfig.show_tax_id && receiptConfig.tax_id && (
-                                    <div className="text-[10px]">RUT: {receiptConfig.tax_id}</div>
-                                )}
-                                {receiptConfig.show_phone && receiptConfig.phone && (
-                                    <div className="text-[10px]">Tel: {receiptConfig.phone}</div>
-                                )}
-                                {receiptConfig.show_email && receiptConfig.email && (
-                                    <div className="text-[10px]">{receiptConfig.email}</div>
-                                )}
-                                {receiptConfig.header_message && (
-                                    <div className="text-[10px] mt-2 italic">{receiptConfig.header_message}</div>
-                                )}
-                            </div>
-
-                            <div className="text-[10px] space-y-1 mb-2">
-                                <div className="flex justify-between">
-                                    <span>Boleta:</span>
-                                    <span>T-001234</span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span>Fecha:</span>
-                                    <span>{new Date().toLocaleString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span>Vend:</span>
-                                    <span>Vendedor</span>
-                                </div>
-                            </div>
-
-                            <div className="border-t border-dashed border-gray-400 pt-2 mb-2 text-[10px]">
-                                <div className="flex justify-between font-bold">
-                                    <span>DESCRIPCIÓN</span>
-                                    <span>TOTAL</span>
-                                </div>
-                            </div>
-
-                            <div className="text-[10px] space-y-2 mb-2">
-                                <div>
-                                    <div>Coca Cola 1.5L</div>
-                                    <div className="flex justify-between">
-                                        <span>2 x $1.500</span>
-                                        <span>$3.000</span>
-                                    </div>
-                                </div>
-                                <div>
-                                    <div>Pan Molde</div>
-                                    <div className="flex justify-between">
-                                        <span>1 x $2.200</span>
-                                        <span>$2.200</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="border-t border-dashed border-gray-400 pt-2 mb-2">
-                                <div className="flex justify-between font-bold text-sm">
-                                    <span>TOTAL</span>
-                                    <span>$5.200</span>
-                                </div>
-                                <div className="flex justify-between text-[10px] mt-1">
-                                    <span>Medio Pago:</span>
-                                    <span>Efectivo</span>
-                                </div>
-                            </div>
-
-                            {receiptConfig.footer_message && (
-                                <div className="text-center text-[10px] border-t border-dashed border-gray-400 pt-2 mt-2">
-                                    {receiptConfig.footer_message}
-                                </div>
-                            )}
+                        {/* La boleta tal cual se imprime: el mismo modelo y el mismo HTML de la impresión. */}
+                        <div className="overflow-x-auto">
+                            <iframe
+                                title="Vista previa de la boleta"
+                                data-prueba="vista-boleta"
+                                srcDoc={receiptModelToHtml(modeloMuestra, { formato: receiptConfig.format, timbreImg: timbreMuestra, imprimir: false })}
+                                onLoad={(e) => { const d = e.currentTarget.contentDocument; if (d?.body) setAltoVista(d.documentElement.scrollHeight + 4); }}
+                                className="block mx-auto bg-white rounded shadow-lg"
+                                style={{ width: receiptConfig.format === '80mm' ? '80mm' : '58mm', height: altoVista, border: 0 }}
+                            />
                         </div>
                         <p className="text-center text-xs text-[var(--color-text-muted)] mt-4">
-                            Vista previa aproximada • Formato {receiptConfig.format === 'a4' ? 'A4' : receiptConfig.format}
+                            Vista previa • Formato {receiptConfig.format === 'a4' ? 'A4' : receiptConfig.format}
                         </p>
                     </div>
                 )}

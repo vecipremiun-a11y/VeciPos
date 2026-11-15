@@ -43,6 +43,14 @@ export function datosDelDte(xml) {
         tipo: num('TipoDTE'),
         folio: etiqueta(xml, 'Folio'),
         rutEmisor: conPuntos(etiqueta(xml, 'RUTEmisor')),
+        // Lo que se firmó con Documentos SII → Configuración. La boleta los llama
+        // RznSocEmisor/GiroEmisor y la factura RznSoc/GiroEmis.
+        emisor: {
+            razonSocial: etiqueta(xml, 'RznSocEmisor') || etiqueta(xml, 'RznSoc'),
+            giro: etiqueta(xml, 'GiroEmisor') || etiqueta(xml, 'GiroEmis'),
+            direccion: etiqueta(xml, 'DirOrigen'),
+            comuna: etiqueta(xml, 'CmnaOrigen'),
+        },
         // Boleta 66666666-6 = "sin receptor": no se muestra.
         receptor: rutRecep && rutRecep !== '66666666-6' ? {
             rut: conPuntos(rutRecep),
@@ -56,6 +64,35 @@ export function datosDelDte(xml) {
         iva: num('IVA'),
         tasaIva: num('TasaIVA'),
         total: num('MntTotal'),
+    };
+}
+
+const sinTildes = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * Los datos del emisor que van impresos en una boleta o factura electrónica,
+ * sacados del DTE firmado: así el papel dice lo mismo que recibió el SII.
+ *
+ * Formato Boletas Electrónicas del SII (v4.2, 8-sep-2025): el RUT del emisor
+ * tiene que ir impreso, siempre. En la boleta, razón social, giro y dirección
+ * son opcionales: salen según los "Mostrar" de Configuración → Boleta
+ * (`mostrar`, migración 0040). Sin dato: razón social y giro no, dirección sí
+ * (lo que fijó Kevin el 13-nov-2026). En la factura los tres son obligatorios,
+ * así que salen siempre. Arriba va el nombre del negocio, que puede ser el de
+ * fantasía; la razón social se agrega debajo solo si es otro nombre.
+ */
+const MOSTRAR_POR_DEFECTO = { razonSocial: false, giro: false, direccion: true };
+
+export function emisorParaImprimir(dte, nombreNegocio, mostrar = {}) {
+    const e = dte?.emisor;
+    if (!e) return null;
+    const esBoleta = dte.tipo === 39 || dte.tipo === 41;
+    const si = (k) => !esBoleta || (typeof mostrar[k] === 'boolean' ? mostrar[k] : MOSTRAR_POR_DEFECTO[k]);
+    return {
+        razonSocial: si('razonSocial') && e.razonSocial && sinTildes(e.razonSocial) !== sinTildes(nombreNegocio) ? e.razonSocial : null,
+        rut: dte.rutEmisor || null,
+        giro: si('giro') ? (e.giro || null) : null,
+        direccion: si('direccion') ? ([e.direccion, e.comuna].filter(Boolean).join(', ') || null) : null,
     };
 }
 
@@ -89,6 +126,11 @@ export function boletaA4Html(model, { currency = 'CLP', xml = null, timbreImg = 
         : 'BOLETA';
     const numero = dte?.folio || model.folio || model.code || '';
     const rutCaja = dte?.rutEmisor || (emp.mostrarRut ? emp.rut : null);
+    // Razón social, giro y dirección del DTE firmado (el RUT ya va en el recuadro),
+    // según los "Mostrar" de Configuración → Boleta. La dirección escrita ahí
+    // manda; si está vacía, la del DTE.
+    const emisor = emisorParaImprimir(dte, emp.nombre || model.companyName, emp.mostrar);
+    const direccion = emp.direccion || emisor?.direccion;
 
     const filas = (model.items || []).map(it => {
         const cant = typeof it.qty === 'number' && it.unit && it.unit !== 'Und' ? `${it.qty} ${it.unit}` : it.qty;
@@ -136,6 +178,7 @@ export function boletaA4Html(model, { currency = 'CLP', xml = null, timbreImg = 
     .cab { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
     .emp h1 { font-size: 20px; margin: 0 0 6px; }
     .emp div { margin: 2px 0; }
+    .emp .rs { font-weight: bold; }
     .emp .msg { font-style: italic; margin-top: 6px; }
     .caja { border: 2px solid #000; padding: 10px 14px; text-align: center; font-weight: bold; min-width: 64mm; }
     .caja .tipo { font-size: 16px; margin: 6px 0; }
@@ -161,7 +204,9 @@ export function boletaA4Html(model, { currency = 'CLP', xml = null, timbreImg = 
     <div class="cab">
         <div class="emp">
             <h1>${esc(emp.nombre || model.companyName)}</h1>
-            ${emp.direccion ? `<div>${esc(emp.direccion)}</div>` : ''}
+            ${emisor?.razonSocial ? `<div class="rs">${esc(emisor.razonSocial)}</div>` : ''}
+            ${emisor?.giro ? `<div>Giro: ${esc(emisor.giro)}</div>` : ''}
+            ${direccion ? `<div>${esc(direccion)}</div>` : ''}
             ${emp.telefono ? `<div>Tel: ${esc(emp.telefono)}</div>` : ''}
             ${emp.email ? `<div>${esc(emp.email)}</div>` : ''}
             ${emp.mensaje ? `<div class="msg">${esc(emp.mensaje)}</div>` : ''}
