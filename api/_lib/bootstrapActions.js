@@ -19,8 +19,30 @@ async function userCompanies(turso, session) {
     return { success: true, companies: r.rows };
 }
 
+// Nombres de fantasía (migración 0039) de las empresas del usuario, como
+// { [companyId]: nombre }: el menú muestra el de la activa y el selector los usa
+// para distinguir una empresa de otra. null = no se pudo leer (por ejemplo, el
+// código llegó antes que la migración): el cliente se queda con lo último que supo.
+async function nombresFantasia(turso, companyId, uid) {
+    try {
+        const r = await turso.execute({
+            sql: `SELECT id, fantasy_name FROM companies
+                  WHERE (id = ? OR id IN (SELECT company_id FROM user_companies WHERE user_id = ?))
+                    AND fantasy_name IS NOT NULL AND fantasy_name <> ''`,
+            args: [companyId, uid ?? null],
+        });
+        return Object.fromEntries(r.rows.map((x) => [x.id, x.fantasy_name]));
+    } catch (error) {
+        console.warn('⚠️  bootstrap: no se pudo leer fantasy_name:', error.message);
+        return null;
+    }
+}
+
 // Metadata completa de la empresa activa (mismo set que cargaba el navegador).
-async function bootstrap(turso, companyId) {
+async function bootstrap(turso, companyId, session) {
+    // Fuera del batch por lo mismo que la libreta de abajo (un batch falla entero),
+    // pero en paralelo con él: es una consulta chica y así no suma espera al arranque.
+    const fantasiaP = nombresFantasia(turso, companyId, session?.uid);
     const results = await turso.batch([
         // Primero se recortan los 200 lotes, DESPUÉS se les busca el nombre.
         //
@@ -117,6 +139,7 @@ async function bootstrap(turso, companyId) {
         paymentTerminals: payTerminalsRes.rows,
         bankAccounts: bankAccountsRes.rows,
         companyConfig: companyConfigRes.rows[0] || null,
+        fantasyNames: await fantasiaP,
     };
 }
 

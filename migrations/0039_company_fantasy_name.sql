@@ -1,0 +1,22 @@
+-- Nombre de fantasía de la empresa.
+--
+-- EL PROBLEMA. El menú decía POSVECI para todos, y Kevin (9-nov-2026) pidió el
+-- nombre de cada negocio ahí. El nombre legal no sirve: en una persona natural es
+-- su nombre completo, largo. El nombre con que se registró tampoco: el cliente no
+-- lo puede cambiar, y en una sucursal es el de la sucursal. Además, se viene el
+-- traspaso entre sucursales, y cada empresa tiene que poder distinguirse con un
+-- nombre corto que elija el cliente.
+--
+-- CÓMO SE RESUELVE. Una columna aparte, opcional, hasta 30 caracteres (el
+-- servidor la recorta). NULL = no tiene: el menú sigue diciendo POSVECI y el
+-- selector de empresa muestra `name`, como hasta hoy.
+--
+-- No la leen ni la boleta, ni el SII, ni la impresión: esos usan sus propios
+-- nombres (sii_config.razon_social, receipt_business_name).
+--
+-- Al desplegar: el arranque la lee FUERA del batch, así que si el código llegara
+-- antes que la migración, la app arranca igual (sin nombres de fantasía).
+--
+-- Aditivo puro. Rollback: revertir el commit; la columna queda sin usar.
+
+ALTER TABLE companies ADD COLUMN fantasy_name TEXT;

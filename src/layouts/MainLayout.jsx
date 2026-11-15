@@ -9,6 +9,8 @@ import CompanySwitcher from '../components/CompanySwitcher';
 import BotonModoOffline from '../components/BotonModoOffline';
 import { pendingOpsApi } from '../lib/db/localdb';
 import NotificationBell from '../components/NotificationBell';
+import InterruptorTema from '../components/InterruptorTema';
+import MarcaEmpresa from '../components/MarcaEmpresa';
 import SupportWidget from '../components/SupportWidget';
 import WebOrderToast from '../components/WebOrderToast';
 import { usePermissions } from '../hooks/usePermissions';
@@ -396,9 +398,8 @@ const MainLayout = () => {
                 )}
             >
                 <div className="h-16 flex items-center justify-center border-b border-[var(--glass-border)] relative">
-                    <h1 className={cn("font-bold text-2xl neon-text transition-opacity duration-300 text-[var(--color-text)]", !isSidebarOpen && !isMobile && "opacity-0 hidden")}>
-                        POSVECI
-                    </h1>
+                    {/* Nombre de fantasía de la empresa (o POSVECI si no tiene). */}
+                    <MarcaEmpresa oculta={!isSidebarOpen && !isMobile} movil={isMobile} />
                     <button
                         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                         className={cn(
@@ -653,6 +654,9 @@ const MainLayout = () => {
 
                         {/* Company Switcher */}
                         <CompanySwitcher />
+
+                        {/* Día / noche, de acceso rápido (solo escritorio). */}
+                        <InterruptorTema />
 
                         {/* Notification Bell */}
                         <NotificationBell />

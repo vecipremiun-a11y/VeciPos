@@ -3,19 +3,25 @@
 // decide qué columna se escribe.
 
 import crypto from 'crypto';
+import { limpiarNombreFantasia } from '../../src/lib/nombreFantasia.js';
 
 // Columnas de companies que el usuario puede editar desde Configuración
 const COMPANY_FIELDS = new Set([
     'legal_name', 'full_address', 'tax_id_legal', 'phone_main', 'email_main',
     'city', 'country', 'postal_code', 'website', 'business_type', 'currency',
     'timezone', 'kds_sound', 'credit_block_mode', 'inventory_adjustment_mode',
+    'fantasy_name',
 ]);
 
 async function companyFieldsUpdate(turso, companyId, session, { fields }) {
     const sets = [];
     const args = [];
     for (const [k, v] of Object.entries(fields || {})) {
-        if (COMPANY_FIELDS.has(k) && v !== undefined) { sets.push(`${k} = ?`); args.push(v); }
+        if (COMPANY_FIELDS.has(k) && v !== undefined) {
+            sets.push(`${k} = ?`);
+            // Nombre de fantasía (migración 0039): corto; vacío = NULL.
+            args.push(k === 'fantasy_name' ? limpiarNombreFantasia(v) : v);
+        }
     }
     if (!sets.length) return { success: true };
     args.push(companyId);

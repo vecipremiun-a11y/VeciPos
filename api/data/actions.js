@@ -134,7 +134,7 @@ export default async function handler(req, res) {
                 return res.status(200).json({ success: true, data: await catalogoIds(turso, companyId) });
             // Carga inicial de la app (Fase 1 · Paso 35)
             case 'bootstrap':
-                return res.status(200).json(await bootstrapActions.bootstrap(turso, companyId));
+                return res.status(200).json(await bootstrapActions.bootstrap(turso, companyId, session));
             // Lectura paginada de productos para sync WooCommerce (Fase 1 · Paso 37)
             case 'productsForStoreSync':
                 return res.status(200).json(await productsForStoreSync(turso, companyId, body));

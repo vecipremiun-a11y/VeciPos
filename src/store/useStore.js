@@ -310,6 +310,16 @@ export const useStore = create(persist((set, get) => ({
     inventoryAdjustmentMode: false, // Will be loaded from DB per company
     creditBlockMode: 'warn', // 'warn' or 'block' - loaded from DB per company
 
+    // Nombre de fantasía por empresa, { [companyId]: nombre } (migración 0039).
+    // Va en el menú en vez de POSVECI y en el selector de empresa. Lo trae el
+    // arranque; sin nombre, cada lugar muestra lo de siempre.
+    companyFantasyNames: {},
+    setCompanyFantasyName: (companyId, nombre) => set((state) => {
+        const copia = { ...(state.companyFantasyNames || {}) };
+        if (nombre) copia[companyId] = nombre; else delete copia[companyId];
+        return { companyFantasyNames: copia };
+    }),
+
     toggleInventoryAdjustmentMode: async () => {
         const { activeCompanyId, inventoryAdjustmentMode } = get();
         const newValue = !inventoryAdjustmentMode;
@@ -847,7 +857,9 @@ export const useStore = create(persist((set, get) => ({
                 companyApps: boot.companyApps || [],
                 paymentMethodsConfig: payConfig,
                 paymentTerminals: boot.paymentTerminals,
-                bankAccounts: boot.bankAccounts
+                bankAccounts: boot.bankAccounts,
+                // null = el servidor no pudo leerlos: se queda lo último conocido.
+                ...(boot.fantasyNames ? { companyFantasyNames: boot.fantasyNames } : {}),
             });
 
             console.timeEnd('⏱️ fetchInitialData');
@@ -8860,6 +8872,8 @@ export const useStore = create(persist((set, get) => ({
         // Mismo motivo: sin esto, offline no sabe si la empresa bloquea o solo
         // avisa al pasarse del crédito.
         creditBlockMode: state.creditBlockMode,
+        // Para que el menú diga el nombre del negocio también al abrir sin señal.
+        companyFantasyNames: state.companyFantasyNames,
         // Las unidades de medida (Caja, Display…): sin esto, un arranque sin
         // conexión no reconocería el código de barras de una caja. Es una lista
         // chica —una fila por presentación—.

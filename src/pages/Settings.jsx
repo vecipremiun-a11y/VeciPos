@@ -17,6 +17,7 @@ import { formatCurrency, getCurrencySymbol } from '../utils/formatCurrency';
 import { usePermissions } from '../hooks/usePermissions';
 import { PRODUCTION_SOUNDS, getProductionSound, setProductionSound, playProductionSound } from '../utils/productionSounds';
 import { cn } from '../lib/utils';
+import { limpiarNombreFantasia, LARGO_NOMBRE_FANTASIA } from '../lib/nombreFantasia';
 import ThermalPrinterSettings from '../components/settings/ThermalPrinterSettings';
 
 // Qué versión y en qué forma está corriendo esto.
@@ -46,7 +47,7 @@ function versionMostrada() {
 const VERSION_MOSTRADA = versionMostrada();
 
 const Settings = () => {
-    const { darkMode, toggleDarkMode, inventoryAdjustmentMode, toggleInventoryAdjustmentMode, activeCompanyId, currentCompanyTimezone, fetchInitialData, updateCurrency, checkSubscriptionStatus, currentUser, currentUserCompanyRole, hasModule } = useStore();
+    const { darkMode, toggleDarkMode, inventoryAdjustmentMode, toggleInventoryAdjustmentMode, activeCompanyId, currentCompanyTimezone, fetchInitialData, updateCurrency, checkSubscriptionStatus, currentUser, currentUserCompanyRole, hasModule, companyFantasyNames, setCompanyFantasyName } = useStore();
     const canPreorders = hasModule('preorders');
 
     // Contratar/gestionar el plan es SOLO del dueño (owner), no del personal (aunque sea Administrador).
@@ -92,6 +93,13 @@ const Settings = () => {
         currency: 'CLP'
     });
     const [isSavingCompanyInfo, setIsSavingCompanyInfo] = useState(false);
+
+    // Nombre de fantasía (migración 0039). Sale del store —lo trae el arranque—
+    // y no de la consulta de arriba: así esta pantalla carga igual aunque la
+    // columna todavía no exista. Se manda solo si cambió.
+    const fantasiaGuardada = companyFantasyNames?.[activeCompanyId] || '';
+    const [nombreFantasia, setNombreFantasia] = useState(fantasiaGuardada);
+    useEffect(() => { setNombreFantasia(fantasiaGuardada); }, [activeCompanyId, fantasiaGuardada]);
 
     // Pantalla de Cocina (TV) — link con token secreto por empresa
     const [kdsToken, setKdsToken] = useState('');
@@ -224,6 +232,8 @@ const Settings = () => {
 
     const handleSaveCompanyInfo = async () => {
         setIsSavingCompanyInfo(true);
+        const fantasiaNueva = limpiarNombreFantasia(nombreFantasia) || '';
+        const cambioFantasia = fantasiaNueva !== fantasiaGuardada;
         try {
             // Se revisa la respuesta: antes se avisaba "guardado" sin mirarla, así que
             // un fallo del servidor pasaba desapercibido y los datos se perdían al
@@ -242,12 +252,15 @@ const Settings = () => {
                     website: companyInfo.website,
                     business_type: companyInfo.business_type,
                     currency: companyInfo.currency,
+                    ...(cambioFantasia ? { fantasy_name: fantasiaNueva } : {}),
                 },
             });
             if (!r?.success) {
                 alert('❌ No se pudo guardar: ' + (r?.error || 'el servidor rechazó el cambio'));
                 return;
             }
+            if (cambioFantasia) setCompanyFantasyName(activeCompanyId, fantasiaNueva);
+            setNombreFantasia(fantasiaNueva);
             alert('✅ Información de la empresa guardada correctamente');
         } catch (e) {
             console.error('Error saving company info:', e);
@@ -531,6 +544,27 @@ const Settings = () => {
                                         />
                                     </div>
 
+                                    {/* Nombre de fantasía (migración 0039) */}
+                                    <div>
+                                        <label htmlFor="nombre-fantasia" className="block text-sm font-medium text-[var(--color-text)] mb-2">
+                                            Nombre de fantasía
+                                        </label>
+                                        <input
+                                            id="nombre-fantasia"
+                                            type="text"
+                                            value={nombreFantasia}
+                                            maxLength={LARGO_NOMBRE_FANTASIA}
+                                            onChange={(e) => setNombreFantasia(e.target.value)}
+                                            placeholder="Ej: Minimarket Don José"
+                                            data-prueba="nombre-fantasia"
+                                            className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                        />
+                                        <div className="flex justify-between gap-2 mt-1 text-xs text-[var(--color-text-muted)]">
+                                            <span>Nombre corto, hasta {LARGO_NOMBRE_FANTASIA} caracteres.</span>
+                                            <span className="tabular-nums">{Array.from(nombreFantasia).length}/{LARGO_NOMBRE_FANTASIA}</span>
+                                        </div>
+                                    </div>
+
                                     {/* RUT/NIT */}
                                     <div>
                                         <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
@@ -541,6 +575,21 @@ const Settings = () => {
                                             value={companyInfo.tax_id_legal}
                                             onChange={(e) => setCompanyInfo({ ...companyInfo, tax_id_legal: e.target.value })}
                                             placeholder="Ej: 76.XXX.XXX-X"
+                                            className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                        />
+                                    </div>
+
+                                    {/* Giro/Rubro — junto al RUT: con el nombre de fantasía la grilla
+                                        quedaba con un hueco al lado del RUT, y son datos de la misma familia. */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
+                                            Giro / Rubro del Negocio
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={companyInfo.business_type}
+                                            onChange={(e) => setCompanyInfo({ ...companyInfo, business_type: e.target.value })}
+                                            placeholder="Ej: Comercio al por menor"
                                             className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
                                         />
                                     </div>
@@ -648,20 +697,6 @@ const Settings = () => {
                                             value={companyInfo.website}
                                             onChange={(e) => setCompanyInfo({ ...companyInfo, website: e.target.value })}
                                             placeholder="Ej: https://www.miempresa.cl"
-                                            className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                                        />
-                                    </div>
-
-                                    {/* Giro/Rubro */}
-                                    <div>
-                                        <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
-                                            Giro / Rubro del Negocio
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={companyInfo.business_type}
-                                            onChange={(e) => setCompanyInfo({ ...companyInfo, business_type: e.target.value })}
-                                            placeholder="Ej: Comercio al por menor"
                                             className="w-full bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-4 py-2 text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
                                         />
                                     </div>

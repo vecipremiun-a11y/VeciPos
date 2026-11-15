@@ -3,15 +3,18 @@ import { useStore } from '../store/useStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ChevronDown, Building2, Check, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { nombreDeEmpresa } from '../lib/nombreFantasia';
 
 const CompanySwitcher = () => {
     // FASE 10 · useShallow → aislamos re-renders del store global.
-    const { availableCompanies, activeCompanyId, setActiveCompanyId, currentUser } = useStore(
+    const { availableCompanies, activeCompanyId, setActiveCompanyId, currentUser, companyFantasyNames } = useStore(
         useShallow(s => ({
             availableCompanies: s.availableCompanies,
             activeCompanyId: s.activeCompanyId,
             setActiveCompanyId: s.setActiveCompanyId,
             currentUser: s.currentUser,
+            // Nombre de fantasía (migración 0039): distingue una empresa de otra.
+            companyFantasyNames: s.companyFantasyNames,
         }))
     );
     const [isOpen, setIsOpen] = useState(false);
@@ -50,7 +53,7 @@ const CompanySwitcher = () => {
         return (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 rounded-full border border-white/10 text-sm text-[var(--color-text-muted)]">
                 <Building2 size={14} className="shrink-0" />
-                <span className="font-medium truncate max-w-[100px] sm:max-w-[150px]">{currentCompany.name}</span>
+                <span className="font-medium truncate max-w-[100px] sm:max-w-[150px]">{nombreDeEmpresa(currentCompany, companyFantasyNames)}</span>
             </div>
         );
     }
@@ -65,7 +68,7 @@ const CompanySwitcher = () => {
                     <Building2 size={14} />
                 </div>
                 <span className="font-medium text-[var(--color-text)] truncate max-w-[100px] sm:max-w-[150px]">
-                    {currentCompany.name}
+                    {nombreDeEmpresa(currentCompany, companyFantasyNames)}
                 </span>
                 <ChevronDown size={14} className={`text-[var(--color-text-muted)] transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -87,7 +90,7 @@ const CompanySwitcher = () => {
                                     }`}
                             >
                                 <div className="flex flex-col items-start truncate">
-                                    <span className="font-medium truncate w-full text-left">{company.name}</span>
+                                    <span className="font-medium truncate w-full text-left">{nombreDeEmpresa(company, companyFantasyNames)}</span>
                                     {company.role && <span className="text-[10px] opacity-60 uppercase">{company.role}</span>}
                                 </div>
                                 {company.id === activeCompanyId && <Check size={14} />}
