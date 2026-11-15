@@ -158,7 +158,7 @@ export const ALL_MODULES = [
     {
         key: 'finance',
         label: 'Administración financiera',
-        description: 'Gastos, servicios recurrentes y utilidad operacional por empresa.',
+        description: 'Gastos, cuentas mensuales y utilidad operacional por empresa.',
         defaultEnabled: true,
         plan: 'professional',
         minLevel: 2,

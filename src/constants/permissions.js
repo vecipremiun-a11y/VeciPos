@@ -241,7 +241,7 @@ export const ALL_PERMISSIONS = [
         label: 'Administración financiera',
         permissions: [
             { id: 'finance.view', label: 'Ver administración', desc: 'Permite ver gastos y utilidad operacional de la empresa' },
-            { id: 'finance.manage', label: 'Gestionar gastos', desc: 'Permite crear, editar y eliminar gastos y servicios recurrentes' },
+            { id: 'finance.manage', label: 'Gestionar gastos', desc: 'Permite crear, editar y eliminar gastos y cuentas mensuales' },
         ]
     },
     {
