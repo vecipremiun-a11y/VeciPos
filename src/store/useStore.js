@@ -2089,8 +2089,13 @@ export const useStore = create(persist((set, get) => ({
             // Validación de rol + hash bcrypt + inserción corren server-side
             const r = await userApiCall('userCreate', { companyId: get().activeCompanyId, user });
             if (!r?.success) return r || { success: false, error: 'Error creando usuario' };
-            set((state) => ({ users: [...state.users, r.user] }));
-            return { success: true, user: r.user };
+            // La pantalla Usuarios separa Activos / Eliminados por `company_role`
+            // (la membresía a la empresa). El servidor de antes no lo devolvía y el
+            // usuario nuevo aparecía en Eliminados hasta refrescar. Recién creado,
+            // su membresía es el rol con que se creó.
+            const nuevo = { ...r.user, company_role: r.user?.company_role ?? user.role };
+            set((state) => ({ users: [...state.users, nuevo] }));
+            return { success: true, user: nuevo };
         } catch (e) {
             console.error("Add user error", e);
             return { success: false, error: e.message };
@@ -2101,8 +2106,14 @@ export const useStore = create(persist((set, get) => ({
         try {
             const r = await userApiCall('userUpdate', { companyId: get().activeCompanyId, id, user: updatedUser });
             if (!r?.success) return r || { success: false, error: 'Error actualizando usuario' };
+            // El servidor también cambia el rol de la membresía (salvo al dueño y a
+            // quien no tiene acceso): se refleja acá para no esperar a refrescar.
             set((state) => ({
-                users: state.users.map(u => u.id === id ? { ...u, ...updatedUser } : u)
+                users: state.users.map(u => u.id === id ? {
+                    ...u,
+                    ...updatedUser,
+                    company_role: u.company_role && u.company_role !== 'owner' ? (updatedUser.role || u.company_role) : u.company_role,
+                } : u)
             }));
             return { success: true };
         } catch (e) {

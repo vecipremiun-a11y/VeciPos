@@ -83,7 +83,10 @@ async function userCreate(turso, companyId, session, { user }) {
         sql: "INSERT INTO audit_logs (company_id, user_id, action, entity, details, created_at) VALUES (?, ?, 'CREATE', 'USER', ?, ?)",
         args: [companyId, session?.uid ?? null, JSON.stringify({ username: user.username }), new Date().toISOString()],
     });
-    return { success: true, user: newUser };
+    // Con la membresía recién creada: la pantalla Usuarios decide Activos /
+    // Eliminados por `company_role`, y sin él el usuario nuevo caía en
+    // Eliminados hasta refrescar (Kevin, 13-nov-2026).
+    return { success: true, user: { ...newUser, company_role: user.role } };
 }
 
 async function userUpdate(turso, companyId, session, { id, user }) {
