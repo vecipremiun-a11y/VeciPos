@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
+import { formatCurrency as formatearMoneda } from '../../../utils/formatCurrency';
 import { format, startOfMonth, endOfMonth, subMonths, addMonths } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Save, AlertCircle, CheckCircle, ChevronLeft, ChevronRight, ChevronDown, Clock, CalendarDays, TrendingDown, Gift, Wallet, Lock } from 'lucide-react';
@@ -104,7 +105,8 @@ const PeriodCalculator = () => {
         setLoading(false);
     };
 
-    const fmt = (amount) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(amount || 0);
+    // Con la moneda de la empresa (antes, CLP fijo).
+    const fmt = (amount) => formatearMoneda(amount || 0, useStore.getState().currentCurrency);
 
     const toggleDetail = (userId) => setExpandedUser(prev => prev === userId ? null : userId);
 

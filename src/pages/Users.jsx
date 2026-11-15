@@ -6,6 +6,24 @@ import { usePermissions } from '../hooks/usePermissions';
 import { toast } from '../lib/toast';
 import { validateRut, formatRutInput, formatRut } from '../utils/rutValidation';
 import BajaPersonalModal from '../components/BajaPersonalModal';
+import InputMonto from '../components/InputMonto';
+
+// Qué es el monto según el tipo de pago. Antes decía "Sueldo Base" en todos, y
+// junto a "Día de Pago" se leía como "pago por día": Kevin escribió 25000 ahí
+// (13-nov-2026), que es el campo del día en que se le paga.
+const MONTO_POR_TIPO = {
+    monthly: 'Sueldo mensual',
+    weekly: 'Pago semanal',
+    daily: 'Pago diario',
+    hourly: 'Valor hora',
+};
+const DIAS_SEMANA = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+// El día de pago es un día del mes (mensual, por hora), de la semana (semanal)
+// o no corresponde (diario).
+const clasePagoDia = (tipo) => (tipo === 'weekly' ? 'semana' : tipo === 'daily' ? null : 'mes');
+// Un día de pago guardado que no es un día del mes (p. ej. un monto escrito
+// ahí por error) no se muestra como si lo fuera.
+const diaDelMes = (v) => (/^\d{1,2}$/.test(String(v ?? '').trim()) && Number(v) >= 1 && Number(v) <= 31 ? String(Number(v)) : '');
 
 const Users = () => {
     const { users, currentUser, currentUserCompanyRole, addUser, deleteUser, updateUser, activeCompanyId, fetchCompanyRoles, darDeBajaUsuario, reincorporarUsuario, fetchPersonalDadoDeBaja } = useStore();
@@ -187,7 +205,10 @@ const Users = () => {
                 // Payment
                 pay_type: user.pay_type || 'monthly',
                 pay_method: user.pay_method || 'transfer',
-                pay_day: user.pay_day || '',
+                pay_day: {
+                    mes: () => diaDelMes(user.pay_day),
+                    semana: () => user.pay_day || '',
+                }[clasePagoDia(user.pay_type || 'monthly')]?.() ?? '',
                 pay_base_amount: user.pay_base_amount || 0,
                 pay_fixed_bonus: user.pay_fixed_bonus || 0,
                 pay_fixed_discount: user.pay_fixed_discount || 0,
@@ -960,10 +981,16 @@ const Users = () => {
                                             <CreditCard size={16} /> Configuración de Pago
                                         </h4>
 
-                                        <div className="grid grid-cols-2 gap-4">
+                                        <div className="grid grid-cols-2 gap-4 items-end">
                                             <div>
                                                 <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">Tipo Pago</label>
-                                                <select className="glass-input w-full bg-[var(--color-surface)]" value={formData.pay_type} onChange={e => setFormData({ ...formData, pay_type: e.target.value })}>
+                                                <select className="glass-input w-full bg-[var(--color-surface)]" value={formData.pay_type} onChange={e => {
+                                                    // El día de pago cambia de sentido con el tipo (del mes, de la
+                                                    // semana, ninguno): al pasar de uno a otro se vacía.
+                                                    const pay_type = e.target.value;
+                                                    const mismoDia = clasePagoDia(pay_type) === clasePagoDia(formData.pay_type);
+                                                    setFormData({ ...formData, pay_type, pay_day: mismoDia ? formData.pay_day : '' });
+                                                }}>
                                                     <option value="monthly">Mensual</option>
                                                     <option value="weekly">Semanal</option>
                                                     <option value="daily">Diario</option>
@@ -977,14 +1004,55 @@ const Users = () => {
                                                     <option value="cash">Efectivo</option>
                                                 </select>
                                             </div>
+                                            {/* El monto, con la moneda de la empresa y los miles
+                                                separados. Su nombre dice qué es según el tipo de pago. */}
                                             <div>
-                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">Día de Pago</label>
-                                                <input className="glass-input w-full" value={formData.pay_day} onChange={e => setFormData({ ...formData, pay_day: e.target.value })} placeholder="Ej: 05" />
+                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
+                                                    {MONTO_POR_TIPO[formData.pay_type] || 'Sueldo Base'}
+                                                </label>
+                                                <InputMonto
+                                                    data-prueba="sueldo-base"
+                                                    value={formData.pay_base_amount}
+                                                    onChange={(n) => setFormData({ ...formData, pay_base_amount: n })}
+                                                    placeholder="Ej: 750.000"
+                                                />
                                             </div>
-                                            <div>
-                                                <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">Sueldo Base</label>
-                                                <input type="number" className="glass-input w-full" value={formData.pay_base_amount} onChange={e => setFormData({ ...formData, pay_base_amount: Number(e.target.value) })} />
-                                            </div>
+                                            {/* Día de pago: un día del mes o de la semana, nunca un monto.
+                                                En pago diario no corresponde. */}
+                                            {clasePagoDia(formData.pay_type) === 'mes' && (
+                                                <div>
+                                                    <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">Día de pago del mes</label>
+                                                    <input
+                                                        data-prueba="dia-pago"
+                                                        className="glass-input w-full"
+                                                        inputMode="numeric"
+                                                        maxLength={2}
+                                                        value={formData.pay_day}
+                                                        onChange={e => {
+                                                            const d = e.target.value.replace(/\D/g, '').slice(0, 2);
+                                                            setFormData({ ...formData, pay_day: Number(d) > 31 ? '31' : d });
+                                                        }}
+                                                        placeholder="Ej: 5"
+                                                    />
+                                                </div>
+                                            )}
+                                            {clasePagoDia(formData.pay_type) === 'semana' && (
+                                                <div>
+                                                    <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">Día de pago de la semana</label>
+                                                    <select
+                                                        data-prueba="dia-pago"
+                                                        className="glass-input w-full bg-[var(--color-surface)]"
+                                                        value={formData.pay_day}
+                                                        onChange={e => setFormData({ ...formData, pay_day: e.target.value })}
+                                                    >
+                                                        <option value="">Seleccione…</option>
+                                                        {DIAS_SEMANA.map(d => <option key={d} value={d}>{d}</option>)}
+                                                        {formData.pay_day && !DIAS_SEMANA.includes(formData.pay_day) && (
+                                                            <option value={formData.pay_day}>{formData.pay_day}</option>
+                                                        )}
+                                                    </select>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {formData.pay_method === 'transfer' && (

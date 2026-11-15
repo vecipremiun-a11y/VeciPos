@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
+import { formatCurrency as formatearMoneda } from '../../../utils/formatCurrency';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Calendar, ChevronDown, ChevronRight, FileText, Lock, Clock, AlertCircle } from 'lucide-react';
@@ -15,8 +16,8 @@ const PayrollHistory = () => {
         Promise.all([fetchPayrollPeriods(), fetchStaffMembers()]).then(() => setLoading(false));
     }, []);
 
-    const formatCurrency = (amount) =>
-        new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(amount || 0);
+    // Con la moneda de la empresa (antes, CLP fijo).
+    const formatCurrency = (amount) => formatearMoneda(amount || 0, useStore.getState().currentCurrency);
 
     const getUserName = (id) => {
         const user = staffMembers.find(u => u.id === id);

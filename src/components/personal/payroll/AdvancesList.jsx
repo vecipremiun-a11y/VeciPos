@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
+import { formatCurrency as formatearMoneda } from '../../../utils/formatCurrency';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { Plus, Trash2, Calendar, User, DollarSign } from 'lucide-react';
 import { cn } from '../../../lib/utils';
@@ -47,9 +48,8 @@ const AdvancesList = () => {
         return user ? user.name : 'Desconocido';
     };
 
-    const formatCurrency = (amount) => {
-        return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(amount);
-    };
+    // Con la moneda de la empresa (antes, CLP fijo).
+    const formatCurrency = (amount) => formatearMoneda(amount || 0, useStore.getState().currentCurrency);
 
     return (
         <div className="space-y-4 animate-in fade-in duration-500">

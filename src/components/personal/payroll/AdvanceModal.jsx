@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
-import { X, Save, DollarSign } from 'lucide-react';
+import { X, Save } from 'lucide-react';
+import InputMonto from '../../InputMonto';
 import { format } from 'date-fns';
 
 const AdvanceModal = ({ isOpen, onClose, onSuccess }) => {
@@ -77,18 +78,11 @@ const AdvanceModal = ({ isOpen, onClose, onSuccess }) => {
 
                     <div>
                         <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1.5 uppercase">Monto</label>
-                        <div className="relative">
-                            <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" size={16} />
-                            <input
-                                type="number"
-                                className="glass-input w-full !pl-9"
-                                value={formData.amount}
-                                onChange={e => setFormData({ ...formData, amount: e.target.value })}
-                                required
-                                min="0"
-                                step="1000"
-                            />
-                        </div>
+                        <InputMonto
+                            value={formData.amount}
+                            onChange={(n) => setFormData({ ...formData, amount: n })}
+                            required
+                        />
                     </div>
 
                     <div>

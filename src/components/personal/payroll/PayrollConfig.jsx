@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../../../store/useStore';
 import { Save, Clock, DollarSign, Gift, Calendar, AlertCircle, CheckCircle } from 'lucide-react';
 import { cn } from '../../../lib/utils';
+import InputMonto from '../../InputMonto';
 
 const PayrollConfig = () => {
     const { personalConfig, fetchPersonalConfig, updatePersonalConfig } = useStore();
@@ -113,9 +114,10 @@ const PayrollConfig = () => {
                 </div>
                 {form.late_discount_enabled ? (
                     <div>
-                        <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1 block">Descuento por minuto de atraso ($)</label>
-                        <input type="number" className="glass-input w-full md:w-48" value={form.late_discount_per_minute}
-                            onChange={e => set('late_discount_per_minute', parseFloat(e.target.value) || 0)} min={0} step={100} />
+                        <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1 block">Descuento por minuto de atraso</label>
+                        <div className="w-full md:w-48">
+                            <InputMonto value={form.late_discount_per_minute} onChange={(n) => set('late_discount_per_minute', n)} />
+                        </div>
                     </div>
                 ) : null}
             </section>
@@ -205,9 +207,10 @@ const PayrollConfig = () => {
                         </div>
                         {form[item.enabledField] ? (
                             <div className="ml-12">
-                                <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1 block">Monto del bono ($)</label>
-                                <input type="number" className="glass-input w-full md:w-48" value={form[item.amountField]}
-                                    onChange={e => set(item.amountField, parseFloat(e.target.value) || 0)} min={0} step={1000} />
+                                <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase mb-1 block">Monto del bono</label>
+                                <div className="w-full md:w-48">
+                                    <InputMonto value={form[item.amountField]} onChange={(n) => set(item.amountField, n)} />
+                                </div>
                             </div>
                         ) : null}
                     </div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../../../store/useStore';
+import { formatCurrency as formatearMoneda } from '../../../utils/formatCurrency';
 import { format, startOfMonth, endOfMonth, subMonths, startOfWeek, endOfWeek, eachWeekOfInterval, eachDayOfInterval, isAfter, isBefore, parseISO, differenceInDays, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { BarChart3, TrendingUp, Clock, AlertTriangle, Users, DollarSign, CalendarDays, UserX, Activity } from 'lucide-react';
@@ -237,7 +238,8 @@ const ReportsDashboard = () => {
         }));
     }, [absenceStats]);
 
-    const formatCurrency = (n) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n || 0);
+    // Con la moneda de la empresa (antes, CLP fijo).
+    const formatCurrency = (n) => formatearMoneda(n || 0, useStore.getState().currentCurrency);
 
     const punctualityDiff = punctualityStats.current - punctualityStats.prev;
 
